@@ -77,6 +77,15 @@ async function showJoinRecord(worker){
 async function showPpeRecords(worker){
   try{const rows=await api(`/api/workers/${worker.id}/ppe-issues?siteId=${state.siteId}`);showDialog('가상 보호구 지급 내역',`<p>${esc(worker.name)} · ${esc(worker.company)}</p><p class="muted">가입 시 선택한 보호구와 별도의 시험 기록입니다.</p>${rows.length?`<ul>${rows.map(r=>`<li>${esc(r.date)} · ${esc(r.item)} · ${r.quantity}개</li>`).join('')}</ul>`:'<p>기록이 없습니다.</p>'}`,async()=>{});$('#dialog-form button[type=submit]').textContent='닫기';}catch(error){showError(error);}
 }
+async function showWorkerFiles(worker){
+  try{
+    const siteId=state.siteId,base=`/api/workers/${worker.id}/files?siteId=${siteId}`,categories={agreement:'계약 서류',identity:'신원 확인 서류',training:'교육 이수 서류',license:'자격·면허 서류',bank:'계좌 서류',other:'기타'};
+    showDialog('가상 출입자 서류',`<p>${esc(worker.name)} · ${esc(worker.company)}</p><p class="muted">실제 서류 대신 가상 파일만 사용하세요. 파일당 2MB, 출입자당 20개까지 보관합니다.</p><ul id="worker-files"></ul><label>종류 <select id="worker-file-category">${Object.entries(categories).map(([key,label])=>`<option value="${key}">${esc(label)}</option>`).join('')}</select></label><label>가상 파일 <input type="file" id="worker-file"></label><button type="button" id="worker-file-add">첨부</button>`,async()=>{});$('#dialog-form button[type=submit]').textContent='닫기';
+    const load=async()=>{const files=await api(base),list=$('#worker-files');list.replaceChildren();for(const file of files){const li=document.createElement('li'),link=document.createElement('a'),remove=document.createElement('button');link.textContent=`${categories[file.category]} · ${file.name} (${file.size}바이트)`;link.href=`/api/workers/${worker.id}/files/${file.id}?siteId=${siteId}`;remove.type='button';remove.textContent='삭제';remove.onclick=async()=>{try{await api(link.href,{method:'DELETE'});await load();}catch(error){showError(error);}};li.append(link,document.createTextNode(' '),remove);list.append(li);}};
+    $('#worker-file-add').onclick=async()=>{try{const file=$('#worker-file').files[0];if(!file||file.size>2*1024*1024)throw Error('2MB 이하의 가상 파일을 선택해 주세요.');const response=await fetch(`${base}&category=${encodeURIComponent($('#worker-file-category').value)}`,{method:'POST',headers:{'Content-Type':'application/octet-stream','X-File-Name':encodeURIComponent(file.name)},body:file}),result=await response.json();if(!response.ok)throw Error(result.error);$('#worker-file').value='';await load();}catch(error){showError(error);}};
+    await load();
+  }catch(error){showError(error);}
+}
 const dailyFields={weather:'날씨',progress:'공정률 (%)',todayWork:'금일 작업',tomorrowWork:'명일 작업',remarks:'비고'};
 const basicCategories=['안전·보건 경영 방침','안전·보건 관리 규정','안전·보건 조직도','안전·보건 관리 책임자 선임계','안전·보건 계획 및 이사회 의사록','유해·위험 방지 계획서','위험성 평가 실시 규정','안전 관리 계획서','위원회 운영규정','위원회 회의록','재해 기록 보존','하도급 업체 선정 및 평가 기준','안전·보건관리책임자 업무 수행 평가','중대재해 대응 매뉴얼','비상사태 시나리오','비상사태 모의 훈련 결과 보고서'];
 const rainChecks=['기상특보 확인','장화 및 우의 확보','분전반 및 차단기 점검','자재 보양상태 점검','굴착사면 보양','양수기 비치','배수로 점검'];
@@ -592,6 +601,7 @@ async function render(){
     $('#new-worker').onclick=()=>editWorker();
     document.querySelectorAll('[data-edit-worker]').forEach(button=>{const worker=workers.find(w=>w.id===Number(button.dataset.editWorker)),view=document.createElement('button');view.type='button';view.className='small';view.textContent='가입 기록';view.onclick=()=>showJoinRecord(worker);button.after(view);});
     document.querySelectorAll('[data-edit-worker]').forEach(button=>{const worker=workers.find(w=>w.id===Number(button.dataset.editWorker)),view=document.createElement('button');view.type='button';view.className='small';view.textContent='보호구 내역';view.onclick=()=>showPpeRecords(worker);button.after(view);});
+    document.querySelectorAll('[data-edit-worker]').forEach(button=>{const worker=workers.find(w=>w.id===Number(button.dataset.editWorker)),view=document.createElement('button');view.type='button';view.className='small';view.textContent='시험 서류';view.onclick=()=>showWorkerFiles(worker);button.after(view);});
     document.querySelectorAll('[data-edit-worker]').forEach(button=>button.onclick=()=>editWorker(workers.find(w=>w.id===Number(button.dataset.editWorker))));
     $('#search').onclick=()=>{const from=$('#worker-from').value,to=$('#worker-to').value;if(from&&to&&from>to){flash('조회 기간을 확인해 주세요.',true);return;}state.query=$('#query').value;state.workerFilters={...Object.fromEntries(Object.keys(filters).map(key=>[key,$(`#worker-${key}`).value])),from,to};render().catch(showError);};
     $('#query').onkeydown=e=>{if(e.key==='Enter')$('#search').click();};return;

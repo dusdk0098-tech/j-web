@@ -65,6 +65,7 @@ export class Store {
       CREATE TABLE IF NOT EXISTS equipment_checks (id INTEGER PRIMARY KEY,document_id INTEGER NOT NULL REFERENCES documents(id),equipment_id INTEGER NOT NULL REFERENCES equipment(id),date TEXT NOT NULL,items TEXT NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,UNIQUE(document_id,equipment_id,date));
       CREATE TABLE IF NOT EXISTS workers (id INTEGER PRIMARY KEY, site_id INTEGER NOT NULL REFERENCES sites(id), name TEXT NOT NULL, category TEXT NOT NULL, company TEXT NOT NULL, occupation TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS worker_accounts (worker_id INTEGER PRIMARY KEY REFERENCES workers(id),site_id INTEGER NOT NULL REFERENCES sites(id),login_id TEXT NOT NULL,salt BLOB NOT NULL,password_hash BLOB NOT NULL,UNIQUE(site_id,login_id));
+      CREATE TABLE IF NOT EXISTS worker_files (id INTEGER PRIMARY KEY,worker_id INTEGER NOT NULL REFERENCES workers(id),category TEXT NOT NULL,name TEXT NOT NULL,data BLOB NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
       CREATE TABLE IF NOT EXISTS attendance (worker_id INTEGER NOT NULL REFERENCES workers(id), date TEXT NOT NULL, present INTEGER NOT NULL CHECK(present IN (0,1)), updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY(worker_id,date));
       CREATE TABLE IF NOT EXISTS documents (id INTEGER PRIMARY KEY, site_id INTEGER NOT NULL REFERENCES sites(id), type TEXT NOT NULL, title TEXT NOT NULL, date TEXT NOT NULL, body TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'draft', updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
       CREATE TABLE IF NOT EXISTS checklist_signatures (document_id INTEGER PRIMARY KEY REFERENCES documents(id),signature BLOB NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
@@ -189,6 +190,19 @@ export class Store {
     siteId=Number(siteId);workerId=Number(workerId);if(!this.db.prepare('SELECT 1 FROM workers WHERE id=? AND site_id=?').get(workerId,siteId))throw new Error('선택한 현장의 출입자를 확인해 주세요.');
     return this.db.prepare('SELECT id,date,item,quantity FROM ppe_issues WHERE site_id=? AND worker_id=? ORDER BY date DESC,id DESC').all(siteId,workerId);
   }
+  workerFiles(siteId,workerId){
+    siteId=Number(siteId);workerId=Number(workerId);if(!this.db.prepare('SELECT 1 FROM workers WHERE id=? AND site_id=?').get(workerId,siteId))throw new Error('선택한 현장의 출입자를 확인해 주세요.');
+    return this.db.prepare('SELECT id,category,name,length(data) AS size,created_at FROM worker_files WHERE worker_id=? ORDER BY id').all(workerId);
+  }
+  addWorkerFile(siteId,workerId,category,name,data){
+    const files=this.workerFiles(siteId,workerId);if(files.length>=20)throw new Error('첨부파일은 출입자당 20개까지 가능합니다.');
+    if(!['agreement','identity','training','license','bank','other'].includes(category))throw new Error('서류 종류를 확인해 주세요.');
+    if(typeof name!=='string'||!name.trim()||name.length>200||/[\\\\/\x00-\x1f\x7f]/.test(name))throw new Error('파일 이름을 확인해 주세요.');
+    if(!(data instanceof Uint8Array)||!data.length||data.length>2*1024*1024)throw new Error('파일은 1바이트 이상 2MB 이하여야 합니다.');
+    return this.db.prepare('INSERT INTO worker_files(worker_id,category,name,data) VALUES(?,?,?,?)').run(Number(workerId),category,name,data).lastInsertRowid;
+  }
+  workerFile(siteId,workerId,fileId){return this.db.prepare('SELECT f.* FROM worker_files f JOIN workers w ON w.id=f.worker_id WHERE w.site_id=? AND w.id=? AND f.id=?').get(Number(siteId),Number(workerId),Number(fileId))||null;}
+  deleteWorkerFile(siteId,workerId,fileId){if(!this.workerFile(siteId,workerId,fileId))throw new Error('첨부파일을 찾을 수 없습니다.');this.db.prepare('DELETE FROM worker_files WHERE id=?').run(Number(fileId));}
   addPpeIssue(input){
     const siteId=Number(input.siteId),workerId=Number(input.workerId),date=dateValue(input.date),item=text(input.item,'보호구');
     const worker=this.db.prepare('SELECT name,category,company,occupation FROM workers WHERE id=? AND site_id=?').get(workerId,siteId);if(!worker)throw new Error('선택한 현장의 출입자를 확인해 주세요.');

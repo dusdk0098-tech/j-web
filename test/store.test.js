@@ -106,6 +106,17 @@ test('보호구 시험 지급은 현장·월별로 집계하고 기록 당시 �
   }finally{s.close();}
 });
 
+test('출입자 시험 서류는 현장과 출입자별로 분리하고 첨부를 검증한다',()=>{
+  const s=new Store(':memory:');try{
+    const site=s.createSite({name:'가상 현장'}),other=s.createSite({name:'다른 현장'}),worker=s.createWorker({siteId:site.id,name:'가상 근로자',category:'직영',company:'가상 회사',occupation:'목공'}),bytes=Buffer.from('가상 문서');
+    const id=s.addWorkerFile(site.id,worker.id,'training','시험.txt',bytes);assert.equal(s.workerFiles(site.id,worker.id)[0].category,'training');assert.deepEqual(Buffer.from(s.workerFile(site.id,worker.id,id).data),bytes);
+    assert.throws(()=>s.workerFiles(other.id,worker.id),/현장/);assert.equal(s.workerFile(other.id,worker.id,id),null);assert.throws(()=>s.deleteWorkerFile(other.id,worker.id,id),/첨부/);
+    assert.throws(()=>s.addWorkerFile(site.id,worker.id,'invalid','시험.txt',bytes),/종류/);assert.throws(()=>s.addWorkerFile(site.id,worker.id,'other','../x',bytes),/이름/);assert.throws(()=>s.addWorkerFile(site.id,worker.id,'other','시험.txt',Buffer.alloc(0)),/파일/);assert.throws(()=>s.addWorkerFile(site.id,worker.id,'other','시험.txt',Buffer.alloc(2*1024*1024+1)),/파일/);
+    assert.throws(()=>s.addWorkerFile(site.id,worker.id,'other','x\\y',bytes),/이름/);
+    s.deleteWorkerFile(site.id,worker.id,id);assert.equal(s.workerFiles(site.id,worker.id).length,0);
+  }finally{s.close();}
+});
+
 test('식당 시험 설정은 현장별로 저장하며 잘못된 수정을 거절한다',()=>{
   const s=new Store(':memory:');try{
     const a=s.createSite({name:'가상 A'}),b=s.createSite({name:'가상 B'}),input={siteId:a.id,name:'가상 식당',mealPrice:'5000',snackPrice:'1000',tax:'600'},restaurant=s.saveRestaurant(input);

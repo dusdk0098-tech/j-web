@@ -192,6 +192,12 @@ test('관리자 인증 모드가 문서 API를 보호하고 로그아웃을 적�
     assert.equal((await fetch(defaultsPath,{method:'PUT',headers:{cookie,'content-type':'application/json'},body:JSON.stringify({siteId:site.id,items:[]})})).status,200);
     const joinRecord=`${base}/api/workers/${own.id}/join-record?siteId=${site.id}`;assert.equal((await fetch(joinRecord,{headers:{cookie:workerCookie}})).status,401);
     const savedJoin=await (await fetch(joinRecord,{headers:{cookie}})).json();assert.deepEqual(savedJoin.equipment,['안전모','안전화']);assert.deepEqual(savedJoin.profile,profile);assert.equal(savedJoin.has_signature,1);
+    const workerFiles=`${base}/api/workers/${own.id}/files`,workerFileBytes=Buffer.from('가상 서류'),workerUpload=`${workerFiles}?siteId=${site.id}&category=training`;
+    assert.equal((await fetch(workerUpload)).status,401);assert.equal((await fetch(workerUpload,{method:'POST',headers:{cookie:workerCookie,'x-file-name':encodeURIComponent('시험.txt')},body:workerFileBytes})).status,401);
+    const fileResponse=await fetch(workerUpload,{method:'POST',headers:{cookie,'x-file-name':encodeURIComponent('시험.txt')},body:workerFileBytes});assert.equal(fileResponse.status,201);const workerFileId=(await fileResponse.json()).id;
+    assert.equal((await (await fetch(workerUpload,{headers:{cookie}})).json()).length,1);assert.equal((await fetch(`${workerFiles}/${workerFileId}?siteId=${other.id}`,{headers:{cookie}})).status,404);
+    assert.deepEqual(Buffer.from(await (await fetch(`${workerFiles}/${workerFileId}?siteId=${site.id}`,{headers:{cookie}})).arrayBuffer()),workerFileBytes);
+    assert.equal((await fetch(`${workerFiles}/${workerFileId}?siteId=${site.id}`,{method:'DELETE',headers:{cookie}})).status,200);assert.equal((await (await fetch(workerUpload,{headers:{cookie}})).json()).length,0);
     const ppePath=`${base}/api/ppe-issues`,ppeInput={siteId:site.id,workerId:own.id,date:'2024-02-29',item:'가상 안전모',quantity:'2'};
     assert.equal((await fetch(`${ppePath}?siteId=${site.id}&month=2024-02`)).status,401);assert.equal((await fetch(ppePath,{method:'POST',headers:{cookie:workerCookie,'content-type':'application/json'},body:JSON.stringify(ppeInput)})).status,401);
     assert.equal((await post('/api/ppe-issues',ppeInput)).status,201);const ppeReport=await (await fetch(`${ppePath}?siteId=${site.id}&month=2024-02`,{headers:{cookie}})).json();assert.equal(ppeReport.totals[0].quantity,2);assert.equal(ppeReport.rows[0].worker.name,'가상 근로자');

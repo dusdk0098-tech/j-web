@@ -377,6 +377,14 @@ const server = http.createServer(async (req, res) => {
       if (req.method === 'POST') return json(res,201,store.createWorker(await body(req)));
     }
     const worker=url.pathname.match(/^\/api\/workers\/(\d+)$/);
+    const workerFiles=url.pathname.match(/^\/api\/workers\/(\d+)\/files(?:\/(\d+))?$/);
+    if(workerFiles){
+      const [,workerId,fileId]=workerFiles,siteId=url.searchParams.get('siteId');
+      if(!fileId&&req.method==='GET')return json(res,200,store.workerFiles(siteId,workerId));
+      if(!fileId&&req.method==='POST'){const chunks=[];let size=0;for await(const chunk of req){size+=chunk.length;if(size>2*1024*1024)throw new Error('파일은 2MB 이하여야 합니다.');chunks.push(chunk);}let name;try{name=decodeURIComponent(req.headers['x-file-name']||'');}catch{throw new Error('파일 이름을 확인해 주세요.');}return json(res,201,{id:store.addWorkerFile(siteId,workerId,url.searchParams.get('category'),name,Buffer.concat(chunks))});}
+      if(fileId&&req.method==='DELETE'){store.deleteWorkerFile(siteId,workerId,fileId);return json(res,200,{ok:true});}
+      if(fileId&&req.method==='GET'){const file=store.workerFile(siteId,workerId,fileId);if(!file)return json(res,404,{error:'첨부파일을 찾을 수 없습니다.'});const name=encodeURIComponent(file.name).replace(/[!'()*]/g,c=>`%${c.charCodeAt(0).toString(16).toUpperCase()}`);res.writeHead(200,{'Content-Type':'application/octet-stream','Content-Disposition':`attachment; filename="attachment"; filename*=UTF-8''${name}`,'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(file.data);}
+    }
     const workerPpe=url.pathname.match(/^\/api\/workers\/(\d+)\/ppe-issues$/);
     if(workerPpe&&req.method==='GET')return json(res,200,store.workerPpeIssues(url.searchParams.get('siteId'),workerPpe[1]));
     const workerJoin=url.pathname.match(/^\/api\/workers\/(\d+)\/join-record(?:\/(signature))?$/);
