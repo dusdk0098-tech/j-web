@@ -78,6 +78,8 @@ export class Store {
       CREATE TABLE IF NOT EXISTS documents (id INTEGER PRIMARY KEY, site_id INTEGER NOT NULL REFERENCES sites(id), type TEXT NOT NULL, title TEXT NOT NULL, date TEXT NOT NULL, body TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'draft', updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
       CREATE TABLE IF NOT EXISTS reviewers (id INTEGER PRIMARY KEY,site_id INTEGER NOT NULL REFERENCES sites(id),login_id TEXT NOT NULL UNIQUE,name TEXT NOT NULL,salt BLOB NOT NULL,password_hash BLOB NOT NULL,active INTEGER NOT NULL DEFAULT 1 CHECK(active IN (0,1)));
       CREATE TABLE IF NOT EXISTS approval_steps (document_id INTEGER NOT NULL REFERENCES documents(id),position INTEGER NOT NULL,reviewer_id INTEGER NOT NULL REFERENCES reviewers(id),state TEXT NOT NULL DEFAULT 'pending' CHECK(state IN ('pending','approved','rejected')),PRIMARY KEY(document_id,position),UNIQUE(document_id,reviewer_id));
+      CREATE TABLE IF NOT EXISTS approval_cycles (id INTEGER PRIMARY KEY,document_id INTEGER NOT NULL REFERENCES documents(id),document_json TEXT NOT NULL,attachments_json TEXT NOT NULL,linked_json TEXT NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+      CREATE TABLE IF NOT EXISTS approval_cycle_files (cycle_id INTEGER NOT NULL REFERENCES approval_cycles(id),kind TEXT NOT NULL,parent_id INTEGER NOT NULL,file_id INTEGER NOT NULL,name TEXT NOT NULL,data BLOB NOT NULL,PRIMARY KEY(cycle_id,kind,parent_id,file_id));
       CREATE TABLE IF NOT EXISTS checklist_signatures (document_id INTEGER PRIMARY KEY REFERENCES documents(id),signature BLOB NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
       CREATE TABLE IF NOT EXISTS worker_notice_reads (worker_id INTEGER NOT NULL REFERENCES workers(id),document_id INTEGER NOT NULL REFERENCES documents(id),read_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(worker_id,document_id));
       CREATE TABLE IF NOT EXISTS worker_self_checks (worker_id INTEGER NOT NULL REFERENCES workers(id),date TEXT NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(worker_id,date));
@@ -100,11 +102,13 @@ export class Store {
       CREATE TABLE IF NOT EXISTS risk_activity_photos (id INTEGER PRIMARY KEY, activity_id INTEGER NOT NULL REFERENCES risk_activities(id) ON DELETE CASCADE, name TEXT NOT NULL,data BLOB NOT NULL);
       CREATE TABLE IF NOT EXISTS hazard_reports (id INTEGER PRIMARY KEY,site_id INTEGER NOT NULL REFERENCES sites(id),title TEXT NOT NULL,body TEXT NOT NULL,reporter TEXT NOT NULL,photo BLOB,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);`);
     if (!this.db.prepare('PRAGMA table_info(documents)').all().some(c=>c.name==='details')) this.db.exec("ALTER TABLE documents ADD COLUMN details TEXT NOT NULL DEFAULT '{}'");
+    if (!this.db.prepare('PRAGMA table_info(documents)').all().some(c=>c.name==='approval_cycle_id')) this.db.exec('ALTER TABLE documents ADD COLUMN approval_cycle_id INTEGER');
     if (!this.db.prepare('PRAGMA table_info(workers)').all().some(c=>c.name==='created_date')) this.db.exec('ALTER TABLE workers ADD COLUMN created_date TEXT');
     if (!this.db.prepare('PRAGMA table_info(events)').all().some(c=>c.name==='opinion')) this.db.exec("ALTER TABLE events ADD COLUMN opinion TEXT NOT NULL DEFAULT ''");
     if (!this.db.prepare('PRAGMA table_info(events)').all().some(c=>c.name==='signature')) this.db.exec('ALTER TABLE events ADD COLUMN signature BLOB');
     if (!this.db.prepare('PRAGMA table_info(events)').all().some(c=>c.name==='reviewer_id')) this.db.exec('ALTER TABLE events ADD COLUMN reviewer_id INTEGER REFERENCES reviewers(id)');
     if (!this.db.prepare('PRAGMA table_info(events)').all().some(c=>c.name==='reviewer_name')) this.db.exec('ALTER TABLE events ADD COLUMN reviewer_name TEXT');
+    if (!this.db.prepare('PRAGMA table_info(events)').all().some(c=>c.name==='approval_cycle_id')) this.db.exec('ALTER TABLE events ADD COLUMN approval_cycle_id INTEGER');
     if (!this.db.prepare('PRAGMA table_info(work_stops)').all().some(c=>c.name==='photo')) this.db.exec('ALTER TABLE work_stops ADD COLUMN photo BLOB');
     if (!this.db.prepare('PRAGMA table_info(worker_self_checks)').all().some(c=>c.name==='signature')) this.db.exec('ALTER TABLE worker_self_checks ADD COLUMN signature BLOB');
     if (!this.db.prepare('PRAGMA table_info(attachments)').all().some(c=>c.name==='category')) this.db.exec("ALTER TABLE attachments ADD COLUMN category TEXT NOT NULL DEFAULT 'general'");
@@ -887,7 +891,7 @@ export class Store {
   }
   reviewerDocuments(reviewerId){return this.db.prepare("SELECT d.id,d.site_id,d.type,d.title,d.date FROM documents d JOIN approval_steps s ON s.document_id=d.id JOIN reviewers r ON r.id=s.reviewer_id AND r.site_id=d.site_id WHERE r.id=? AND r.active=1 AND d.status='pending' AND s.state='pending' AND NOT EXISTS (SELECT 1 FROM approval_steps prior WHERE prior.document_id=d.id AND prior.position<s.position AND prior.state<>'approved') ORDER BY d.date DESC,d.id DESC").all(Number(reviewerId));}
   reviewerDocument(reviewerId,id){return this.reviewerDocuments(reviewerId).some(doc=>doc.id===Number(id))?this.document(id):null;}
-  reviewerLinks(doc){
+  liveReviewerLinks(doc){
     if(doc.type==='risk')return {type:'risk',activities:this.riskActivities(doc.id).map(activity=>({...activity,worker_snapshot:JSON.parse(activity.worker_snapshot||'[]'),files:this.riskActivityPhotos(doc.id,activity.id)}))};
     if(doc.type==='permit')return {type:'permit',checks:this.permitChecks(doc.id),extensions:this.permitExtensions(doc.id)};
     if(['tbm','education'].includes(doc.type)){const targets=this.trainingTargets(doc.id);return {type:'training',configured:targets.configured,workers:targets.workers.filter(worker=>!targets.configured||worker.selected),signedWorkers:targets.signedWorkers,checks:this.trainingChecks(doc.id)};}
@@ -897,7 +901,7 @@ export class Store {
     const place=this.workPlaces(doc.site_id).find(item=>item.id===details.workPlaceId);
     return {type:'plan',equipment,rigging,place:place?{info:{...place,details:JSON.parse(place.details)},files:this.workPlacePhotos(doc.site_id,place.id)}:null,checks:this.equipmentChecks(doc.id).map(check=>({...check,items:JSON.parse(check.items),equipment_snapshot:check.equipment_snapshot?JSON.parse(check.equipment_snapshot):null}))};
   }
-  reviewerLinkedFile(doc,kind,parentId,fileId){
+  liveReviewerLinkedFile(doc,kind,parentId,fileId){
     if(kind==='risk'&&doc.type==='risk')return this.riskActivityPhoto(doc.id,parentId,fileId);
     if(doc.type!=='work_plan')return null;const details=JSON.parse(doc.details||'{}'),parent=Number(parentId);
     if(kind==='equipment'&&(details.equipmentIds||[]).includes(parent))return this.equipmentAttachment(doc.site_id,parent,fileId);
@@ -905,11 +909,32 @@ export class Store {
     if(kind==='place'&&details.workPlaceId===parent)return this.workPlacePhoto(doc.site_id,parent,fileId);
     return null;
   }
-  reviewerLinkedSignature(doc,kind,id){
+  liveReviewerLinkedSignature(doc,kind,id){
     if(kind==='permit'&&doc.type==='permit')return this.permitExtensionSignature(doc.id,id);
     if(kind==='training'&&['tbm','education'].includes(doc.type))return this.documentTrainingSignature(doc.id,id);
     return null;
   }
+  captureApprovalCycle(doc){
+    const linked=this.liveReviewerLinks(doc),attachments=this.attachments(doc.id),cycle=this.db.prepare('INSERT INTO approval_cycles(document_id,document_json,attachments_json,linked_json) VALUES(?,?,?,?)').run(doc.id,JSON.stringify(doc),JSON.stringify(attachments),JSON.stringify(linked)).lastInsertRowid;
+    const insert=this.db.prepare('INSERT INTO approval_cycle_files(cycle_id,kind,parent_id,file_id,name,data) VALUES(?,?,?,?,?,?)');
+    const save=(kind,parentId,fileId,file)=>{if(!file||!file.data)throw new Error('결재 자료를 보존할 수 없습니다.');insert.run(cycle,kind,Number(parentId),Number(fileId),file.name||'signature.png',file.data);};
+    for(const file of attachments)save('document',0,file.id,this.attachment(file.id));
+    if(linked?.type==='plan'){
+      for(const item of linked.equipment)for(const file of item.files)save('equipment',item.info.id,file.id,this.liveReviewerLinkedFile(doc,'equipment',item.info.id,file.id));
+      for(const item of linked.rigging)for(const file of item.files)save('rigging',item.info.id,file.id,this.liveReviewerLinkedFile(doc,'rigging',item.info.id,file.id));
+      if(linked.place)for(const file of linked.place.files)save('place',linked.place.info.id,file.id,this.liveReviewerLinkedFile(doc,'place',linked.place.info.id,file.id));
+    }
+    if(linked?.type==='risk')for(const activity of linked.activities)for(const file of activity.files)save('risk',activity.id,file.id,this.liveReviewerLinkedFile(doc,'risk',activity.id,file.id));
+    if(linked?.type==='permit')for(const extension of linked.extensions)save('permit-signature',extension.id,0,{data:this.liveReviewerLinkedSignature(doc,'permit',extension.id)});
+    if(linked?.type==='training')for(const worker of linked.signedWorkers)save('training-signature',worker.id,0,{data:this.liveReviewerLinkedSignature(doc,'training',worker.id)});
+    this.db.prepare('UPDATE documents SET approval_cycle_id=? WHERE id=?').run(cycle,doc.id);return cycle;
+  }
+  approvalCycle(documentId,cycleId){const row=this.db.prepare('SELECT id,document_id,document_json,attachments_json,linked_json,created_at FROM approval_cycles WHERE id=? AND document_id=?').get(Number(cycleId),Number(documentId));return row?{id:row.id,documentId:row.document_id,createdAt:row.created_at,document:JSON.parse(row.document_json),attachments:JSON.parse(row.attachments_json),linked:JSON.parse(row.linked_json)}:null;}
+  approvalCycleFile(documentId,cycleId,kind,parentId,fileId){return this.db.prepare('SELECT f.name,f.data FROM approval_cycle_files f JOIN approval_cycles c ON c.id=f.cycle_id WHERE c.document_id=? AND c.id=? AND f.kind=? AND f.parent_id=? AND f.file_id=?').get(Number(documentId),Number(cycleId),kind,Number(parentId),Number(fileId))||null;}
+  reviewerPayload(doc){const cycle=doc.approval_cycle_id&&this.approvalCycle(doc.id,doc.approval_cycle_id);return cycle?{document:{...cycle.document,status:doc.status,approval_cycle_id:cycle.id},attachments:cycle.attachments,linked:cycle.linked,frozen:true}:{document:doc,attachments:this.attachments(doc.id),linked:this.liveReviewerLinks(doc),frozen:false};}
+  reviewerLinkedFile(doc,kind,parentId,fileId){return doc.approval_cycle_id?this.approvalCycleFile(doc.id,doc.approval_cycle_id,kind,parentId,fileId):this.liveReviewerLinkedFile(doc,kind,parentId,fileId);}
+  reviewerLinkedSignature(doc,kind,id){return doc.approval_cycle_id?this.approvalCycleFile(doc.id,doc.approval_cycle_id,`${kind}-signature`,id,0)?.data||null:this.liveReviewerLinkedSignature(doc,kind,id);}
+  reviewerAttachment(doc,fileId){return doc.approval_cycle_id?this.approvalCycleFile(doc.id,doc.approval_cycle_id,'document',0,fileId):this.attachment(fileId);}
   createDocument(input) {
     const d = recordInput(input);
     if (!this.db.prepare('SELECT id FROM sites WHERE id=?').get(d.siteId)) throw new Error('현장을 선택해 주세요.');
@@ -1077,6 +1102,7 @@ export class Store {
     const line=this.approvalLine(id),current=line.find(step=>step.state==='pending');let reviewer=null;
     if(line.length&&['approve','reject'].includes(action)){
       if(!reviewerId||!current||current.reviewer_id!==reviewerId||!current.active)throw new Error('현재 차례의 결재자를 확인해 주세요.');
+      if(action==='approve'&&!this.approvalCycle(doc.id,doc.approval_cycle_id))throw new Error('이전 요청의 자료가 보존되지 않았습니다. 관리자에게 요청 취소 후 다시 요청하도록 알려 주세요.');
       reviewer=current;if(action==='approve'&&line.some(step=>step.position>current.position))next='pending';
     }else if(reviewerId)throw new Error('현재 차례의 결재자를 확인해 주세요.');
     if(action==='submit'&&line.some(step=>!step.active))throw new Error('활성 결재자를 확인해 주세요.');
@@ -1084,7 +1110,7 @@ export class Store {
     if(typeof opinion!=='string' || opinion.length>2000)throw new Error('검토 의견을 확인해 주세요.');
     opinion=opinion.trim();
     if(doc.type==='risk' && action==='reject' && !opinion)throw new Error('반려 의견을 입력해 주세요.');
-    this.db.exec('SAVEPOINT document_transition');
+    let cycleId=doc.approval_cycle_id||null;this.db.exec('SAVEPOINT document_transition');
     try {
       if(action==='submit'&&line.length)this.db.prepare("UPDATE approval_steps SET state='pending' WHERE document_id=?").run(Number(id));
       if(reviewer)this.db.prepare('UPDATE approval_steps SET state=? WHERE document_id=? AND position=?').run(action==='approve'?'approved':'rejected',Number(id),reviewer.position);
@@ -1092,8 +1118,9 @@ export class Store {
         const details=JSON.parse(doc.details),get=this.db.prepare('SELECT id,kind,model,capacity,manufacturer,registration,details FROM equipment WHERE id=? AND site_id=?');
         if(details.equipmentIds!==undefined){details.equipmentSnapshot=details.equipmentIds.map(equipmentId=>{const item=get.get(equipmentId,doc.site_id);if(!item)throw new Error('같은 현장의 장비를 확인해 주세요.');return item;});this.db.prepare('UPDATE documents SET details=? WHERE id=?').run(JSON.stringify(details),Number(id));}
       }
+      if(action==='submit'){if(line.length)cycleId=this.captureApprovalCycle(this.document(id));else{cycleId=null;this.db.prepare('UPDATE documents SET approval_cycle_id=NULL WHERE id=?').run(Number(id));}}
       this.db.prepare('UPDATE documents SET status=?,updated_at=CURRENT_TIMESTAMP WHERE id=?').run(next, Number(id));
-      this.db.prepare('INSERT INTO events(document_id,action,from_status,to_status,opinion,signature,reviewer_id,reviewer_name) VALUES(?,?,?,?,?,?,?,?)').run(Number(id),action,doc.status,next,opinion,signature,reviewer?.reviewer_id||null,reviewer?.name||null);
+      this.db.prepare('INSERT INTO events(document_id,action,from_status,to_status,opinion,signature,reviewer_id,reviewer_name,approval_cycle_id) VALUES(?,?,?,?,?,?,?,?,?)').run(Number(id),action,doc.status,next,opinion,signature,reviewer?.reviewer_id||null,reviewer?.name||null,cycleId);
       this.db.exec('RELEASE document_transition');
     } catch (err) { this.db.exec('ROLLBACK TO document_transition');this.db.exec('RELEASE document_transition');throw err; }
     return this.document(id);
@@ -1111,6 +1138,6 @@ export class Store {
     }catch(err){this.db.exec('ROLLBACK');throw err;}
     return {approved:ids.length};
   }
-  events(id) { return this.db.prepare('SELECT id,document_id,action,from_status,to_status,created_at,opinion,reviewer_id,reviewer_name,signature IS NOT NULL AS has_signature FROM events WHERE document_id=? ORDER BY id').all(Number(id)); }
+  events(id) { return this.db.prepare('SELECT id,document_id,action,from_status,to_status,created_at,opinion,reviewer_id,reviewer_name,approval_cycle_id,signature IS NOT NULL AS has_signature FROM events WHERE document_id=? ORDER BY id').all(Number(id)); }
   eventSignature(id,eventId){return this.db.prepare('SELECT signature FROM events WHERE document_id=? AND id=? AND signature IS NOT NULL').get(Number(id),Number(eventId))?.signature||null;}
 }
