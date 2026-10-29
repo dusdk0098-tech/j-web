@@ -564,7 +564,7 @@ test('관리자 인증 모드가 문서 API를 보호하고 로그아웃을 적�
     assert.equal(participants.length,1);assert.equal(participants[0].name,'가상 근로자');assert.equal(participants[0].rights_ack,'demo-v1');
     const educationReport=`${base}/api/education/report?siteId=${site.id}&from=${today}&to=${today}`;
     assert.equal((await fetch(educationReport)).status,401);assert.equal((await fetch(educationReport,{headers:{cookie:workerCookie}})).status,401);
-    const educationRows=await (await fetch(educationReport,{headers:{cookie}})).json();assert.equal(educationRows.length,1);assert.equal(educationRows[0].id,own.id);assert.equal(educationRows[0].count,1);assert.deepEqual(educationRows[0].documents.map(d=>d.id),[training.id]);
+    const educationRows=await (await fetch(educationReport,{headers:{cookie}})).json();assert.equal(educationRows.length,1);assert.equal(educationRows[0].id,own.id);assert.equal(educationRows[0].birth_date,'2000-02-29');assert.equal(educationRows[0].count,1);assert.deepEqual(educationRows[0].documents.map(d=>d.id),[training.id]);
     assert.deepEqual(await (await fetch(`${base}/api/education/report?siteId=${other.id}&from=${today}&to=${today}`,{headers:{cookie}})).json(),[]);
     assert.equal((await fetch(`${base}/api/education/report?siteId=${site.id}&from=2026-02-30&to=${today}`,{headers:{cookie}})).status,400);
     const weekly=`${base}/api/weekly-activity?siteId=${site.id}&start=${today}`;

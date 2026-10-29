@@ -19,3 +19,8 @@ export function trainingRoster(targets){
     confirmed:!!worker.daily_confirmed,hasSignature:!!worker.daily_has_signature
   }));
 }
+
+export function filterEducationReport(rows,categories){
+  const selected=new Set(categories);
+  return rows.filter(row=>selected.has(row.category));
+}
