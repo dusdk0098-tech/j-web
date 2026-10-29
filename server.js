@@ -315,6 +315,8 @@ const server = http.createServer(async (req, res) => {
       if(id&&req.method==='GET'){const photo=store.hazardReportPhoto(siteId,id);if(!photo)return json(res,404,{error:'사진을 찾을 수 없습니다.'});res.writeHead(200,{'Content-Type':'application/octet-stream','Content-Disposition':'attachment; filename="test-hazard-photo"','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(photo);}
     }
     if(siteStops && req.method==='GET')return json(res,200,store.workStops(siteStops[1],url.searchParams.get('q')||''));
+    const stopResponse=url.pathname.match(/^\/api\/sites\/(\d+)\/work-stops\/(\d+)$/);
+    if(stopResponse&&req.method==='PUT'){store.updateWorkStopResponse(stopResponse[1],stopResponse[2],await body(req));return json(res,200,{ok:true});}
     const stopPhoto=url.pathname.match(/^\/api\/sites\/(\d+)\/work-stops\/(\d+)\/photo$/);
     if(stopPhoto && req.method==='GET'){
       const photo=store.workStopPhoto(stopPhoto[1],stopPhoto[2]);if(!photo)return json(res,404,{error:'사진을 찾을 수 없습니다.'});

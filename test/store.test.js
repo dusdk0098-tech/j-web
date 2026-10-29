@@ -264,6 +264,21 @@ test('보호구 시험 지급은 현장·월별로 집계하고 기록 당시 �
   }finally{s.close();}
 });
 
+test('이전 작업중지 요청은 조치가 미기록인 채로 보존된다',()=>{
+  const dir=mkdtempSync(join(tmpdir(),'jweb-old-stop-')),path=join(dir,'test.sqlite');try{
+    const old=new DatabaseSync(path);old.exec("CREATE TABLE work_stops(id INTEGER PRIMARY KEY,site_id INTEGER NOT NULL,worker_id INTEGER,place TEXT NOT NULL,reason TEXT NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP); INSERT INTO work_stops(id,site_id,place,reason) VALUES(1,1,'가상 장소','가상 사유')");old.close();
+    for(let i=0;i<2;i++){const s=new Store(path);try{const row=s.workStops(1)[0];assert.equal(row.place,'가상 장소');assert.equal(row.response,null);assert.equal(row.requester,'익명');}finally{s.close();}}
+  }finally{rmSync(dir,{recursive:true,force:true});}
+});
+
+test('작업중지 조치는 현장별로 저장하고 이전 변경을 덮어쓰지 않는다',()=>{
+  const s=new Store(':memory:');try{
+    const site=s.createSite({name:'가상 현장'}),other=s.createSite({name:'다른 현장'}),worker=s.createWorker({siteId:site.id,name:'가상 근로자',category:'직영',company:'가상 업체',occupation:'가상 직종'});s.createWorkStop(worker.id,{anonymous:true,place:'가상 장소',reason:'가상 위험'});const stop=s.workStops(site.id)[0];assert.equal(stop.response,null);assert.equal(stop.requester,'익명');
+    for(const input of [{response:'',previousResponse:null},{response:'x'.repeat(2001),previousResponse:null},{response:'가상 조치'},{response:'가상 조치',previousResponse:1}])assert.throws(()=>s.updateWorkStopResponse(site.id,stop.id,input));assert.throws(()=>s.updateWorkStopResponse(other.id,stop.id,{response:'가상 조치',previousResponse:null}),/현장/);assert.equal(s.workStops(site.id)[0].response,null);
+    s.updateWorkStopResponse(site.id,stop.id,{response:' 가상 조치 ',previousResponse:null});assert.equal(s.workStops(site.id)[0].response,'가상 조치');assert.throws(()=>s.updateWorkStopResponse(site.id,stop.id,{response:'오래된 수정',previousResponse:null}),/다른 변경/);s.updateWorkStopResponse(site.id,stop.id,{response:'수정 조치',previousResponse:'가상 조치'});assert.equal(s.workStops(site.id)[0].response,'수정 조치');assert.equal(s.workStops(site.id)[0].requester,'익명');
+  }finally{s.close();}
+});
+
 test('이전 가상 신고에 접수 상태를 추가하고 조치 이력을 임의로 만들지 않는다',()=>{
   const dir=mkdtempSync(join(tmpdir(),'j-web-hazards-')),path=join(dir,'test.sqlite');
   try{

@@ -123,6 +123,7 @@ export class Store {
     if (!this.db.prepare('PRAGMA table_info(events)').all().some(c=>c.name==='reviewer_name')) this.db.exec('ALTER TABLE events ADD COLUMN reviewer_name TEXT');
     if (!this.db.prepare('PRAGMA table_info(events)').all().some(c=>c.name==='approval_cycle_id')) this.db.exec('ALTER TABLE events ADD COLUMN approval_cycle_id INTEGER');
     if (!this.db.prepare('PRAGMA table_info(work_stops)').all().some(c=>c.name==='photo')) this.db.exec('ALTER TABLE work_stops ADD COLUMN photo BLOB');
+    if (!this.db.prepare('PRAGMA table_info(work_stops)').all().some(c=>c.name==='response')) this.db.exec('ALTER TABLE work_stops ADD COLUMN response TEXT');
     if (!this.db.prepare('PRAGMA table_info(worker_self_checks)').all().some(c=>c.name==='signature')) this.db.exec('ALTER TABLE worker_self_checks ADD COLUMN signature BLOB');
     if (!this.db.prepare('PRAGMA table_info(worker_self_checks)').all().some(c=>c.name==='answers')) this.db.exec('ALTER TABLE worker_self_checks ADD COLUMN answers TEXT');
     if (!this.db.prepare('PRAGMA table_info(attachments)').all().some(c=>c.name==='category')) this.db.exec("ALTER TABLE attachments ADD COLUMN category TEXT NOT NULL DEFAULT 'general'");
@@ -734,7 +735,12 @@ export class Store {
   }
   workStops(siteId,query='') {
     if(typeof query!=='string'||query.length>200)throw new Error('검색어를 확인해 주세요.');
-    return this.db.prepare("SELECT s.id,s.place,s.reason,s.created_at,s.photo IS NOT NULL AS has_photo,CASE WHEN s.worker_id IS NULL THEN '익명' ELSE w.name END AS requester FROM work_stops s LEFT JOIN workers w ON w.id=s.worker_id WHERE s.site_id=? AND (instr(s.place,?)>0 OR instr(s.reason,?)>0 OR (s.worker_id IS NOT NULL AND instr(w.name,?)>0)) ORDER BY s.id DESC").all(Number(siteId),query,query,query);
+    return this.db.prepare("SELECT s.id,s.place,s.reason,s.created_at,s.response,s.photo IS NOT NULL AS has_photo,CASE WHEN s.worker_id IS NULL THEN '익명' ELSE w.name END AS requester FROM work_stops s LEFT JOIN workers w ON w.id=s.worker_id WHERE s.site_id=? AND (instr(s.place,?)>0 OR instr(s.reason,?)>0 OR (s.worker_id IS NOT NULL AND instr(w.name,?)>0)) ORDER BY s.id DESC").all(Number(siteId),query,query,query);
+  }
+  updateWorkStopResponse(siteId,id,input){
+    if(!input||typeof input!=='object'||Array.isArray(input)||!(input.previousResponse===null||typeof input.previousResponse==='string'))throw new Error('기존 조치 내용을 확인해 주세요.');
+    const response=text(input.response,'조치 내용',2000),result=this.db.prepare('UPDATE work_stops SET response=? WHERE site_id=? AND id=? AND response IS ?').run(response,Number(siteId),Number(id),input.previousResponse);
+    if(!result.changes){if(this.db.prepare('SELECT 1 FROM work_stops WHERE site_id=? AND id=?').get(Number(siteId),Number(id)))throw new Error('다른 변경이 있습니다. 다시 조회해 주세요.');throw new Error('선택한 현장의 요청을 확인해 주세요.');}
   }
   workStopPhoto(siteId,id) {return this.db.prepare('SELECT photo FROM work_stops WHERE site_id=? AND id=? AND photo IS NOT NULL').get(Number(siteId),Number(id))?.photo || null;}
   createHazardReport(siteId,input,workerId=null){
