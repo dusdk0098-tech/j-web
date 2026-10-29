@@ -966,6 +966,24 @@ test('현장과 날짜별 출역을 기록하고 다른 현장의 근로자 변�
   } finally {s.close();}
 });
 
+test('월별 출역 정보 변경은 선택한 현장과 근로자의 출역일만 수정한다',()=>{
+  const s=new Store(':memory:');try{
+    const site=s.createSite({name:'가상 현장'}),other=s.createSite({name:'다른 현장'}),worker=s.createWorker({siteId:site.id,name:'가상 근로자',category:'직영',company:'기존 업체',occupation:'기존 직종'}),second=s.createWorker({siteId:site.id,name:'다른 근로자',category:'직영',company:'기존 업체',occupation:'기존 직종'});
+    for(const [person,date] of [[worker,'2024-02-01'],[worker,'2024-02-02'],[worker,'2024-03-01'],[second,'2024-02-01']])s.setAttendance({siteId:site.id,workerId:person.id,date,present:true});
+    s.saveWageRecord({siteId:site.id,workerId:worker.id,month:'2024-02',gross:'1000',deductions:{income:'0',local:'0',health:'0',care:'0',pension:'0',employment:'0'}});
+    s.setAttendance({siteId:site.id,workerId:worker.id,date:'2024-02-02',present:false});
+    const input={siteId:site.id,workerId:worker.id,month:'2024-02',company:'변경 업체',occupation:'변경 직종'};
+    assert.throws(()=>s.updateMonthlyAttendanceDetails({...input,siteId:other.id}),/현장/);assert.throws(()=>s.updateMonthlyAttendanceDetails({...input,month:'2024-13'}),/월/);assert.throws(()=>s.updateMonthlyAttendanceDetails({...input,occupation:' '}),/직종/);
+    assert.equal(s.updateMonthlyAttendanceDetails(input),1);
+    assert.equal(s.attendanceReport(site.id,'2024-02-01','2024-02-29','company').find(r=>r.label==='변경 업체').days,1);
+    assert.equal(s.attendanceReport(site.id,'2024-03-01','2024-03-31','occupation')[0].label,'기존 직종');
+    assert.equal(s.workers(site.id).find(w=>w.id===worker.id).company,'기존 업체');
+    assert.equal(s.wageRecords(site.id,'2024-02')[0].gross,1000);assert.equal(s.wageRecords(site.id,'2024-02')[0].occupation,'기존 직종');
+    assert.throws(()=>s.updateMonthlyAttendanceDetails({siteId:site.id,workerId:worker.id,month:'2024-04',company:'변경'}),/출역/);
+    assert.throws(()=>s.updateMonthlyAttendanceDetails({siteId:site.id,workerId:worker.id,month:'2024-02'}),/항목/);
+  }finally{s.close();}
+});
+
 test('시험 공수는 현장과 출역일별로 수동 기록하고 미기록을 구분한다',()=>{
   const s=new Store(':memory:');try{
     const site=s.createSite({name:'가상 현장'}),other=s.createSite({name:'다른 현장'}),worker=s.createWorker({siteId:site.id,name:'가상 근로자',category:'직영',company:'가상 업체',occupation:'가상 직종'}),date='2024-02-29',base={siteId:site.id,workerId:worker.id,date};

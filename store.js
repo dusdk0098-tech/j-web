@@ -653,6 +653,16 @@ export class Store {
     const result=this.db.prepare('UPDATE attendance SET units_hundredths=?,updated_at=CURRENT_TIMESTAMP WHERE worker_id=? AND date=? AND present=1 AND EXISTS(SELECT 1 FROM workers WHERE workers.id=attendance.worker_id AND workers.site_id=?)').run(units,Number(input.workerId),date,Number(input.siteId));
     if(!result.changes)throw new Error('같은 현장의 출역 기록을 확인해 주세요.');
   }
+  updateMonthlyAttendanceDetails(input){
+    const month=monthValue(input.month),fields=['category','company','occupation'].filter(key=>input[key]!==undefined);
+    if(!fields.length)throw new Error('변경할 항목을 선택해 주세요.');
+    const values=fields.map(key=>text(input[key],{category:'구분',company:'소속',occupation:'직종'}[key]));
+    const worker=this.db.prepare('SELECT id FROM workers WHERE id=? AND site_id=?').get(Number(input.workerId),Number(input.siteId));
+    if(!worker)throw new Error('선택한 현장의 출입자를 확인해 주세요.');
+    const result=this.db.prepare(`UPDATE attendance SET ${fields.map(key=>`${key}_snapshot=?`).join(',')},updated_at=CURRENT_TIMESTAMP WHERE worker_id=? AND present=1 AND date BETWEEN ? AND ?`).run(...values,worker.id,`${month}-01`,`${month}-31`);
+    if(!result.changes)throw new Error('해당 월의 출역 기록이 없습니다.');
+    return result.changes;
+  }
   recordWorkerLogin(workerId,date) {
     date=dateValue(date);
     this.db.exec('BEGIN IMMEDIATE');try{const result=this.db.prepare("INSERT OR IGNORE INTO attendance(worker_id,date,present,company_snapshot,occupation_snapshot,category_snapshot,source) SELECT id,?,1,company,occupation,category,'login' FROM workers WHERE id=?").run(date,Number(workerId));if(result.changes)this.applyMealDefaults(workerId,date);this.db.exec('COMMIT');}catch(error){this.db.exec('ROLLBACK');throw error;}
