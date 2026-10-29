@@ -90,10 +90,12 @@ export class Store {
       CREATE TABLE IF NOT EXISTS basic_document_versions (document_id INTEGER PRIMARY KEY REFERENCES documents(id),version TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS work_plan_copies (document_id INTEGER PRIMARY KEY REFERENCES documents(id),source_document_id INTEGER NOT NULL REFERENCES documents(id));
       CREATE TABLE IF NOT EXISTS office_document_copies (document_id INTEGER PRIMARY KEY REFERENCES documents(id),source_document_id INTEGER NOT NULL REFERENCES documents(id));
+      CREATE TABLE IF NOT EXISTS office_reference_recipients (document_id INTEGER NOT NULL REFERENCES documents(id),reviewer_id INTEGER NOT NULL REFERENCES reviewers(id),PRIMARY KEY(document_id,reviewer_id));
       CREATE TABLE IF NOT EXISTS reviewers (id INTEGER PRIMARY KEY,site_id INTEGER NOT NULL REFERENCES sites(id),login_id TEXT NOT NULL UNIQUE,name TEXT NOT NULL,salt BLOB NOT NULL,password_hash BLOB NOT NULL,active INTEGER NOT NULL DEFAULT 1 CHECK(active IN (0,1)));
       CREATE TABLE IF NOT EXISTS reviewer_sessions (token_hash TEXT PRIMARY KEY,reviewer_id INTEGER NOT NULL REFERENCES reviewers(id),expires INTEGER NOT NULL,credential_hash BLOB NOT NULL);
       CREATE TABLE IF NOT EXISTS approval_steps (document_id INTEGER NOT NULL REFERENCES documents(id),position INTEGER NOT NULL,reviewer_id INTEGER NOT NULL REFERENCES reviewers(id),state TEXT NOT NULL DEFAULT 'pending' CHECK(state IN ('pending','approved','rejected')),PRIMARY KEY(document_id,position),UNIQUE(document_id,reviewer_id));
       CREATE TABLE IF NOT EXISTS approval_cycles (id INTEGER PRIMARY KEY,document_id INTEGER NOT NULL REFERENCES documents(id),document_json TEXT NOT NULL,attachments_json TEXT NOT NULL,linked_json TEXT NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+      CREATE TABLE IF NOT EXISTS office_reference_cycle_recipients (cycle_id INTEGER NOT NULL REFERENCES approval_cycles(id),reviewer_id INTEGER NOT NULL REFERENCES reviewers(id),PRIMARY KEY(cycle_id,reviewer_id));
       CREATE TABLE IF NOT EXISTS approval_cycle_files (cycle_id INTEGER NOT NULL REFERENCES approval_cycles(id),kind TEXT NOT NULL,parent_id INTEGER NOT NULL,file_id INTEGER NOT NULL,name TEXT NOT NULL,data BLOB NOT NULL,PRIMARY KEY(cycle_id,kind,parent_id,file_id));
       CREATE TABLE IF NOT EXISTS checklist_signatures (document_id INTEGER PRIMARY KEY REFERENCES documents(id),signature BLOB NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
       CREATE TABLE IF NOT EXISTS tbm_signatures (document_id INTEGER PRIMARY KEY REFERENCES documents(id),signature BLOB NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
@@ -1156,6 +1158,13 @@ export class Store {
   }
   reviewerDocuments(reviewerId){return this.db.prepare("SELECT d.id,d.site_id,d.type,d.title,d.date FROM documents d JOIN approval_steps s ON s.document_id=d.id JOIN reviewers r ON r.id=s.reviewer_id AND r.site_id=d.site_id WHERE r.id=? AND r.active=1 AND d.status='pending' AND s.state='pending' AND NOT EXISTS (SELECT 1 FROM approval_steps prior WHERE prior.document_id=d.id AND prior.position<s.position AND prior.state<>'approved') ORDER BY d.date DESC,d.id DESC").all(Number(reviewerId));}
   reviewerDocument(reviewerId,id){return this.reviewerDocuments(reviewerId).some(doc=>doc.id===Number(id))?this.document(id):null;}
+  officeReferences(id){const doc=this.document(id);if(!doc||doc.type!=='office')throw new Error('업무 문서를 확인해 주세요.');return this.db.prepare('SELECT r.id,r.name,r.active FROM office_reference_recipients o JOIN reviewers r ON r.id=o.reviewer_id WHERE o.document_id=? ORDER BY r.name,r.id').all(Number(id));}
+  setOfficeReferences(id,ids){
+    if(!Array.isArray(ids)||ids.length>100||ids.some(x=>!Number.isSafeInteger(x)||x<1)||new Set(ids).size!==ids.length)throw new Error('참조자를 확인해 주세요.');
+    this.db.exec('BEGIN IMMEDIATE');try{const doc=this.document(id);if(!doc||doc.type!=='office'||!['draft','rejected'].includes(doc.status))throw new Error('수정 가능한 업무 문서를 확인해 주세요.');const exists=this.db.prepare('SELECT 1 FROM reviewers WHERE id=? AND site_id=? AND active=1');if(ids.some(reviewer=>!exists.get(reviewer,doc.site_id)))throw new Error('같은 현장의 활성 참조자를 선택해 주세요.');this.db.prepare('DELETE FROM office_reference_recipients WHERE document_id=?').run(Number(id));const add=this.db.prepare('INSERT INTO office_reference_recipients(document_id,reviewer_id) VALUES(?,?)');for(const reviewer of ids)add.run(Number(id),reviewer);this.db.prepare('DELETE FROM meeting_signatures WHERE document_id=?').run(Number(id));this.db.exec('COMMIT');return this.officeReferences(id);}catch(error){this.db.exec('ROLLBACK');throw error;}
+  }
+  officeReferenceDocuments(reviewerId){return this.db.prepare("SELECT d.id,d.site_id,d.type,json_extract(a.document_json,'$.title') AS title,json_extract(a.document_json,'$.date') AS date,d.status FROM documents d JOIN office_reference_recipients o ON o.document_id=d.id JOIN reviewers r ON r.id=o.reviewer_id AND r.site_id=d.site_id JOIN office_reference_cycle_recipients c ON c.cycle_id=d.approval_cycle_id AND c.reviewer_id=r.id JOIN approval_cycles a ON a.id=c.cycle_id AND a.document_id=d.id WHERE r.id=? AND r.active=1 AND d.type='office' AND d.status IN ('pending','approved','rejected') ORDER BY date DESC,d.id DESC").all(Number(reviewerId));}
+  officeReferenceDocument(reviewerId,id){return this.officeReferenceDocuments(reviewerId).some(doc=>doc.id===Number(id))?this.document(id):null;}
   priorReviewerEvents(doc,reviewerId){
     if(!doc.approval_cycle_id)return [];
     return this.db.prepare("SELECT e.id,e.reviewer_name,e.opinion,e.created_at,e.signature IS NOT NULL AS has_signature FROM events e JOIN approval_steps prior ON prior.document_id=e.document_id AND prior.reviewer_id=e.reviewer_id AND prior.state='approved' JOIN approval_steps current ON current.document_id=e.document_id AND current.reviewer_id=? AND current.state='pending' AND prior.position<current.position WHERE e.document_id=? AND e.approval_cycle_id=? AND e.action='approve' ORDER BY prior.position,e.id").all(Number(reviewerId),doc.id,doc.approval_cycle_id);
@@ -1164,7 +1173,7 @@ export class Store {
     if(doc.type==='risk')return {type:'risk',activities:this.riskActivities(doc.id).map(activity=>({...activity,worker_snapshot:JSON.parse(activity.worker_snapshot||'[]'),files:this.riskActivityPhotos(doc.id,activity.id)}))};
     if(doc.type==='permit')return {type:'permit',checks:this.permitChecks(doc.id),extensions:this.permitExtensions(doc.id)};
     if(doc.type==='joint_inspection')return {type:'joint',authorSignature:!!this.jointSignature(doc.id)};
-    if(doc.type==='office'){const referenceId=JSON.parse(doc.details||'{}').referenceId||0,reference=referenceId?this.officeReference(doc.site_id,referenceId):null;if(referenceId&&!reference)throw new Error('연결된 품의서가 변경되었습니다. 다시 확인해 주세요.');return {type:'office',authorSignature:!!this.meetingSignature(doc.id),reference:reference?{id:reference.id,title:reference.title,date:reference.date,body:reference.body,files:this.attachments(reference.id)}:null};}
+    if(doc.type==='office'){const referenceId=JSON.parse(doc.details||'{}').referenceId||0,reference=referenceId?this.officeReference(doc.site_id,referenceId):null;if(referenceId&&!reference)throw new Error('연결된 품의서가 변경되었습니다. 다시 확인해 주세요.');return {type:'office',authorSignature:!!this.meetingSignature(doc.id),referenceRecipients:this.officeReferences(doc.id),reference:reference?{id:reference.id,title:reference.title,date:reference.date,body:reference.body,files:this.attachments(reference.id)}:null};}
     if(['work_council','safety_meeting'].includes(doc.type))return {type:'meeting',authorSignature:!!this.meetingSignature(doc.id)};
     if(['tbm','education'].includes(doc.type)){const targets=this.trainingTargets(doc.id);return {type:'training',authorSignature:doc.type==='tbm'&&!!this.tbmSignature(doc.id),configured:targets.configured,workers:targets.workers.filter(worker=>!targets.configured||worker.selected),signedWorkers:targets.signedWorkers,checks:this.trainingChecks(doc.id)};}
     if(doc.type!=='work_plan')return null;const details=JSON.parse(doc.details||'{}'),equipmentIds=details.equipmentIds||[],riggingIds=details.riggingIds||[],snapshots=Array.isArray(details.equipmentSnapshot)?details.equipmentSnapshot:null;
@@ -1194,6 +1203,7 @@ export class Store {
   }
   captureApprovalCycle(doc){
     const linked=this.liveReviewerLinks(doc),attachments=this.attachments(doc.id),cycle=this.db.prepare('INSERT INTO approval_cycles(document_id,document_json,attachments_json,linked_json) VALUES(?,?,?,?)').run(doc.id,JSON.stringify(doc),JSON.stringify(attachments),JSON.stringify(linked)).lastInsertRowid;
+    if(linked?.type==='office'){const add=this.db.prepare('INSERT INTO office_reference_cycle_recipients(cycle_id,reviewer_id) VALUES(?,?)');for(const person of linked.referenceRecipients)add.run(cycle,person.id);}
     const insert=this.db.prepare('INSERT INTO approval_cycle_files(cycle_id,kind,parent_id,file_id,name,data) VALUES(?,?,?,?,?,?)');
     const save=(kind,parentId,fileId,file)=>{if(!file||!file.data)throw new Error('결재 자료를 보존할 수 없습니다.');insert.run(cycle,kind,Number(parentId),Number(fileId),file.name||'signature.png',file.data);};
     for(const file of attachments)save('document',0,file.id,this.attachment(file.id));
@@ -1471,7 +1481,7 @@ export class Store {
       if(doc.type==='office'&&action==='submit'){
         this.db.prepare('UPDATE documents SET id=id WHERE id=?').run(Number(id));const currentDoc=this.document(id),currentLine=this.approvalLine(id);
         if(!currentDoc||['status','title','date','body','details'].some(key=>currentDoc[key]!==doc[key])||JSON.stringify(currentLine)!==JSON.stringify(line))throw new Error('문서 또는 결재선이 변경되었습니다. 다시 확인해 주세요.');
-        if(!currentLine.length||currentLine.some(step=>!step.active)||!this.meetingSignature(id))throw new Error('시험 결재자와 작성자 서명을 확인해 주세요.');
+        if(!currentLine.length||currentLine.some(step=>!step.active)||this.officeReferences(id).some(person=>!person.active)||!this.meetingSignature(id))throw new Error('시험 결재자·참조자와 작성자 서명을 확인해 주세요.');
       }
       if(doc.type==='basic'&&action==='submit'){
         this.db.prepare('UPDATE basic_document_versions SET version=version WHERE document_id=?').run(doc.id);

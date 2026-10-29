@@ -73,6 +73,14 @@ const server = http.createServer(async (req, res) => {
       req.checkSession=()=>reviewerSessions.get(key)===session&&session.expires>Date.now()&&store.reviewer(session.id)?null:{status:401,error:'결재자 로그인이 필요합니다.'};
       if(url.pathname==='/api/reviewer/session'&&req.method==='GET')return json(res,200,{reviewer});
       if(url.pathname==='/api/reviewer/documents'&&req.method==='GET')return json(res,200,store.reviewerDocuments(reviewer.id));
+      if(url.pathname==='/api/reviewer/references'&&req.method==='GET')return json(res,200,store.officeReferenceDocuments(reviewer.id));
+      const reference=url.pathname.match(/^\/api\/reviewer\/references\/(\d+)(?:\/(attachments\/(\d+)|linked\/office-reference\/(\d+)\/(\d+)|signatures\/author\/0))?$/);
+      if(reference&&req.method==='GET'){
+        const [,id,part,fileId,parentId,linkedId]=reference,doc=store.officeReferenceDocument(reviewer.id,id);if(!doc)return json(res,404,{error:'참조 문서를 찾을 수 없습니다.'});
+        const payload=store.reviewerPayload(doc);if(!part)return json(res,200,payload);
+        if(part==='signatures/author/0'){const signature=store.reviewerLinkedSignature(doc,'author',0);if(!signature)return json(res,404,{error:'시험 서명을 찾을 수 없습니다.'});res.writeHead(200,{'Content-Type':'image/png','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(signature);}
+        const file=fileId?(payload.attachments.some(item=>item.id===Number(fileId))&&store.reviewerAttachment(doc,fileId)):store.reviewerLinkedFile(doc,'office-reference',parentId,linkedId);if(!file)return json(res,404,{error:'참조 파일을 찾을 수 없습니다.'});const name=encodeURIComponent(file.name).replace(/[!'()*]/g,c=>`%${c.charCodeAt(0).toString(16).toUpperCase()}`);res.writeHead(200,{'Content-Type':'application/octet-stream','Content-Disposition':`attachment; filename="file"; filename*=UTF-8''${name}`,'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(file.data);
+      }
       const priorSignature=url.pathname.match(/^\/api\/reviewer\/documents\/(\d+)\/prior-signatures\/(\d+)$/);
       if(priorSignature&&req.method==='GET'){const [,id,eventId]=priorSignature,doc=store.reviewerDocument(reviewer.id,id),permitted=doc&&store.priorReviewerEvents(doc,reviewer.id).some(event=>event.id===Number(eventId)&&event.has_signature),signature=permitted&&store.eventSignature(id,eventId);if(!signature)return json(res,404,{error:'시험 결재 서명을 찾을 수 없습니다.'});res.writeHead(200,{'Content-Type':'image/png','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(signature);}
       const linkedSignature=url.pathname.match(/^\/api\/reviewer\/documents\/(\d+)\/signatures\/(permit|training|author|equipment-check|risk-activity)\/(\d+)$/);
@@ -688,6 +696,8 @@ const server = http.createServer(async (req, res) => {
     if(previousApproval&&req.method==='GET')return json(res,200,store.previousApprovalLine(previousApproval[1]));
     const approvalLine=url.pathname.match(/^\/api\/documents\/(\d+)\/approval-line$/);
     if(approvalLine){if(req.method==='GET'){if(!store.document(approvalLine[1]))return json(res,404,{error:'문서를 찾을 수 없습니다.'});return json(res,200,store.approvalLine(approvalLine[1]));}if(req.method==='PUT'){const input=await body(req);return json(res,200,store.setApprovalLine(approvalLine[1],input.reviewerIds));}}
+    const officeReferences=url.pathname.match(/^\/api\/documents\/(\d+)\/office-references$/);
+    if(officeReferences){if(req.method==='GET')return json(res,200,store.officeReferences(officeReferences[1]));if(req.method==='PUT'){const input=await body(req);return json(res,200,store.setOfficeReferences(officeReferences[1],input.reviewerIds));}}
     const approvalCycle=url.pathname.match(/^\/api\/documents\/(\d+)\/approval-cycles\/(\d+)(?:\/files\/(document|equipment|rigging|place|risk|office-reference|permit-signature|training-signature|author-signature|equipment-check-signature|risk-activity-signature)\/(\d+)\/(\d+))?$/);
     if(approvalCycle&&req.method==='GET'){const [,id,cycleId,kind,parentId,fileId]=approvalCycle;if(!kind){const cycle=store.approvalCycle(id,cycleId);return cycle?json(res,200,cycle):json(res,404,{error:'결재 자료를 찾을 수 없습니다.'});}const file=store.approvalCycleFile(id,cycleId,kind,parentId,fileId);if(!file)return json(res,404,{error:'결재 파일을 찾을 수 없습니다.'});const name=encodeURIComponent(file.name).replace(/[!'()*]/g,c=>`%${c.charCodeAt(0).toString(16).toUpperCase()}`);res.writeHead(200,{'Content-Type':'application/octet-stream','Content-Disposition':`attachment; filename="file"; filename*=UTF-8''${name}`,'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(file.data);}
     const eventSignature=url.pathname.match(/^\/api\/documents\/(\d+)\/events\/(\d+)\/signature$/);
