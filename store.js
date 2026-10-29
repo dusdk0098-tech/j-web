@@ -45,6 +45,7 @@ export class Store {
     this.db.exec(`PRAGMA foreign_keys=ON;
       CREATE TABLE IF NOT EXISTS sites (id INTEGER PRIMARY KEY, name TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
       CREATE TABLE IF NOT EXISTS site_access (site_id INTEGER PRIMARY KEY REFERENCES sites(id),access_key TEXT NOT NULL UNIQUE);
+      CREATE TABLE IF NOT EXISTS site_registration (site_id INTEGER PRIMARY KEY REFERENCES sites(id),expires_at INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS site_articles (id INTEGER PRIMARY KEY,site_id INTEGER NOT NULL REFERENCES sites(id),category TEXT NOT NULL,title TEXT NOT NULL,body TEXT NOT NULL,visible INTEGER NOT NULL CHECK(visible IN (0,1)),created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
       CREATE TABLE IF NOT EXISTS site_photos (id INTEGER PRIMARY KEY,site_id INTEGER NOT NULL REFERENCES sites(id),name TEXT NOT NULL,date TEXT NOT NULL,description TEXT NOT NULL DEFAULT '',data BLOB NOT NULL);
       CREATE TABLE IF NOT EXISTS site_article_files (id INTEGER PRIMARY KEY,article_id INTEGER NOT NULL REFERENCES site_articles(id),name TEXT NOT NULL,data BLOB NOT NULL);
@@ -700,7 +701,7 @@ export class Store {
     return { token, expiresAt };
   }
   revokeInvitations(siteId) {
-    return this.db.prepare('UPDATE invitations SET revoked=1 WHERE site_id=? AND revoked=0').run(Number(siteId)).changes;
+    this.db.exec('BEGIN IMMEDIATE');try{const count=this.db.prepare('UPDATE invitations SET revoked=1 WHERE site_id=? AND revoked=0').run(Number(siteId)).changes;this.db.prepare('DELETE FROM site_registration WHERE site_id=?').run(Number(siteId));this.db.exec('COMMIT');return count;}catch(error){this.db.exec('ROLLBACK');throw error;}
   }
   invitation(token) {
     if (typeof token !== 'string' || !/^[\w-]{43}$/.test(token)) return null;
@@ -721,8 +722,15 @@ export class Store {
     return this.db.prepare('SELECT s.id,s.name FROM site_access a JOIN sites s ON s.id=a.site_id WHERE a.access_key=?').get(key)||null;
   }
   siteAccessKey(siteId){return this.db.prepare('SELECT access_key FROM site_access WHERE site_id=?').get(Number(siteId))?.access_key||null;}
+  openSiteRegistration(siteId){
+    this.ensureSiteAccess(siteId);const expiresAt=Date.now()+30*24*60*60*1000;
+    this.db.prepare('INSERT INTO site_registration(site_id,expires_at) VALUES(?,?) ON CONFLICT(site_id) DO UPDATE SET expires_at=excluded.expires_at').run(Number(siteId),expiresAt);return expiresAt;
+  }
+  siteRegistrationExpiry(siteId){return this.db.prepare('SELECT expires_at FROM site_registration WHERE site_id=? AND expires_at>?').get(Number(siteId),Date.now())?.expires_at||null;}
+  siteRegistrationOpen(siteId){return this.siteRegistrationExpiry(siteId)!==null;}
   join(token,input) {
-    const invite=this.invitation(token);
+    const invite=input.siteKey?this.siteFromAccess(input.siteKey):this.invitation(token);
+    if(input.siteKey&&invite&&!this.siteRegistrationOpen(invite.id))throw new Error('이 현장의 시험 가입이 중지되었거나 만료되었습니다.');
     if (!invite) throw new Error('유효하지 않거나 만료된 가입 링크입니다.');
     if(input.acknowledged!==true)throw new Error('시험 안내를 확인해 주세요.');
     const equipment=input.equipment??[];

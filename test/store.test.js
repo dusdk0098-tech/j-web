@@ -534,6 +534,19 @@ test('현장과 출입자를 분리하고 문서 결재 이력을 보존한다',
   } finally {s.close();}
 });
 
+test('현장 QR 가입은 현장별로 열고 만료 또는 중지 시 차단된다',()=>{
+  const s=new Store(':memory:');try{
+    const a=s.createSite({name:'가상 현장 A'}),b=s.createSite({name:'가상 현장 B'}),key=s.ensureSiteAccess(a.id),otherKey=s.ensureSiteAccess(b.id),input={name:'가상 근로자',category:'직영',company:'가상 업체',occupation:'기타',loginId:'demo_worker',password:'virtual-password-123',acknowledged:true};
+    assert.throws(()=>s.join(null,{...input,siteKey:key}),/중지|만료/);
+    assert.ok(s.openSiteRegistration(a.id)>Date.now());assert.equal(s.siteRegistrationOpen(b.id),false);
+    assert.throws(()=>s.join(null,{...input,siteKey:otherKey}),/중지|만료/);
+    const joined=s.join(null,{...input,siteKey:key});assert.equal(joined.site_id,a.id);
+    const newKey=s.rotateSiteAccess(a.id);assert.throws(()=>s.join(null,{...input,siteKey:key,loginId:'another'}),/만료/);assert.equal(s.siteRegistrationOpen(a.id),true);
+    s.db.prepare('UPDATE site_registration SET expires_at=? WHERE site_id=?').run(Date.now()-1,a.id);assert.throws(()=>s.join(null,{...input,siteKey:newKey,loginId:'another'}),/중지|만료/);
+    s.openSiteRegistration(a.id);s.revokeInvitations(a.id);assert.equal(s.siteRegistrationOpen(a.id),false);assert.throws(()=>s.join(null,{...input,siteKey:newKey,loginId:'another'}),/중지|만료/);
+  }finally{s.close();}
+});
+
 test('저장한 현장과 가입 정보가 서버 재시작 후 유지되고 만료 링크는 거절한다',()=>{
   const dir=mkdtempSync(join(tmpdir(),'j-web-'));
   const path=join(dir,'test.sqlite');

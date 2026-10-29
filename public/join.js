@@ -28,13 +28,13 @@ try {
   for(const name of data.companies||[]){const option=document.createElement('option');option.value=name;list.append(option);}
   form.append(list);form.elements.company.setAttribute('list',list.id);
   const occupations=document.createElement('datalist');occupations.id='join-occupations';for(const name of data.occupations||[]){const option=document.createElement('option');option.value=name;occupations.append(option);}form.append(occupations);form.elements.occupation.setAttribute('list',occupations.id);
-  site.textContent=`현장: ${data.name}`;login.hidden=false;form.hidden=!!siteKey;
+  site.textContent=`현장: ${data.name}`;login.hidden=false;form.hidden=!!siteKey&&!data.canSignup;
   const homeKey=siteKey||data.siteKey;if(homeKey){const manifest=document.createElement('link');manifest.rel='manifest';manifest.href=`/worker.webmanifest?site=${encodeURIComponent(homeKey)}`;document.head.append(manifest);const tip=document.createElement('p');tip.textContent='휴대전화 브라우저의 홈 화면 추가를 사용하면 이 현장의 로그인 주소를 다시 열 수 있습니다. 인터넷 연결이 필요합니다.';site.after(tip);}
   if(data.siteKey&&!siteKey){const link=document.createElement('a');link.href=`/join?site=${encodeURIComponent(data.siteKey)}`;link.textContent='기존 가입자 로그인 주소';site.after(link);}
 } catch(error) {site.textContent='';message.textContent=error.message;}
 form.onsubmit=async event=>{
   event.preventDefault();const submit=form.querySelector('button[type=submit], button:not([type])');submit.disabled=true;
-  try {const equipment=[...form.querySelectorAll('[name=equipment]:checked')].map(input=>input.value),profile=Object.fromEntries(['birthDate','phone','emergencyName','emergencyPhone','address','nationality','bloodType','healthStatus','pledge'].map(key=>[key,form.elements[key].value])),response=await fetch('/api/join',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...Object.fromEntries(new FormData(form)),profile,equipment,signature:joinPad.value(),acknowledged:form.elements.acknowledged.checked,token})});const data=await response.json();if(!response.ok)throw Error(data.error);adoptSiteAddress();form.reset();joinPad.clear();form.hidden=true;message.textContent='시험 등록이 완료되었습니다. 위에서 로그인하세요.';}catch(error){message.textContent=error.message;submit.disabled=false;}
+  try {const equipment=[...form.querySelectorAll('[name=equipment]:checked')].map(input=>input.value),profile=Object.fromEntries(['birthDate','phone','emergencyName','emergencyPhone','address','nationality','bloodType','healthStatus','pledge'].map(key=>[key,form.elements[key].value])),response=await fetch('/api/join',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...Object.fromEntries(new FormData(form)),profile,equipment,signature:joinPad.value(),acknowledged:form.elements.acknowledged.checked,token,siteKey})});const data=await response.json();if(!response.ok)throw Error(data.error);adoptSiteAddress();form.reset();joinPad.clear();form.hidden=true;message.textContent='시험 등록이 완료되었습니다. 위에서 로그인하세요.';}catch(error){message.textContent=error.message;submit.disabled=false;}
 };
 async function showWorker(worker){
     const button=login.querySelector('button');

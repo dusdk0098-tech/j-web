@@ -58,7 +58,7 @@ const server = http.createServer(async (req, res) => {
       const key=url.searchParams.get('site');if(!store.siteFromAccess(key))return json(res,404,{error:'현장 접속 주소를 확인해 주세요.'});
       const start=workerSitePath(key);res.writeHead(200,{'Content-Type':'application/manifest+json; charset=utf-8','Cache-Control':'no-store','Referrer-Policy':'no-referrer','X-Content-Type-Options':'nosniff'});return res.end(JSON.stringify({name:'J웹 현장 출입',short_name:'J웹',id:start,start_url:start,scope:'/join',display:'standalone',background_color:'#f4f6fa',theme_color:'#213c80',icons:[{src:'/jweb-icon.svg',sizes:'any',type:'image/svg+xml'}]}));
     }
-    if(url.pathname==='/api/worker/site'&&req.method==='GET'){const site=store.siteFromAccess(url.searchParams.get('key'));return site?json(res,200,site):json(res,404,{error:'현장 접속 주소를 확인해 주세요.'});}
+    if(url.pathname==='/api/worker/site'&&req.method==='GET'){const site=store.siteFromAccess(url.searchParams.get('key'));if(!site)return json(res,404,{error:'현장 접속 주소를 확인해 주세요.'});const canSignup=store.siteRegistrationOpen(site.id);return json(res,200,{...site,canSignup,...(canSignup?{companies:store.companies(site.id).map(c=>c.name),occupations:store.siteOccupations(site.id).map(o=>o.name)}:{})});}
     if(url.pathname==='/api/worker/login' && req.method==='POST'){
       const now=Date.now(),input=await body(req),site=input.siteKey?store.siteFromAccess(input.siteKey):store.invitation(input.token),accountKey=site&&typeof input.loginId==='string'&&/^[a-zA-Z0-9_]{3,40}$/.test(input.loginId)?`${site.id}:${input.loginId}`:'invalid';
       workerFailures=workerFailures.filter(t=>t>now-5*60*1000);for(const [key,times] of workerAccountFailures){const recent=times.filter(t=>t>now-5*60*1000);if(recent.length)workerAccountFailures.set(key,recent);else workerAccountFailures.delete(key);}
@@ -220,8 +220,10 @@ const server = http.createServer(async (req, res) => {
       res.writeHead(200,{'Content-Type':'application/octet-stream','Content-Disposition':'attachment; filename="work-stop-photo"','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(photo);
     }
     const inviteSite=url.pathname.match(/^\/api\/sites\/(\d+)\/invitation$/);
+    const registrationSite=url.pathname.match(/^\/api\/sites\/(\d+)\/access\/registration$/);
     const accessSite=url.pathname.match(/^\/api\/sites\/(\d+)\/access(?:\/(rotate))?$/);
-    if(accessSite&&req.method==='POST'){const key=accessSite[2]?store.rotateSiteAccess(accessSite[1]):store.ensureSiteAccess(accessSite[1]),link=`${requestOrigin}/join?site=${encodeURIComponent(key)}`;return json(res,200,{link,image:await QRCode.toDataURL(link,{errorCorrectionLevel:'M',margin:2,width:256})});}
+    if(registrationSite&&req.method==='POST')return json(res,200,{expiresAt:store.openSiteRegistration(registrationSite[1])});
+    if(accessSite&&req.method==='POST'){const key=accessSite[2]?store.rotateSiteAccess(accessSite[1]):store.ensureSiteAccess(accessSite[1]),link=`${requestOrigin}/join?site=${encodeURIComponent(key)}`;return json(res,200,{link,registrationExpiresAt:store.siteRegistrationExpiry(accessSite[1]),image:await QRCode.toDataURL(link,{errorCorrectionLevel:'M',margin:2,width:256})});}
     if (inviteSite && req.method === 'POST') {
       const invite=store.createInvitation(inviteSite[1]);
       const link=`${requestOrigin}/join?token=${encodeURIComponent(invite.token)}`;

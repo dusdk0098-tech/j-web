@@ -526,7 +526,14 @@ test('관리자 인증 모드가 문서 API를 보호하고 로그아웃을 적�
     assert.equal((await confirmNotice(notice.id)).status,401);
     assert.equal((await fetch(`${base}/api/worker/attendance?month=2024-02`,{headers:{cookie:workerCookie}})).status,401);
     assert.equal((await (await fetch(`${base}/api/workers?siteId=${site.id}`,{headers:{cookie}})).json()).length,1);
+    const siteSignup=key=>fetch(`${base}/api/join`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({siteKey:key,name:'가상 신규 근로자',category:'직영',company:'가상 업체',occupation:'목공',loginId:'worker_site',password:'virtual-password-123',acknowledged:true})}),registrationUrl=`${base}/api/sites/${site.id}/access/registration`;
+    assert.equal((await (await fetch(`${base}/api/worker/site?key=${siteKey}`)).json()).canSignup,false);assert.equal((await siteSignup(siteKey)).status,400);
+    assert.equal((await fetch(registrationUrl,{method:'POST',headers:{cookie:workerCookie}})).status,401);assert.equal((await fetch(registrationUrl,{method:'POST'})).status,401);
+    const opened=await post(`/api/sites/${site.id}/access/registration`,{});assert.equal(opened.status,200);assert.ok((await opened.json()).expiresAt>Date.now());
+    const openInfo=await (await fetch(`${base}/api/worker/site?key=${siteKey}`)).json();assert.equal(openInfo.canSignup,true);assert.ok(openInfo.companies.includes('가상 협력사'));assert.ok(openInfo.occupations.includes('가상 목공'));
+    assert.equal((await siteSignup(siteKey)).status,201);
     assert.equal((await fetch(`${base}/api/sites/${site.id}/invitation`,{method:'DELETE',headers:{cookie}})).status,200);
+    assert.equal((await (await fetch(`${base}/api/worker/site?key=${siteKey}`)).json()).canSignup,false);assert.equal((await siteSignup(siteKey)).status,400);
     assert.equal((await fetch(`${base}/api/join?token=${inviteToken}`)).status,404);
     assert.equal((await fetch(manifestUrl)).status,200);
     assert.equal((await signup(true)).status,400);
