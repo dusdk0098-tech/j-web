@@ -1018,6 +1018,17 @@ test('월별 출역 정보 변경은 선택한 현장과 근로자의 출역일�
   }finally{s.close();}
 });
 
+test('월별 시험 일당은 선택한 근로자의 해당 월 출역일에만 적용된다',()=>{
+  const s=new Store(':memory:');try{
+    const site=s.createSite({name:'가상 현장'}),other=s.createSite({name:'다른 현장'}),add=(siteId,name)=>s.createWorker({siteId,name,category:'직영',company:'가상 회사',occupation:'목공'}),worker=add(site.id,'가상 근로자'),second=add(site.id,'다른 근로자'),foreign=add(other.id,'다른 현장'),base={siteId:site.id,workerId:worker.id,month:'2024-02'};
+    for(const [siteId,person,date] of [[site.id,worker,'2024-02-01'],[site.id,worker,'2024-02-02'],[site.id,worker,'2024-02-03'],[site.id,worker,'2024-03-01'],[site.id,second,'2024-02-01'],[other.id,foreign,'2024-02-01']])s.setAttendance({siteId,workerId:person.id,date,present:true});
+    s.setAttendance({siteId:site.id,workerId:worker.id,date:'2024-02-03',present:false});s.setAttendanceUnits({siteId:site.id,workerId:worker.id,date:'2024-02-01',units:'0.5'});s.saveWageRecord({...base,gross:'2000',deductions:{income:'0',local:'0',health:'0',care:'0',pension:'0',employment:'0'}});
+    for(const dailyRate of ['', '-1','1.1','1000000000',null,100])assert.throws(()=>s.updateMonthlyAttendanceDetails({...base,company:'바꾸면 안 됨',dailyRate}),/일당/);assert.equal(s.monthlyAttendance(site.id,'2024-02').find(row=>row.id===worker.id).units[0].company,'가상 회사');
+    assert.throws(()=>s.updateMonthlyAttendanceDetails({...base,siteId:other.id,dailyRate:'101'}),/현장/);assert.equal(s.updateMonthlyAttendanceDetails({...base,dailyRate:'101'}),2);let days=s.monthlyAttendance(site.id,'2024-02').find(row=>row.id===worker.id).units;assert.deepEqual(days.map(day=>[day.daily_rate,day.estimated_pay]),[[101,51],[101,null]]);assert.equal(s.monthlyAttendance(site.id,'2024-03').find(row=>row.id===worker.id).units[0].daily_rate,null);assert.equal(s.monthlyAttendance(site.id,'2024-02').find(row=>row.id===second.id).units[0].daily_rate,null);assert.equal(s.monthlyAttendance(other.id,'2024-02')[0].units[0].daily_rate,null);assert.equal(s.wageRecords(site.id,'2024-02')[0].gross,2000);
+    s.setAttendance({siteId:site.id,workerId:worker.id,date:'2024-02-03',present:true});days=s.monthlyAttendance(site.id,'2024-02').find(row=>row.id===worker.id).units;assert.equal(days[2].daily_rate,null);assert.equal(s.updateMonthlyAttendanceDetails({...base,dailyRate:'0'}),3);assert.equal(s.monthlyAttendance(site.id,'2024-02').find(row=>row.id===worker.id).units[0].estimated_pay,0);
+  }finally{s.close();}
+});
+
 test('시험 공수는 현장과 출역일별로 수동 기록하고 미기록을 구분한다',()=>{
   const s=new Store(':memory:');try{
     const site=s.createSite({name:'가상 현장'}),other=s.createSite({name:'다른 현장'}),worker=s.createWorker({siteId:site.id,name:'가상 근로자',category:'직영',company:'가상 업체',occupation:'가상 직종'}),date='2024-02-29',base={siteId:site.id,workerId:worker.id,date};

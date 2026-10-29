@@ -7,6 +7,7 @@ function monthValue(month) {
   if(typeof month!=='string' || !/^\d{4}-(0[1-9]|1[0-2])$/.test(month) || Number(month.slice(0,4))<1000)throw new Error('조회할 월을 확인해 주세요.');
   return month;
 }
+function dailyRateValue(value){if(typeof value!=='string'||!/^$|^\d{1,9}$/.test(value))throw new Error('시험 일당은 0부터 999999999까지 정수로 입력해 주세요.');return value===''?null:Number(value);}
 function equipmentDetails(input){
   const details={};
   for(const key of ['owner','businessNumber','insurer']){
@@ -663,18 +664,17 @@ export class Store {
     if(!result.changes)throw new Error('같은 현장의 출역 기록을 확인해 주세요.');
   }
   setAttendanceDailyRate(input){
-    const date=dateValue(input.date),value=input.dailyRate;
-    if(typeof value!=='string'||!/^$|^\d{1,9}$/.test(value))throw new Error('시험 일당은 0부터 999999999까지 정수로 입력해 주세요.');
-    const result=this.db.prepare('UPDATE attendance SET daily_rate=?,updated_at=CURRENT_TIMESTAMP WHERE worker_id=? AND date=? AND present=1 AND EXISTS(SELECT 1 FROM workers WHERE workers.id=attendance.worker_id AND workers.site_id=?)').run(value===''?null:Number(value),Number(input.workerId),date,Number(input.siteId));
+    const date=dateValue(input.date),value=dailyRateValue(input.dailyRate);
+    const result=this.db.prepare('UPDATE attendance SET daily_rate=?,updated_at=CURRENT_TIMESTAMP WHERE worker_id=? AND date=? AND present=1 AND EXISTS(SELECT 1 FROM workers WHERE workers.id=attendance.worker_id AND workers.site_id=?)').run(value,Number(input.workerId),date,Number(input.siteId));
     if(!result.changes)throw new Error('같은 현장의 출역 기록을 확인해 주세요.');
   }
   updateMonthlyAttendanceDetails(input){
-    const month=monthValue(input.month),fields=['category','company','occupation'].filter(key=>input[key]!==undefined);
+    const month=monthValue(input.month),fields=['category','company','occupation','dailyRate'].filter(key=>input[key]!==undefined);
     if(!fields.length)throw new Error('변경할 항목을 선택해 주세요.');
-    const values=fields.map(key=>text(input[key],{category:'구분',company:'소속',occupation:'직종'}[key]));
+    const values=fields.map(key=>{if(key==='dailyRate'){const value=dailyRateValue(input[key]);if(value===null)throw new Error('변경할 시험 일당을 입력해 주세요.');return value;}return text(input[key],{category:'구분',company:'소속',occupation:'직종'}[key]);});
     const worker=this.db.prepare('SELECT id FROM workers WHERE id=? AND site_id=?').get(Number(input.workerId),Number(input.siteId));
     if(!worker)throw new Error('선택한 현장의 출입자를 확인해 주세요.');
-    const result=this.db.prepare(`UPDATE attendance SET ${fields.map(key=>`${key}_snapshot=?`).join(',')},updated_at=CURRENT_TIMESTAMP WHERE worker_id=? AND present=1 AND date BETWEEN ? AND ?`).run(...values,worker.id,`${month}-01`,`${month}-31`);
+    const result=this.db.prepare(`UPDATE attendance SET ${fields.map(key=>key==='dailyRate'?'daily_rate=?':`${key}_snapshot=?`).join(',')},updated_at=CURRENT_TIMESTAMP WHERE worker_id=? AND present=1 AND date BETWEEN ? AND ?`).run(...values,worker.id,`${month}-01`,`${month}-31`);
     if(!result.changes)throw new Error('해당 월의 출역 기록이 없습니다.');
     return result.changes;
   }
