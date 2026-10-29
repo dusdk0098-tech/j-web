@@ -546,6 +546,46 @@ test('기본 서류 분류를 현장별로 저장하고 검색한다',()=>{
   const s=new Store(':memory:');try{const a=s.createSite({name:'가상 현장 A'}),b=s.createSite({name:'가상 현장 B'}),input={siteId:a.id,type:'basic',title:'가상 서류',date:'2026-10-29',details:{category:'안전·보건 조직도'}};const doc=s.createDocument(input);assert.equal(JSON.parse(doc.details).category,'안전·보건 조직도');assert.equal(s.documents(a.id,'basic','조직도').length,1);assert.equal(s.documents(b.id,'basic','조직도').length,0);assert.throws(()=>s.updateDocument(doc.id,{...input,details:{category:'가'.repeat(201)}}),/분류/);assert.equal(JSON.parse(s.document(doc.id).details).category,'안전·보건 조직도');}finally{s.close();}
 });
 
+test('계층형 기본 서류 분류는 현장별로 관리하고 확인된 문서만 함께 삭제한다',()=>{
+  const s=new Store(':memory:');try{
+    const a=s.createSite({name:'가상 A'}),b=s.createSite({name:'가상 B'});
+    const root=s.saveBasicCategory(a.id,{name:'안전',description:'설명'}),child=s.saveBasicCategory(a.id,{name:'교육',parentId:root}),other=s.saveBasicCategory(a.id,{name:'기타'}),foreign=s.saveBasicCategory(b.id,{name:'다른 현장'});
+    assert.throws(()=>s.saveBasicCategory(a.id,{name:'중복',parentId:foreign}),/상위/);
+    assert.throws(()=>s.saveBasicCategory(a.id,{name:'3단계',parentId:child}),/상위/);
+    s.saveBasicCategory(a.id,{name:'교육자료',description:'수정'},child);
+    s.orderBasicCategories(a.id,{parentId:0,expectedIds:[root,other],ids:[other,root]});
+    assert.deepEqual(s.basicCategories(a.id).filter(row=>!row.parent_id).map(row=>row.id),[other,root]);
+    assert.throws(()=>s.orderBasicCategories(a.id,{parentId:0,expectedIds:[root,other],ids:[root,other]}),/변경/);
+    assert.throws(()=>s.orderBasicCategories(a.id,{parentId:0,expectedIds:[other,root],ids:[root]}),/변경/);
+    const input={siteId:a.id,type:'basic',title:'가상 문서',date:'2026-10-29',details:{category:'임의',categoryId:child,shared:true}};
+    const doc=s.createDocument(input),file=s.addAttachment(doc.id,'가상.txt',Buffer.from('가상'));
+    assert.equal(JSON.parse(doc.details).category,'안전 / 교육자료');
+    assert.throws(()=>s.createDocument({...input,details:{categoryId:foreign}}),/분류/);
+    assert.throws(()=>s.updateDocument(doc.id,{...input,details:{category:'기존 클라이언트'}}),/새로고침/);
+    s.transition(doc.id,'submit');s.transition(doc.id,'approve');
+    const legacy=s.createDocument({...input,title:'직접 입력',details:{category:'교육자료'}}),elsewhere=s.createDocument({...input,siteId:b.id,details:{categoryId:foreign}});
+    assert.throws(()=>s.deleteBasicCategory(a.id,root,{expectedCategoryIds:[root,child],expectedDocumentIds:[]}),/변경/);
+    assert.ok(s.document(doc.id));assert.ok(s.attachment(file));
+    s.db.exec("CREATE TRIGGER fail_category_delete BEFORE DELETE ON basic_categories BEGIN SELECT RAISE(ABORT,'시험 실패'); END");
+    assert.throws(()=>s.deleteBasicCategory(a.id,root,{expectedCategoryIds:[root,child],expectedDocumentIds:[doc.id]}),/시험 실패/);
+    assert.ok(s.document(doc.id));assert.ok(s.attachment(file));assert.equal(s.basicCategories(a.id).length,3);
+    s.db.exec('DROP TRIGGER fail_category_delete');
+    s.deleteBasicCategory(a.id,root,{expectedCategoryIds:[root,child],expectedDocumentIds:[doc.id]});
+    assert.equal(s.document(doc.id),undefined);assert.equal(s.attachment(file),undefined);assert.ok(s.document(legacy.id));assert.ok(s.document(elsewhere.id));
+    assert.deepEqual(s.basicCategories(a.id).map(row=>row.id),[other]);assert.equal(s.db.prepare('PRAGMA foreign_key_check').all().length,0);
+    const replacement=s.saveBasicCategory(a.id,{name:'새 분류'});assert.ok(replacement>root&&replacement>child);
+  }finally{s.close();}
+});
+
+test('기본 서류 분류와 문서 연결은 저장소를 다시 열어도 유지된다',()=>{
+  const dir=mkdtempSync(join(tmpdir(),'jweb-basic-categories-')),path=join(dir,'data.sqlite');let s=new Store(path);
+  try{
+    const site=s.createSite({name:'가상 현장'}),root=s.saveBasicCategory(site.id,{name:'대분류'}),child=s.saveBasicCategory(site.id,{parentId:root,name:'소분류'});
+    const doc=s.createDocument({siteId:site.id,type:'basic',title:'시험 문서',date:'2026-10-29',details:{categoryId:child}});
+    s.close();s=new Store(path);assert.deepEqual(s.basicCategories(site.id).find(row=>row.id===child).documentIds,[doc.id]);assert.equal(JSON.parse(s.document(doc.id).details).category,'대분류 / 소분류');
+  }finally{s.close();rmSync(dir,{recursive:true,force:true});}
+});
+
 test('안전 업무 일지 출역 수는 저장 시점에 보존되고 날짜 변경 시 다시 계산한다',()=>{
   const s=new Store(':memory:');try{const site=s.createSite({name:'가상 현장'}),worker=s.createWorker({siteId:site.id,name:'가상 근로자',category:'직영',company:'가상 회사',occupation:'목공'});s.setAttendance({siteId:site.id,workerId:worker.id,date:'2026-10-29',present:true});const input={siteId:site.id,type:'safety_log',title:'가상 일지',date:'2026-10-29',details:{attendanceSnapshot:{present:999}}};const doc=s.createDocument(input),snapshot=JSON.parse(doc.details).attendanceSnapshot;assert.equal(snapshot.present,1);s.setAttendance({siteId:site.id,workerId:worker.id,date:input.date,present:false});assert.deepEqual(JSON.parse(s.updateDocument(doc.id,input).details).attendanceSnapshot,snapshot);assert.equal(JSON.parse(s.updateDocument(doc.id,{...input,date:'2026-10-30'}).details).attendanceSnapshot.present,0);}finally{s.close();}
 });

@@ -472,6 +472,18 @@ const server = http.createServer(async (req, res) => {
       if(req.method==='POST'){const input=await body(req);return json(res,201,{id:store.addSiteOccupation(input.siteId,input.name)});}
       if(req.method==='DELETE'){store.deleteSiteOccupation(url.searchParams.get('siteId'),url.searchParams.get('id'));return json(res,200,{ok:true});}
     }
+    if(url.pathname==='/api/basic-categories'){
+      const siteId=url.searchParams.get('siteId');
+      if(req.method==='GET')return json(res,200,store.basicCategories(siteId));
+      if(req.method==='POST')return json(res,201,{id:store.saveBasicCategory(siteId,await body(req))});
+      if(req.method==='PUT'){const input=await body(req);store.orderBasicCategories(siteId,input);return json(res,200,{ok:true});}
+    }
+    const basicCategory=url.pathname.match(/^\/api\/basic-categories\/(\d+)$/);
+    if(basicCategory){
+      const siteId=url.searchParams.get('siteId');
+      if(req.method==='PUT')return json(res,200,{id:store.saveBasicCategory(siteId,await body(req),basicCategory[1])});
+      if(req.method==='DELETE'){store.deleteBasicCategory(siteId,basicCategory[1],await body(req));return json(res,200,{ok:true});}
+    }
     if (url.pathname === '/api/companies') {
       if(req.method==='GET')return json(res,200,store.companies(url.searchParams.get('siteId')));
       if(req.method==='POST')return json(res,201,store.createCompany(await body(req)));

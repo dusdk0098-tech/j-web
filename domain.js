@@ -44,6 +44,7 @@ export function recordInput(input) {
   }
   if(type==='basic'){
     const value=input.details??{};if(!value||typeof value!=='object'||Array.isArray(value)||typeof (value.category??'')!=='string'||(value.category??'').length>200||value.shared!==undefined&&typeof value.shared!=='boolean')throw new Error('기본 서류 분류와 공유 범위를 확인해 주세요.');details.category=(value.category??'').trim();details.shared=value.shared??false;
+    if(value.categoryId!==undefined){if(!Number.isSafeInteger(value.categoryId)||value.categoryId<0)throw new Error('기본 서류 분류를 확인해 주세요.');details.categoryId=value.categoryId;}
   }
   if(type==='safety_log'){
     const value=input.details??{};if(!value||typeof value!=='object'||Array.isArray(value))throw new Error('안전 업무 일지 항목을 확인해 주세요.');

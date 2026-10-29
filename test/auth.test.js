@@ -39,6 +39,27 @@ test('관리자 암호가 없으면 서버는 시작하지 않는다',async()=>{
   } finally {rmSync(dir,{recursive:true,force:true});}
 });
 
+test('기본 서류 분류 API는 관리자 인증과 변경 확인을 적용한다',{timeout:30000},async()=>{
+  const dir=mkdtempSync(join(tmpdir(),'jweb-basic-category-')),reservation=createServer();
+  await new Promise(resolve=>reservation.listen(0,'127.0.0.1',resolve));const port=reservation.address().port;await new Promise(resolve=>reservation.close(resolve));
+  const child=spawn(process.execPath,['server.js'],{cwd:process.cwd(),env:{...process.env,PORT:String(port),JWEB_DATA_DIR:dir,JWEB_ADMIN_PASSWORD:'test-password-12345'},stdio:['ignore','pipe','pipe']});
+  try{
+    await Promise.race([once(child.stdout,'data'),once(child,'exit').then(()=>{throw Error('시험 서버가 종료됐습니다.');})]);
+    const base=`http://127.0.0.1:${port}`,send=(path,method='GET',data,cookie)=>fetch(base+path,{method,headers:{...(data?{'content-type':'application/json'}:{}),...(cookie?{cookie}:{})},...(data?{body:JSON.stringify(data)}:{})});
+    assert.equal((await send('/api/basic-categories?siteId=1')).status,401);
+    const login=await send('/api/login','POST',{password:'test-password-12345'}),cookie=login.headers.get('set-cookie').split(';')[0];
+    const site=await (await send('/api/sites','POST',{name:'가상 현장'},cookie)).json(),url=`/api/basic-categories?siteId=${site.id}`;
+    const root=await (await send(url,'POST',{name:'대분류'},cookie)).json(),childCategory=await (await send(url,'POST',{name:'소분류',parentId:root.id},cookie)).json();
+    assert.equal((await send(`/api/basic-categories/${childCategory.id}?siteId=${site.id}`,'PUT',{name:'바뀐 분류'},cookie)).status,200);
+    const doc=await (await send('/api/documents','POST',{siteId:site.id,type:'basic',title:'시험 문서',date:'2026-10-29',details:{categoryId:childCategory.id}},cookie)).json();
+    const list=await (await send(url,'GET',undefined,cookie)).json();assert.deepEqual(list.find(row=>row.id===childCategory.id).documentIds,[doc.id]);
+    const path=`/api/basic-categories/${root.id}?siteId=${site.id}`;
+    assert.equal((await send(path,'DELETE',{expectedCategoryIds:[root.id,childCategory.id],expectedDocumentIds:[]},cookie)).status,400);
+    assert.equal((await send(path,'DELETE',{expectedCategoryIds:[root.id,childCategory.id],expectedDocumentIds:[doc.id]},cookie)).status,200);
+    assert.deepEqual(await (await send(url,'GET',undefined,cookie)).json(),[]);
+  }finally{if(child.exitCode===null){const exited=once(child,'exit');child.kill();await exited;}rmSync(dir,{recursive:true,force:true});}
+});
+
 test('근로자 세션은 재시작 후 복원되고 로그아웃·암호 변경·만료 시 무효화된다',{timeout:30000},async()=>{
   const dir=mkdtempSync(join(tmpdir(),'jweb-worker-session-')),reservation=createServer();await new Promise(resolve=>reservation.listen(0,'127.0.0.1',resolve));const port=reservation.address().port;await new Promise(resolve=>reservation.close(resolve));let child;
   const start=async()=>{child=spawn(process.execPath,['server.js'],{cwd:process.cwd(),env:{...process.env,PORT:String(port),JWEB_DATA_DIR:dir,JWEB_ADMIN_PASSWORD:'test-password-12345'},stdio:['ignore','pipe','pipe']});await Promise.race([once(child.stdout,'data'),once(child,'exit').then(()=>{throw Error('시험 서버가 종료됐습니다.');})]);},stop=async()=>{if(child){const exited=once(child,'exit');child.kill();await exited;child=null;}};
