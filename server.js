@@ -296,6 +296,11 @@ const server = http.createServer(async (req, res) => {
       if(fileId && req.method==='DELETE'){store.deleteEquipmentAttachment(siteId,id,fileId);return json(res,200,{ok:true});}
       if(fileId && req.method==='GET'){
         const file=store.equipmentAttachment(siteId,id,fileId);if(!file)return json(res,404,{error:'첨부파일을 찾을 수 없습니다.'});
+        if(url.searchParams.get('preview')==='1'){
+          const bytes=Buffer.from(file.data),type=bytes.subarray(0,8).equals(Buffer.from('89504e470d0a1a0a','hex'))?'image/png':bytes.subarray(0,3).equals(Buffer.from('ffd8ff','hex'))?'image/jpeg':null;
+          if(!type)return json(res,415,{error:'미리보기는 PNG 또는 JPEG 파일만 지원합니다.'});
+          res.writeHead(200,{'Content-Type':type,'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(bytes);
+        }
         const name=encodeURIComponent(file.name).replace(/[!'()*]/g,c=>`%${c.charCodeAt(0).toString(16).toUpperCase()}`);
         res.writeHead(200,{'Content-Type':'application/octet-stream','Content-Disposition':`attachment; filename="attachment"; filename*=UTF-8''${name}`,'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(file.data);
       }

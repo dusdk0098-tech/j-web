@@ -429,7 +429,7 @@ export class Store {
   deleteWorkPlacePhoto(siteId,placeId,id){if(!this.workPlacePhoto(siteId,placeId,id))throw new Error('사진을 찾을 수 없습니다.');this.db.prepare('DELETE FROM work_place_photos WHERE id=?').run(Number(id));}
   equipmentAttachments(siteId,id){
     if(!this.db.prepare('SELECT 1 FROM equipment WHERE id=? AND site_id=?').get(Number(id),Number(siteId)))throw new Error('선택한 현장의 장비를 확인해 주세요.');
-    return this.db.prepare('SELECT id,category,name,length(data) AS size FROM equipment_attachments WHERE equipment_id=? ORDER BY id').all(Number(id));
+    return this.db.prepare("SELECT id,category,name,length(data) AS size,CASE WHEN substr(data,1,8)=X'89504E470D0A1A0A' THEN 'image/png' WHEN substr(data,1,3)=X'FFD8FF' THEN 'image/jpeg' ELSE NULL END AS image_type FROM equipment_attachments WHERE equipment_id=? ORDER BY id").all(Number(id));
   }
   addEquipmentAttachment(siteId,id,category,name,data){
     const existing=this.equipmentAttachments(siteId,id);

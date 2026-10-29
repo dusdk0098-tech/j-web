@@ -355,6 +355,13 @@ test('관리자 인증 모드가 문서 API를 보호하고 로그아웃을 적�
     const uploaded=await fetch(`${assetUrl}&category=insurance`,{method:'POST',headers:{cookie,'x-file-name':encodeURIComponent('가상.txt')},body:assetBytes});assert.equal(uploaded.status,201);
     const assetFile=(await uploaded.json()).id,assetFileUrl=`${base}/api/equipment/${asset.id}/attachments/${assetFile}?siteId=${site.id}`;
     assert.deepEqual(Buffer.from(await (await fetch(assetFileUrl,{headers:{cookie}})).arrayBuffer()),assetBytes);
+    assert.equal((await fetch(assetFileUrl+'&preview=1',{headers:{cookie}})).status,415);
+    const assetPhoto=(await (await fetch(`${assetUrl}&category=inspection`,{method:'POST',headers:{cookie,'x-file-name':encodeURIComponent('가상.png')},body:photo})).json()).id,assetPhotoUrl=`${base}/api/equipment/${asset.id}/attachments/${assetPhoto}?siteId=${site.id}&preview=1`;
+    const preview=await fetch(assetPhotoUrl,{headers:{cookie}});assert.equal(preview.status,200);assert.equal(preview.headers.get('content-type'),'image/png');assert.deepEqual(Buffer.from(await preview.arrayBuffer()),photo);
+    assert.equal((await fetch(assetPhotoUrl,{headers:{cookie:workerCookie}})).status,401);assert.equal((await fetch(assetPhotoUrl.replace(`siteId=${site.id}`,`siteId=${other.id}`),{headers:{cookie}})).status,404);
+    const assetFiles=await (await fetch(assetUrl,{headers:{cookie}})).json();assert.equal(assetFiles.find(file=>file.id===assetFile).image_type,null);assert.equal(assetFiles.find(file=>file.id===assetPhoto).image_type,'image/png');
+    const jpegBytes=Buffer.from('ffd8ffd9','hex'),jpegId=(await (await fetch(`${assetUrl}&category=inspection`,{method:'POST',headers:{cookie,'x-file-name':'virtual.jpg'},body:jpegBytes})).json()).id,jpegUrl=`${base}/api/equipment/${asset.id}/attachments/${jpegId}?siteId=${site.id}`,jpegPreview=await fetch(jpegUrl+'&preview=1',{headers:{cookie}});
+    assert.equal(jpegPreview.headers.get('content-type'),'image/jpeg');assert.deepEqual(Buffer.from(await jpegPreview.arrayBuffer()),jpegBytes);assert.equal((await (await fetch(assetUrl,{headers:{cookie}})).json()).find(file=>file.id===jpegId).image_type,'image/jpeg');
     const assetPlan=await (await post('/api/documents',{siteId:site.id,type:'work_plan',title:'가상 장비 계획',date:'2026-10-28',details:{equipmentIds:[asset.id]}})).json();
     assert.deepEqual(JSON.parse(assetPlan.details).equipmentIds,[asset.id]);
     const diagramUpload=await fetch(`${base}/api/documents/${assetPlan.id}/attachments?category=plan_diagram`,{method:'POST',headers:{cookie,'x-file-name':encodeURIComponent('가상.png')},body:photo});assert.equal(diagramUpload.status,201);const diagramId=(await diagramUpload.json()).id;
@@ -363,6 +370,8 @@ test('관리자 인증 모드가 문서 API를 보호하고 로그아웃을 적�
     assert.equal((await (await fetch(assetUrl,{headers:{cookie}})).json())[0].id,assetFile);
     assert.equal((await fetch(`${base}/api/equipment/${asset.id}/attachments/${assetFile}?siteId=${other.id}`,{headers:{cookie}})).status,404);
     assert.equal((await fetch(assetFileUrl,{method:'DELETE',headers:{cookie}})).status,200);
+    assert.equal((await fetch(assetPhotoUrl.replace('&preview=1',''),{method:'DELETE',headers:{cookie}})).status,200);
+    assert.equal((await fetch(jpegUrl,{method:'DELETE',headers:{cookie}})).status,200);
     const managerAnswers=[{answer:'O',note:''},{answer:'X',note:'가상 비고'},{answer:'O',note:''}];
     const managerCheck=(answers,signature=`data:image/png;base64,${photo.toString('base64')}`)=>post(`/api/sites/${site.id}/manager-checks`,{answers,signature});
     assert.equal((await fetch(`${base}/api/sites/${site.id}/manager-checks`,{headers:{cookie:workerCookie}})).status,401);
