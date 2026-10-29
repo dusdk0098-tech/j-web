@@ -7,6 +7,30 @@ import { join, resolve, sep } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { PNG } from 'pngjs';
 
+test('가상 결재자는 현장과 순서에 따라 문서를 승인하고 우회 요청을 거절한다',()=>{
+  const s=new Store(':memory:');try{
+    const a=s.createSite({name:'가상 A'}),b=s.createSite({name:'가상 B'}),add=(siteId,loginId)=>s.createReviewer({siteId,loginId,name:loginId,password:'virtual-password-123'}),one=add(a.id,'reviewer_one'),two=add(a.id,'reviewer_two'),other=add(b.id,'reviewer_other');
+    assert.equal(s.authenticateReviewer('reviewer_one','wrong'),null);assert.equal(s.authenticateReviewer('reviewer_one','virtual-password-123').id,one.id);assert.equal(s.authenticateReviewer('none','wrong'),null);
+    const doc=s.createDocument({siteId:a.id,type:'tbm',title:'가상 문서',date:'2026-10-29'}),png=new PNG({width:1,height:1});png.data[3]=255;const signature=`data:image/png;base64,${PNG.sync.write(png).toString('base64')}`;
+    assert.throws(()=>s.setApprovalLine(doc.id,[one.id,other.id]),/현장/);assert.throws(()=>s.setApprovalLine(doc.id,[one.id,one.id]),/결재자/);
+    s.setApprovalLine(doc.id,[one.id,two.id]);s.transition(doc.id,'submit');assert.throws(()=>s.setApprovalLine(doc.id,[]),/수정/);assert.throws(()=>s.approveDocument(doc.id,'',signature),/결재자/);assert.throws(()=>s.approveDocuments(a.id,[doc.id],signature),/결재자/);
+    assert.deepEqual(s.reviewerDocuments(one.id).map(d=>d.id),[doc.id]);assert.deepEqual(s.reviewerDocuments(two.id),[]);assert.deepEqual(s.reviewerDocuments(other.id),[]);assert.throws(()=>s.reviewerTransition(doc.id,two.id,'approve','',signature),/결재자/);assert.throws(()=>s.reviewerTransition(doc.id,one.id,'approve','',''),/서명/);
+    s.reviewerTransition(doc.id,one.id,'approve','첫 시험 검토',signature);assert.equal(s.document(doc.id).status,'pending');assert.deepEqual(s.reviewerDocuments(one.id),[]);assert.deepEqual(s.reviewerDocuments(two.id).map(d=>d.id),[doc.id]);assert.equal(s.events(doc.id).at(-1).reviewer_name,'reviewer_one');
+    s.reviewerTransition(doc.id,two.id,'reject','시험 반려');assert.equal(s.document(doc.id).status,'rejected');s.transition(doc.id,'revise');s.transition(doc.id,'submit');assert.deepEqual(s.approvalLine(doc.id).map(x=>x.state),['pending','pending']);
+    s.reviewerTransition(doc.id,one.id,'approve','',signature);s.reviewerTransition(doc.id,two.id,'approve','',signature);assert.equal(s.document(doc.id).status,'approved');assert.equal(s.events(doc.id).at(-1).reviewer_name,'reviewer_two');
+    const waiting=s.createDocument({siteId:a.id,type:'tbm',title:'대기 문서',date:'2026-10-29'});s.setApprovalLine(waiting.id,[one.id,two.id]);s.transition(waiting.id,'submit');s.reviewerTransition(waiting.id,one.id,'approve','',signature);s.updateReviewer(a.id,two.id,{active:false});assert.deepEqual(s.reviewerDocuments(two.id),[]);assert.throws(()=>s.approveDocument(waiting.id,'',signature),/결재자/);assert.throws(()=>s.reviewerTransition(waiting.id,two.id,'approve','',signature),/결재자/);assert.equal(s.document(waiting.id).status,'pending');s.transition(waiting.id,'withdraw');s.setApprovalLine(waiting.id,[one.id]);s.transition(waiting.id,'submit');s.reviewerTransition(waiting.id,one.id,'approve','',signature);assert.equal(s.document(waiting.id).status,'approved');
+  }finally{s.close();}
+});
+
+test('시험 결재 계정과 진행 순서는 데이터베이스를 다시 열어도 유지된다',()=>{
+  const dir=mkdtempSync(join(tmpdir(),'jweb-review-persist-')),file=join(dir,'data.sqlite');let s=new Store(file);
+  try{
+    const site=s.createSite({name:'가상 현장'}),first=s.createReviewer({siteId:site.id,loginId:'persist_one',name:'가상 첫째',password:'virtual-password-123'}),second=s.createReviewer({siteId:site.id,loginId:'persist_two',name:'가상 둘째',password:'virtual-password-123'}),doc=s.createDocument({siteId:site.id,type:'tbm',title:'가상 문서',date:'2026-10-29'}),png=new PNG({width:1,height:1});png.data[3]=255;const signature=`data:image/png;base64,${PNG.sync.write(png).toString('base64')}`;
+    s.setApprovalLine(doc.id,[first.id,second.id]);s.transition(doc.id,'submit');s.reviewerTransition(doc.id,first.id,'approve','가상 의견',signature);s.close();s=new Store(file);
+    assert.equal(s.authenticateReviewer('persist_two','virtual-password-123').id,second.id);assert.deepEqual(s.approvalLine(doc.id).map(step=>step.state),['approved','pending']);assert.deepEqual(s.reviewerDocuments(second.id).map(row=>row.id),[doc.id]);assert.equal(s.events(doc.id).at(-1).reviewer_name,'가상 첫째');s.reviewerTransition(doc.id,second.id,'approve','',signature);assert.equal(s.document(doc.id).status,'approved');
+  }finally{s.close();rmSync(dir,{recursive:true,force:true});}
+});
+
 test('일괄 시험 승인은 같은 현장의 대기 문서만 모두 처리하며 오류 때 전부 되돌린다',()=>{
   const s=new Store(':memory:');try{
     const a=s.createSite({name:'가상 A'}),b=s.createSite({name:'가상 B'}),make=siteId=>s.createDocument({siteId,type:'tbm',title:'가상 문서',date:'2026-10-29'}),one=make(a.id),two=make(a.id),other=make(b.id),draft=make(a.id);

@@ -23,12 +23,13 @@ const auth=new LocalAuth(process.env.JWEB_ADMIN_PASSWORD);
 mkdirSync(dataDir, { recursive: true });
 const store = new Store(join(dataDir, 'jweb.sqlite'));
 const workerSessions=new Map();
+const reviewerSessions=new Map(),reviewerAccountFailures=new Map();let reviewerFailures=[];
 let workerFailures=[];
 const workerAccountFailures=new Map();
 const workerKey=raw=>typeof raw==='string' && /^[\w-]{43}$/.test(raw)?createHash('sha256').update(raw).digest('hex'):'';
 delete process.env.JWEB_ADMIN_PASSWORD;
 const mime = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg':'image/svg+xml', '.png':'image/png' };
-const assets = new Set(['/','/app.js','/batch-print.js','/risk-scale.js','/worker-link.js','/style.css','/jweb-icon.svg','/jweb-icon-192.png','/jweb-icon-512.png','/join','/join.js','/login','/login.js']);
+const assets = new Set(['/','/app.js','/batch-print.js','/risk-scale.js','/worker-link.js','/style.css','/jweb-icon.svg','/jweb-icon-192.png','/jweb-icon-512.png','/join','/join.js','/login','/login.js','/review','/review.js']);
 const json = (res, code, value) => { res.writeHead(code, {'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}); res.end(JSON.stringify(value)); };
 async function body(req,max=65536) {
   const chunks=[];let size=0;
@@ -52,6 +53,28 @@ const server = http.createServer(async (req, res) => {
     }
     if(url.pathname==='/api/logout' && req.method==='POST'){
       auth.logout(token);res.setHeader('Set-Cookie',`jweb_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0${secureCookie}`);return json(res,200,{ok:true});
+    }
+    const reviewerToken=(req.headers.cookie||'').split(';').map(x=>x.trim()).find(x=>x.startsWith('jweb_reviewer='))?.slice(14)||'';
+    if(url.pathname==='/api/reviewer/login'&&req.method==='POST'){
+      const input=await body(req),now=Date.now(),accountKey=typeof input.loginId==='string'&&/^[A-Za-z0-9_]{3,40}$/.test(input.loginId)?input.loginId:'invalid';reviewerFailures=reviewerFailures.filter(time=>time>now-5*60*1000);for(const [key,times] of reviewerAccountFailures){const recent=times.filter(time=>time>now-5*60*1000);if(recent.length)reviewerAccountFailures.set(key,recent);else reviewerAccountFailures.delete(key);}
+      const failures=reviewerAccountFailures.get(accountKey)||[];if(reviewerFailures.length>=100||failures.length>=10)return json(res,429,{error:'잠시 후 다시 로그인해 주세요.'});
+      const reviewer=store.authenticateReviewer(input.loginId,input.password);if(!reviewer){reviewerFailures.push(now);failures.push(now);reviewerAccountFailures.set(accountKey,failures);return json(res,401,{error:'아이디 또는 암호가 올바르지 않습니다.'});}
+      reviewerAccountFailures.delete(accountKey);reviewerSessions.delete(workerKey(reviewerToken));for(const [key,session] of reviewerSessions)if(session.expires<=now)reviewerSessions.delete(key);
+      const raw=randomBytes(32).toString('base64url');reviewerSessions.set(workerKey(raw),{id:reviewer.id,expires:now+8*60*60*1000});res.setHeader('Set-Cookie',`jweb_reviewer=${raw}; HttpOnly; SameSite=Strict; Path=/; Max-Age=28800${secureCookie}`);return json(res,200,{ok:true});
+    }
+    if(url.pathname.startsWith('/api/reviewer/')){
+      const key=workerKey(reviewerToken),session=reviewerSessions.get(key),reviewer=session&&session.expires>Date.now()?store.reviewer(session.id):null;
+      if(!reviewer){reviewerSessions.delete(key);return json(res,401,{error:'결재자 로그인이 필요합니다.'});}
+      if(url.pathname==='/api/reviewer/logout'&&req.method==='POST'){reviewerSessions.delete(key);res.setHeader('Set-Cookie',`jweb_reviewer=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0${secureCookie}`);return json(res,200,{ok:true});}
+      if(url.pathname==='/api/reviewer/session'&&req.method==='GET')return json(res,200,{reviewer});
+      if(url.pathname==='/api/reviewer/documents'&&req.method==='GET')return json(res,200,store.reviewerDocuments(reviewer.id));
+      const reviewDoc=url.pathname.match(/^\/api\/reviewer\/documents\/(\d+)(?:\/(decision|attachments)(?:\/(\d+))?)?$/);
+      if(reviewDoc){const [,id,part,fileId]=reviewDoc,doc=store.reviewerDocument(reviewer.id,id);if(!doc)return json(res,404,{error:'결재할 문서를 찾을 수 없습니다.'});
+        if(!part&&req.method==='GET')return json(res,200,{document:doc,attachments:store.attachments(id)});
+        if(part==='decision'&&!fileId&&req.method==='POST'){const input=await body(req);return json(res,200,store.reviewerTransition(id,reviewer.id,input.action,input.opinion,input.signature));}
+        if(part==='attachments'&&fileId&&req.method==='GET'){const file=store.attachment(fileId);if(!file||file.document_id!==doc.id)return json(res,404,{error:'첨부파일을 찾을 수 없습니다.'});const name=encodeURIComponent(file.name).replace(/[!'()*]/g,c=>`%${c.charCodeAt(0).toString(16).toUpperCase()}`);res.writeHead(200,{'Content-Type':'application/octet-stream','Content-Disposition':`attachment; filename="file"; filename*=UTF-8''${name}`,'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(file.data);}
+      }
+      return json(res,404,{error:'요청한 경로가 없습니다.'});
     }
     const workerToken=(req.headers.cookie||'').split(';').map(x=>x.trim()).find(x=>x.startsWith('jweb_worker='))?.slice(12)||'';
     if(url.pathname==='/worker.webmanifest'&&req.method==='GET'){
@@ -191,11 +214,14 @@ const server = http.createServer(async (req, res) => {
     }
     if(url.pathname.startsWith('/api/') && url.pathname!=='/api/join' && !auth.valid(token))return json(res,401,{error:'관리자 로그인이 필요합니다.'});
     if (req.method === 'GET' && assets.has(url.pathname)) {
-      const path = url.pathname === '/' ? '/index.html' : url.pathname === '/join' ? '/join.html' : url.pathname === '/login' ? '/login.html' : url.pathname;
+      const path = url.pathname === '/' ? '/index.html' : url.pathname === '/join' ? '/join.html' : url.pathname === '/login' ? '/login.html' : url.pathname === '/review' ? '/review.html' : url.pathname;
       res.writeHead(200, {'Content-Type':mime[extname(path)],'X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer','Content-Security-Policy':"default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; object-src 'none'; frame-ancestors 'none'"});
       return res.end(readFileSync(join(root,'public',path.slice(1))));
     }
     if (url.pathname === '/api/types' && req.method === 'GET') return json(res,200,types);
+    if(url.pathname==='/api/reviewers'){if(req.method==='GET')return json(res,200,store.reviewers(url.searchParams.get('siteId')));if(req.method==='POST')return json(res,201,store.createReviewer(await body(req)));}
+    const reviewerAccount=url.pathname.match(/^\/api\/reviewers\/(\d+)$/);
+    if(reviewerAccount&&req.method==='PUT'){const input=await body(req),account=store.updateReviewer(input.siteId,reviewerAccount[1],input);if(input.password!==undefined){reviewerAccountFailures.delete(account.login_id);}if(input.password!==undefined||input.active===false)for(const [key,session] of reviewerSessions)if(session.id===account.id)reviewerSessions.delete(key);return json(res,200,account);}
     const managerChecks=url.pathname.match(/^\/api\/sites\/(\d+)\/manager-checks$/);
     const managerDayOff=url.pathname.match(/^\/api\/sites\/(\d+)\/manager-checks\/day-off$/);
     if(managerDayOff && req.method==='POST'){const now=new Date(),date=new Date(now.getTime()-now.getTimezoneOffset()*60000).toISOString().slice(0,10);store.saveManagerDayOff(managerDayOff[1],date);return json(res,201,{ok:true});}
@@ -541,6 +567,8 @@ const server = http.createServer(async (req, res) => {
     const riskActivity=url.pathname.match(/^\/api\/documents\/(\d+)\/risk-activities(?:\/(\d+))?$/);
     if(riskActivity){const [,id,activityId]=riskActivity;if(!activityId&&req.method==='GET')return json(res,200,store.riskActivities(id));if(!activityId&&req.method==='POST')return json(res,201,{id:store.saveRiskActivity(id,await body(req))});if(activityId&&req.method==='PUT')return json(res,200,{id:store.saveRiskActivity(id,await body(req),activityId)});if(activityId&&req.method==='DELETE'){store.deleteRiskActivity(id,activityId);return json(res,200,{ok:true});}}
     if(url.pathname==='/api/documents/batch-approve'&&req.method==='POST'){const input=await body(req);return json(res,200,store.approveDocuments(input.siteId,input.ids,input.signature));}
+    const approvalLine=url.pathname.match(/^\/api\/documents\/(\d+)\/approval-line$/);
+    if(approvalLine){if(req.method==='GET'){if(!store.document(approvalLine[1]))return json(res,404,{error:'문서를 찾을 수 없습니다.'});return json(res,200,store.approvalLine(approvalLine[1]));}if(req.method==='PUT'){const input=await body(req);return json(res,200,store.setApprovalLine(approvalLine[1],input.reviewerIds));}}
     const eventSignature=url.pathname.match(/^\/api\/documents\/(\d+)\/events\/(\d+)\/signature$/);
     if(eventSignature&&req.method==='GET'){const signature=store.eventSignature(eventSignature[1],eventSignature[2]);if(!signature)return json(res,404,{error:'시험 서명을 찾을 수 없습니다.'});res.writeHead(200,{'Content-Type':'image/png','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(signature);}
     const documentTrainingSignature=url.pathname.match(/^\/api\/documents\/(\d+)\/training-signatures\/(\d+)$/);

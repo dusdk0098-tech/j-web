@@ -76,6 +76,8 @@ export class Store {
       CREATE TABLE IF NOT EXISTS worker_files (id INTEGER PRIMARY KEY,worker_id INTEGER NOT NULL REFERENCES workers(id),category TEXT NOT NULL,name TEXT NOT NULL,data BLOB NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
       CREATE TABLE IF NOT EXISTS attendance (worker_id INTEGER NOT NULL REFERENCES workers(id), date TEXT NOT NULL, present INTEGER NOT NULL CHECK(present IN (0,1)), updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY(worker_id,date));
       CREATE TABLE IF NOT EXISTS documents (id INTEGER PRIMARY KEY, site_id INTEGER NOT NULL REFERENCES sites(id), type TEXT NOT NULL, title TEXT NOT NULL, date TEXT NOT NULL, body TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'draft', updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+      CREATE TABLE IF NOT EXISTS reviewers (id INTEGER PRIMARY KEY,site_id INTEGER NOT NULL REFERENCES sites(id),login_id TEXT NOT NULL UNIQUE,name TEXT NOT NULL,salt BLOB NOT NULL,password_hash BLOB NOT NULL,active INTEGER NOT NULL DEFAULT 1 CHECK(active IN (0,1)));
+      CREATE TABLE IF NOT EXISTS approval_steps (document_id INTEGER NOT NULL REFERENCES documents(id),position INTEGER NOT NULL,reviewer_id INTEGER NOT NULL REFERENCES reviewers(id),state TEXT NOT NULL DEFAULT 'pending' CHECK(state IN ('pending','approved','rejected')),PRIMARY KEY(document_id,position),UNIQUE(document_id,reviewer_id));
       CREATE TABLE IF NOT EXISTS checklist_signatures (document_id INTEGER PRIMARY KEY REFERENCES documents(id),signature BLOB NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
       CREATE TABLE IF NOT EXISTS worker_notice_reads (worker_id INTEGER NOT NULL REFERENCES workers(id),document_id INTEGER NOT NULL REFERENCES documents(id),read_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(worker_id,document_id));
       CREATE TABLE IF NOT EXISTS worker_self_checks (worker_id INTEGER NOT NULL REFERENCES workers(id),date TEXT NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(worker_id,date));
@@ -101,6 +103,8 @@ export class Store {
     if (!this.db.prepare('PRAGMA table_info(workers)').all().some(c=>c.name==='created_date')) this.db.exec('ALTER TABLE workers ADD COLUMN created_date TEXT');
     if (!this.db.prepare('PRAGMA table_info(events)').all().some(c=>c.name==='opinion')) this.db.exec("ALTER TABLE events ADD COLUMN opinion TEXT NOT NULL DEFAULT ''");
     if (!this.db.prepare('PRAGMA table_info(events)').all().some(c=>c.name==='signature')) this.db.exec('ALTER TABLE events ADD COLUMN signature BLOB');
+    if (!this.db.prepare('PRAGMA table_info(events)').all().some(c=>c.name==='reviewer_id')) this.db.exec('ALTER TABLE events ADD COLUMN reviewer_id INTEGER REFERENCES reviewers(id)');
+    if (!this.db.prepare('PRAGMA table_info(events)').all().some(c=>c.name==='reviewer_name')) this.db.exec('ALTER TABLE events ADD COLUMN reviewer_name TEXT');
     if (!this.db.prepare('PRAGMA table_info(work_stops)').all().some(c=>c.name==='photo')) this.db.exec('ALTER TABLE work_stops ADD COLUMN photo BLOB');
     if (!this.db.prepare('PRAGMA table_info(worker_self_checks)').all().some(c=>c.name==='signature')) this.db.exec('ALTER TABLE worker_self_checks ADD COLUMN signature BLOB');
     if (!this.db.prepare('PRAGMA table_info(attachments)').all().some(c=>c.name==='category')) this.db.exec("ALTER TABLE attachments ADD COLUMN category TEXT NOT NULL DEFAULT 'general'");
@@ -804,7 +808,7 @@ export class Store {
     if(from)from=dateValue(from);if(to)to=dateValue(to);
     if(from && to && from>to)throw new Error('조회 시작일은 종료일보다 늦을 수 없습니다.');
     siteId=Number(siteId);if(!this.db.prepare('SELECT 1 FROM sites WHERE id=?').get(siteId))throw new Error('현장을 선택해 주세요.');
-    return this.db.prepare("SELECT * FROM documents WHERE (site_id=? OR (type='basic' AND status='approved' AND json_extract(details,'$.shared')=1)) AND (?='' OR type=?) AND (title LIKE ? OR body LIKE ? OR details LIKE ?) AND (?='' OR date>=?) AND (?='' OR date<=?) ORDER BY date DESC,id DESC").all(siteId,type,type,...Array(3).fill(`%${query}%`),from,from,to,to);
+    return this.db.prepare("SELECT documents.*,EXISTS(SELECT 1 FROM approval_steps WHERE document_id=documents.id) AS has_approval_line FROM documents WHERE (site_id=? OR (type='basic' AND status='approved' AND json_extract(details,'$.shared')=1)) AND (?='' OR type=?) AND (title LIKE ? OR body LIKE ? OR details LIKE ?) AND (?='' OR date>=?) AND (?='' OR date<=?) ORDER BY date DESC,id DESC").all(siteId,type,type,...Array(3).fill(`%${query}%`),from,from,to,to);
   }
   previousDailyReport(siteId, before) {
     before=dateValue(before);
@@ -849,6 +853,40 @@ export class Store {
     for(const row of this.db.prepare("SELECT d.date,d.type,COUNT(*) AS n FROM worker_training_checks c JOIN documents d ON d.id=c.document_id JOIN workers w ON w.id=c.worker_id AND w.site_id=d.site_id WHERE d.site_id=? AND d.date BETWEEN ? AND ? AND d.type IN ('tbm','education') AND d.status='approved' GROUP BY d.date,d.type").all(siteId,start,end)){const day=byDate.get(row.date);day.trainingByType[row.type]=row.n;day.trainingChecks+=row.n;}
     return rows;
   }
+  reviewers(siteId){return this.db.prepare('SELECT id,site_id,login_id,name,active FROM reviewers WHERE site_id=? ORDER BY name,id').all(Number(siteId));}
+  reviewer(id){return this.db.prepare('SELECT id,site_id,name FROM reviewers WHERE id=? AND active=1').get(Number(id))||null;}
+  createReviewer(input){
+    const siteId=Number(input.siteId),name=text(input.name,'결재자 이름');
+    if(!Number.isSafeInteger(siteId)||!this.db.prepare('SELECT 1 FROM sites WHERE id=?').get(siteId))throw new Error('현장을 확인해 주세요.');
+    if(typeof input.loginId!=='string'||!/^[A-Za-z0-9_]{3,40}$/.test(input.loginId))throw new Error('시험 아이디를 확인해 주세요.');
+    if(typeof input.password!=='string'||input.password.length<12||input.password.length>256)throw new Error('시험 암호는 12자 이상 256자 이하여야 합니다.');
+    if(this.db.prepare('SELECT 1 FROM reviewers WHERE login_id=?').get(input.loginId))throw new Error('이미 사용 중인 시험 아이디입니다.');
+    const salt=randomBytes(16),hash=scryptSync(input.password,salt,32),id=this.db.prepare('INSERT INTO reviewers(site_id,login_id,name,salt,password_hash) VALUES(?,?,?,?,?)').run(siteId,input.loginId,name,salt,hash).lastInsertRowid;
+    return this.db.prepare('SELECT id,site_id,login_id,name,active FROM reviewers WHERE id=?').get(id);
+  }
+  updateReviewer(siteId,id,input){
+    const row=this.db.prepare('SELECT id FROM reviewers WHERE id=? AND site_id=?').get(Number(id),Number(siteId));if(!row)throw new Error('선택한 현장의 시험 결재자를 확인해 주세요.');
+    if(input.active!==undefined&&typeof input.active!=='boolean')throw new Error('계정 상태를 확인해 주세요.');
+    if(input.password!==undefined&&(typeof input.password!=='string'||input.password.length<12||input.password.length>256))throw new Error('시험 암호는 12자 이상 256자 이하여야 합니다.');
+    if(input.active===undefined&&input.password===undefined)throw new Error('변경할 내용을 확인해 주세요.');
+    this.db.exec('SAVEPOINT update_reviewer');try{if(input.password!==undefined){const salt=randomBytes(16),hash=scryptSync(input.password,salt,32);this.db.prepare('UPDATE reviewers SET salt=?,password_hash=? WHERE id=?').run(salt,hash,row.id);}if(input.active!==undefined)this.db.prepare('UPDATE reviewers SET active=? WHERE id=?').run(input.active?1:0,row.id);this.db.exec('RELEASE update_reviewer');}catch(error){this.db.exec('ROLLBACK TO update_reviewer');this.db.exec('RELEASE update_reviewer');throw error;}
+    return this.db.prepare('SELECT id,site_id,login_id,name,active FROM reviewers WHERE id=?').get(row.id);
+  }
+  authenticateReviewer(loginId,password){
+    const row=typeof loginId==='string'&&/^[A-Za-z0-9_]{3,40}$/.test(loginId)?this.db.prepare('SELECT * FROM reviewers WHERE login_id=?').get(loginId):null;
+    const salt=row?.salt||Buffer.alloc(16),candidate=typeof password==='string'&&password.length<=256?password:'',hash=scryptSync(candidate,salt,32),expected=row?.password_hash||Buffer.alloc(32);
+    return row&&row.active&&timingSafeEqual(hash,expected)?{id:row.id,site_id:row.site_id,name:row.name}:null;
+  }
+  approvalLine(id){return this.db.prepare('SELECT s.position,s.reviewer_id,s.state,r.name,r.active FROM approval_steps s JOIN reviewers r ON r.id=s.reviewer_id WHERE s.document_id=? ORDER BY s.position').all(Number(id));}
+  setApprovalLine(id,ids){
+    const doc=this.document(id);if(!doc||!['draft','rejected'].includes(doc.status))throw new Error('수정 가능한 문서를 확인해 주세요.');
+    if(!Array.isArray(ids)||ids.length>4||ids.some(x=>!Number.isSafeInteger(x)||x<1)||new Set(ids).size!==ids.length)throw new Error('결재자를 확인해 주세요.');
+    const exists=this.db.prepare('SELECT 1 FROM reviewers WHERE id=? AND site_id=? AND active=1');if(ids.some(id=>!exists.get(id,doc.site_id)))throw new Error('같은 현장의 활성 결재자를 선택해 주세요.');
+    this.db.exec('SAVEPOINT set_approval_line');try{this.db.prepare('DELETE FROM approval_steps WHERE document_id=?').run(Number(id));const add=this.db.prepare('INSERT INTO approval_steps(document_id,position,reviewer_id) VALUES(?,?,?)');ids.forEach((reviewerId,index)=>add.run(Number(id),index+1,reviewerId));this.db.exec('RELEASE set_approval_line');}catch(error){this.db.exec('ROLLBACK TO set_approval_line');this.db.exec('RELEASE set_approval_line');throw error;}
+    return this.approvalLine(id);
+  }
+  reviewerDocuments(reviewerId){return this.db.prepare("SELECT d.id,d.site_id,d.type,d.title,d.date FROM documents d JOIN approval_steps s ON s.document_id=d.id JOIN reviewers r ON r.id=s.reviewer_id AND r.site_id=d.site_id WHERE r.id=? AND r.active=1 AND d.status='pending' AND s.state='pending' AND NOT EXISTS (SELECT 1 FROM approval_steps prior WHERE prior.document_id=d.id AND prior.position<s.position AND prior.state<>'approved') ORDER BY d.date DESC,d.id DESC").all(Number(reviewerId));}
+  reviewerDocument(reviewerId,id){return this.reviewerDocuments(reviewerId).some(doc=>doc.id===Number(id))?this.document(id):null;}
   createDocument(input) {
     const d = recordInput(input);
     if (!this.db.prepare('SELECT id FROM sites WHERE id=?').get(d.siteId)) throw new Error('현장을 선택해 주세요.');
@@ -1008,28 +1046,37 @@ export class Store {
     doc.details.companyName=company.name;doc.details.companyTrade=company.trade;
     if(doc.details.recipientId){const worker=this.db.prepare('SELECT name FROM workers WHERE id=? AND site_id=? AND company=?').get(doc.details.recipientId,doc.siteId,company.name);if(!worker)throw new Error('선택한 현장과 협력사의 담당자를 확인해 주세요.');doc.details.recipient=worker.name;}
   }
-  transition(id, action, opinion='', signature=null) {
+  transition(id, action, opinion='', signature=null,reviewerId=null) {
     const doc = this.document(id);
     if (!doc) throw new Error('문서를 찾을 수 없습니다.');
-    const next = transitions[doc.status]?.[action];
+    let next = transitions[doc.status]?.[action];
     if (!next) throw new Error('현재 상태에서 수행할 수 없는 작업입니다.');
+    const line=this.approvalLine(id),current=line.find(step=>step.state==='pending');let reviewer=null;
+    if(line.length&&['approve','reject'].includes(action)){
+      if(!reviewerId||!current||current.reviewer_id!==reviewerId||!current.active)throw new Error('현재 차례의 결재자를 확인해 주세요.');
+      reviewer=current;if(action==='approve'&&line.some(step=>step.position>current.position))next='pending';
+    }else if(reviewerId)throw new Error('현재 차례의 결재자를 확인해 주세요.');
+    if(action==='submit'&&line.some(step=>!step.active))throw new Error('활성 결재자를 확인해 주세요.');
     if(doc.type==='checklist'&&action==='submit'){const details=JSON.parse(doc.details),required={rain:[0,1,2,3,4,5,6],wind:[0,1,2,3,4,5,6,7,8],thaw:Array.from({length:15},(_,i)=>i),heat:Array.from({length:8},(_,i)=>i),cold:Array.from({length:10},(_,i)=>i),wet_season:Array.from({length:6},(_,i)=>i),heavy_rain:Array.from({length:11},(_,i)=>i),electrical:Array.from({length:12},(_,i)=>i),fire:Array.from({length:5},(_,i)=>i),formwork:Array.from({length:7},(_,i)=>i),falling:Array.from({length:8},(_,i)=>i),confined:Array.from({length:4},(_,i)=>i),excavation:Array.from({length:8},(_,i)=>i),semiannual:Array.from({length:11},(_,i)=>i),morning:[0,1,2,3,4,6],afternoon:[0,1,2,3,4,5],evening:[0,1,2,3,4,5,6,7,8]}[details.kind]||[];if(required.some(i=>!details.answers[i].answer))throw new Error('필수 체크리스트 답변을 모두 선택해 주세요.');}
     if(typeof opinion!=='string' || opinion.length>2000)throw new Error('검토 의견을 확인해 주세요.');
     opinion=opinion.trim();
     if(doc.type==='risk' && action==='reject' && !opinion)throw new Error('반려 의견을 입력해 주세요.');
     this.db.exec('SAVEPOINT document_transition');
     try {
+      if(action==='submit'&&line.length)this.db.prepare("UPDATE approval_steps SET state='pending' WHERE document_id=?").run(Number(id));
+      if(reviewer)this.db.prepare('UPDATE approval_steps SET state=? WHERE document_id=? AND position=?').run(action==='approve'?'approved':'rejected',Number(id),reviewer.position);
       if(doc.type==='work_plan'&&action==='submit'){
         const details=JSON.parse(doc.details),get=this.db.prepare('SELECT id,kind,model,capacity,manufacturer,registration,details FROM equipment WHERE id=? AND site_id=?');
         if(details.equipmentIds!==undefined){details.equipmentSnapshot=details.equipmentIds.map(equipmentId=>{const item=get.get(equipmentId,doc.site_id);if(!item)throw new Error('같은 현장의 장비를 확인해 주세요.');return item;});this.db.prepare('UPDATE documents SET details=? WHERE id=?').run(JSON.stringify(details),Number(id));}
       }
       this.db.prepare('UPDATE documents SET status=?,updated_at=CURRENT_TIMESTAMP WHERE id=?').run(next, Number(id));
-      this.db.prepare('INSERT INTO events(document_id,action,from_status,to_status,opinion,signature) VALUES(?,?,?,?,?,?)').run(Number(id),action,doc.status,next,opinion,signature);
+      this.db.prepare('INSERT INTO events(document_id,action,from_status,to_status,opinion,signature,reviewer_id,reviewer_name) VALUES(?,?,?,?,?,?,?,?)').run(Number(id),action,doc.status,next,opinion,signature,reviewer?.reviewer_id||null,reviewer?.name||null);
       this.db.exec('RELEASE document_transition');
     } catch (err) { this.db.exec('ROLLBACK TO document_transition');this.db.exec('RELEASE document_transition');throw err; }
     return this.document(id);
   }
   approveDocument(id,opinion,signature){return this.transition(id,'approve',opinion,signatureBytes(signature));}
+  reviewerTransition(id,reviewerId,action,opinion,signature){if(!['approve','reject'].includes(action)||!this.reviewerDocument(reviewerId,id))throw new Error('현재 차례의 결재자를 확인해 주세요.');return this.transition(id,action,opinion,action==='approve'?signatureBytes(signature):null,Number(reviewerId));}
   approveDocuments(siteId,ids,signature){
     if(!Number.isSafeInteger(siteId)||siteId<1||!Array.isArray(ids)||!ids.length||ids.length>100||ids.some(id=>!Number.isSafeInteger(id)||id<1)||new Set(ids).size!==ids.length)throw new Error('선택한 시험 문서를 확인해 주세요.');
     const bytes=signatureBytes(signature);
@@ -1041,6 +1088,6 @@ export class Store {
     }catch(err){this.db.exec('ROLLBACK');throw err;}
     return {approved:ids.length};
   }
-  events(id) { return this.db.prepare('SELECT id,document_id,action,from_status,to_status,created_at,opinion,signature IS NOT NULL AS has_signature FROM events WHERE document_id=? ORDER BY id').all(Number(id)); }
+  events(id) { return this.db.prepare('SELECT id,document_id,action,from_status,to_status,created_at,opinion,reviewer_id,reviewer_name,signature IS NOT NULL AS has_signature FROM events WHERE document_id=? ORDER BY id').all(Number(id)); }
   eventSignature(id,eventId){return this.db.prepare('SELECT signature FROM events WHERE document_id=? AND id=? AND signature IS NOT NULL').get(Number(id),Number(eventId))?.signature||null;}
 }
