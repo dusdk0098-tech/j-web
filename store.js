@@ -718,11 +718,15 @@ export class Store {
   }
   updateMonthlyAttendanceDetails(input){
     const month=monthValue(input.month),fields=['category','company','occupation','dailyRate'].filter(key=>input[key]!==undefined);
-    if(!fields.length)throw new Error('변경할 항목을 선택해 주세요.');
+    const salaryRequested=input.salaryKind!==undefined||input.salaryAmount!==undefined;
+    if(salaryRequested&&fields.includes('dailyRate'))throw new Error('일당과 다른 급여를 동시에 변경할 수 없습니다.');
+    let salaryAmount;if(salaryRequested){if(!['monthly','yearly','other'].includes(input.salaryKind)||typeof input.salaryAmount!=='string'||!/^\d{1,9}$/.test(input.salaryAmount))throw new Error('시험 급여 종류와 금액을 확인해 주세요.');salaryAmount=Number(input.salaryAmount);}
+    if(!fields.length&&!salaryRequested)throw new Error('변경할 항목을 선택해 주세요.');
     const values=fields.map(key=>{if(key==='dailyRate'){const value=dailyRateValue(input[key]);if(value===null)throw new Error('변경할 시험 일당을 입력해 주세요.');return value;}return text(input[key],{category:'구분',company:'소속',occupation:'직종'}[key]);});
+    const assignments=fields.map(key=>key==='dailyRate'?'daily_rate=?,salary_kind=NULL,salary_amount=NULL':`${key}_snapshot=?`);if(salaryRequested){assignments.push('salary_kind=?,salary_amount=?');values.push(input.salaryKind,salaryAmount);}
     const worker=this.db.prepare('SELECT id FROM workers WHERE id=? AND site_id=?').get(Number(input.workerId),Number(input.siteId));
     if(!worker)throw new Error('선택한 현장의 출입자를 확인해 주세요.');
-    const result=this.db.prepare(`UPDATE attendance SET ${fields.map(key=>key==='dailyRate'?'daily_rate=?,salary_kind=NULL,salary_amount=NULL':`${key}_snapshot=?`).join(',')},updated_at=CURRENT_TIMESTAMP WHERE worker_id=? AND present=1 AND date BETWEEN ? AND ?`).run(...values,worker.id,`${month}-01`,`${month}-31`);
+    const result=this.db.prepare(`UPDATE attendance SET ${assignments.join(',')},updated_at=CURRENT_TIMESTAMP WHERE worker_id=? AND present=1 AND date BETWEEN ? AND ?`).run(...values,worker.id,`${month}-01`,`${month}-31`);
     if(!result.changes)throw new Error('해당 월의 출역 기록이 없습니다.');
     return result.changes;
   }
