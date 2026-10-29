@@ -889,6 +889,8 @@ export class Store {
   reviewerDocument(reviewerId,id){return this.reviewerDocuments(reviewerId).some(doc=>doc.id===Number(id))?this.document(id):null;}
   reviewerLinks(doc){
     if(doc.type==='risk')return {type:'risk',activities:this.riskActivities(doc.id).map(activity=>({...activity,worker_snapshot:JSON.parse(activity.worker_snapshot||'[]'),files:this.riskActivityPhotos(doc.id,activity.id)}))};
+    if(doc.type==='permit')return {type:'permit',checks:this.permitChecks(doc.id),extensions:this.permitExtensions(doc.id)};
+    if(['tbm','education'].includes(doc.type)){const targets=this.trainingTargets(doc.id);return {type:'training',configured:targets.configured,workers:targets.workers.filter(worker=>!targets.configured||worker.selected),signedWorkers:targets.signedWorkers,checks:this.trainingChecks(doc.id)};}
     if(doc.type!=='work_plan')return null;const details=JSON.parse(doc.details||'{}'),equipmentIds=details.equipmentIds||[],riggingIds=details.riggingIds||[],snapshots=Array.isArray(details.equipmentSnapshot)?details.equipmentSnapshot:null;
     const equipment=this.equipment(doc.site_id).filter(item=>equipmentIds.includes(item.id)).map(item=>{const snapshot=snapshots?.find(row=>row.id===item.id);return {info:snapshot||item,snapshot:!!snapshot,files:this.equipmentAttachments(doc.site_id,item.id)};});
     const rigging=this.rigging(doc.site_id).filter(item=>riggingIds.includes(item.id)).map(item=>({info:{...item,details:JSON.parse(item.details)},files:this.riggingPhotos(doc.site_id,item.id)}));
@@ -901,6 +903,11 @@ export class Store {
     if(kind==='equipment'&&(details.equipmentIds||[]).includes(parent))return this.equipmentAttachment(doc.site_id,parent,fileId);
     if(kind==='rigging'&&(details.riggingIds||[]).includes(parent))return this.riggingPhoto(doc.site_id,parent,fileId);
     if(kind==='place'&&details.workPlaceId===parent)return this.workPlacePhoto(doc.site_id,parent,fileId);
+    return null;
+  }
+  reviewerLinkedSignature(doc,kind,id){
+    if(kind==='permit'&&doc.type==='permit')return this.permitExtensionSignature(doc.id,id);
+    if(kind==='training'&&['tbm','education'].includes(doc.type))return this.documentTrainingSignature(doc.id,id);
     return null;
   }
   createDocument(input) {
