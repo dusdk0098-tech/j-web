@@ -7,6 +7,8 @@ import { createServer } from 'node:net';
 import { request } from 'node:http';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
+import { DatabaseSync } from 'node:sqlite';
+import { createHash } from 'node:crypto';
 import { LocalAuth,sessionToken } from '../auth.js';
 import jsQR from 'jsqr';
 import { PNG } from 'pngjs';
@@ -34,6 +36,19 @@ test('관리자 암호가 없으면 서버는 시작하지 않는다',async()=>{
     const [code]=await once(child,'exit');
     assert.notEqual(code,0);assert.match(stderr,/관리자 암호/);
   } finally {rmSync(dir,{recursive:true,force:true});}
+});
+
+test('근로자 세션은 재시작 후 복원되고 로그아웃·암호 변경·만료 시 무효화된다',{timeout:30000},async()=>{
+  const dir=mkdtempSync(join(tmpdir(),'jweb-worker-session-')),reservation=createServer();await new Promise(resolve=>reservation.listen(0,'127.0.0.1',resolve));const port=reservation.address().port;await new Promise(resolve=>reservation.close(resolve));let child;
+  const start=async()=>{child=spawn(process.execPath,['server.js'],{cwd:process.cwd(),env:{...process.env,PORT:String(port),JWEB_DATA_DIR:dir,JWEB_ADMIN_PASSWORD:'test-password-12345'},stdio:['ignore','pipe','pipe']});await Promise.race([once(child.stdout,'data'),once(child,'exit').then(()=>{throw Error('시험 서버가 종료됐습니다.');})]);},stop=async()=>{if(child){const exited=once(child,'exit');child.kill();await exited;child=null;}};
+  try{
+    await start();const base=`http://127.0.0.1:${port}`,send=(path,data,cookie)=>fetch(base+path,{method:'POST',headers:{'content-type':'application/json',...(cookie?{cookie}:{})},body:JSON.stringify(data)}),admin=(await send('/api/login',{password:'test-password-12345'})).headers.get('set-cookie').split(';')[0],site=await (await send('/api/sites',{name:'가상 현장'},admin)).json(),invite=await (await send(`/api/sites/${site.id}/invitation`,{},admin)).json(),token=new URL(invite.link).searchParams.get('token');
+    const joinWorker=async loginId=>assert.equal((await send('/api/join',{token,name:loginId,category:'직영',company:'가상 업체',occupation:'가상 직종',loginId,password:'virtual-password-123',acknowledged:true})).status,201);await joinWorker('worker_one');await joinWorker('worker_two');const login=async loginId=>(await send('/api/worker/login',{token,loginId,password:'virtual-password-123'})).headers.get('set-cookie').split(';')[0],a=await login('worker_one'),b=await login('worker_one'),c=await login('worker_two'),d=await login('worker_two'),valid=async cookie=>(await fetch(base+'/api/worker/session',{headers:{cookie}})).status,one=(await (await fetch(base+'/api/worker/session',{headers:{cookie:a}})).json()).worker,two=(await (await fetch(base+'/api/worker/session',{headers:{cookie:c}})).json()).worker;
+    await stop();let db=new DatabaseSync(join(dir,'jweb.sqlite'));const saved=db.prepare('SELECT token_hash FROM worker_sessions').all();assert.equal(saved.length,4);assert.ok(saved.some(row=>row.token_hash===createHash('sha256').update(a.split('=')[1]).digest('hex')));assert.ok(saved.every(row=>![a,b,c,d].some(cookie=>row.token_hash===cookie.split('=')[1])));db.close();
+    await start();assert.equal((await (await fetch(base+'/api/session',{headers:{cookie:admin}})).json()).authenticated,false);for(const cookie of [a,b,c,d])assert.equal(await valid(cookie),200);assert.equal((await send('/api/worker/logout',{},a)).status,200);assert.equal(await valid(a),401);
+    const admin2=(await send('/api/login',{password:'test-password-12345'})).headers.get('set-cookie').split(';')[0],reset=await fetch(`${base}/api/workers/${one.id}/password`,{method:'PUT',headers:{cookie:admin2,'content-type':'application/json'},body:JSON.stringify({siteId:site.id,password:'replacement-password-123'})});assert.equal(reset.status,200);assert.equal(await valid(b),401);assert.equal(await valid(c),200);await stop();
+    db=new DatabaseSync(join(dir,'jweb.sqlite'));db.prepare('UPDATE worker_sessions SET expires=0 WHERE token_hash=?').run(createHash('sha256').update(c.split('=')[1]).digest('hex'));db.prepare('UPDATE worker_accounts SET password_hash=zeroblob(32) WHERE worker_id=?').run(two.id);db.close();await start();for(const cookie of [a,b,c,d])assert.equal(await valid(cookie),401);
+  }finally{await stop();rmSync(dir,{recursive:true,force:true});}
 });
 
 test('HTTPS 중계 주소는 QR과 보안 쿠키에 사용되고 다른 주소는 거절한다',async()=>{

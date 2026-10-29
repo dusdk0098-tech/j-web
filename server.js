@@ -7,7 +7,7 @@ import { types } from './domain.js';
 import QRCode from 'qrcode';
 import { issueAccessQr,issueInvitationQr } from './qr-issue.js';
 import { workerSpreadsheet, wageSpreadsheet } from './exports.js';
-import { LocalAuth, sessionToken } from './auth.js';
+import { LocalAuth, sessionToken, WorkerSessions } from './auth.js';
 import { workerSitePath } from './public/worker-link.js';
 import { createHash, randomBytes } from 'node:crypto';
 
@@ -23,7 +23,7 @@ const dataDir = process.env.JWEB_DATA_DIR || join(root, 'data');
 const auth=new LocalAuth(process.env.JWEB_ADMIN_PASSWORD);
 mkdirSync(dataDir, { recursive: true });
 const store = new Store(join(dataDir, 'jweb.sqlite'));
-const workerSessions=new Map();
+const workerSessions=new WorkerSessions(store.db);
 const reviewerSessions=new Map(),reviewerAccountFailures=new Map();let reviewerFailures=[];
 let workerFailures=[];
 const workerAccountFailures=new Map();
