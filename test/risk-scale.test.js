@@ -52,3 +52,23 @@ test('시험 점수는 유효한 두 입력의 곱이며 서버에서 다시 계
     const incomplete=store.updateDocument(doc.id,{...input,details:{scale:'3x3',items:[{likelihood:'2',severity:''}]}});assert.equal(Object.hasOwn(JSON.parse(incomplete.details).items[0],'score'),false);
   }finally{store.close();}
 });
+
+test('개선 후 시험 위험성은 척도에 맞게 검증하고 서버에서 계산한다',()=>{
+  for(const scale of ['','three-level','3x3','5x4'])for(const [improved,current] of [['improvedGrade','grade'],['improvedLikelihood','likelihood'],['improvedSeverity','severity']])assert.deepEqual(riskScaleOptions(scale,improved),riskScaleOptions(scale,current));
+  const store=new Store(':memory:');try{
+    const site=store.createSite({name:'가상 현장'}),base={siteId:site.id,type:'risk',title:'가상 평가',date:'2041-01-01'},row={task:'가상 작업',improvedGrade:'',improvedLikelihood:'2',improvedSeverity:'3',improvedScore:999},input={...base,details:{scale:'3x3',items:[row]}},doc=store.createDocument(input);assert.equal(JSON.parse(doc.details).items[0].improvedScore,6);
+    assert.throws(()=>store.updateDocument(doc.id,{...base,details:{scale:'3x3',items:[{task:'이전 화면'}]}}),/새로고침/);assert.equal(JSON.parse(store.document(doc.id).details).items[0].improvedScore,6);
+    assert.throws(()=>store.updateDocument(doc.id,{...input,details:{scale:'3x3',items:[{...row,improvedLikelihood:'4'}]}}),/척도/);assert.equal(JSON.parse(store.document(doc.id).details).items[0].improvedLikelihood,'2');
+    const cleared=store.updateDocument(doc.id,{...input,details:{scale:'three-level',items:[{...row,improvedGrade:'중',improvedLikelihood:'',improvedSeverity:''}]}}),saved=JSON.parse(cleared.details).items[0];assert.equal(saved.improvedGrade,'중');assert.equal(Object.hasOwn(saved,'improvedScore'),false);
+    store.transition(doc.id,'submit');const cycle=store.document(doc.id).approval_cycle_id;store.transition(doc.id,'withdraw');store.updateDocument(doc.id,{...input,details:{scale:'three-level',items:[{...row,improvedGrade:'하',improvedLikelihood:'',improvedSeverity:''}]}});assert.equal(JSON.parse(store.approvalCycle(doc.id,cycle).document.details).items[0].improvedGrade,'중');
+  }finally{store.close();}
+});
+
+test('근로자 위험성평가도 개선 후 항목을 보존하고 이전 화면의 저장을 거부한다',()=>{
+  const store=new Store(':memory:');try{
+    const site=store.createSite({name:'가상 현장'}),invite=store.createInvitation(site.id),worker=store.join(invite.token,{name:'가상 근로자',category:'직영',company:'가상 업체',occupation:'가상 직종',loginId:'risk_writer',password:'virtual-password-123',acknowledged:true});store.setWorkerPermissions(site.id,worker.id,['risk']);
+    const row={task:'가상 작업',improvedGrade:'',improvedLikelihood:'5',improvedSeverity:'4'},input={type:'risk',title:'가상 평가',date:'2041-01-01',details:{scale:'5x4',items:[row]}},doc=store.createWorkerDocument(site.id,worker.id,input);assert.equal(JSON.parse(doc.details).items[0].improvedScore,20);
+    assert.throws(()=>store.updateWorkerDocument(site.id,worker.id,doc.id,{...input,details:{scale:'5x4',items:[{task:'이전 화면'}]}}),/새로고침/);assert.equal(JSON.parse(store.workerDocument(site.id,worker.id,doc.id).details).items[0].improvedScore,20);
+    store.updateWorkerDocument(site.id,worker.id,doc.id,{...input,details:{scale:'5x4',items:[{...row,improvedLikelihood:'',improvedSeverity:''}]}});assert.equal(Object.hasOwn(JSON.parse(store.workerDocument(site.id,worker.id,doc.id).details).items[0],'improvedScore'),false);
+  }finally{store.close();}
+});

@@ -207,13 +207,14 @@ export function recordInput(input) {
         if(item[key]!==undefined){if(typeof item[key]!=='string' || item[key].length>2000)throw new Error('위험성평가 항목을 확인해 주세요.');row[key]=item[key].trim();}
       }
       if(item.contractorId!==undefined){if(!Number.isSafeInteger(item.contractorId)||item.contractorId<1)throw new Error('협력사를 확인해 주세요.');row.contractorId=item.contractorId;}
-      for(const key of ['grade','likelihood','severity'])if(item[key]!==undefined){
+      for(const key of ['grade','likelihood','severity','improvedGrade','improvedLikelihood','improvedSeverity'])if(item[key]!==undefined){
         if(typeof item[key]!=='string')throw new Error('위험성 척도 입력을 확인해 주세요.');
         const v=item[key],scale=value.scale||'';
         if(v&&!riskScaleOptions(scale,key).includes(v))throw new Error('위험성 척도 입력을 확인해 주세요.');
         row[key]=v;
       }
       const score=riskScore(value.scale||'',row.likelihood,row.severity);if(score!==null)row.score=score;
+      const improvedScore=riskScore(value.scale||'',row.improvedLikelihood,row.improvedSeverity);if(improvedScore!==null)row.improvedScore=improvedScore;
       for(const key of ['dueDate','completionDate']){
         if(item[key]!==undefined){if(typeof item[key]!=='string')throw new Error('위험성평가 날짜를 확인해 주세요.');row[key]=item[key]?dateValue(item[key]):'';}
       }
