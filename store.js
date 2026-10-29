@@ -518,7 +518,7 @@ export class Store {
     const category=filters.category || '',company=filters.company || '',occupation=filters.occupation || '';
     const from=filters.from?dateValue(filters.from):'',to=filters.to?dateValue(filters.to):'';
     if(from && to && from>to)throw new Error('조회 시작일은 종료일보다 늦을 수 없습니다.');
-    return this.db.prepare("SELECT * FROM workers WHERE site_id=? AND (name LIKE ? OR company LIKE ? OR occupation LIKE ?) AND (?='' OR category=?) AND (?='' OR company=?) AND (?='' OR occupation=?) AND (?='' OR created_date>=?) AND (?='' OR created_date<=?) ORDER BY id DESC").all(Number(siteId),...Array(3).fill(`%${query}%`),category,category,company,company,occupation,occupation,from,from,to,to);
+    return this.db.prepare("SELECT workers.*,EXISTS(SELECT 1 FROM worker_accounts a WHERE a.worker_id=workers.id AND a.site_id=workers.site_id) AS has_account FROM workers WHERE site_id=? AND (name LIKE ? OR company LIKE ? OR occupation LIKE ?) AND (?='' OR category=?) AND (?='' OR company=?) AND (?='' OR occupation=?) AND (?='' OR created_date>=?) AND (?='' OR created_date<=?) ORDER BY id DESC").all(Number(siteId),...Array(3).fill(`%${query}%`),category,category,company,company,occupation,occupation,from,from,to,to);
   }
   attendance(siteId, date) {
     date = dateValue(date);
@@ -782,6 +782,11 @@ export class Store {
     return row?{...row,equipment:JSON.parse(row.equipment),profile:row.profile?JSON.parse(row.profile):null}:null;
   }
   joinSignature(siteId,workerId){return this.db.prepare('SELECT a.signature FROM join_acknowledgements a JOIN workers w ON w.id=a.worker_id WHERE w.site_id=? AND w.id=? AND a.signature IS NOT NULL').get(Number(siteId),Number(workerId))?.signature||null;}
+  resetWorkerPassword(siteId,workerId,password) {
+    if(typeof password!=='string'||password.length<12||password.length>256)throw new Error('암호는 12자 이상 256자 이하여야 합니다.');
+    const account=this.db.prepare('SELECT login_id FROM worker_accounts WHERE site_id=? AND worker_id=?').get(Number(siteId),Number(workerId));if(!account)throw new Error('선택한 현장의 시험 계정을 확인해 주세요.');
+    const salt=randomBytes(16),hash=scryptSync(password,salt,32);this.db.prepare('UPDATE worker_accounts SET salt=?,password_hash=? WHERE site_id=? AND worker_id=?').run(salt,hash,Number(siteId),Number(workerId));return account.login_id;
+  }
   authenticateWorker(token,loginId,password,siteKey=null) {
     const site=siteKey?this.siteFromAccess(siteKey):this.invitation(token);
     if(!site || typeof loginId!=='string' || !/^[a-zA-Z0-9_]{3,40}$/.test(loginId) || typeof password!=='string' || password.length>256)return null;

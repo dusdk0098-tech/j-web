@@ -557,6 +557,13 @@ test('관리자 인증 모드가 문서 API를 보호하고 로그아웃을 적�
     const openInfo=await (await fetch(`${base}/api/worker/site?key=${siteKey}`)).json();assert.equal(openInfo.canSignup,true);assert.ok(openInfo.companies.includes('가상 협력사'));assert.ok(openInfo.occupations.includes('가상 목공'));
     assert.equal((await siteSignup(siteKey)).status,201);
     const anotherLogin=await fetch(`${base}/api/worker/login`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({siteKey,loginId:'worker_site',password:'virtual-password-123'})});assert.equal(anotherLogin.status,200);assert.equal((await fetch(ownHazardPhoto,{headers:{cookie:anotherLogin.headers.get('set-cookie').split(';')[0]}})).status,404);
+    const accountWorker=(await anotherLogin.json()).worker,anotherCookie=anotherLogin.headers.get('set-cookie').split(';')[0],loginWorker=(loginId,password)=>fetch(`${base}/api/worker/login`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({siteKey,loginId,password})});
+    const anotherLogin2=await loginWorker('worker_site','virtual-password-123'),otherLogin=await loginWorker('worker1','virtual-password-123');assert.equal(anotherLogin2.status,200);assert.equal(otherLogin.status,200);const anotherCookie2=anotherLogin2.headers.get('set-cookie').split(';')[0],otherCookie=otherLogin.headers.get('set-cookie').split(';')[0];
+    const resetPassword=(session,siteId,password,workerId=accountWorker.id)=>fetch(`${base}/api/workers/${workerId}/password`,{method:'PUT',headers:{cookie:session,'content-type':'application/json'},body:JSON.stringify({siteId,password})});
+    assert.equal((await resetPassword('',site.id,'replacement-password-123')).status,401);assert.equal((await resetPassword(anotherCookie,site.id,'replacement-password-123')).status,401);
+    assert.equal((await resetPassword(cookie,other.id,'replacement-password-123')).status,400);assert.equal((await resetPassword(cookie,site.id,'short')).status,400);assert.equal((await fetch(`${base}/api/worker/session`,{headers:{cookie:anotherCookie}})).status,200);
+    assert.equal((await resetPassword(cookie,site.id,'replacement-password-123')).status,200);for(const session of [anotherCookie,anotherCookie2])assert.equal((await fetch(`${base}/api/worker/session`,{headers:{cookie:session}})).status,401);assert.equal((await fetch(`${base}/api/worker/session`,{headers:{cookie:otherCookie}})).status,200);
+    assert.equal((await loginWorker('worker_site','virtual-password-123')).status,401);assert.equal((await loginWorker('worker_site','replacement-password-123')).status,200);assert.equal((await (await fetch(`${base}/api/workers?siteId=${site.id}`,{headers:{cookie}})).json()).find(w=>w.id===accountWorker.id).has_account,1);
     assert.equal((await fetch(`${base}/api/sites/${site.id}/invitation`,{method:'DELETE',headers:{cookie}})).status,200);
     assert.equal((await (await fetch(`${base}/api/worker/site?key=${siteKey}`)).json()).canSignup,false);assert.equal((await siteSignup(siteKey)).status,400);
     assert.equal((await fetch(`${base}/api/join?token=${inviteToken}`)).status,404);
@@ -573,6 +580,7 @@ test('관리자 인증 모드가 문서 API를 보호하고 로그아웃을 적�
     assert.equal((await fetch(`${base}/api/worker/logout`,{method:'POST',headers:{cookie:rotatedLogin.headers.get('set-cookie').split(';')[0]}})).status,200);
     assert.equal((await fetch(`${base}/api/worker/logout`,{method:'POST',headers:{cookie:stableLogin.headers.get('set-cookie').split(';')[0]}})).status,200);
     const worker=await (await post('/api/workers',{siteId:site.id,name:'가상 출입자',category:'직영',company:'가상 업체',occupation:'목공'})).json();
+    assert.equal((await (await fetch(`${base}/api/workers?siteId=${site.id}`,{headers:{cookie}})).json()).find(w=>w.id===worker.id).has_account,0);assert.equal((await resetPassword(cookie,site.id,'replacement-password-123',worker.id)).status,400);
     assert.equal((await post('/api/attendance',{siteId:site.id,workerId:worker.id,date:'2024-02-29',present:true})).status,200);
     const monthly=await (await fetch(`${base}/api/attendance/month?siteId=${site.id}&month=2024-02`,{headers:{cookie}})).json();
     assert.deepEqual(monthly.find(row=>row.id===worker.id).days,['2024-02-29']);

@@ -414,6 +414,8 @@ const server = http.createServer(async (req, res) => {
       if (req.method === 'POST') return json(res,201,store.createWorker(await body(req)));
     }
     const worker=url.pathname.match(/^\/api\/workers\/(\d+)$/);
+    const workerPassword=url.pathname.match(/^\/api\/workers\/(\d+)\/password$/);
+    if(workerPassword&&req.method==='PUT'){const input=await body(req),siteId=Number(input.siteId),id=Number(workerPassword[1]),loginId=store.resetWorkerPassword(siteId,id,input.password);for(const [key,session] of workerSessions)if(session.worker.id===id&&session.worker.site_id===siteId)workerSessions.delete(key);workerAccountFailures.delete(`${siteId}:${loginId}`);return json(res,200,{ok:true});}
     const workerFiles=url.pathname.match(/^\/api\/workers\/(\d+)\/files(?:\/(\d+))?$/);
     if(workerFiles){
       const [,workerId,fileId]=workerFiles,siteId=url.searchParams.get('siteId');

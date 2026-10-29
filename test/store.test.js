@@ -578,6 +578,14 @@ test('근로자 재접속은 날짜별 출역을 추가하고 수동 변경을 �
   }finally{s.close();}
 });
 
+test('시험 암호 재설정은 현장과 계정을 검증하고 새 해시와 솔트를 저장한다',()=>{
+  const s=new Store(':memory:');try{
+    const site=s.createSite({name:'가상 현장'}),other=s.createSite({name:'다른 현장'}),invite=s.createInvitation(site.id),worker=s.join(invite.token,{name:'가상 근로자',category:'직영',company:'가상 업체',occupation:'목공',loginId:'virtual_worker',password:'virtual-password-123',acknowledged:true}),read=()=>s.db.prepare('SELECT salt,password_hash FROM worker_accounts WHERE worker_id=?').get(worker.id),before=read();
+    assert.throws(()=>s.resetWorkerPassword(other.id,worker.id,'replacement-password-123'),/현장/);assert.throws(()=>s.resetWorkerPassword(site.id,worker.id,'short'),/암호/);assert.deepEqual(Buffer.from(read().password_hash),Buffer.from(before.password_hash));
+    s.resetWorkerPassword(site.id,worker.id,'replacement-password-123');const after=read();assert.notDeepEqual(Buffer.from(after.salt),Buffer.from(before.salt));assert.notDeepEqual(Buffer.from(after.password_hash),Buffer.from(before.password_hash));assert.equal(s.authenticateWorker(invite.token,'virtual_worker','virtual-password-123'),null);assert.equal(s.authenticateWorker(invite.token,'virtual_worker','replacement-password-123').id,worker.id);
+  }finally{s.close();}
+});
+
 test('현장 QR 가입은 현장별로 열고 만료 또는 중지 시 차단된다',()=>{
   const s=new Store(':memory:');try{
     const a=s.createSite({name:'가상 현장 A'}),b=s.createSite({name:'가상 현장 B'}),key=s.ensureSiteAccess(a.id),otherKey=s.ensureSiteAccess(b.id),input={name:'가상 근로자',category:'직영',company:'가상 업체',occupation:'기타',loginId:'demo_worker',password:'virtual-password-123',acknowledged:true};
