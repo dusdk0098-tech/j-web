@@ -89,6 +89,7 @@ test('관리자 인증 모드가 문서 API를 보호하고 로그아웃을 적�
     assert.equal((await fetch(`${base}/api/sites`)).status,401);
     const scaleModule=await fetch(`${base}/risk-scale.js`);assert.equal(scaleModule.status,200);assert.match(scaleModule.headers.get('content-type'),/text\/javascript/);assert.match(await scaleModule.text(),/export function riskScaleOptions/);
     const batchModule=await fetch(`${base}/batch-print.js`);assert.equal(batchModule.status,200);assert.match(batchModule.headers.get('content-type'),/text\/javascript/);assert.match(await batchModule.text(),/export function selectBatchDocuments/);
+    const homeIcon=await fetch(`${base}/jweb-icon.svg`);assert.equal(homeIcon.status,200);assert.match(homeIcon.headers.get('content-type'),/image\/svg\+xml/);assert.equal((await fetch(`${base}/worker.webmanifest?site=invalid`)).status,404);
     assert.equal((await fetch(`${base}/api/join?token=invalid`)).status,404);
     const login=await fetch(`${base}/api/login`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({password:'test-password-12345'})});
     assert.equal(login.status,200);const cookie=login.headers.get('set-cookie').split(';')[0];
@@ -157,6 +158,7 @@ test('관리자 인증 모드가 문서 API를 보호하고 로그아웃을 적�
     assert.equal(joinInfo.status,200);const joinData=await joinInfo.json();assert.equal(joinData.id,site.id);assert.deepEqual(joinData.companies,['가상 협력사']);assert.deepEqual(joinData.occupations,['가상 목공']);
     assert.equal((await fetch(`${base}/api/sites/${site.id}/access`,{method:'POST'})).status,401);
     const siteAccess=await (await post(`/api/sites/${site.id}/access`,{})).json(),siteKey=new URL(siteAccess.link).searchParams.get('site');assert.equal(siteKey,joinData.siteKey);
+    const manifestUrl=`${base}/worker.webmanifest?site=${encodeURIComponent(siteKey)}`,manifestResponse=await fetch(manifestUrl);assert.equal(manifestResponse.status,200);assert.match(manifestResponse.headers.get('content-type'),/application\/manifest\+json/);assert.equal(manifestResponse.headers.get('cache-control'),'no-store');assert.equal(manifestResponse.headers.get('referrer-policy'),'no-referrer');const manifest=await manifestResponse.json();assert.equal(manifest.start_url,`/join?site=${siteKey}`);assert.equal(manifest.id,manifest.start_url);assert.equal(manifest.scope,'/join');assert.equal(manifest.icons[0].src,'/jweb-icon.svg');assert.equal(manifest.start_url.includes(inviteToken),false);
     const accessPng=PNG.sync.read(Buffer.from(siteAccess.image.split(',')[1],'base64'));assert.equal(jsQR(new Uint8ClampedArray(accessPng.data),accessPng.width,accessPng.height)?.data,siteAccess.link);
     assert.equal((await (await fetch(`${base}/api/worker/site?key=${siteKey}`)).json()).id,site.id);assert.equal((await fetch(`${base}/api/worker/site?key=invalid`)).status,404);
     const joinImage=new PNG({width:1,height:1});joinImage.data[3]=255;const joinBytes=PNG.sync.write(joinImage),joinSignature=`data:image/png;base64,${joinBytes.toString('base64')}`;
@@ -515,10 +517,12 @@ test('관리자 인증 모드가 문서 API를 보호하고 로그아웃을 적�
     assert.equal((await (await fetch(`${base}/api/workers?siteId=${site.id}`,{headers:{cookie}})).json()).length,1);
     assert.equal((await fetch(`${base}/api/sites/${site.id}/invitation`,{method:'DELETE',headers:{cookie}})).status,200);
     assert.equal((await fetch(`${base}/api/join?token=${inviteToken}`)).status,404);
+    assert.equal((await fetch(manifestUrl)).status,200);
     assert.equal((await signup(true)).status,400);
     const stableLogin=await fetch(`${base}/api/worker/login`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({siteKey,loginId:'worker1',password:'virtual-password-123'})});assert.equal(stableLogin.status,200);
     assert.equal((await fetch(`${base}/api/sites/${site.id}/access/rotate`,{method:'POST'})).status,401);
     const rotated=await (await post(`/api/sites/${site.id}/access/rotate`,{})).json(),newKey=new URL(rotated.link).searchParams.get('site');assert.notEqual(newKey,siteKey);
+    assert.equal((await fetch(manifestUrl)).status,404);assert.equal((await fetch(`${base}/worker.webmanifest?site=${encodeURIComponent(newKey)}`)).status,200);
     const rotatedPng=PNG.sync.read(Buffer.from(rotated.image.split(',')[1],'base64'));assert.equal(jsQR(new Uint8ClampedArray(rotatedPng.data),rotatedPng.width,rotatedPng.height)?.data,rotated.link);
     assert.equal((await fetch(`${base}/api/worker/site?key=${siteKey}`)).status,404);assert.equal((await fetch(`${base}/api/worker/session`,{headers:{cookie:stableLogin.headers.get('set-cookie').split(';')[0]}})).status,200);
     assert.equal((await fetch(`${base}/api/worker/login`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({siteKey,loginId:'worker1',password:'virtual-password-123'})})).status,401);

@@ -26,8 +26,8 @@ let workerFailures=[];
 const workerAccountFailures=new Map();
 const workerKey=raw=>typeof raw==='string' && /^[\w-]{43}$/.test(raw)?createHash('sha256').update(raw).digest('hex'):'';
 delete process.env.JWEB_ADMIN_PASSWORD;
-const mime = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8' };
-const assets = new Set(['/','/app.js','/batch-print.js','/risk-scale.js','/style.css','/join','/join.js','/login','/login.js']);
+const mime = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg':'image/svg+xml' };
+const assets = new Set(['/','/app.js','/batch-print.js','/risk-scale.js','/style.css','/jweb-icon.svg','/join','/join.js','/login','/login.js']);
 const json = (res, code, value) => { res.writeHead(code, {'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}); res.end(JSON.stringify(value)); };
 async function body(req,max=65536) {
   const chunks=[];let size=0;
@@ -53,6 +53,10 @@ const server = http.createServer(async (req, res) => {
       auth.logout(token);res.setHeader('Set-Cookie',`jweb_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0${secureCookie}`);return json(res,200,{ok:true});
     }
     const workerToken=(req.headers.cookie||'').split(';').map(x=>x.trim()).find(x=>x.startsWith('jweb_worker='))?.slice(12)||'';
+    if(url.pathname==='/worker.webmanifest'&&req.method==='GET'){
+      const key=url.searchParams.get('site');if(!store.siteFromAccess(key))return json(res,404,{error:'현장 접속 주소를 확인해 주세요.'});
+      const start=`/join?site=${encodeURIComponent(key)}`;res.writeHead(200,{'Content-Type':'application/manifest+json; charset=utf-8','Cache-Control':'no-store','Referrer-Policy':'no-referrer','X-Content-Type-Options':'nosniff'});return res.end(JSON.stringify({name:'J웹 현장 출입',short_name:'J웹',id:start,start_url:start,scope:'/join',display:'standalone',background_color:'#f4f6fa',theme_color:'#213c80',icons:[{src:'/jweb-icon.svg',sizes:'any',type:'image/svg+xml'}]}));
+    }
     if(url.pathname==='/api/worker/site'&&req.method==='GET'){const site=store.siteFromAccess(url.searchParams.get('key'));return site?json(res,200,site):json(res,404,{error:'현장 접속 주소를 확인해 주세요.'});}
     if(url.pathname==='/api/worker/login' && req.method==='POST'){
       const now=Date.now(),input=await body(req),site=input.siteKey?store.siteFromAccess(input.siteKey):store.invitation(input.token),accountKey=site&&typeof input.loginId==='string'&&/^[a-zA-Z0-9_]{3,40}$/.test(input.loginId)?`${site.id}:${input.loginId}`:'invalid';

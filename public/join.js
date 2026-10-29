@@ -26,6 +26,7 @@ try {
   form.append(list);form.elements.company.setAttribute('list',list.id);
   const occupations=document.createElement('datalist');occupations.id='join-occupations';for(const name of data.occupations||[]){const option=document.createElement('option');option.value=name;occupations.append(option);}form.append(occupations);form.elements.occupation.setAttribute('list',occupations.id);
   site.textContent=`현장: ${data.name}`;login.hidden=false;form.hidden=!!siteKey;
+  const homeKey=siteKey||data.siteKey;if(homeKey){const manifest=document.createElement('link');manifest.rel='manifest';manifest.href=`/worker.webmanifest?site=${encodeURIComponent(homeKey)}`;document.head.append(manifest);const tip=document.createElement('p');tip.textContent='휴대전화 브라우저의 홈 화면 추가를 사용하면 이 현장의 로그인 주소를 다시 열 수 있습니다. 인터넷 연결이 필요합니다.';site.after(tip);}
   if(data.siteKey&&!siteKey){const link=document.createElement('a');link.href=`/join?site=${encodeURIComponent(data.siteKey)}`;link.textContent='기존 가입자 로그인 주소';site.after(link);}
 } catch(error) {site.textContent='';message.textContent=error.message;}
 form.onsubmit=async event=>{
