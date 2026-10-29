@@ -1365,6 +1365,15 @@ test('이전 기타 활동은 자료 구분 열 추가 후 미기록으로 보�
   }finally{s.close();rmSync(directory,{recursive:true,force:true});}
 });
 
+test('주간 점검은 작성 방식별 필수 항목과 날짜 변경 시 참석자를 확인한다',()=>{
+  const s=new Store(':memory:');try{
+    const site=s.createSite({name:'가상 현장'}),doc=s.createDocument({siteId:site.id,type:'risk',title:'가상 평가',date:'2026-10-29'}),worker=s.createWorker({siteId:site.id,name:'가상 근로자',category:'직영',company:'가상 업체',occupation:'가상 직종'}),input={kind:'weekly',date:'2026-10-30',periodFrom:'2026-10-01',periodTo:'2026-10-31',place:'가상 장소',host:'가상 주관',participants:'',content:'가상 내용',workerIds:[worker.id]};
+    for(const invalid of [{...input,periodFrom:''},{...input,place:''},{...input,host:''},{...input,content:''},{...input,workerIds:[]}])assert.throws(()=>s.saveRiskActivity(doc.id,invalid),/관리기간|장소/);
+    const id=s.saveRiskActivity(doc.id,input);s.updateWorker(worker.id,{siteId:site.id,name:'변경 이름',category:'직영',company:'가상 업체',occupation:'가상 직종'});assert.throws(()=>s.saveRiskActivity(doc.id,{...input,date:'2026-10-31',workerIds:undefined},id),/다시 선택/);assert.equal(s.riskActivities(doc.id)[0].date,'2026-10-30');
+    s.saveRiskActivity(doc.id,{...input,date:'2026-10-31'},id);assert.equal(JSON.parse(s.riskActivities(doc.id)[0].worker_snapshot)[0].name,'변경 이름');const scan=s.saveRiskActivity(doc.id,{...input,entryMode:'scan',place:'',host:'',content:'',workerIds:[]});assert.equal(s.riskActivities(doc.id).find(row=>row.id===scan).entry_mode,'scan');
+  }finally{s.close();}
+});
+
 test('위험성평가 시험 활동은 완료 후에도 문서별로 관리된다',()=>{
   const s=new Store(':memory:');try{
     const site=s.createSite({name:'가상 현장'}),doc=s.createDocument({siteId:site.id,type:'risk',title:'가상 평가',date:'2026-10-29'}),other=s.createDocument({siteId:site.id,type:'risk',title:'다른 평가',date:'2026-10-29'}),nonRisk=s.createDocument({siteId:site.id,type:'tbm',title:'가상 교육',date:'2026-10-29'});
@@ -1382,12 +1391,12 @@ test('위험성평가 시험 활동은 완료 후에도 문서별로 관리된�
     assert.equal(s.riskActivities(doc.id)[0].host,'가상 주관자');assert.deepEqual(s.riskActivities(other.id),[]);
     assert.throws(()=>s.saveRiskActivity(other.id,input,id),/찾을 수/);assert.throws(()=>s.saveRiskActivity(nonRisk.id,input),/위험성평가/);
     assert.throws(()=>s.saveRiskActivity(doc.id,{...input,date:'2026-02-30'},id),/날짜/);assert.equal(s.riskActivities(doc.id)[0].date,input.date);
-    s.saveRiskActivity(doc.id,{...input,kind:'weekly',content:'수정'},id);assert.equal(s.riskActivities(doc.id)[0].kind,'weekly');
+    const weekly={...input,kind:'weekly',periodFrom:'2026-10-01',periodTo:'2026-10-31',workerIds:[worker.id],content:'수정'};s.saveRiskActivity(doc.id,weekly,id);assert.equal(s.riskActivities(doc.id)[0].kind,'weekly');
     assert.throws(()=>s.saveRiskActivity(doc.id,{...input,kind:'weekly',periodFrom:'2026-11-01',periodTo:'2026-10-01'},id),/관리기간/);
     s.saveRiskActivity(doc.id,{...input,kind:'weekly',periodFrom:'2026-10-01',periodTo:'2026-10-31',entryMode:'scan'},id);assert.equal(s.riskActivities(doc.id)[0].entry_mode,'scan');
     const pdf=Buffer.from('%PDF-1.4\n가상 회의록'),minutes=s.addRiskActivityPhoto(doc.id,id,'시험.pdf',pdf,'minutes');assert.equal(s.riskActivityPhotos(doc.id,id).find(p=>p.id===minutes).purpose,'minutes');assert.deepEqual(Buffer.from(s.riskActivityPhoto(doc.id,id,minutes).data),pdf);
     assert.throws(()=>s.saveRiskActivity(doc.id,{...input,kind:'weekly',entryMode:'manual'},id),/회의록 첨부/);assert.throws(()=>s.saveRiskActivity(doc.id,input,id),/회의록 첨부/);assert.equal(s.riskActivities(doc.id)[0].entry_mode,'scan');assert.deepEqual(Buffer.from(s.riskActivityPhoto(doc.id,id,minutes).data),pdf);
-    s.deleteRiskActivityPhoto(doc.id,id,minutes);s.saveRiskActivity(doc.id,{...input,kind:'weekly',entryMode:'manual'},id);assert.equal(s.riskActivities(doc.id)[0].entry_mode,'manual');
+    s.deleteRiskActivityPhoto(doc.id,id,minutes);s.saveRiskActivity(doc.id,{...weekly,entryMode:'manual'},id);assert.equal(s.riskActivities(doc.id)[0].entry_mode,'manual');
     assert.throws(()=>s.addRiskActivityPhoto(doc.id,id,'시험.pdf',pdf),/PNG/);assert.throws(()=>s.saveRiskActivity(doc.id,{...input,entryMode:'scan'}),/방식/);
     assert.throws(()=>s.deleteRiskActivity(other.id,id),/찾을 수/);s.deleteRiskActivity(doc.id,id);assert.equal(s.riskActivities(doc.id).length,0);assert.equal(s.riskActivityPhoto(doc.id,id,photoId),null);
   }finally{s.close();}
