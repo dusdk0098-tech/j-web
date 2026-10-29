@@ -137,6 +137,21 @@ test('월간 식대 일괄 변경은 출역일만 대상으로 기존 단가와 
   }finally{s.close();}
 });
 
+test('식대 부가세는 기록 시점에 보존하고 간식은 미기록으로 둔다',()=>{
+  const s=new Store(':memory:');try{
+    const site=s.createSite({name:'가상 현장'}),worker=s.createWorker({siteId:site.id,name:'가상 근로자',category:'직영',company:'가상 회사',occupation:'목공'}),input={siteId:site.id,name:'가상 식당',mealPrice:'5000',snackPrice:'1000',tax:'500'},restaurant=s.saveRestaurant(input);
+    s.saveMealDefaults(site.id,[{kind:'lunch',restaurantId:restaurant.id},{kind:'snack',restaurantId:restaurant.id}]);s.setAttendance({siteId:site.id,workerId:worker.id,date:'2026-10-01',present:true});s.saveRestaurant({...input,tax:'700'},restaurant.id);s.setAttendance({siteId:site.id,workerId:worker.id,date:'2026-10-02',present:true});
+    assert.deepEqual(s.mealChecks(site.id,'2026-10-01').map(r=>[r.kind,r.tax_snapshot]),[['lunch',500],['snack',null]]);assert.deepEqual(s.mealChecks(site.id,'2026-10-02').map(r=>[r.kind,r.tax_snapshot]),[['lunch',700],['snack',null]]);
+    assert.equal(s.setWorkerMonthlyMeals({siteId:site.id,workerId:worker.id,month:'2026-10',kind:'breakfast',present:true,restaurantId:restaurant.id}),2);s.saveMealCheck({siteId:site.id,workerId:worker.id,date:'2026-10-01',kind:'dinner',restaurantId:restaurant.id});
+    const rows=s.workerMonthlyMealChecks(site.id,worker.id,'2026-10');assert.ok(rows.filter(r=>r.kind==='breakfast'||r.kind==='dinner').every(r=>r.tax_snapshot===700));const groups=s.mealStatement(site.id,'2026-10').groups;assert.deepEqual(groups.filter(g=>g.kind==='lunch').map(g=>[g.tax_snapshot,g.total_with_tax]),[[500,5500],[700,5700]]);assert.equal(groups.find(g=>g.kind==='snack').total_with_tax,null);
+  }finally{s.close();}
+});
+
+test('이전 식대 기록은 부가세 열 추가 후 미기록으로 유지된다',()=>{
+  const dir=mkdtempSync(join(tmpdir(),'jweb-meal-tax-')),file=join(dir,'data.sqlite');let s=new Store(file);
+  try{const site=s.createSite({name:'가상 현장'}),worker=s.createWorker({siteId:site.id,name:'가상 근로자',category:'직영',company:'가상 업체',occupation:'목공'}),restaurant=s.saveRestaurant({siteId:site.id,name:'가상 식당',mealPrice:'5000',snackPrice:'1000',tax:'500'});s.setAttendance({siteId:site.id,workerId:worker.id,date:'2026-10-01',present:true});s.saveMealCheck({siteId:site.id,workerId:worker.id,date:'2026-10-01',kind:'lunch',restaurantId:restaurant.id});s.db.exec('ALTER TABLE meal_checks DROP COLUMN tax_snapshot');s.close();s=new Store(file);const row=s.mealChecks(site.id,'2026-10-01')[0];assert.equal(row.price,5000);assert.equal(row.tax_snapshot,null);assert.equal(s.mealStatement(site.id,'2026-10').groups[0].total_with_tax,null);}finally{s.close();rmSync(dir,{recursive:true,force:true});}
+});
+
 test('월간 식대 명세서는 현장과 월을 제한하고 기록 단가별 수량을 집계한다',()=>{
   const s=new Store(':memory:');try{
     const site=s.createSite({name:'가상 현장'}),other=s.createSite({name:'다른 현장'}),worker=s.createWorker({siteId:site.id,name:'가상 근로자',category:'직영',company:'가상 회사',occupation:'목공'}),restaurant=s.saveRestaurant({siteId:site.id,name:'가상 식당',mealPrice:'5000',snackPrice:'1000',tax:'0'});

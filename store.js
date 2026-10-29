@@ -103,6 +103,7 @@ export class Store {
       CREATE TABLE IF NOT EXISTS risk_activity_photos (id INTEGER PRIMARY KEY, activity_id INTEGER NOT NULL REFERENCES risk_activities(id) ON DELETE CASCADE, name TEXT NOT NULL,data BLOB NOT NULL);
       CREATE TABLE IF NOT EXISTS hazard_reports (id INTEGER PRIMARY KEY,site_id INTEGER NOT NULL REFERENCES sites(id),title TEXT NOT NULL,body TEXT NOT NULL,reporter TEXT NOT NULL,photo BLOB,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);`);
     if (!this.db.prepare('PRAGMA table_info(documents)').all().some(c=>c.name==='details')) this.db.exec("ALTER TABLE documents ADD COLUMN details TEXT NOT NULL DEFAULT '{}'");
+    if (!this.db.prepare('PRAGMA table_info(meal_checks)').all().some(c=>c.name==='tax_snapshot')) this.db.exec('ALTER TABLE meal_checks ADD COLUMN tax_snapshot INTEGER CHECK(tax_snapshot IS NULL OR tax_snapshot BETWEEN 0 AND 999999999)');
     if (!this.db.prepare('PRAGMA table_info(documents)').all().some(c=>c.name==='approval_cycle_id')) this.db.exec('ALTER TABLE documents ADD COLUMN approval_cycle_id INTEGER');
     if (!this.db.prepare('PRAGMA table_info(workers)').all().some(c=>c.name==='created_date')) this.db.exec('ALTER TABLE workers ADD COLUMN created_date TEXT');
     if (!this.db.prepare('PRAGMA table_info(events)').all().some(c=>c.name==='opinion')) this.db.exec("ALTER TABLE events ADD COLUMN opinion TEXT NOT NULL DEFAULT ''");
@@ -262,7 +263,7 @@ export class Store {
     return this.mealDefaults(siteId);
   }
   applyMealDefaults(workerId,date) {
-    this.db.prepare("INSERT OR IGNORE INTO meal_checks(site_id,worker_id,date,kind,restaurant_id,restaurant_name,price) SELECT w.site_id,w.id,?,d.kind,r.id,r.name,CASE WHEN d.kind='snack' THEN r.snack_price ELSE r.meal_price END FROM workers w JOIN meal_defaults d ON d.site_id=w.site_id JOIN restaurants r ON r.id=d.restaurant_id AND r.site_id=w.site_id WHERE w.id=? AND w.category='직영'").run(date,Number(workerId));
+    this.db.prepare("INSERT OR IGNORE INTO meal_checks(site_id,worker_id,date,kind,restaurant_id,restaurant_name,price,tax_snapshot) SELECT w.site_id,w.id,?,d.kind,r.id,r.name,CASE WHEN d.kind='snack' THEN r.snack_price ELSE r.meal_price END,CASE WHEN d.kind='snack' THEN NULL ELSE r.tax END FROM workers w JOIN meal_defaults d ON d.site_id=w.site_id JOIN restaurants r ON r.id=d.restaurant_id AND r.site_id=w.site_id WHERE w.id=? AND w.category='직영'").run(date,Number(workerId));
   }
   wageRecords(siteId,month,filters={}) {
     month=monthValue(month);
@@ -299,14 +300,14 @@ export class Store {
   mealStatement(siteId,month) {
     month=monthValue(month);siteId=Number(siteId);
     const site=this.db.prepare('SELECT id,name FROM sites WHERE id=?').get(siteId);if(!site)throw new Error('현장을 선택해 주세요.');
-    const rows=this.db.prepare('SELECT m.date,m.kind,m.restaurant_name,m.price,w.id AS worker_id,w.name,w.company,w.category FROM meal_checks m JOIN workers w ON w.id=m.worker_id AND w.site_id=m.site_id WHERE m.site_id=? AND m.date BETWEEN ? AND ? ORDER BY w.name,w.id,m.date,m.kind').all(siteId,`${month}-01`,`${month}-31`);
-    const groups=this.db.prepare('SELECT kind,restaurant_name,price,COUNT(*) AS quantity,SUM(price) AS total FROM meal_checks WHERE site_id=? AND date BETWEEN ? AND ? GROUP BY kind,restaurant_name,price ORDER BY restaurant_name,kind,price').all(siteId,`${month}-01`,`${month}-31`);
+    const rows=this.db.prepare('SELECT m.date,m.kind,m.restaurant_name,m.price,m.tax_snapshot,w.id AS worker_id,w.name,w.company,w.category FROM meal_checks m JOIN workers w ON w.id=m.worker_id AND w.site_id=m.site_id WHERE m.site_id=? AND m.date BETWEEN ? AND ? ORDER BY w.name,w.id,m.date,m.kind').all(siteId,`${month}-01`,`${month}-31`);
+    const groups=this.db.prepare('SELECT kind,restaurant_name,price,tax_snapshot,COUNT(*) AS quantity,SUM(price) AS total,CASE WHEN tax_snapshot IS NULL THEN NULL ELSE SUM(price+tax_snapshot) END AS total_with_tax FROM meal_checks WHERE site_id=? AND date BETWEEN ? AND ? GROUP BY kind,restaurant_name,price,tax_snapshot ORDER BY restaurant_name,kind,price,tax_snapshot').all(siteId,`${month}-01`,`${month}-31`);
     return {site,month,rows,groups};
   }
   workerMonthlyMealChecks(siteId,workerId,month) {
     month=monthValue(month);siteId=Number(siteId);workerId=Number(workerId);
     if(!this.db.prepare('SELECT 1 FROM workers WHERE id=? AND site_id=?').get(workerId,siteId))throw new Error('선택한 현장의 출입자를 확인해 주세요.');
-    return this.db.prepare('SELECT id,date,kind,restaurant_name,price FROM meal_checks WHERE site_id=? AND worker_id=? AND date BETWEEN ? AND ? ORDER BY date,kind').all(siteId,workerId,`${month}-01`,`${month}-31`);
+    return this.db.prepare('SELECT id,date,kind,restaurant_name,price,tax_snapshot FROM meal_checks WHERE site_id=? AND worker_id=? AND date BETWEEN ? AND ? ORDER BY date,kind').all(siteId,workerId,`${month}-01`,`${month}-31`);
   }
   setWorkerMonthlyMeals(input) {
     const siteId=Number(input.siteId),workerId=Number(input.workerId),month=monthValue(input.month),kind=input.kind;
@@ -315,7 +316,7 @@ export class Store {
     if(input.present){
       const restaurant=this.db.prepare('SELECT * FROM restaurants WHERE id=? AND site_id=?').get(Number(input.restaurantId),siteId);
       if(!restaurant)throw new Error('선택한 현장의 식당을 확인해 주세요.');
-      return this.db.prepare('INSERT OR IGNORE INTO meal_checks(site_id,worker_id,date,kind,restaurant_id,restaurant_name,price) SELECT ?,a.worker_id,a.date,?,?,?,? FROM attendance a WHERE a.worker_id=? AND a.present=1 AND a.date BETWEEN ? AND ?').run(siteId,kind,restaurant.id,restaurant.name,kind==='snack'?restaurant.snack_price:restaurant.meal_price,workerId,`${month}-01`,`${month}-31`).changes;
+      return this.db.prepare('INSERT OR IGNORE INTO meal_checks(site_id,worker_id,date,kind,restaurant_id,restaurant_name,price,tax_snapshot) SELECT ?,a.worker_id,a.date,?,?,?,?,? FROM attendance a WHERE a.worker_id=? AND a.present=1 AND a.date BETWEEN ? AND ?').run(siteId,kind,restaurant.id,restaurant.name,kind==='snack'?restaurant.snack_price:restaurant.meal_price,kind==='snack'?null:restaurant.tax,workerId,`${month}-01`,`${month}-31`).changes;
     }
     return this.db.prepare('DELETE FROM meal_checks WHERE site_id=? AND worker_id=? AND kind=? AND date BETWEEN ? AND ? AND EXISTS (SELECT 1 FROM attendance a WHERE a.worker_id=meal_checks.worker_id AND a.date=meal_checks.date AND a.present=1)').run(siteId,workerId,kind,`${month}-01`,`${month}-31`).changes;
   }
@@ -326,7 +327,7 @@ export class Store {
     if(!worker)throw new Error('선택한 날짜의 출역자를 확인해 주세요.');
     const restaurant=this.db.prepare('SELECT * FROM restaurants WHERE id=? AND site_id=?').get(Number(input.restaurantId),siteId);
     if(!restaurant)throw new Error('선택한 현장의 식당을 확인해 주세요.');
-    this.db.prepare('INSERT INTO meal_checks(site_id,worker_id,date,kind,restaurant_id,restaurant_name,price) VALUES(?,?,?,?,?,?,?) ON CONFLICT(worker_id,date,kind) DO UPDATE SET restaurant_id=excluded.restaurant_id,restaurant_name=excluded.restaurant_name,price=excluded.price').run(siteId,workerId,date,kind,restaurant.id,restaurant.name,kind==='snack'?restaurant.snack_price:restaurant.meal_price);
+    this.db.prepare('INSERT INTO meal_checks(site_id,worker_id,date,kind,restaurant_id,restaurant_name,price,tax_snapshot) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(worker_id,date,kind) DO UPDATE SET restaurant_id=excluded.restaurant_id,restaurant_name=excluded.restaurant_name,price=excluded.price,tax_snapshot=excluded.tax_snapshot').run(siteId,workerId,date,kind,restaurant.id,restaurant.name,kind==='snack'?restaurant.snack_price:restaurant.meal_price,kind==='snack'?null:restaurant.tax);
   }
   deleteMealCheck(siteId,id) {
     if(!this.db.prepare('DELETE FROM meal_checks WHERE site_id=? AND id=?').run(Number(siteId),Number(id)).changes)throw new Error('선택한 현장의 식대 기록을 확인해 주세요.');
