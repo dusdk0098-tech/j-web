@@ -64,6 +64,16 @@ test('공유 DB를 쓰는 서버 사이에서 근로자 세션과 폐기를 확�
   }finally{for(const child of children){if(child.exitCode===null){const exited=once(child,'exit');child.kill();await exited;}}rmSync(dir,{recursive:true,force:true});}
 });
 
+test('데이터베이스가 잠시 사용 중이어도 현장 저장 요청을 처리한다',{timeout:15000},async()=>{
+  const dir=mkdtempSync(join(tmpdir(),'jweb-db-busy-')),reservation=createServer();await new Promise(resolve=>reservation.listen(0,'127.0.0.1',resolve));const port=reservation.address().port;await new Promise(resolve=>reservation.close(resolve));
+  const trace="import http from 'node:http';const create=http.createServer;http.createServer=handler=>create((req,res)=>{if(req.url==='/api/sites'&&req.method==='POST')process.stdout.write('SITE_WRITE\\n');return handler(req,res)});",child=spawn(process.execPath,['--import',`data:text/javascript,${encodeURIComponent(trace)}`,'server.js'],{cwd:process.cwd(),env:{...process.env,PORT:String(port),JWEB_DATA_DIR:dir,JWEB_ADMIN_PASSWORD:'test-password-12345'},stdio:['ignore','pipe','pipe']});let db,locked=false;
+  try{
+    await Promise.race([once(child.stdout,'data'),once(child,'exit').then(()=>{throw Error('시험 서버가 종료됐습니다.');})]);const base=`http://127.0.0.1:${port}`,login=await fetch(base+'/api/login',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({password:'test-password-12345'})}),cookie=login.headers.get('set-cookie').split(';')[0];
+    db=new DatabaseSync(join(dir,'jweb.sqlite'));db.exec('BEGIN IMMEDIATE');locked=true;const started=once(child.stdout,'data'),pending=fetch(base+'/api/sites',{method:'POST',headers:{cookie,'content-type':'application/json'},body:JSON.stringify({name:'가상 현장'})});assert.match(String((await started)[0]),/SITE_WRITE/);await new Promise(resolve=>setTimeout(resolve,200));db.exec('COMMIT');locked=false;assert.equal((await pending).status,201);
+    db.exec('BEGIN IMMEDIATE');locked=true;const held=once(child.stdout,'data'),blocked=fetch(base+'/api/sites',{method:'POST',headers:{cookie,'content-type':'application/json'},body:JSON.stringify({name:'다른 가상 현장'})});assert.match(String((await held)[0]),/SITE_WRITE/);const failed=await blocked;assert.equal(failed.status,503);assert.match((await failed.json()).error,/사용 중/);db.exec('COMMIT');locked=false;const sites=await (await fetch(base+'/api/sites',{headers:{cookie}})).json();assert.deepEqual(sites.map(site=>site.name),['가상 현장']);const retry=await fetch(base+'/api/sites',{method:'POST',headers:{cookie,'content-type':'application/json'},body:JSON.stringify({name:'다른 가상 현장'})});assert.equal(retry.status,201);
+  }finally{if(db){if(locked)db.exec('ROLLBACK');db.close();}child.kill();await once(child,'exit').catch(()=>{});rmSync(dir,{recursive:true,force:true});}
+});
+
 test('HTTPS 중계 주소는 QR과 보안 쿠키에 사용되고 다른 주소는 거절한다',async()=>{
   const dir=mkdtempSync(join(tmpdir(),'j-web-proxy-'));
   const reservation=createServer();await new Promise(resolve=>reservation.listen(0,'127.0.0.1',resolve));

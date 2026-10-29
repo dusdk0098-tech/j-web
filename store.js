@@ -47,7 +47,7 @@ function photoBytes(photo){
 export class Store {
   constructor(path) {
     this.db = new DatabaseSync(path);
-    this.db.exec(`PRAGMA foreign_keys=ON;
+    this.db.exec(`PRAGMA foreign_keys=ON; PRAGMA busy_timeout=3000;
       CREATE TABLE IF NOT EXISTS sites (id INTEGER PRIMARY KEY, name TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
       CREATE TABLE IF NOT EXISTS site_access (site_id INTEGER PRIMARY KEY REFERENCES sites(id),access_key TEXT NOT NULL UNIQUE);
       CREATE TABLE IF NOT EXISTS site_registration (site_id INTEGER PRIMARY KEY REFERENCES sites(id),expires_at INTEGER NOT NULL);
