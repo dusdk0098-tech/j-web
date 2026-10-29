@@ -128,6 +128,7 @@ const riskFields={task:'작업 내용',riskCategory:'위험 분류',riskType:'�
 const riskKinds={initial:'최초평가',regular:'정기평가',occasional:'수시평가',continuous:'상시평가'};
 const riskScales={'three-level':'3등급(상·중·하) 판단법','3x3':'3×3 위험성 추정','5x4':'5×4 위험성 추정'};
 const educationKinds={new:'신규채용자 안전교육',regular:'근로자 정기교육',risk:'위험성평가 전파교육',special:'특별안전보건교육',changed:'작업내용 변경 시 교육',supervisor:'관리감독자 교육',msds:'물질안전보건교육(MSDS)',other:'기타교육'};
+const tbmFields={weather:'날씨',instructor:'교육 실시자',work:'작업 내용',hazards:'위험요인 및 대책'};
 const planFields={consultedAt:'협의일',periodFrom:'작업기간 시작일',periodTo:'작업기간 종료일',company:'작업업체',personnel:'작업인원',place:'작업장소',equipment:'기계·장비',hazards:'위험요인',measures:'안전대책'};
 const incidentFields={recipient:'수신',sender:'발신',contractor:'원청',contractorRepresentative:'원청 대표',subcontractor:'하청',subcontractorRepresentative:'하청 대표',siteName:'현장명',siteAddress:'현장 주소',client:'발주처',constructionType:'공사종류',constructionAmount:'공사금액 (백만원)',periodFrom:'공사 시작일',periodTo:'공사 종료일',workerCount:'근로자수',progress:'공정률 (%)',occurredAt:'발생 일시',location:'발생 장소',incidentType:'발생 형태',causeObject:'기인물',circumstances:'사고경위',measures:'조치',other:'기타 중요한 사항',prevention:'재발 방지 대책'};
 const victimFields={name:'가상 이름',company:'가상 소속',occupation:'직종',career:'경력',joinedAt:'입사일',treatment:'치료 내용'};
@@ -150,6 +151,7 @@ async function editDocument(doc=null) {
     if(doc)data.type=doc.type;
     const fields=data.type==='daily_report'?dailyFields:null;
     if(fields){data.details={};for(const key of Object.keys(fields)){data.details[key]=data[key]||'';delete data[key];}}
+    if(data.type==='tbm')data.details=Object.fromEntries(Object.keys(tbmFields).map(key=>[key,data[`tbm_${key}`]||'']));
     if(data.type==='education')data.details={kind:data.educationKind||'',otherTitle:data.otherTitle||'',audience:data.audience||''};
     if(data.type==='basic')data.details={category:data.basicCategory||'',shared:data.basicShared==='on'};
     if(data.type==='checklist'){data.details={kind:data.checklistKind||''};if(data.details.kind)data.details.answers=[...document.querySelectorAll('[data-check-row]')].map(row=>({answer:row.querySelector('[data-answer]')?.value||'',note:row.querySelector('[data-note]').value}));}
@@ -172,6 +174,7 @@ async function editDocument(doc=null) {
   const renderFields=()=>{
     const fields=select.value==='daily_report'?dailyFields:null;
     $('#daily-fields').innerHTML=fields?Object.entries(fields).map(([key,label])=>field(key,label,details[key]||'','text',false)).join(''):'';
+    if(select.value==='tbm'){$('#daily-fields').innerHTML=`<p class="muted">교육 내용은 위의 내용란에 입력합니다.</p>${Object.entries(tbmFields).map(([key,label])=>`<label>${esc(label)}<textarea name="tbm_${key}" maxlength="4000">${esc(details[key]||'')}</textarea></label>`).join('')}`;return;}
     if(select.value==='basic'){$('#daily-fields').innerHTML=`<label>서류 분류<input name="basicCategory" list="basic-categories" value="${esc(details.category||'')}" maxlength="200"></label><datalist id="basic-categories">${basicCategories.map(name=>`<option value="${esc(name)}"></option>`).join('')}</datalist><label><input type="checkbox" name="basicShared" ${details.shared?'checked':''}> 승인 후 모든 가상 현장에 공유</label><p class="muted">승인된 시험 문서와 첨부만 다른 현장에서 조회할 수 있습니다. 문서를 저장한 뒤 파일을 첨부할 수 있습니다.</p>`;return;}
     if(select.value==='checklist'){
       $('#daily-fields').innerHTML=`<label>체크리스트 종류<select name="checklistKind"><option value="">미선택</option>${[['rain','우천시 체크리스트'],['wind','강풍 대비 점검'],['thaw','해빙기 점검'],['heat','고온기 점검'],['cold','저온기 점검'],['wet_season','장마 대비 점검'],['heavy_rain','집중호우 대비 점검'],['electrical','전기 안전 점검'],['fire','화재 예방 점검'],['formwork','거푸집 지지 점검'],['falling','낙하물 예방 점검'],['confined','밀폐 공간 점검'],['excavation','굴착 안전 점검'],['semiannual','반기 안전 관리 점검'],['morning','일일 안전 점검 (07시)'],['afternoon','일일 안전 점검 (13시)'],['evening','일일 안전 점검 (18시)']].map(([value,label])=>`<option value="${value}" ${details.kind===value?'selected':''}>${label}</option>`).join('')}</select></label><div id="rain-checks"></div>`;
@@ -327,7 +330,7 @@ function documentTable(docs) {return docs.length?`<div class="table-wrap"><table
 function wireDocLinks(){document.querySelectorAll('[data-doc]').forEach(b=>b.onclick=()=>{state.detail=Number(b.dataset.doc);render().catch(showError);});}
 function capturedFields(value){
   if(Array.isArray(value))return `<ol>${value.map(item=>`<li>${capturedFields(item)}</li>`).join('')}</ol>`;
-  if(value&&typeof value==='object'){const names={...dailyFields,...riskFields,...planFields,...permitFields,name:'이름',model:'장비 형식',kind:'종류',title:'제목',date:'날짜',content:'내용',result:'결과',action:'조치',items:'항목',company:'소속',host:'주관',participants:'참석자',worker_snapshot:'시험 참여자',workers:'대상자',checks:'시험 점검',extensions:'시험 연장',equipment:'장비',rigging:'장구',place:'장소',activities:'시험 활동',info:'상세 정보',details:'상세 정보',workerSnapshot:'저장된 참여자',equipmentSnapshot:'저장된 장비'};return `<dl>${Object.entries(value).filter(([key,v])=>!/(?:^id$|_id$|Ids?$)/i.test(key)&&!['files','type','signedWorkers'].includes(key)&&v!==null&&v!==undefined&&v!=='').map(([key,v])=>`<dt>${esc(names[key]||'추가 항목')}</dt><dd>${capturedFields(v)}</dd>`).join('')}</dl>`;}
+  if(value&&typeof value==='object'){const names={...dailyFields,...riskFields,...planFields,...permitFields,instructor:'교육 실시자',name:'이름',model:'장비 형식',kind:'종류',title:'제목',date:'날짜',content:'내용',result:'결과',action:'조치',items:'항목',company:'소속',host:'주관',participants:'참석자',worker_snapshot:'시험 참여자',workers:'대상자',checks:'시험 점검',extensions:'시험 연장',equipment:'장비',rigging:'장구',place:'장소',activities:'시험 활동',info:'상세 정보',details:'상세 정보',workerSnapshot:'저장된 참여자',equipmentSnapshot:'저장된 장비'};return `<dl>${Object.entries(value).filter(([key,v])=>!/(?:^id$|_id$|Ids?$)/i.test(key)&&!['files','type','signedWorkers'].includes(key)&&v!==null&&v!==undefined&&v!=='').map(([key,v])=>`<dt>${esc(names[key]||'추가 항목')}</dt><dd>${capturedFields(v)}</dd>`).join('')}</dl>`;}
   return esc(typeof value==='boolean'?(value?'선택':'선택 안 함'):value);
 }
 function capturedFiles(cycle){
@@ -342,7 +345,7 @@ function capturedFiles(cycle){
 async function renderDetail(){
   const [doc,events,attachments,line]=await Promise.all([api(`/api/documents/${state.detail}`),api(`/api/documents/${state.detail}/events`),api(`/api/documents/${state.detail}/attachments`),api(`/api/documents/${state.detail}/approval-line`)]);
   const actions=({draft:[['submit','결재 요청']],pending:[['approve','승인'],['reject','반려'],['withdraw','요청 취소']],rejected:[['revise','다시 작성']],approved:[]}[doc.status]).filter(([action])=>!line.length||!['approve','reject'].includes(action));
-  const fields=doc.type==='daily_report'?dailyFields:doc.type==='education'?{otherTitle:'기타 교육명',audience:'출력용 교육대상'}:doc.type==='work_plan'?planFields:doc.type==='permit'?permitFields:doc.type==='incident'?{severity:'사고유형',...incidentFields,technicalGuidance:'기술지도관계',preventionPlan:'방지계획서관계'}:{};
+  const fields=doc.type==='daily_report'?dailyFields:doc.type==='tbm'?tbmFields:doc.type==='education'?{otherTitle:'기타 교육명',audience:'출력용 교육대상'}:doc.type==='work_plan'?planFields:doc.type==='permit'?permitFields:doc.type==='incident'?{severity:'사고유형',...incidentFields,technicalGuidance:'기술지도관계',preventionPlan:'방지계획서관계'}:{};
   const details=JSON.parse(doc.details||'{}');
   const currentEquipment=doc.type==='work_plan' && details.equipmentIds?.length?(await api(`/api/equipment?siteId=${doc.site_id}`)).filter(item=>details.equipmentIds.includes(item.id)):[];
   const selectedEquipment=Array.isArray(details.equipmentSnapshot)?details.equipmentSnapshot:currentEquipment;

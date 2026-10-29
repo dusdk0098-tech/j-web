@@ -141,6 +141,11 @@ export function recordInput(input) {
     if(details.periodFrom&&details.periodTo&&details.periodFrom>details.periodTo)throw new Error('작업기간을 확인해 주세요.');
     if(value.timeFrom!==undefined||value.timeTo!==undefined){const from=value.timeFrom??'',to=value.timeTo??'',valid=time=>typeof time==='string'&&/^(?:[01]\d|2[0-3]):(?:00|30)$|^24:00$/.test(time);if(typeof from!=='string'||typeof to!=='string'||(from||to)&&(!valid(from)||!valid(to)||!details.periodFrom||!details.periodTo||details.periodFrom===details.periodTo&&from>to))throw new Error('작업시간을 확인해 주세요.');details.timeFrom=from;details.timeTo=to;}
   }
+  if(type==='tbm'){
+    const value=input.details??{};
+    if(!value||typeof value!=='object'||Array.isArray(value))throw new Error('TBM 항목을 확인해 주세요.');
+    for(const key of ['weather','instructor','work','hazards']){const v=value[key]??'';if(typeof v!=='string'||v.length>4000)throw new Error('TBM 항목을 확인해 주세요.');details[key]=v.trim();}
+  }
   if(type==='education'){
     const value=input.details ?? {};
     if(!value || typeof value!=='object' || Array.isArray(value))throw new Error('교육 항목을 확인해 주세요.');

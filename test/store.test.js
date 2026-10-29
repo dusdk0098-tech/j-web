@@ -730,6 +730,18 @@ test('위험성평가 반려 의견은 필수이며 처리 이력에 보존된�
   } finally {s.close();}
 });
 
+test('TBM의 작업 내용과 위험요인을 분리해 저장하고 잘못된 수정은 보존한다',()=>{
+  const s=new Store(':memory:');
+  try {
+    const site=s.createSite({name:'가상 현장'}),input={siteId:site.id,type:'tbm',title:'가상 TBM',date:'2026-10-29',body:'시험 교육 내용',details:{weather:'맑음',instructor:'가상 관리자',work:'가상 작업',hazards:'가상 위험과 대책'}};
+    const doc=s.createDocument(input);assert.deepEqual(JSON.parse(doc.details),input.details);
+    s.updateDocument(doc.id,{...input,details:{...input.details,work:'수정한 작업'}});
+    assert.throws(()=>s.updateDocument(doc.id,{...input,details:{...input.details,hazards:'x'.repeat(4001)}}),/TBM/);
+    assert.equal(JSON.parse(s.document(doc.id).details).work,'수정한 작업');
+    const legacy=s.createDocument({...input,details:undefined});assert.equal(JSON.parse(legacy.details).hazards,'');
+  } finally {s.close();}
+});
+
 test('교육 종류와 출력용 교육대상을 저장하고 기타 교육명을 검증한다',()=>{
   const s=new Store(':memory:');
   try {
