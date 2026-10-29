@@ -37,6 +37,15 @@ test('식대 시험 기록은 출역과 현장을 검증하고 기록 단가를 
   }finally{s.close();}
 });
 
+test('조식 시험 기록은 출역을 검증하고 식사 단가를 월 합계에 포함한다',()=>{
+  const s=new Store(':memory:');try{
+    const site=s.createSite({name:'가상 현장'}),worker=s.createWorker({siteId:site.id,name:'가상 근로자',category:'직영',company:'가상 회사',occupation:'목공'}),restaurant=s.saveRestaurant({siteId:site.id,name:'가상 식당',mealPrice:'5000',snackPrice:'1000',tax:'0'}),input={siteId:site.id,workerId:worker.id,date:'2024-02-29',kind:'breakfast',restaurantId:restaurant.id};
+    assert.throws(()=>s.saveMealCheck(input),/출역자/);
+    s.setAttendance({siteId:site.id,workerId:worker.id,date:input.date,present:true});s.saveMealCheck(input);
+    assert.equal(s.mealChecks(site.id,input.date)[0].kind,'breakfast');assert.equal(s.mealChecks(site.id,input.date)[0].price,5000);assert.equal(s.monthlyMealChecks(site.id,'2024-02')[0].total,5000);
+  }finally{s.close();}
+});
+
 test('식당 시험 설정은 현장별로 저장하며 잘못된 수정을 거절한다',()=>{
   const s=new Store(':memory:');try{
     const a=s.createSite({name:'가상 A'}),b=s.createSite({name:'가상 B'}),input={siteId:a.id,name:'가상 식당',mealPrice:'5000',snackPrice:'1000',tax:'600'},restaurant=s.saveRestaurant(input);

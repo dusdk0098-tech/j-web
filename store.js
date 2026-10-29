@@ -215,7 +215,7 @@ export class Store {
   }
   saveMealCheck(input) {
     const siteId=Number(input.siteId),workerId=Number(input.workerId),date=dateValue(input.date),kind=input.kind;
-    if(!['lunch','dinner','snack'].includes(kind))throw new Error('식사 종류를 확인해 주세요.');
+    if(!['breakfast','lunch','dinner','snack'].includes(kind))throw new Error('식사 종류를 확인해 주세요.');
     const worker=this.db.prepare('SELECT w.id FROM workers w JOIN attendance a ON a.worker_id=w.id WHERE w.id=? AND w.site_id=? AND a.date=? AND a.present=1').get(workerId,siteId,date);
     if(!worker)throw new Error('선택한 날짜의 출역자를 확인해 주세요.');
     const restaurant=this.db.prepare('SELECT * FROM restaurants WHERE id=? AND site_id=?').get(Number(input.restaurantId),siteId);
