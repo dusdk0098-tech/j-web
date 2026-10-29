@@ -543,6 +543,7 @@ async function render(){
   if(state.page==='stops'){
     const siteId=state.siteId,query=state.query,requests=await api(`/api/sites/${siteId}/work-stops?q=${encodeURIComponent(query)}`);if(state.siteId!==siteId||state.page!=='stops'||state.query!==query)return;
     content.innerHTML=`<section class="panel"><h2>작업중지 시험 요청</h2><p class="muted">이 시험 기능은 알림을 발송하지 않습니다. 익명 요청은 이름을 저장하지 않지만 시각이나 내용으로 유추될 수 있습니다.</p><div class="filters"><label>장소·사유·실명 요청자 검색 <input id="stop-query" maxlength="200" value="${esc(query)}"></label><button type="button" id="stop-search">검색</button></div>${requests.length?`<div class="table-wrap"><table><thead><tr><th>요청자</th><th>장소</th><th>사유</th><th>접수 시각 (UTC)</th><th>사진</th></tr></thead><tbody>${requests.map(r=>`<tr><td>${esc(r.requester)}</td><td>${esc(r.place)}</td><td>${esc(r.reason)}</td><td>${esc(r.created_at)}</td><td>${r.has_photo?`<a href="/api/sites/${siteId}/work-stops/${r.id}/photo">사진 다운로드</a>`:'없음'}</td></tr>`).join('')}</tbody></table></div>`:'<p>요청이 없습니다.</p>'}</section>`;
+    if(query&&!requests.length)content.querySelector('.panel').lastElementChild.textContent='검색 결과가 없습니다.';
     $('#stop-search').onclick=()=>{state.query=$('#stop-query').value.trim();render().catch(showError);};
     return;
   }
