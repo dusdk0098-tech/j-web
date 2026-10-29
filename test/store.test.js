@@ -367,6 +367,17 @@ test('관리자 시험 휴무는 점검과 구분되고 같은 날짜에 중복 
   }finally{s.close();}
 });
 
+test('근로자 자가점검 답변은 새 기록에만 보존하고 이전 기록을 추정하지 않는다',()=>{
+  const dir=mkdtempSync(join(tmpdir(),'jweb-self-check-')),file=join(dir,'data.sqlite');let s=new Store(file);
+  try{
+    const site=s.createSite({name:'가상 현장'}),other=s.createSite({name:'다른 현장'}),worker=s.createWorker({siteId:site.id,name:'가상 작업자',category:'직영',company:'가상 업체',occupation:'가상 직종'}),png=new PNG({width:1,height:1});png.data[3]=255;const bytes=PNG.sync.write(png),signature=`data:image/png;base64,${bytes.toString('base64')}`,answers={equipment:true,sober:true,exercise:true,briefing:true};
+    s.db.prepare('INSERT INTO worker_self_checks(worker_id,date,signature) VALUES(?,?,?)').run(worker.id,'2026-10-28',bytes);s.db.exec('ALTER TABLE worker_self_checks DROP COLUMN answers');s.close();s=new Store(file);
+    assert.equal(s.siteSelfChecks(site.id,'2026-10-28')[0].answers,null);s.createWorkerSelfCheck(worker.id,'2026-10-28',answers,signature);assert.equal(s.siteSelfChecks(site.id,'2026-10-28')[0].answers,null);
+    assert.throws(()=>s.createWorkerSelfCheck(worker.id,'2026-10-29',{...answers,sober:false},signature),/네 항목/);s.createWorkerSelfCheck(worker.id,'2026-10-29',{...answers,extra:'무시'},signature);s.close();s=new Store(file);
+    assert.deepEqual(s.siteSelfChecks(site.id,'2026-10-29')[0].answers,answers);assert.deepEqual(s.siteSelfChecks(other.id,'2026-10-29'),[]);assert.deepEqual(Buffer.from(s.selfCheckSignature(site.id,worker.id,'2026-10-29')),bytes);assert.equal(s.selfCheckSignature(other.id,worker.id,'2026-10-29'),null);
+  }finally{s.close();rmSync(dir,{recursive:true,force:true});}
+});
+
 test('근로자 안전활동은 현장과 본인별로 종류를 구분해 조회한다',()=>{
   const s=new Store(':memory:');try{
     const site=s.createSite({name:'가상 A'}),otherSite=s.createSite({name:'가상 B'}),make=siteId=>s.createWorker({siteId,name:'가상 근로자',category:'직영',company:'가상 업체',occupation:'가상 직종'}),worker=make(site.id),other=make(site.id),foreign=make(otherSite.id),date='2026-10-29',png=new PNG({width:1,height:1});png.data[3]=255;const signature=`data:image/png;base64,${PNG.sync.write(png).toString('base64')}`;

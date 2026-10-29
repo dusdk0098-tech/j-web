@@ -113,6 +113,7 @@ export class Store {
     if (!this.db.prepare('PRAGMA table_info(events)').all().some(c=>c.name==='approval_cycle_id')) this.db.exec('ALTER TABLE events ADD COLUMN approval_cycle_id INTEGER');
     if (!this.db.prepare('PRAGMA table_info(work_stops)').all().some(c=>c.name==='photo')) this.db.exec('ALTER TABLE work_stops ADD COLUMN photo BLOB');
     if (!this.db.prepare('PRAGMA table_info(worker_self_checks)').all().some(c=>c.name==='signature')) this.db.exec('ALTER TABLE worker_self_checks ADD COLUMN signature BLOB');
+    if (!this.db.prepare('PRAGMA table_info(worker_self_checks)').all().some(c=>c.name==='answers')) this.db.exec('ALTER TABLE worker_self_checks ADD COLUMN answers TEXT');
     if (!this.db.prepare('PRAGMA table_info(attachments)').all().some(c=>c.name==='category')) this.db.exec("ALTER TABLE attachments ADD COLUMN category TEXT NOT NULL DEFAULT 'general'");
     if (!this.db.prepare('PRAGMA table_info(worker_daily_training)').all().some(c=>c.name==='signature')) this.db.exec('ALTER TABLE worker_daily_training ADD COLUMN signature BLOB');
     if (!this.db.prepare('PRAGMA table_info(join_acknowledgements)').all().some(c=>c.name==='signature')) this.db.exec('ALTER TABLE join_acknowledgements ADD COLUMN signature BLOB');
@@ -660,7 +661,7 @@ export class Store {
   }
   siteSelfChecks(siteId,date) {
     date=dateValue(date);
-    return this.db.prepare('SELECT w.id,w.name,w.company,c.created_at,c.signature IS NOT NULL AS has_signature FROM workers w LEFT JOIN worker_self_checks c ON c.worker_id=w.id AND c.date=? WHERE w.site_id=? ORDER BY w.name,w.id').all(date,Number(siteId));
+    return this.db.prepare('SELECT w.id,w.name,w.company,c.created_at,c.signature IS NOT NULL AS has_signature,c.answers FROM workers w LEFT JOIN worker_self_checks c ON c.worker_id=w.id AND c.date=? WHERE w.site_id=? ORDER BY w.name,w.id').all(date,Number(siteId)).map(row=>({...row,answers:row.answers?JSON.parse(row.answers):null}));
   }
   selfCheckSignature(siteId,workerId,date) {
     date=dateValue(date);
@@ -705,7 +706,7 @@ export class Store {
     date=dateValue(date);
     if(!answers || typeof answers!=='object' || Array.isArray(answers) || !['equipment','sober','exercise','briefing'].every(key=>answers[key]===true))throw new Error('자가점검 네 항목을 모두 확인해 주세요.');
     const bytes=signatureBytes(signature);
-    this.db.prepare('INSERT OR IGNORE INTO worker_self_checks(worker_id,date,signature) VALUES(?,?,?)').run(Number(workerId),date,bytes);
+    this.db.prepare('INSERT OR IGNORE INTO worker_self_checks(worker_id,date,signature,answers) VALUES(?,?,?,?)').run(Number(workerId),date,bytes,JSON.stringify(Object.fromEntries(['equipment','sober','exercise','briefing'].map(key=>[key,answers[key]]))));
     return this.workerSelfCheck(workerId,date);
   }
   setAttendance(input) {

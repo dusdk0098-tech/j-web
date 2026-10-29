@@ -462,11 +462,13 @@ test('관리자 인증 모드가 문서 API를 보호하고 로그아웃을 적�
     assert.equal((await fetch(`${base}/api/sites/${site.id}/self-checks?date=${checked.check.date}`,{headers:{cookie:workerCookie}})).status,401);
     const checkList=await (await fetch(`${base}/api/sites/${site.id}/self-checks?date=${checked.check.date}`,{headers:{cookie}})).json();
     assert.equal(checkList.length,1);assert.equal(checkList[0].name,'가상 근로자');assert.ok(checkList[0].created_at);assert.equal(checkList[0].has_signature,1);
+    assert.deepEqual(checkList[0].answers,{equipment:true,sober:true,exercise:true,briefing:true});
     const signaturePath=`/api/sites/${site.id}/self-checks/${own.id}/signature?date=${checked.check.date}`;
     {const activityUrl=`${base}/api/workers/${own.id}/activities?siteId=${site.id}&kind=checklist`,response=await fetch(activityUrl,{headers:{cookie}}),activityRows=await response.json();assert.equal(response.status,200);assert.equal(activityRows.items[0].date,checked.check.date);assert.equal(activityRows.items[0].has_signature,1);assert.equal((await fetch(activityUrl,{headers:{cookie:workerCookie}})).status,401);}
     assert.equal((await fetch(`${base}${signaturePath}`,{headers:{cookie:workerCookie}})).status,401);
     const signatureResponse=await fetch(`${base}${signaturePath}`,{headers:{cookie}});
     assert.equal(signatureResponse.status,200);assert.deepEqual(Buffer.from(await signatureResponse.arrayBuffer()),photo);
+    const checkPreview=await fetch(`${base}${signaturePath}&preview=1`,{headers:{cookie}});assert.equal(checkPreview.headers.get('content-type'),'image/png');assert.equal(checkPreview.headers.get('content-disposition'),null);assert.deepEqual(Buffer.from(await checkPreview.arrayBuffer()),photo);assert.equal((await fetch(`${base}${signaturePath}&preview=1`,{headers:{cookie:workerCookie}})).status,401);
     assert.equal((await fetch(`${base}/api/sites/${other.id}/self-checks/${own.id}/signature?date=${checked.check.date}`,{headers:{cookie}})).status,404);
     assert.deepEqual(await (await fetch(`${base}/api/sites/${other.id}/self-checks?date=${checked.check.date}`,{headers:{cookie}})).json(),[]);
     assert.equal((await fetch(`${base}/api/sites/${site.id}/self-checks?date=2024-02-30`,{headers:{cookie}})).status,400);
