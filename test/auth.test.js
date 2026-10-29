@@ -275,6 +275,9 @@ test('관리자 인증 모드가 문서 API를 보호하고 로그아웃을 적�
     const submitStop=data=>fetch(`${base}/api/worker/work-stops`,{method:'POST',headers:{cookie:workerCookie,'content-type':'application/json'},body:JSON.stringify(data)});
     const image=new PNG({width:1,height:1});image.data[3]=255;
     const photo=PNG.sync.write(image),blank=PNG.sync.write(new PNG({width:1,height:1}));
+    const morningAnswers=Array.from({length:9},()=>({answer:'',note:''}));const morningDoc=await (await post('/api/documents',{siteId:site.id,type:'checklist',title:'가상 07시 점검',date:'2041-01-01',details:{kind:'morning',answers:morningAnswers}})).json();
+    const morningUpload=await fetch(`${base}/api/documents/${morningDoc.id}/attachments?category=morning_hazard_photo`,{method:'POST',headers:{cookie,'x-file-name':encodeURIComponent('가상.png')},body:photo});assert.equal(morningUpload.status,201);const morningPhotoId=(await morningUpload.json()).id,morningPhotoUrl=`${base}/api/documents/${morningDoc.id}/checklist-photos/${morningPhotoId}`;
+    assert.equal((await fetch(morningPhotoUrl,{headers:{cookie:workerCookie}})).status,401);const morningPhoto=await fetch(morningPhotoUrl,{headers:{cookie}});assert.equal(morningPhoto.headers.get('content-type'),'image/png');assert.deepEqual(Buffer.from(await morningPhoto.arrayBuffer()),photo);assert.equal((await fetch(`${base}/api/documents/${windDocument.id}/checklist-photos/${morningPhotoId}`,{headers:{cookie}})).status,404);
     const sitePhotoPath=`${base}/api/site-photos?siteId=${site.id}`,photoUpload=()=>fetch(sitePhotoPath,{method:'POST',headers:{cookie,'x-file-name':encodeURIComponent('가상.png')},body:photo});
     assert.equal((await fetch(sitePhotoPath,{headers:{cookie:workerCookie}})).status,401);
     const sitePhotoResponse=await photoUpload();assert.equal(sitePhotoResponse.status,201);const sitePhotoId=(await sitePhotoResponse.json()).id,photoItem=`${base}/api/site-photos/${sitePhotoId}?siteId=${site.id}`;

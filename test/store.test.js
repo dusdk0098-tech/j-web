@@ -192,6 +192,16 @@ test('07시 시험 체크리스트는 필수 인원과 선택 항목을 확인�
   const s=new Store(':memory:');try{const site=s.createSite({name:'가상 현장'}),answers=Array.from({length:9},()=>({answer:'',note:''})),input={siteId:site.id,type:'checklist',title:'가상 일일 점검',date:'2026-10-29',details:{kind:'morning',answers}};const doc=s.createDocument(input);assert.throws(()=>s.transition(doc.id,'submit'),/필수/);for(const i of [1,2,3,4,6])answers[i].answer='O';answers[0].answer='가상 공정 3명';answers[7].answer='가상 조치';s.updateDocument(doc.id,input);assert.equal(s.transition(doc.id,'submit').status,'pending');assert.equal(JSON.parse(s.document(doc.id).details).answers[7].answer,'가상 조치');}finally{s.close();}
 });
 
+test('07시 점검 사진은 해당 항목에 연결되고 점검 종류 변경을 보호한다',()=>{
+  const s=new Store(':memory:');try{
+    const site=s.createSite({name:'가상 현장'}),answers=Array.from({length:9},()=>({answer:'',note:''})),input={siteId:site.id,type:'checklist',title:'가상 점검',date:'2041-01-01',details:{kind:'morning',answers}},doc=s.createDocument(input),other=s.createDocument({...input,details:{kind:'rain',answers:answers.slice(0,7)}}),image=new PNG({width:1,height:1});image.data[3]=255;const bytes=PNG.sync.write(image);
+    assert.throws(()=>s.addAttachment(other.id,'사진.png',bytes,'morning_hazard_photo'),/첨부 구분/);assert.throws(()=>s.addAttachment(doc.id,'사진.png',Buffer.from('bad'),'morning_hazard_photo'),/PNG/);
+    const file=s.addAttachment(doc.id,'가상.png',bytes,'morning_hazard_photo');assert.equal(s.attachments(doc.id)[0].category,'morning_hazard_photo');
+    assert.throws(()=>s.updateDocument(doc.id,{...input,details:{kind:'rain',answers:answers.slice(0,7)}}),/사진/);assert.equal(JSON.parse(s.document(doc.id).details).kind,'morning');assert.deepEqual(Buffer.from(s.attachment(file).data),bytes);
+    for(const i of [1,2,3,4,6])answers[i].answer='O';answers[0].answer='가상 공정';s.updateDocument(doc.id,input);s.transition(doc.id,'submit');assert.throws(()=>s.deleteAttachment(file),/첨부파일/);assert.equal(s.attachments(doc.id)[0].category,'morning_hazard_photo');
+  }finally{s.close();}
+});
+
 test('우천시 시험 체크리스트는 필수 답변을 확인하고 이전 기록을 보존한다',()=>{
   const s=new Store(':memory:');try{const site=s.createSite({name:'가상 현장'}),answers=Array.from({length:7},(_,i)=>({answer:i===0?'':'O',note:''})),input={siteId:site.id,type:'checklist',title:'가상 우천 점검',date:'2026-10-29',details:{kind:'rain',answers}};const doc=s.createDocument(input);assert.throws(()=>s.transition(doc.id,'submit'),/필수/);assert.throws(()=>s.updateDocument(doc.id,{...input,details:{kind:'rain',answers:answers.map((a,i)=>i===1?{...a,answer:'해당없음'}:a)}}),/답변/);answers[0].answer='X';s.updateDocument(doc.id,input);assert.equal(s.transition(doc.id,'submit').status,'pending');assert.equal(JSON.parse(s.document(doc.id).details).answers[0].answer,'X');}finally{s.close();}
 });

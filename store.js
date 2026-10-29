@@ -858,8 +858,8 @@ export class Store {
     if (!doc || !['draft','rejected'].includes(doc.status)) throw new Error('임시저장 또는 반려된 문서에만 첨부할 수 있습니다.');
     if (typeof name!=='string' || !name.trim() || name.length>200 || /[\\/\x00-\x1f\x7f]/.test(name)) throw new Error('파일 이름을 확인해 주세요.');
     if (!(data instanceof Uint8Array) || data.length===0 || data.length>2*1024*1024) throw new Error('파일은 1바이트 이상 2MB 이하여야 합니다.');
-    if(!['general','plan_diagram'].includes(category)||category==='plan_diagram'&&doc.type!=='work_plan')throw new Error('첨부 구분을 확인해 주세요.');
-    if(category==='plan_diagram'){const bytes=Buffer.from(data);if(!bytes.subarray(0,8).equals(Buffer.from('89504e470d0a1a0a','hex'))&&!bytes.subarray(0,3).equals(Buffer.from('ffd8ff','hex')))throw new Error('계획도는 PNG 또는 JPEG를 선택해 주세요.');}
+    if(!['general','plan_diagram','morning_hazard_photo'].includes(category)||category==='plan_diagram'&&doc.type!=='work_plan'||category==='morning_hazard_photo'&&(doc.type!=='checklist'||JSON.parse(doc.details).kind!=='morning'))throw new Error('첨부 구분을 확인해 주세요.');
+    if(['plan_diagram','morning_hazard_photo'].includes(category)){const bytes=Buffer.from(data);if(!bytes.subarray(0,8).equals(Buffer.from('89504e470d0a1a0a','hex'))&&!bytes.subarray(0,3).equals(Buffer.from('ffd8ff','hex')))throw new Error('시험 이미지는 PNG 또는 JPEG를 선택해 주세요.');}
     if (this.attachments(id).length>=20) throw new Error('첨부파일은 문서당 20개까지 가능합니다.');
     this.db.exec('BEGIN IMMEDIATE');try{const attachmentId=this.db.prepare('INSERT INTO attachments(document_id,name,data,category) VALUES(?,?,?,?)').run(Number(id),name,data,category).lastInsertRowid;if(doc.type==='checklist')this.db.prepare('DELETE FROM checklist_signatures WHERE document_id=?').run(Number(id));this.db.exec('COMMIT');return attachmentId;}catch(error){this.db.exec('ROLLBACK');throw error;}
   }
@@ -877,6 +877,7 @@ export class Store {
     if (current.status !== 'draft' && current.status !== 'rejected') throw new Error('임시저장 또는 반려된 문서만 수정할 수 있습니다.');
     const d = recordInput(input);
     if (d.siteId !== current.site_id || d.type !== current.type) throw new Error('문서의 현장과 유형은 변경할 수 없습니다.');
+    if(d.type==='checklist'&&d.details.kind!=='morning'&&this.db.prepare("SELECT 1 FROM attachments WHERE document_id=? AND category='morning_hazard_photo' LIMIT 1").get(Number(id)))throw new Error('점검 항목 사진을 삭제한 뒤 점검 종류를 변경해 주세요.');
     this.validatePlanEquipment(d);
     this.validateSafetyMeeting(d,current);
     this.validateInstructionRecipient(d);
