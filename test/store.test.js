@@ -1259,6 +1259,15 @@ test('승인된 위험요인의 개선 정보는 후속 수정해도 결재 사�
   }finally{s.close();}
 });
 
+test('여러 위험요인 개선 정보는 모두 검증한 뒤 저장하고 이전 변경을 덮어쓰지 않는다',()=>{
+  const s=new Store(':memory:');try{
+    const site=s.createSite({name:'가상 현장'}),other=s.createSite({name:'다른 현장'}),doc=s.createDocument({siteId:site.id,type:'risk',title:'가상 평가',date:'2026-10-29',details:{items:[{task:'첫 작업',dueDate:'2026-10-30',responsible:'기존 담당'},{task:'둘째 작업'}]}}),previous=(dueDate='',completionDate='',responsible='')=>({dueDate,completionDate,responsible}),changes=[{index:0,dueDate:'2026-11-01',completionDate:'',responsible:'새 담당',previous:previous('2026-10-30','','기존 담당')},{index:1,dueDate:'',completionDate:'2026-11-02',responsible:'다른 담당',previous:previous()}],input={siteId:site.id,changes};
+    assert.throws(()=>s.updateRiskImprovement(doc.id,input),/승인/);s.transition(doc.id,'submit');const cycle=s.document(doc.id).approval_cycle_id;s.transition(doc.id,'approve');
+    const before=s.document(doc.id).details;assert.throws(()=>s.updateRiskImprovement(doc.id,{...input,siteId:other.id}),/현장/);assert.throws(()=>s.updateRiskImprovement(doc.id,{...input,changes:[changes[0],{...changes[1],completionDate:'2026-02-30'}]}),/날짜/);assert.throws(()=>s.updateRiskImprovement(doc.id,{...input,changes:[changes[0],changes[0]]}),/위험요인/);assert.equal(s.document(doc.id).details,before);
+    const result=JSON.parse(s.updateRiskImprovement(doc.id,input).details);assert.equal(result.items[0].responsible,'새 담당');assert.equal(result.items[1].completionDate,'2026-11-02');assert.throws(()=>s.updateRiskImprovement(doc.id,input),/다른 변경/);assert.equal(JSON.parse(s.approvalCycle(doc.id,cycle).document.details).items[0].responsible,'기존 담당');
+  }finally{s.close();}
+});
+
 test('위험요인의 등록 협력사는 현장별로 검증되고 결재 당시 이름이 보존된다',()=>{
   const s=new Store(':memory:');try{
     const site=s.createSite({name:'가상 현장 A'}),other=s.createSite({name:'가상 현장 B'}),company=s.createCompany({siteId:site.id,name:'가상 업체 A',trade:'가상 공종'}),foreign=s.createCompany({siteId:other.id,name:'다른 현장 업체',trade:'가상 공종'}),reviewer=s.createReviewer({siteId:site.id,loginId:'risk_company_review',name:'가상 결재자',password:'virtual-password-123'});

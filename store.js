@@ -1251,11 +1251,16 @@ export class Store {
     const doc=this.document(documentId);
     if(!doc||doc.type!=='risk'||doc.site_id!==Number(input.siteId))throw new Error('같은 현장의 위험성평가를 확인해 주세요.');
     if(doc.status!=='approved')throw new Error('승인된 위험성평가만 개선 정보를 변경할 수 있습니다.');
-    const details=JSON.parse(doc.details),items=Array.isArray(details.items)?details.items:[details],index=input.index;
-    if(!Number.isSafeInteger(index)||index<0||index>=items.length)throw new Error('위험요인을 확인해 주세요.');
-    const values={};for(const key of ['dueDate','completionDate']){if(typeof input[key]!=='string')throw new Error('개선 날짜를 확인해 주세요.');values[key]=input[key]?dateValue(input[key]):'';}
-    if(typeof input.responsible!=='string'||input.responsible.length>2000)throw new Error('담당자를 확인해 주세요.');values.responsible=input.responsible.trim();
-    Object.assign(items[index],values);
+    const details=JSON.parse(doc.details),items=Array.isArray(details.items)?details.items:[details],batch=input.changes!==undefined,changes=batch?input.changes:[input];
+    if(!Array.isArray(changes)||!changes.length||changes.length>items.length)throw new Error('위험요인을 확인해 주세요.');
+    const indices=new Set(),validated=changes.map(change=>{
+      if(!change||!Number.isSafeInteger(change.index)||change.index<0||change.index>=items.length||indices.has(change.index))throw new Error('위험요인을 확인해 주세요.');indices.add(change.index);
+      const values={};for(const key of ['dueDate','completionDate']){if(typeof change[key]!=='string')throw new Error('개선 날짜를 확인해 주세요.');values[key]=change[key]?dateValue(change[key]):'';}
+      if(typeof change.responsible!=='string'||change.responsible.length>2000)throw new Error('담당자를 확인해 주세요.');values.responsible=change.responsible.trim();
+      if(batch&&(!change.previous||['dueDate','completionDate','responsible'].some(key=>typeof change.previous[key]!=='string'||change.previous[key]!==String(items[change.index][key]||''))))throw new Error('다른 변경이 있어 다시 확인해 주세요.');
+      return {index:change.index,values};
+    });
+    for(const change of validated)Object.assign(items[change.index],change.values);
     this.db.prepare('UPDATE documents SET details=?,updated_at=CURRENT_TIMESTAMP WHERE id=?').run(JSON.stringify(details),doc.id);
     return this.document(doc.id);
   }
