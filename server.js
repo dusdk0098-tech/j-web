@@ -215,6 +215,8 @@ const server = http.createServer(async (req, res) => {
       let name;try{name=decodeURIComponent(req.headers['x-file-name']||'');}catch{throw new Error('사진 이름을 확인해 주세요.');}
       return json(res,201,{id:store.addWorkerInstructionPhoto(session.worker.id,id,url.searchParams.get('phase'),name,Buffer.concat(chunks))});
     }
+    const workerMeetingFile=url.pathname.match(/^\/api\/worker\/meetings\/(\d+)\/attachments\/(\d+)$/);
+    if(workerMeetingFile&&req.method==='GET'){const key=workerKey(workerToken),session=workerSessions.get(key);if(!session||session.expires<=Date.now()){workerSessions.delete(key);return json(res,401,{error:'근로자 로그인이 필요합니다.'});}const file=store.workerMeetingAttachment(session.worker.id,workerMeetingFile[1],workerMeetingFile[2]);if(!file)return json(res,404,{error:'첨부파일을 찾을 수 없습니다.'});const name=encodeURIComponent(file.name).replace(/[!'()*]/g,c=>`%${c.charCodeAt(0).toString(16).toUpperCase()}`);res.writeHead(200,{'Content-Type':'application/octet-stream','Content-Disposition':`attachment; filename="attachment"; filename*=UTF-8''${name}`,'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(file.data);}
     if(url.pathname==='/api/worker/meetings'&&['GET','POST'].includes(req.method)){
       const key=workerKey(workerToken),session=workerSessions.get(key);if(!session||session.expires<=Date.now()){workerSessions.delete(key);return json(res,401,{error:'근로자 로그인이 필요합니다.'});}
       if(req.method==='GET')return json(res,200,store.workerMeetings(session.worker.id));

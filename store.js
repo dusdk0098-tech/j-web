@@ -581,8 +581,9 @@ export class Store {
   }
   workerMeetings(workerId){
     const rows=this.db.prepare("SELECT d.id,d.type,d.title,d.date,d.body,d.details,c.created_at FROM workers w JOIN documents d ON d.site_id=w.site_id LEFT JOIN worker_meeting_checks c ON c.document_id=d.id AND c.worker_id=w.id WHERE w.id=? AND d.type IN ('work_council','safety_meeting') AND d.status='approved' ORDER BY d.date DESC,d.id DESC").all(Number(workerId));
-    return rows.map(row=>{const details=JSON.parse(row.details);return {...row,details:{place:details.place||'',timeFrom:details.timeFrom||'',timeTo:details.timeTo||'',host:details.host||'',decisions:details.decisions||'',discussion:details.discussion||''},selected:(details.workerSnapshot||[]).some(person=>person.id===Number(workerId))};}).filter(row=>row.selected).map(({selected,...row})=>row);
+    return rows.map(row=>{const details=JSON.parse(row.details);return {...row,details:{place:details.place||'',timeFrom:details.timeFrom||'',timeTo:details.timeTo||'',host:details.host||'',decisions:details.decisions||'',discussion:details.discussion||''},selected:(details.workerSnapshot||[]).some(person=>person.id===Number(workerId))};}).filter(row=>row.selected).map(({selected,...row})=>({...row,files:this.attachments(row.id).map(({id,name,size})=>({id,name,size}))}));
   }
+  workerMeetingAttachment(workerId,documentId,fileId){if(!this.workerMeetings(workerId).some(row=>row.id===Number(documentId)))return null;const file=this.attachment(fileId);return file?.document_id===Number(documentId)?file:null;}
   confirmWorkerMeeting(workerId,documentId,signature){
     if(!Number.isSafeInteger(documentId)||!this.workerMeetings(workerId).some(row=>row.id===documentId))throw new Error('지정된 승인 회의를 확인해 주세요.');
     const bytes=signatureBytes(signature);this.db.prepare('INSERT OR IGNORE INTO worker_meeting_checks(document_id,worker_id,signature) VALUES(?,?,?)').run(documentId,Number(workerId),bytes);
