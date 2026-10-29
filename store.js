@@ -213,6 +213,11 @@ export class Store {
     month=monthValue(month);
     return this.db.prepare("SELECT w.id,w.name,COUNT(*) AS count,SUM(m.price) AS total FROM meal_checks m JOIN workers w ON w.id=m.worker_id AND w.site_id=m.site_id WHERE m.site_id=? AND m.date BETWEEN ? AND ? GROUP BY w.id,w.name ORDER BY w.name,w.id").all(Number(siteId),`${month}-01`,`${month}-31`);
   }
+  workerMonthlyMealChecks(siteId,workerId,month) {
+    month=monthValue(month);siteId=Number(siteId);workerId=Number(workerId);
+    if(!this.db.prepare('SELECT 1 FROM workers WHERE id=? AND site_id=?').get(workerId,siteId))throw new Error('선택한 현장의 출입자를 확인해 주세요.');
+    return this.db.prepare('SELECT id,date,kind,restaurant_name,price FROM meal_checks WHERE site_id=? AND worker_id=? AND date BETWEEN ? AND ? ORDER BY date,kind').all(siteId,workerId,`${month}-01`,`${month}-31`);
+  }
   saveMealCheck(input) {
     const siteId=Number(input.siteId),workerId=Number(input.workerId),date=dateValue(input.date),kind=input.kind;
     if(!['breakfast','lunch','dinner','snack'].includes(kind))throw new Error('식사 종류를 확인해 주세요.');
