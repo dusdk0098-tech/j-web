@@ -558,7 +558,7 @@ const server = http.createServer(async (req, res) => {
       if (req.method === 'PUT' && part === 'training-targets') {const input=await body(req);store.setTrainingTargets(id,input.workerIds);return json(res,200,{ok:true});}
       if (req.method === 'GET' && !part) { const d=store.document(id); return d ? json(res,200,d) : json(res,404,{error:'문서를 찾을 수 없습니다.'}); }
       if (req.method === 'PUT' && !part) return json(res,200,store.updateDocument(id,await body(req)));
-      if (req.method === 'POST' && part === 'transition') {const input=await body(req);return json(res,200,store.transition(id,input.action,input.opinion));}
+      if (req.method === 'POST' && part === 'transition') {const input=await body(req);return json(res,200,input.action==='approve'?store.approveDocument(id,input.opinion,input.signature):store.transition(id,input.action,input.opinion));}
     }
     return json(res,404,{error:'요청한 경로가 없습니다.'});
   } catch (e) { return json(res,400,{error:e.message || '요청을 처리하지 못했습니다.'}); }

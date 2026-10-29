@@ -97,7 +97,8 @@ test('관리자 인증 모드가 문서 API를 보호하고 로그아웃을 적�
     const login=await fetch(`${base}/api/login`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({password:'test-password-12345'})});
     assert.equal(login.status,200);const cookie=login.headers.get('set-cookie').split(';')[0];
     assert.equal((await fetch(`${base}/api/sites`,{headers:{cookie}})).status,200);
-    const post=async(path,data)=>fetch(`${base}${path}`,{method:'POST',headers:{cookie,'content-type':'application/json'},body:JSON.stringify(data)});
+    const batchPng=new PNG({width:1,height:1});batchPng.data[3]=255;const batchBytes=PNG.sync.write(batchPng),batchSignature=`data:image/png;base64,${batchBytes.toString('base64')}`;
+    const post=async(path,data)=>fetch(`${base}${path}`,{method:'POST',headers:{cookie,'content-type':'application/json'},body:JSON.stringify(data.action==='approve'?{...data,signature:batchSignature}:data)});
     const site=await (await post('/api/sites',{name:'가상 현장'})).json();
     const restaurantPath=`${base}/api/restaurants?siteId=${site.id}`;
     assert.equal((await fetch(restaurantPath)).status,401);
@@ -115,7 +116,6 @@ test('관리자 인증 모드가 문서 API를 보호하고 로그아웃을 적�
     await post(`/api/documents/${instruction.id}/transition`,{action:'submit'});
     assert.equal((await fetch(`${base}/api/documents/batch-approve`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({siteId:site.id,ids:[instruction.id]})})).status,401);
     assert.equal((await post('/api/documents/batch-approve',{siteId:site.id,ids:[instruction.id]})).status,400);
-    const batchPng=new PNG({width:1,height:1});batchPng.data[3]=255;const batchBytes=PNG.sync.write(batchPng),batchSignature=`data:image/png;base64,${batchBytes.toString('base64')}`;
     assert.equal((await post('/api/documents/batch-approve',{siteId:site.id,ids:[instruction.id],signature:batchSignature})).status,200);assert.equal((await (await fetch(`${base}/api/documents/${instruction.id}`,{headers:{cookie}})).json()).status,'approved');
     const batchEvent=(await (await fetch(`${base}/api/documents/${instruction.id}/events`,{headers:{cookie}})).json()).at(-1),batchSignatureUrl=`${base}/api/documents/${instruction.id}/events/${batchEvent.id}/signature`;assert.equal(batchEvent.has_signature,1);assert.equal((await fetch(batchSignatureUrl)).status,401);assert.deepEqual(Buffer.from(await (await fetch(batchSignatureUrl,{headers:{cookie}})).arrayBuffer()),batchBytes);assert.equal((await fetch(`${base}/api/documents/999999/events/${batchEvent.id}/signature`,{headers:{cookie}})).status,404);
     assert.equal((await post(resultPath,resultInput)).status,201);assert.equal((await (await fetch(`${base}${resultPath}`,{headers:{cookie}})).json()).content,'시험 조치');
@@ -268,7 +268,9 @@ test('관리자 인증 모드가 문서 API를 보호하고 로그아웃을 적�
     const assigned=await (await post('/api/documents',{siteId:site.id,type:'instruction',title:'가상 근로자 지시',date:'2026-10-29',body:'가상 내용',details:{companyId:recipientCompany.id,recipientId:own.id}})).json();
     const unapproved=await (await post('/api/documents',{siteId:site.id,type:'instruction',title:'미승인 지시',date:'2026-10-29',details:{companyId:recipientCompany.id,recipientId:own.id}})).json();
     const attachmentBytes=Buffer.from('가상 지시 첨부');const uploadedInstruction=await fetch(`${base}/api/documents/${assigned.id}/attachments`,{method:'POST',headers:{cookie,'x-file-name':encodeURIComponent('가상.txt')},body:attachmentBytes});assert.equal(uploadedInstruction.status,201);const attachmentId=(await uploadedInstruction.json()).id;
-    await post(`/api/documents/${assigned.id}/transition`,{action:'submit'});await post(`/api/documents/${assigned.id}/transition`,{action:'approve'});
+    await post(`/api/documents/${assigned.id}/transition`,{action:'submit'});
+    const individualPath=`${base}/api/documents/${assigned.id}/transition`,noSignature=await fetch(individualPath,{method:'POST',headers:{cookie,'content-type':'application/json'},body:JSON.stringify({action:'approve'})});assert.equal(noSignature.status,400);assert.equal((await (await fetch(`${base}/api/documents/${assigned.id}`,{headers:{cookie}})).json()).status,'pending');
+    assert.equal((await post(`/api/documents/${assigned.id}/transition`,{action:'approve',opinion:'가상 검토'})).status,200);const individualEvent=(await (await fetch(`${base}/api/documents/${assigned.id}/events`,{headers:{cookie}})).json()).at(-1);assert.equal(individualEvent.opinion,'가상 검토');assert.equal(individualEvent.has_signature,1);assert.deepEqual(Buffer.from(await (await fetch(`${base}/api/documents/${assigned.id}/events/${individualEvent.id}/signature`,{headers:{cookie}})).arrayBuffer()),batchBytes);
     const workerInstructions=()=>fetch(`${base}/api/worker/instructions`,{headers:{cookie:workerCookie}}),reply=data=>fetch(`${base}/api/worker/instructions`,{method:'POST',headers:{cookie:workerCookie,'content-type':'application/json'},body:JSON.stringify(data)});
     assert.equal((await fetch(`${base}/api/worker/instructions`)).status,401);
     assert.deepEqual((await (await workerInstructions()).json()).map(row=>row.id),[assigned.id]);

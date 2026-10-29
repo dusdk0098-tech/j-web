@@ -1026,6 +1026,7 @@ export class Store {
     } catch (err) { this.db.exec('ROLLBACK TO document_transition');this.db.exec('RELEASE document_transition');throw err; }
     return this.document(id);
   }
+  approveDocument(id,opinion,signature){return this.transition(id,'approve',opinion,signatureBytes(signature));}
   approveDocuments(siteId,ids,signature){
     if(!Number.isSafeInteger(siteId)||siteId<1||!Array.isArray(ids)||!ids.length||ids.length>100||ids.some(id=>!Number.isSafeInteger(id)||id<1)||new Set(ids).size!==ids.length)throw new Error('선택한 시험 문서를 확인해 주세요.');
     const bytes=signatureBytes(signature);
