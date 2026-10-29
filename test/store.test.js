@@ -1136,6 +1136,16 @@ test('교육 참가 확인은 현장과 날짜 및 교육 종류에 맞는 대�
   } finally {s.close();}
 });
 
+test('가상 작업계획서 복사는 출처와 연결을 유지하고 결재·첨부를 분리한다',()=>{
+  const s=new Store(':memory:');try{
+    const site=s.createSite({name:'가상 현장'}),other=s.createSite({name:'다른 현장'}),asset=s.createEquipment({siteId:site.id,kind:'가상 장비',model:'가상 모델',capacity:'',manufacturer:'',registration:''}),worker=s.createWorker({siteId:site.id,name:'가상 작업자',category:'직영',company:'가상 업체',occupation:'가상 직종'}),source=s.createDocument({siteId:site.id,type:'work_plan',title:'가상 계획',date:'2026-10-29',body:'가상 작업',details:{equipmentIds:[asset.id],periodFrom:'2026-10-30',periodTo:'2026-11-01',workers:[{workerId:worker.id,role:'운전원',training:'가상 교육',qualification:'가상 자격'}]}});
+    s.addAttachment(source.id,'가상.txt',Buffer.from('가상'));s.addEquipmentCheck(source.id,{equipmentId:asset.id,date:'2026-10-30',items:[{name:'가상 점검',result:'적정'}]});s.transition(source.id,'submit');
+    const input={siteId:site.id,title:'가상 복사본',date:'2026-11-02'},copy=s.copyWorkPlan(source.id,input),details=JSON.parse(copy.details);assert.equal(copy.status,'draft');assert.equal(copy.copied_from,source.id);assert.equal(copy.body,'가상 작업');assert.equal(details.periodFrom,'2026-10-30');assert.deepEqual(details.equipmentIds,[asset.id]);assert.equal(details.workers[0].workerId,worker.id);assert.deepEqual(s.attachments(copy.id),[]);assert.deepEqual(s.equipmentChecks(copy.id),[]);assert.deepEqual(s.approvalLine(copy.id),[]);assert.deepEqual(s.events(copy.id),[]);assert.equal(s.documents(site.id,'work_plan').find(row=>row.id===copy.id).copied_from,source.id);assert.equal(s.document(source.id).status,'pending');
+    assert.throws(()=>s.copyWorkPlan(source.id,{...input,siteId:other.id}),/같은 현장/);assert.throws(()=>s.copyWorkPlan(source.id,{...input,date:'2026-02-30'}),/날짜/);const wrong=s.createDocument({siteId:site.id,type:'tbm',title:'다른 유형',date:'2026-10-29'});assert.throws(()=>s.copyWorkPlan(wrong.id,input),/계획서/);
+    const count=s.documents(site.id,'work_plan').length;s.db.exec("CREATE TRIGGER fail_work_plan_copy BEFORE INSERT ON work_plan_copies BEGIN SELECT RAISE(ABORT,'복사 시험 실패'); END");assert.throws(()=>s.copyWorkPlan(source.id,input),/복사 시험 실패/);assert.equal(s.documents(site.id,'work_plan').length,count);
+  }finally{s.close();}
+});
+
 test('장비 점검자 시험 서명은 점검별로 저장하고 결재 당시 보존한다',()=>{
   const s=new Store(':memory:');try{
     const site=s.createSite({name:'가상 현장'}),asset=s.createEquipment({siteId:site.id,kind:'가상 장비',model:'가상 모델',capacity:'',manufacturer:'',registration:''}),doc=s.createDocument({siteId:site.id,type:'work_plan',title:'가상 계획',date:'2026-10-29',details:{equipmentIds:[asset.id]}}),png=new PNG({width:1,height:1});png.data[3]=255;const bytes=PNG.sync.write(png),signature=`data:image/png;base64,${bytes.toString('base64')}`,check={equipmentId:asset.id,date:'2026-10-29',items:[{name:'가상 항목',result:'적정'}]};

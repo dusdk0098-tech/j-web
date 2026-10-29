@@ -81,6 +81,7 @@ export class Store {
       CREATE TABLE IF NOT EXISTS worker_files (id INTEGER PRIMARY KEY,worker_id INTEGER NOT NULL REFERENCES workers(id),category TEXT NOT NULL,name TEXT NOT NULL,data BLOB NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
       CREATE TABLE IF NOT EXISTS attendance (worker_id INTEGER NOT NULL REFERENCES workers(id), date TEXT NOT NULL, present INTEGER NOT NULL CHECK(present IN (0,1)), updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY(worker_id,date));
       CREATE TABLE IF NOT EXISTS documents (id INTEGER PRIMARY KEY, site_id INTEGER NOT NULL REFERENCES sites(id), type TEXT NOT NULL, title TEXT NOT NULL, date TEXT NOT NULL, body TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'draft', updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+      CREATE TABLE IF NOT EXISTS work_plan_copies (document_id INTEGER PRIMARY KEY REFERENCES documents(id),source_document_id INTEGER NOT NULL REFERENCES documents(id));
       CREATE TABLE IF NOT EXISTS reviewers (id INTEGER PRIMARY KEY,site_id INTEGER NOT NULL REFERENCES sites(id),login_id TEXT NOT NULL UNIQUE,name TEXT NOT NULL,salt BLOB NOT NULL,password_hash BLOB NOT NULL,active INTEGER NOT NULL DEFAULT 1 CHECK(active IN (0,1)));
       CREATE TABLE IF NOT EXISTS approval_steps (document_id INTEGER NOT NULL REFERENCES documents(id),position INTEGER NOT NULL,reviewer_id INTEGER NOT NULL REFERENCES reviewers(id),state TEXT NOT NULL DEFAULT 'pending' CHECK(state IN ('pending','approved','rejected')),PRIMARY KEY(document_id,position),UNIQUE(document_id,reviewer_id));
       CREATE TABLE IF NOT EXISTS approval_cycles (id INTEGER PRIMARY KEY,document_id INTEGER NOT NULL REFERENCES documents(id),document_json TEXT NOT NULL,attachments_json TEXT NOT NULL,linked_json TEXT NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
@@ -937,7 +938,7 @@ export class Store {
     if(from)from=dateValue(from);if(to)to=dateValue(to);
     if(from && to && from>to)throw new Error('조회 시작일은 종료일보다 늦을 수 없습니다.');
     siteId=Number(siteId);if(!this.db.prepare('SELECT 1 FROM sites WHERE id=?').get(siteId))throw new Error('현장을 선택해 주세요.');
-    return this.db.prepare("SELECT documents.*,EXISTS(SELECT 1 FROM approval_steps WHERE document_id=documents.id) AS has_approval_line FROM documents WHERE (site_id=? OR (type='basic' AND status='approved' AND json_extract(details,'$.shared')=1)) AND (?='' OR type=?) AND (title LIKE ? OR body LIKE ? OR details LIKE ?) AND (?='' OR date>=?) AND (?='' OR date<=?) ORDER BY date DESC,id DESC").all(siteId,type,type,...Array(3).fill(`%${query}%`),from,from,to,to);
+    return this.db.prepare("SELECT documents.*,EXISTS(SELECT 1 FROM approval_steps WHERE document_id=documents.id) AS has_approval_line,(SELECT source_document_id FROM work_plan_copies WHERE document_id=documents.id) AS copied_from FROM documents WHERE (site_id=? OR (type='basic' AND status='approved' AND json_extract(details,'$.shared')=1)) AND (?='' OR type=?) AND (title LIKE ? OR body LIKE ? OR details LIKE ?) AND (?='' OR date>=?) AND (?='' OR date<=?) ORDER BY date DESC,id DESC").all(siteId,type,type,...Array(3).fill(`%${query}%`),from,from,to,to);
   }
   previousDailyReport(siteId, before) {
     before=dateValue(before);
@@ -1088,7 +1089,11 @@ export class Store {
     const id = this.db.prepare('INSERT INTO documents(site_id,type,title,date,body,details) VALUES(?,?,?,?,?,?)').run(d.siteId,d.type,d.title,d.date,d.body,JSON.stringify(d.details)).lastInsertRowid;
     return this.document(id);
   }
-  document(id) { return this.db.prepare('SELECT * FROM documents WHERE id=?').get(Number(id)); }
+  document(id) { return this.db.prepare('SELECT documents.*,(SELECT source_document_id FROM work_plan_copies WHERE document_id=documents.id) AS copied_from FROM documents WHERE id=?').get(Number(id)); }
+  copyWorkPlan(id,input){
+    const source=this.document(id);if(!source||source.type!=='work_plan'||source.site_id!==Number(input.siteId))throw new Error('같은 현장의 작업계획서를 확인해 주세요.');
+    this.db.exec('SAVEPOINT copy_work_plan');try{const copy=this.createDocument({siteId:source.site_id,type:'work_plan',title:input.title,date:input.date,body:source.body,details:JSON.parse(source.details)});this.db.prepare('INSERT INTO work_plan_copies(document_id,source_document_id) VALUES(?,?)').run(copy.id,source.id);this.db.exec('RELEASE copy_work_plan');return this.document(copy.id);}catch(error){this.db.exec('ROLLBACK TO copy_work_plan');this.db.exec('RELEASE copy_work_plan');throw error;}
+  }
   permitChecks(documentId){const doc=this.document(documentId);if(!doc||doc.type!=='permit')throw new Error('시험 작업허가서를 확인해 주세요.');return this.db.prepare('SELECT * FROM permit_checks WHERE document_id=? ORDER BY date DESC,id DESC').all(Number(documentId)).map(row=>({...row,items:JSON.parse(row.items)}));}
   savePermitCheck(documentId,input,id=null){
     this.permitChecks(documentId);const date=dateValue(input.date);if(!Array.isArray(input.items)||input.items.length<1||input.items.length>20)throw new Error('점검 항목은 1개부터 20개까지 입력해 주세요.');

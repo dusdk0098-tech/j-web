@@ -548,6 +548,8 @@ const server = http.createServer(async (req, res) => {
       if (req.method === 'GET') return json(res,200,store.documents(url.searchParams.get('siteId'),url.searchParams.get('type') || '',url.searchParams.get('q') || '',url.searchParams.get('from') || '',url.searchParams.get('to') || ''));
       if (req.method === 'POST') return json(res,201,store.createDocument(await body(req)));
     }
+    const copyWorkPlan=url.pathname.match(/^\/api\/documents\/(\d+)\/copy-work-plan$/);
+    if(copyWorkPlan&&req.method==='POST')return json(res,201,store.copyWorkPlan(copyWorkPlan[1],await body(req)));
     if (url.pathname === '/api/daily-report/previous' && req.method === 'GET') return json(res,200,store.previousDailyReport(url.searchParams.get('siteId'),url.searchParams.get('before')));
     if (url.pathname === '/api/joint-inspection/previous' && req.method === 'GET') return json(res,200,store.previousJointInspection(url.searchParams.get('siteId'),url.searchParams.get('before')));
     if (url.pathname === '/api/inspection/previous' && req.method === 'GET') return json(res,200,store.previousInspections(url.searchParams.get('siteId'),url.searchParams.get('before'),url.searchParams.get('excludeId')));
