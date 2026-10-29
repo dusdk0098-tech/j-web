@@ -1021,6 +1021,15 @@ test('작업계획서의 역할별 작업자는 현장을 검증하고 당시 �
   }finally{s.close();}
 });
 
+test('위험요인별 시험 검토 의견은 분리 저장되고 결재 요청 당시 보존된다',()=>{
+  const s=new Store(':memory:');try{
+    const site=s.createSite({name:'가상 현장'}),reviewer=s.createReviewer({siteId:site.id,loginId:'risk_opinion_review',name:'가상 결재자',password:'virtual-password-123'}),input={siteId:site.id,type:'risk',title:'가상 평가',date:'2026-10-29',details:{kind:'regular',scale:'3x3',items:[{task:'가상 작업 A',hazard:'위험 A',supervisorOpinion:'감독 의견',safetyOpinion:'안전 의견',healthOpinion:'보건 의견',managerOpinion:'소장 의견'},{task:'가상 작업 B',hazard:'위험 B',safetyOpinion:'다른 의견'}]}};
+    const doc=s.createDocument(input),rows=JSON.parse(doc.details).items;assert.equal(rows[0].supervisorOpinion,'감독 의견');assert.equal(rows[0].managerOpinion,'소장 의견');assert.equal(rows[1].safetyOpinion,'다른 의견');assert.equal(rows[1].managerOpinion,undefined);
+    assert.throws(()=>s.updateDocument(doc.id,{...input,details:{...input.details,items:[{...input.details.items[0],healthOpinion:'x'.repeat(2001)}]}}),/위험성평가/);assert.equal(JSON.parse(s.document(doc.id).details).items[0].healthOpinion,'보건 의견');
+    s.setApprovalLine(doc.id,[reviewer.id]);s.transition(doc.id,'submit');const cycle=s.document(doc.id).approval_cycle_id;s.transition(doc.id,'withdraw');s.updateDocument(doc.id,{...input,details:{...input.details,items:[{...input.details.items[0],safetyOpinion:'수정 의견'}]}});assert.equal(JSON.parse(s.document(doc.id).details).items[0].safetyOpinion,'수정 의견');assert.equal(JSON.parse(s.approvalCycle(doc.id,cycle).document.details).items[0].safetyOpinion,'안전 의견');
+  }finally{s.close();}
+});
+
 test('위험요인과 조치를 저장하고 유효하지 않은 수정은 기존 값을 보존한다',()=>{
   const s=new Store(':memory:');
   try {

@@ -1,7 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { riskScaleOptions, riskScore } from '../public/risk-scale.js';
+import { riskScaleOptions, riskScore, copyRiskItem } from '../public/risk-scale.js';
 import { Store } from '../store.js';
+
+test('이전 위험요인을 가져올 때 검토 의견을 복사하지 않는다',()=>{
+  const original={task:'가상 작업',hazard:'가상 위험',supervisorOpinion:'감독',safetyOpinion:'안전',healthOpinion:'보건',managerOpinion:'소장'},copy=copyRiskItem(original);
+  assert.equal(copy.task,'가상 작업');assert.equal(copy.hazard,'가상 위험');for(const key of ['supervisorOpinion','safetyOpinion','healthOpinion','managerOpinion'])assert.equal(copy[key],'');assert.equal(original.safetyOpinion,'안전');
+});
 
 test('평가 척도별 선택 범위는 서버 저장 규칙과 일치한다', () => {
   const expected = {

@@ -10,3 +10,7 @@ export function riskScore(scale, likelihood, severity) {
   if (!riskScaleOptions(scale, 'likelihood').includes(likelihood) || !riskScaleOptions(scale, 'severity').includes(severity)) return null;
   return Number(likelihood) * Number(severity);
 }
+
+export function copyRiskItem(item){
+  return {...item,supervisorOpinion:'',safetyOpinion:'',healthOpinion:'',managerOpinion:''};
+}
