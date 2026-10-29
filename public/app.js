@@ -621,6 +621,14 @@ async function render(){
     $('#report-group').insertAdjacentHTML('beforeend',`<option value="category" ${state.reportGroup==='category'?'selected':''}>구분별</option>`);
     content.querySelector('.panel-head .muted').textContent='시험 로그인으로 당일 출역이 기록될 수 있으며 관리자가 수정할 수 있습니다. 서명 또는 교육 참가 기록은 생성되지 않습니다.';
     content.querySelectorAll('section:first-child tbody tr').forEach((tr,i)=>{const source=rows[i].source;if(source)tr.cells[4].append(document.createTextNode(source==='login'?' (시험 로그인)':' (관리자 수정)'));});
+    if(rows.length){
+      const section=content.querySelector('section:first-child'),table=section.querySelector('table'),filters=document.createElement('div');
+      filters.className='filters';filters.innerHTML='<label>소속 <select id="attendance-company"><option value="">전체</option></select></label><label>직종 <select id="attendance-occupation"><option value="">전체</option></select></label><label>이름 검색 <input id="attendance-query" type="search"></label><span id="attendance-filter-count" role="status"></span>';
+      table.parentElement.before(filters);
+      for(const key of ['company','occupation']){const select=filters.querySelector(`#attendance-${key}`);for(const value of [...new Set(rows.map(row=>row[key]).filter(Boolean))].sort()){const option=document.createElement('option');option.value=value;option.textContent=value;select.append(option);}}
+      const displayed=[...table.tBodies[0].rows],apply=()=>{const company=filters.querySelector('#attendance-company').value,occupation=filters.querySelector('#attendance-occupation').value,query=filters.querySelector('#attendance-query').value.trim().toLocaleLowerCase();let count=0;displayed.forEach((tr,i)=>{const row=rows[i],match=(!company||row.company===company)&&(!occupation||row.occupation===occupation)&&row.name.toLocaleLowerCase().includes(query);tr.hidden=!match;if(match)count++;});filters.querySelector('#attendance-filter-count').textContent=`검색 결과 ${count}명`;};
+      filters.addEventListener('input',apply);filters.addEventListener('change',apply);apply();
+    }
     content.querySelector('section:first-child').insertAdjacentHTML('beforeend','<p class="muted">시험 공수는 수동 입력이며 빈칸은 미기록입니다. 실제 근로시간이나 급여 계산에 사용하지 않습니다.</p>');
     const month=state.attendanceMonth||date.slice(0,7),monthly=await api(`/api/attendance/month?siteId=${state.siteId}&month=${encodeURIComponent(month)}`);
     const [year,monthNumber]=month.split('-').map(Number),dayCount=new Date(year,monthNumber,0).getDate();
