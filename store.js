@@ -1420,6 +1420,12 @@ export class Store {
     if(doc.type==='risk' && action==='reject' && !opinion)throw new Error('반려 의견을 입력해 주세요.');
     let cycleId=doc.approval_cycle_id||null;this.db.exec('SAVEPOINT document_transition');
     try {
+      if(doc.type==='basic'&&action==='submit'){
+        this.db.prepare('UPDATE basic_document_versions SET version=version WHERE document_id=?').run(doc.id);
+        const current=this.document(id);if(!current||current.basic_version!==doc.basic_version)throw new Error('기본 서류가 변경되었습니다. 다시 조회해 주세요.');
+        const details=JSON.parse(current.details);if(typeof details.category!=='string'||!details.category.trim())throw new Error('기본 서류 분류를 입력해 주세요.');
+        if(!this.attachments(id).length)throw new Error('기본 서류에 첨부파일을 추가해 주세요.');
+      }
       if(action==='submit'&&line.length)this.db.prepare("UPDATE approval_steps SET state='pending' WHERE document_id=?").run(Number(id));
       if(reviewer)this.db.prepare('UPDATE approval_steps SET state=? WHERE document_id=? AND position=?').run(action==='approve'?'approved':'rejected',Number(id),reviewer.position);
       if(doc.type==='work_plan'&&action==='submit'){

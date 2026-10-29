@@ -49,6 +49,13 @@ test('기본 서류 분류 API는 관리자 인증과 변경 확인을 적용한
     assert.equal((await send('/api/basic-categories?siteId=1')).status,401);
     const login=await send('/api/login','POST',{password:'test-password-12345'}),cookie=login.headers.get('set-cookie').split(';')[0];
     const site=await (await send('/api/sites','POST',{name:'가상 현장'},cookie)).json(),url=`/api/basic-categories?siteId=${site.id}`;
+    const draftInput={siteId:site.id,type:'basic',title:'미완성 시험 서류',date:'2026-10-29',details:{}},draft=await (await send('/api/documents','POST',draftInput,cookie)).json(),transition=`/api/documents/${draft.id}/transition`;
+    assert.equal((await send(transition,'POST',{action:'submit'},cookie)).status,400);
+    assert.equal((await send(`/api/documents/${draft.id}`,'PUT',{...draftInput,details:{category:'가상 분류'}},cookie)).status,200);
+    assert.equal((await send(transition,'POST',{action:'submit'},cookie)).status,400);
+    assert.equal((await fetch(base+`/api/documents/${draft.id}/attachments`,{method:'POST',headers:{cookie,'x-file-name':encodeURIComponent('시험.txt')},body:'가상 자료'})).status,201);
+    assert.equal((await send(transition,'POST',{action:'submit'},cookie)).status,200);
+    const complete=await (await send(`/api/documents/${draft.id}`,'GET',undefined,cookie)).json();assert.equal((await send(`/api/documents/${draft.id}`,'DELETE',{siteId:site.id,expectedVersion:complete.basic_version},cookie)).status,200);
     const root=await (await send(url,'POST',{name:'대분류'},cookie)).json(),childCategory=await (await send(url,'POST',{name:'소분류',parentId:root.id},cookie)).json();
     assert.equal((await send(`/api/basic-categories/${childCategory.id}?siteId=${site.id}`,'PUT',{name:'바뀐 분류'},cookie)).status,200);
     const doc=await (await send('/api/documents','POST',{siteId:site.id,type:'basic',title:'시험 문서',date:'2026-10-29',details:{categoryId:childCategory.id}},cookie)).json();
