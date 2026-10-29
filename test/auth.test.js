@@ -90,6 +90,7 @@ test('관리자 인증 모드가 문서 API를 보호하고 로그아웃을 적�
     const scaleModule=await fetch(`${base}/risk-scale.js`);assert.equal(scaleModule.status,200);assert.match(scaleModule.headers.get('content-type'),/text\/javascript/);assert.match(await scaleModule.text(),/export function riskScaleOptions/);
     const batchModule=await fetch(`${base}/batch-print.js`);assert.equal(batchModule.status,200);assert.match(batchModule.headers.get('content-type'),/text\/javascript/);assert.match(await batchModule.text(),/export function selectBatchDocuments/);
     const workerLinkModule=await fetch(`${base}/worker-link.js`);assert.equal(workerLinkModule.status,200);assert.match(workerLinkModule.headers.get('content-type'),/text\/javascript/);assert.match(await workerLinkModule.text(),/export function workerSitePath/);
+    const siteQrModule=await fetch(`${base}/site-qr.js`);assert.equal(siteQrModule.status,200);assert.match(siteQrModule.headers.get('content-type'),/text\/javascript/);
     const joinPage=await fetch(`${base}/join`);assert.equal(joinPage.status,200);const joinHtml=await joinPage.text();assert.match(joinHtml,/<link rel="apple-touch-icon" href="\/jweb-icon-192\.png">/);assert.match(joinHtml,/<meta name="apple-mobile-web-app-title" content="J웹">/);
     const homeIcon=await fetch(`${base}/jweb-icon.svg`);assert.equal(homeIcon.status,200);assert.match(homeIcon.headers.get('content-type'),/image\/svg\+xml/);assert.equal((await fetch(`${base}/worker.webmanifest?site=invalid`)).status,404);
     for(const size of [192,512]){const response=await fetch(`${base}/jweb-icon-${size}.png`);assert.equal(response.status,200);assert.equal(response.headers.get('content-type'),'image/png');const icon=PNG.sync.read(Buffer.from(await response.arrayBuffer()));assert.equal(icon.width,size);assert.equal(icon.height,size);for(let i=3;i<icon.data.length;i+=4)assert.equal(icon.data[i],255);}
@@ -100,6 +101,7 @@ test('관리자 인증 모드가 문서 API를 보호하고 로그아웃을 적�
     const batchPng=new PNG({width:1,height:1});batchPng.data[3]=255;const batchBytes=PNG.sync.write(batchPng),batchSignature=`data:image/png;base64,${batchBytes.toString('base64')}`;
     const post=async(path,data)=>fetch(`${base}${path}`,{method:'POST',headers:{cookie,'content-type':'application/json'},body:JSON.stringify(data.action==='approve'?{...data,signature:batchSignature}:data)});
     const site=await (await post('/api/sites',{name:'가상 현장'})).json();
+    const initialAccess=await (await post(`/api/sites/${site.id}/access`,{})).json(),initialKey=new URL(initialAccess.link).searchParams.get('site');assert.equal((await (await fetch(`${base}/api/worker/site?key=${encodeURIComponent(initialKey)}`)).json()).canSignup,false);
     const restaurantPath=`${base}/api/restaurants?siteId=${site.id}`;
     assert.equal((await fetch(restaurantPath)).status,401);
     const restaurant=await post('/api/restaurants',{siteId:site.id,name:'가상 식당',mealPrice:'5000',snackPrice:'1000',tax:'600'});assert.equal(restaurant.status,201);
