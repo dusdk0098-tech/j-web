@@ -45,7 +45,7 @@ export class WorkerSessions extends Map {
     const row=this.db.prepare('SELECT s.worker_id,s.expires,s.credential_hash,a.password_hash,w.name,w.site_id,t.name AS site_name FROM worker_sessions s JOIN worker_accounts a ON a.worker_id=s.worker_id JOIN workers w ON w.id=a.worker_id AND w.site_id=a.site_id JOIN sites t ON t.id=w.site_id WHERE s.token_hash=?').get(key);
     if(!row){super.delete(key);return undefined;}
     const version=createHash('sha256').update(row.password_hash).digest();if(row.expires<=Date.now()||row.credential_hash.length!==version.length||!timingSafeEqual(row.credential_hash,version)){this.delete(key);return undefined;}
-    let session=super.get(key);if(!session||session.expires!==row.expires||session.worker.id!==row.worker_id||session.worker.site_id!==row.site_id){session={worker:{id:row.worker_id,name:row.name,site_id:row.site_id,site_name:row.site_name},expires:row.expires};super.set(key,session);}return session;
+    let session=super.get(key);if(!session||session.expires!==row.expires||session.worker.id!==row.worker_id||session.worker.site_id!==row.site_id){session={worker:{id:row.worker_id,name:row.name,site_id:row.site_id,site_name:row.site_name},expires:row.expires};super.set(key,session);}else{session.worker.name=row.name;session.worker.site_name=row.site_name;}return session;
   }
   delete(key){if(typeof key==='string'&&/^[a-f0-9]{64}$/.test(key))this.db.prepare('DELETE FROM worker_sessions WHERE token_hash=?').run(key);return super.delete(key);}
 }
