@@ -895,7 +895,7 @@ test('기존 출역 기록에 구분이 없어도 보존되고 다시 열 수 �
     const old=new DatabaseSync(path);
     old.exec("CREATE TABLE sites (id INTEGER PRIMARY KEY,name TEXT NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP); INSERT INTO sites(id,name) VALUES(1,'가상 현장'); CREATE TABLE workers (id INTEGER PRIMARY KEY,site_id INTEGER NOT NULL,name TEXT NOT NULL,category TEXT NOT NULL,company TEXT NOT NULL,occupation TEXT NOT NULL); INSERT INTO workers VALUES(1,1,'가상 근로자','직영','가상 회사','목공'); CREATE TABLE attendance (worker_id INTEGER NOT NULL,date TEXT NOT NULL,present INTEGER NOT NULL,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,company_snapshot TEXT,occupation_snapshot TEXT,source TEXT,PRIMARY KEY(worker_id,date)); INSERT INTO attendance(worker_id,date,present,company_snapshot,occupation_snapshot,source) VALUES(1,'2026-10-28',1,'가상 회사','목공','manual')");
     old.close();
-    for(let i=0;i<2;i++){const s=new Store(path);try{const row=s.attendanceReport(1,'2026-10-28','2026-10-28','category')[0];assert.equal(row.label,'기록 없음');assert.equal(row.days,1);assert.equal(s.attendance(1,'2026-10-28')[0].units_hundredths,null);assert.equal(s.attendanceReport(1,'2026-10-28','2026-10-28','company')[0].label,'가상 회사');assert.equal(s.monthlyAttendance(1,'2026-10')[0].units[0].category,null);}finally{s.close();}}
+    for(let i=0;i<2;i++){const s=new Store(path);try{const row=s.attendanceReport(1,'2026-10-28','2026-10-28','category')[0];assert.equal(row.label,'기록 없음');assert.equal(row.days,1);assert.equal(s.attendanceReport(1,'2026-10-28','2026-10-28','company')[0].label,'가상 회사');const day=s.monthlyAttendance(1,'2026-10')[0].units[0];assert.equal(day.category,null);if(i===0){assert.equal(day.units_hundredths,null);assert.equal(day.daily_rate,null);s.setAttendanceUnits({siteId:1,workerId:1,date:'2026-10-28',units:'0.5'});s.setAttendanceDailyRate({siteId:1,workerId:1,date:'2026-10-28',dailyRate:'101'});}else{assert.equal(day.daily_rate,101);assert.equal(day.estimated_pay,51);}}finally{s.close();}}
   }finally{rmSync(dir,{recursive:true,force:true});}
 });
 
@@ -993,6 +993,18 @@ test('시험 공수는 현장과 출역일별로 수동 기록하고 미기록�
     for(const units of ['10','-1','1.001','1e0','9.999',null,1])assert.throws(()=>s.setAttendanceUnits({...base,units}),/공수/);assert.throws(()=>s.setAttendanceUnits({...base,siteId:other.id,units:'1'}),/현장/);assert.equal(s.attendance(site.id,date)[0].units_hundredths,25);
     s.setAttendance({...base,present:false});assert.deepEqual(s.workerAttendanceUnits(worker.id,'2024-02'),[]);s.recordWorkerLogin(worker.id,date);assert.equal(s.attendance(site.id,date)[0].present,0);s.setAttendance({...base,present:true});assert.equal(s.attendance(site.id,date)[0].units_hundredths,25);
     s.setAttendanceUnits({...base,units:'9.99'});assert.equal(s.attendance(site.id,date)[0].units_hundredths,999);s.setAttendanceUnits({...base,units:'0'});assert.equal(s.attendance(site.id,date)[0].units_hundredths,0);s.setAttendanceUnits({...base,units:''});assert.equal(s.attendance(site.id,date)[0].units_hundredths,null);
+  }finally{s.close();}
+});
+
+test('일당과 공수의 시험 계산은 출역·현장을 제한하고 미기록 및 반올림을 구분한다',()=>{
+  const s=new Store(':memory:');try{
+    const site=s.createSite({name:'가상 현장'}),other=s.createSite({name:'다른 현장'}),worker=s.createWorker({siteId:site.id,name:'가상 근로자',category:'직영',company:'가상 업체',occupation:'가상 직종'}),base={siteId:site.id,workerId:worker.id,date:'2024-02-29'};
+    s.saveWageRecord({siteId:site.id,workerId:worker.id,month:'2024-02',gross:'2000',deductions:{income:'0',local:'0',health:'0',care:'0',pension:'0',employment:'0'}});assert.throws(()=>s.setAttendanceDailyRate({...base,dailyRate:'101'}),/출역/);s.setAttendance({...base,present:true});
+    for(const dailyRate of ['-1','1.1','1e3','1000000000',null,100])assert.throws(()=>s.setAttendanceDailyRate({...base,dailyRate}),/일당/);
+    assert.throws(()=>s.setAttendanceDailyRate({...base,siteId:other.id,dailyRate:'101'}),/현장/);s.setAttendanceDailyRate({...base,dailyRate:'101'});
+    const record=()=>s.monthlyAttendance(site.id,'2024-02')[0].units[0];assert.equal(record().estimated_pay,null);s.setAttendanceUnits({...base,units:'0.5'});assert.equal(record().estimated_pay,51);assert.equal(s.wageRecords(site.id,'2024-02')[0].gross,2000);
+    s.setAttendanceUnits({...base,units:'0'});assert.equal(record().estimated_pay,0);s.setAttendanceDailyRate({...base,dailyRate:''});assert.equal(record().daily_rate,null);assert.equal(record().estimated_pay,null);
+    s.setAttendanceDailyRate({...base,dailyRate:'0'});s.setAttendanceUnits({...base,units:'1'});assert.equal(record().estimated_pay,0);s.setAttendance({...base,present:false});assert.equal(s.monthlyAttendance(site.id,'2024-02')[0].units.length,0);s.setAttendance({...base,present:true});assert.equal(record().daily_rate,0);
   }finally{s.close();}
 });
 

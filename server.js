@@ -409,6 +409,7 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === '/api/education/report' && req.method === 'GET') return json(res,200,store.educationReport(url.searchParams.get('siteId'),url.searchParams.get('from'),url.searchParams.get('to')));
     if (url.pathname === '/api/weekly-activity' && req.method === 'GET') return json(res,200,store.weeklyActivity(url.searchParams.get('siteId'),url.searchParams.get('start')));
     if(url.pathname==='/api/attendance/units'&&req.method==='PUT'){store.setAttendanceUnits(await body(req));return json(res,200,{ok:true});}
+    if(url.pathname==='/api/attendance/daily-rate'&&req.method==='PUT'){store.setAttendanceDailyRate(await body(req));return json(res,200,{ok:true});}
     if(url.pathname==='/api/attendance/month/details'&&req.method==='PUT')return json(res,200,{updated:store.updateMonthlyAttendanceDetails(await body(req))});
     if (url.pathname === '/api/attendance') {
       if (req.method === 'GET') return json(res,200,store.attendance(url.searchParams.get('siteId'),url.searchParams.get('date')));
