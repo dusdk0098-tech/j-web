@@ -8,3 +8,5 @@
 @media print{#content[data-ppe-print="summary"] .ppe-report .ppe-detail,#content[data-ppe-print="detail"] .ppe-report .ppe-summary,.ppe-report .ppe-manage{display:none!important}.ppe-report .table-wrap{overflow:visible}.ppe-report table{min-width:0;table-layout:fixed}.ppe-report td,.ppe-report th{overflow-wrap:anywhere}}
 .wage-daily-print{display:none}
 @media print{.wage-report .table-wrap{overflow:visible}.wage-report table{min-width:0;table-layout:fixed;font-size:8px}.wage-report th,.wage-report td{padding:2px;overflow-wrap:anywhere}.wage-report .wage-main th:last-child,.wage-report .wage-main td:last-child,.wage-report a[download],.wage-daily-screen{display:none}.wage-daily-print{display:block}.wage-daily-print section{break-inside:avoid}.wage-daily-print thead{display:table-header-group}}
+.hazard-print{display:none}
+@media print{#content.hazard-printing>.hazard-list{display:none!important}#content.hazard-printing>.hazard-print{display:block}}
