@@ -590,7 +590,7 @@ const server = http.createServer(async (req, res) => {
     if(eventSignature&&req.method==='GET'){const signature=store.eventSignature(eventSignature[1],eventSignature[2]);if(!signature)return json(res,404,{error:'시험 서명을 찾을 수 없습니다.'});res.writeHead(200,{'Content-Type':'image/png','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(signature);}
     const documentTrainingSignature=url.pathname.match(/^\/api\/documents\/(\d+)\/training-signatures\/(\d+)$/);
     if(documentTrainingSignature&&req.method==='GET'){const signature=store.documentTrainingSignature(documentTrainingSignature[1],documentTrainingSignature[2]);if(!signature)return json(res,404,{error:'시험 서명을 찾을 수 없습니다.'});res.writeHead(200,{'Content-Type':'image/png','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(signature);}
-    const match = url.pathname.match(/^\/api\/documents\/(\d+)(?:\/(events|transition|publish-notice|notice-reads|training-checks|training-targets))?$/);
+    const match = url.pathname.match(/^\/api\/documents\/(\d+)(?:\/(events|transition|publish-notice|copy-notice-files|notice-reads|training-checks|training-targets))?$/);
     const noticeSignature=url.pathname.match(/^\/api\/documents\/(\d+)\/notice-reads\/(\d+)\/signature$/);
     if(noticeSignature && req.method==='GET'){
       const signature=store.noticeSignature(noticeSignature[1],noticeSignature[2]);if(!signature)return json(res,404,{error:'시험 서명을 찾을 수 없습니다.'});
@@ -600,6 +600,7 @@ const server = http.createServer(async (req, res) => {
       const [,id,part] = match;
       if (req.method === 'GET' && part === 'events') return json(res,200,store.events(id));
       if (req.method === 'POST' && part === 'publish-notice') return json(res,200,store.publishNotice(id));
+      if (req.method === 'POST' && part === 'copy-notice-files') {const input=await body(req);return json(res,200,store.copyNoticeAttachments(id,input.sourceId));}
       if (req.method === 'GET' && part === 'notice-reads') return json(res,200,store.noticeReads(id));
       if (req.method === 'GET' && part === 'training-checks') return json(res,200,store.trainingChecks(id));
       if (req.method === 'GET' && part === 'training-targets') return json(res,200,store.trainingTargets(id));

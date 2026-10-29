@@ -1050,6 +1050,17 @@ export class Store {
   tbmSignature(id){const doc=this.document(id);if(!doc||doc.type!=='tbm')throw new Error('TBM 문서를 확인해 주세요.');return this.db.prepare('SELECT signature,created_at FROM tbm_signatures WHERE document_id=?').get(Number(id))||null;}
   saveTbmSignature(id,signature){const doc=this.document(id);if(!doc||doc.type!=='tbm'||!['draft','rejected'].includes(doc.status))throw new Error('수정 가능한 TBM 문서를 확인해 주세요.');const bytes=signatureBytes(signature);this.db.prepare('INSERT INTO tbm_signatures(document_id,signature) VALUES(?,?) ON CONFLICT(document_id) DO UPDATE SET signature=excluded.signature,created_at=CURRENT_TIMESTAMP').run(Number(id),bytes);}
   attachment(id) {return this.db.prepare('SELECT * FROM attachments WHERE id=?').get(Number(id));}
+  copyNoticeAttachments(id,sourceId){
+    const target=this.document(id),source=Number.isSafeInteger(sourceId)&&sourceId>0?this.document(sourceId):null;
+    if(!target||target.type!=='notice'||!['draft','rejected'].includes(target.status))throw new Error('수정 가능한 공지를 확인해 주세요.');
+    if(!source||source.id===target.id||source.type!=='notice'||source.status!=='approved'||source.site_id!==target.site_id||source.date>=target.date)throw new Error('같은 현장의 이전 게시 공지를 선택해 주세요.');
+    const files=this.attachments(source.id),existing=this.attachments(target.id);
+    if(!files.length)throw new Error('선택한 공지에 첨부파일이 없습니다.');
+    if(existing.length+files.length>20)throw new Error('첨부파일은 문서당 20개까지 가능합니다.');
+    this.db.exec('SAVEPOINT copy_notice_attachments');
+    try{this.db.prepare("INSERT INTO attachments(document_id,name,data,category) SELECT ?,name,data,'general' FROM attachments WHERE document_id=? ORDER BY id").run(target.id,source.id);this.db.exec('RELEASE copy_notice_attachments');}catch(error){this.db.exec('ROLLBACK TO copy_notice_attachments');this.db.exec('RELEASE copy_notice_attachments');throw error;}
+    return {copied:files.length};
+  }
   addAttachment(id,name,data,category='general') {
     const doc=this.document(id);
     if (!doc || !['draft','rejected'].includes(doc.status)) throw new Error('임시저장 또는 반려된 문서에만 첨부할 수 있습니다.');

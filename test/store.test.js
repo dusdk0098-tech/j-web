@@ -240,6 +240,18 @@ test('가상 공지는 지정 현장과 날짜에 게시되고 이력을 원자�
   }finally{s.close();}
 });
 
+test('이전 공지 첨부는 같은 현장의 게시 문서에서 원자적으로 복사한다',()=>{
+  const s=new Store(':memory:');try{
+    const site=s.createSite({name:'가상 현장'}),other=s.createSite({name:'다른 현장'}),make=(siteId,date,type='notice')=>s.createDocument({siteId,type,title:'가상 공지',date,body:'가상 내용'}),source=make(site.id,'2026-10-28'),target=make(site.id,'2026-10-29'),foreign=make(other.id,'2026-10-28'),future=make(site.id,'2026-10-30'),draft=make(site.id,'2026-10-27');
+    s.addAttachment(source.id,'첫 번째.txt',Buffer.from('첫 내용'));s.addAttachment(source.id,'두 번째.txt',Buffer.from('둘 내용'));s.addAttachment(foreign.id,'다른.txt',Buffer.from('다른 내용'));for(const d of [source,foreign,future])s.publishNotice(d.id);
+    for(const d of [foreign,future,draft,target])assert.throws(()=>s.copyNoticeAttachments(target.id,d.id),/이전 게시/);
+    assert.throws(()=>s.copyNoticeAttachments(target.id,'1'),/이전 게시/);assert.deepEqual(s.attachments(target.id),[]);
+    s.db.exec("CREATE TRIGGER fail_copy BEFORE INSERT ON attachments WHEN NEW.name='두 번째.txt' BEGIN SELECT RAISE(ABORT,'복사 실패'); END");assert.throws(()=>s.copyNoticeAttachments(target.id,source.id),/복사 실패/);assert.deepEqual(s.attachments(target.id),[]);s.db.exec('DROP TRIGGER fail_copy');
+    assert.equal(s.copyNoticeAttachments(target.id,source.id).copied,2);const copied=s.attachments(target.id);assert.deepEqual(copied.map(f=>f.name),['첫 번째.txt','두 번째.txt']);assert.equal(Buffer.from(s.attachment(copied[0].id).data).toString(),'첫 내용');assert.equal(s.attachments(source.id).length,2);
+    for(let i=0;i<17;i++)s.addAttachment(target.id,`가상${i}.txt`,Buffer.from('가상'));assert.throws(()=>s.copyNoticeAttachments(target.id,source.id),/20개/);assert.equal(s.attachments(target.id).length,19);s.publishNotice(target.id);assert.throws(()=>s.copyNoticeAttachments(target.id,source.id),/수정 가능한/);
+  }finally{s.close();}
+});
+
 test('공지 확인 명단은 공지일 출역 당시의 직종을 표시한다',()=>{
   const s=new Store(':memory:');try{
     const site=s.createSite({name:'가상 현장'}),input={siteId:site.id,name:'가상 근로자',category:'직영',company:'가상 업체',occupation:'목공'},worker=s.createWorker(input),doc=s.createDocument({siteId:site.id,type:'notice',title:'가상 공지',date:'2026-10-29',body:'가상 내용'}),png=new PNG({width:1,height:1});png.data[3]=255;const signature=`data:image/png;base64,${PNG.sync.write(png).toString('base64')}`;
