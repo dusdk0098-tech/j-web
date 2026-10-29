@@ -4,6 +4,7 @@ import { mkdtempSync,rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createServer } from 'node:net';
+import { request } from 'node:http';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { PNG } from 'pngjs';
@@ -38,6 +39,24 @@ test('별도 시험 결재자는 자기 차례의 현장 문서만 열고 순서
     assert.equal((await send(`/api/reviewers/${first.id}`,'PUT',{siteId:site.id,active:true},admin)).status,200);const newFirstCookie=await reviewLogin('virtual_first');assert.equal((await send(`/api/reviewers/${first.id}`,'PUT',{siteId:site.id,password:'virtual-password-456'},admin)).status,200);assert.equal((await send('/api/reviewer/session','GET',undefined,newFirstCookie)).status,401);assert.equal((await send('/api/reviewer/login','POST',{loginId:'virtual_first',password:'virtual-password-123'})).status,401);
     const renewed=await send('/api/reviewer/login','POST',{loginId:'virtual_first',password:'virtual-password-456'});assert.equal(renewed.status,200);const renewedCookie=renewed.headers.get('set-cookie').split(';')[0];assert.equal((await send('/api/reviewer/logout','POST',{},renewedCookie)).status,200);assert.equal((await send('/api/reviewer/session','GET',undefined,renewedCookie)).status,401);
     for(let i=0;i<10;i++)assert.equal((await send('/api/reviewer/login','POST',{loginId:'virtual_first',password:'wrong'})).status,401);assert.equal((await send('/api/reviewer/login','POST',{loginId:'virtual_first',password:'virtual-password-456'})).status,429);assert.equal((await send('/api/reviewer/login','POST',{loginId:'virtual_second',password:'virtual-password-123'})).status,200);assert.equal((await send('/api/reviewer/login','POST',{loginId:'virtual_first',password:'virtual-password-456'})).status,429);
+  }finally{child.kill();await once(child,'exit').catch(()=>{});rmSync(dir,{recursive:true,force:true});}
+});
+
+test('본문 수신 중 로그아웃한 관리자와 결재자의 변경은 저장되지 않는다',async()=>{
+  const dir=mkdtempSync(join(tmpdir(),'jweb-review-inflight-')),reservation=createServer();await new Promise(resolve=>reservation.listen(0,'127.0.0.1',resolve));const port=reservation.address().port;await new Promise(resolve=>reservation.close(resolve));
+  const child=spawn(process.execPath,['server.js'],{cwd:process.cwd(),env:{...process.env,PORT:String(port),JWEB_DATA_DIR:dir,JWEB_ADMIN_PASSWORD:'virtual-admin-password'},stdio:['ignore','pipe','pipe']});
+  try{
+    await Promise.race([once(child.stdout,'data'),once(child,'exit').then(()=>{throw Error('시험 서버가 종료됐습니다.');})]);
+    const base=`http://127.0.0.1:${port}`,send=(path,method='GET',data,cookie)=>fetch(base+path,{method,headers:{...(data===undefined?{}:{'content-type':'application/json'}),...(cookie?{cookie}:{})},...(data===undefined?{}:{body:JSON.stringify(data)})}),admin=(await send('/api/login','POST',{password:'virtual-admin-password'})).headers.get('set-cookie').split(';')[0],site=await (await send('/api/sites','POST',{name:'가상 현장'},admin)).json(),reviewer=await (await send('/api/reviewers','POST',{siteId:site.id,loginId:'stream_reviewer',name:'가상 결재자',password:'virtual-password-123'},admin)).json(),doc=await (await send('/api/documents','POST',{siteId:site.id,type:'tbm',title:'가상 문서',date:'2026-10-29'},admin)).json(),path=`/api/documents/${doc.id}`;
+    assert.equal((await send(path+'/approval-line','PUT',{reviewerIds:[reviewer.id]},admin)).status,200);assert.equal((await send(path+'/transition','POST',{action:'submit'},admin)).status,200);
+    const reviewerCookie=(await send('/api/reviewer/login','POST',{loginId:'stream_reviewer',password:'virtual-password-123'})).headers.get('set-cookie').split(';')[0],png=new PNG({width:1,height:1});png.data[3]=255;const signature=`data:image/png;base64,${PNG.sync.write(png).toString('base64')}`;
+    const delayed=async(url,method,cookie,payload,change,headers={})=>{const req=request(base+url,{method,headers:{cookie,...headers}}),response=new Promise((resolve,reject)=>{req.on('response',res=>{res.resume();res.on('end',()=>resolve(res.statusCode));});req.on('error',reject);});req.write(payload.slice(0,1));await new Promise(resolve=>setTimeout(resolve,100));await change();req.end(payload.slice(1));return response;};
+    assert.equal(await delayed(`/api/reviewer/documents/${doc.id}/decision`,'POST',reviewerCookie,JSON.stringify({action:'approve',signature}),async()=>assert.equal((await send('/api/reviewer/logout','POST',{},reviewerCookie)).status,200),{'content-type':'application/json'}),401);
+    assert.equal((await (await send(path,'GET',undefined,admin)).json()).status,'pending');
+    assert.equal(await delayed('/api/sites','POST',admin,JSON.stringify({name:'만들어지면 안 되는 현장'}),async()=>assert.equal((await send('/api/logout','POST',{},admin)).status,200),{'content-type':'application/json'}),401);
+    const admin2=(await send('/api/login','POST',{password:'virtual-admin-password'})).headers.get('set-cookie').split(';')[0];
+    assert.equal(await delayed(path+'/attachments','POST',admin2,'가상 파일',async()=>assert.equal((await send('/api/logout','POST',{},admin2)).status,200),{'x-file-name':'virtual.txt'}),401);
+    const admin3=(await send('/api/login','POST',{password:'virtual-admin-password'})).headers.get('set-cookie').split(';')[0];assert.equal((await (await send('/api/sites','GET',undefined,admin3)).json()).length,1);assert.deepEqual(await (await send(path+'/attachments','GET',undefined,admin3)).json(),[]);
   }finally{child.kill();await once(child,'exit').catch(()=>{});rmSync(dir,{recursive:true,force:true});}
 });
 

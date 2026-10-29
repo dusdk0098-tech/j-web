@@ -32,10 +32,11 @@ delete process.env.JWEB_ADMIN_PASSWORD;
 const mime = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg':'image/svg+xml', '.png':'image/png' };
 const assets = new Set(['/','/app.js','/batch-print.js','/risk-scale.js','/worker-link.js','/worker-documents.js','/site-qr.js','/tbm-sources.js','/training-groups.js','/restaurant-price.js','/salary-summary.js','/style.css','/jweb-icon.svg','/jweb-icon-192.png','/jweb-icon-512.png','/join','/join.js','/login','/login.js','/review','/review.js']);
 const json = (res, code, value) => { res.writeHead(code, {'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}); res.end(JSON.stringify(value)); };
+function checkRequestSession(req){const failure=req.checkSession?.();if(failure)throw Object.assign(new Error(failure.error),{sessionStatus:failure.status});}
 async function body(req,max=65536) {
   const chunks=[];let size=0;
   for await (const chunk of req) { size+=chunk.length;if(size>max)throw new Error('입력 내용이 너무 깁니다.');chunks.push(chunk); }
-  const failure=req.checkWorkerSession?.();if(failure)throw Object.assign(new Error(failure.error),{workerStatus:failure.status});
+  checkRequestSession(req);
   try { const raw=new TextDecoder('utf-8',{fatal:true}).decode(Buffer.concat(chunks));const value = JSON.parse(raw); if (!value || typeof value !== 'object' || Array.isArray(value)) throw Error(); return value; } catch { throw new Error('입력 형식이 올바르지 않습니다.'); }
 }
 const server = http.createServer(async (req, res) => {
@@ -68,6 +69,7 @@ const server = http.createServer(async (req, res) => {
       const key=workerKey(reviewerToken),session=reviewerSessions.get(key),reviewer=session&&session.expires>Date.now()?store.reviewer(session.id):null;
       if(!reviewer){reviewerSessions.delete(key);return json(res,401,{error:'결재자 로그인이 필요합니다.'});}
       if(url.pathname==='/api/reviewer/logout'&&req.method==='POST'){reviewerSessions.delete(key);res.setHeader('Set-Cookie',`jweb_reviewer=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0${secureCookie}`);return json(res,200,{ok:true});}
+      req.checkSession=()=>reviewerSessions.get(key)===session&&session.expires>Date.now()&&store.reviewer(session.id)?null:{status:401,error:'결재자 로그인이 필요합니다.'};
       if(url.pathname==='/api/reviewer/session'&&req.method==='GET')return json(res,200,{reviewer});
       if(url.pathname==='/api/reviewer/documents'&&req.method==='GET')return json(res,200,store.reviewerDocuments(reviewer.id));
       const priorSignature=url.pathname.match(/^\/api\/reviewer\/documents\/(\d+)\/prior-signatures\/(\d+)$/);
@@ -88,7 +90,7 @@ const server = http.createServer(async (req, res) => {
     if(url.pathname.startsWith('/api/worker/')&&!['/api/worker/site','/api/worker/login','/api/worker/logout'].includes(url.pathname)){
       const session=workerSessions.get(workerKey(workerToken)),now=new Date(),date=new Date(now.getTime()-now.getTimezoneOffset()*60000).toISOString().slice(0,10);
       if(session&&session.expires>now.getTime()&&store.workerAccessBlocked(session.worker.site_id,date))return json(res,403,{error:'해당 현장은 오늘 근로자 접속이 차단되었습니다.'});
-      if(session&&session.expires>now.getTime())req.checkWorkerSession=()=>workerSessionError(workerToken,session);
+      if(session&&session.expires>now.getTime())req.checkSession=()=>workerSessionError(workerToken,session);
     }
     if(url.pathname==='/worker.webmanifest'&&req.method==='GET'){
       const key=url.searchParams.get('site');if(!store.siteFromAccess(key))return json(res,404,{error:'현장 접속 주소를 확인해 주세요.'});
@@ -135,7 +137,7 @@ const server = http.createServer(async (req, res) => {
       if(!part&&req.method==='GET')return json(res,200,doc);if(!part&&req.method==='PUT'){const input=await body(req,120000),failure=workerSessionError(workerToken,session);if(failure)return json(res,failure.status,{error:failure.error});return json(res,200,store.updateWorkerDocument(siteId,workerId,id,input));}
       if(part==='transition'&&req.method==='POST'&&!fileId){const input=await body(req),failure=workerSessionError(workerToken,session);if(failure)return json(res,failure.status,{error:failure.error});return json(res,200,store.transitionWorkerDocument(siteId,workerId,id,input.action));}
       if(part==='attachments'&&!fileId&&req.method==='GET')return json(res,200,store.attachments(id));
-      if(part==='attachments'&&!fileId&&req.method==='POST'){const chunks=[];let size=0;for await(const chunk of req){size+=chunk.length;if(size>2*1024*1024)throw new Error('파일은 2MB 이하여야 합니다.');chunks.push(chunk);}let name;try{name=decodeURIComponent(req.headers['x-file-name']||'');}catch{throw new Error('파일 이름을 확인해 주세요.');}const failure=workerSessionError(workerToken,session);if(failure)return json(res,failure.status,{error:failure.error});store.workerDocument(siteId,workerId,id);return json(res,201,{id:store.addAttachment(id,name,Buffer.concat(chunks),url.searchParams.get('category')||'general')});}
+      if(part==='attachments'&&!fileId&&req.method==='POST'){const chunks=[];let size=0;for await(const chunk of req){size+=chunk.length;if(size>2*1024*1024)throw new Error('파일은 2MB 이하여야 합니다.');chunks.push(chunk);}checkRequestSession(req);let name;try{name=decodeURIComponent(req.headers['x-file-name']||'');}catch{throw new Error('파일 이름을 확인해 주세요.');}const failure=workerSessionError(workerToken,session);if(failure)return json(res,failure.status,{error:failure.error});store.workerDocument(siteId,workerId,id);return json(res,201,{id:store.addAttachment(id,name,Buffer.concat(chunks),url.searchParams.get('category')||'general')});}
       if(part==='attachments'&&fileId&&['GET','DELETE'].includes(req.method)){const file=store.attachment(fileId);if(!file||file.document_id!==doc.id)return json(res,404,{error:'첨부파일을 찾을 수 없습니다.'});if(req.method==='DELETE'){store.deleteAttachment(fileId);return json(res,200,{ok:true});}const name=encodeURIComponent(file.name).replace(/[!'()*]/g,c=>`%${c.charCodeAt(0).toString(16).toUpperCase()}`);res.writeHead(200,{'Content-Type':'application/octet-stream','Content-Disposition':`attachment; filename="file"; filename*=UTF-8''${name}`,'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(file.data);}
     }
     if(url.pathname==='/api/worker/managed-attendance'&&['GET','PUT'].includes(req.method)){
@@ -207,7 +209,7 @@ const server = http.createServer(async (req, res) => {
       }
       if(photoId)return json(res,404,{error:'요청을 찾을 수 없습니다.'});
       store.workerInstructionPhotos(session.worker.id,id);
-      const chunks=[];let size=0;for await(const chunk of req){size+=chunk.length;if(size>2*1024*1024)throw new Error('사진은 2MB 이하여야 합니다.');chunks.push(chunk);}
+      const chunks=[];let size=0;for await(const chunk of req){size+=chunk.length;if(size>2*1024*1024)throw new Error('사진은 2MB 이하여야 합니다.');chunks.push(chunk);}checkRequestSession(req);
       const failure=workerSessionError(workerToken,session);if(failure)return json(res,failure.status,{error:failure.error});
       let name;try{name=decodeURIComponent(req.headers['x-file-name']||'');}catch{throw new Error('사진 이름을 확인해 주세요.');}
       return json(res,201,{id:store.addWorkerInstructionPhoto(session.worker.id,id,url.searchParams.get('phase'),name,Buffer.concat(chunks))});
@@ -259,6 +261,7 @@ const server = http.createServer(async (req, res) => {
       workerSessions.delete(workerKey(workerToken));res.setHeader('Set-Cookie',`jweb_worker=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0${secureCookie}`);return json(res,200,{ok:true});
     }
     if(url.pathname.startsWith('/api/') && url.pathname!=='/api/join' && !auth.valid(token))return json(res,401,{error:'관리자 로그인이 필요합니다.'});
+    if(url.pathname.startsWith('/api/')&&url.pathname!=='/api/join')req.checkSession=()=>auth.valid(token)?null:{status:401,error:'관리자 로그인이 필요합니다.'};
     if (req.method === 'GET' && assets.has(url.pathname)) {
       const path = url.pathname === '/' ? '/index.html' : url.pathname === '/join' ? '/join.html' : url.pathname === '/login' ? '/login.html' : url.pathname === '/review' ? '/review.html' : url.pathname;
       res.writeHead(200, {'Content-Type':mime[extname(path)],'X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer','Content-Security-Policy':"default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; object-src 'none'; frame-ancestors 'none'"});
@@ -341,7 +344,7 @@ const server = http.createServer(async (req, res) => {
       const siteId=url.searchParams.get('siteId'),id=riggingPhotos[1],photoId=riggingPhotos[2];
       if(!photoId&&req.method==='GET')return json(res,200,store.riggingPhotos(siteId,id));
       if(!photoId&&req.method==='POST'){
-        const chunks=[];let size=0;for await(const chunk of req){size+=chunk.length;if(size>2*1024*1024)throw new Error('사진은 2MB 이하여야 합니다.');chunks.push(chunk);}
+        const chunks=[];let size=0;for await(const chunk of req){size+=chunk.length;if(size>2*1024*1024)throw new Error('사진은 2MB 이하여야 합니다.');chunks.push(chunk);}checkRequestSession(req);
         let name;try{name=decodeURIComponent(req.headers['x-file-name']||'');}catch{throw new Error('사진 이름을 확인해 주세요.');}
         return json(res,201,{id:store.addRiggingPhoto(siteId,id,name,Buffer.concat(chunks))});
       }
@@ -362,7 +365,7 @@ const server = http.createServer(async (req, res) => {
       const siteId=url.searchParams.get('siteId'),id=placePhotos[1],photoId=placePhotos[2];
       if(!photoId&&req.method==='GET')return json(res,200,store.workPlacePhotos(siteId,id));
       if(!photoId&&req.method==='POST'){
-        const chunks=[];let size=0;for await(const chunk of req){size+=chunk.length;if(size>2*1024*1024)throw new Error('사진은 2MB 이하여야 합니다.');chunks.push(chunk);}
+        const chunks=[];let size=0;for await(const chunk of req){size+=chunk.length;if(size>2*1024*1024)throw new Error('사진은 2MB 이하여야 합니다.');chunks.push(chunk);}checkRequestSession(req);
         let name;try{name=decodeURIComponent(req.headers['x-file-name']||'');}catch{throw new Error('사진 이름을 확인해 주세요.');}
         return json(res,201,{id:store.addWorkPlacePhoto(siteId,id,name,Buffer.concat(chunks))});
       }
@@ -384,7 +387,7 @@ const server = http.createServer(async (req, res) => {
       const siteId=url.searchParams.get('siteId'),id=equipmentFiles[1],fileId=equipmentFiles[2];
       if(!fileId && req.method==='GET')return json(res,200,store.equipmentAttachments(siteId,id));
       if(!fileId && req.method==='POST'){
-        const chunks=[];let size=0;for await(const chunk of req){size+=chunk.length;if(size>2*1024*1024)throw new Error('파일은 2MB 이하여야 합니다.');chunks.push(chunk);}
+        const chunks=[];let size=0;for await(const chunk of req){size+=chunk.length;if(size>2*1024*1024)throw new Error('파일은 2MB 이하여야 합니다.');chunks.push(chunk);}checkRequestSession(req);
         let name;try{name=decodeURIComponent(req.headers['x-file-name']||'');}catch{throw new Error('파일 이름을 확인해 주세요.');}
         return json(res,201,{id:store.addEquipmentAttachment(siteId,id,url.searchParams.get('category'),name,Buffer.concat(chunks))});
       }
@@ -404,7 +407,7 @@ const server = http.createServer(async (req, res) => {
     if(sitePhoto){
       const id=sitePhoto[1],siteId=url.searchParams.get('siteId');
       if(!id&&req.method==='GET')return json(res,200,store.sitePhotos(siteId,url.searchParams.get('from')||'',url.searchParams.get('to')||'',url.searchParams.get('q')||''));
-      if(!id&&req.method==='POST'){const chunks=[];let size=0;for await(const chunk of req){size+=chunk.length;if(size>2*1024*1024)throw new Error('사진은 2MB 이하여야 합니다.');chunks.push(chunk);}let name;try{name=decodeURIComponent(req.headers['x-file-name']||'');}catch{throw new Error('사진 이름을 확인해 주세요.');}return json(res,201,{id:store.addSitePhoto(siteId,name,Buffer.concat(chunks))});}
+      if(!id&&req.method==='POST'){const chunks=[];let size=0;for await(const chunk of req){size+=chunk.length;if(size>2*1024*1024)throw new Error('사진은 2MB 이하여야 합니다.');chunks.push(chunk);}checkRequestSession(req);let name;try{name=decodeURIComponent(req.headers['x-file-name']||'');}catch{throw new Error('사진 이름을 확인해 주세요.');}return json(res,201,{id:store.addSitePhoto(siteId,name,Buffer.concat(chunks))});}
       if(id&&req.method==='PUT'){store.updateSitePhoto(siteId,id,await body(req));return json(res,200,{ok:true});}
       if(id&&req.method==='DELETE'){store.deleteSitePhoto(siteId,id);return json(res,200,{ok:true});}
       if(id&&req.method==='GET'){const photo=store.sitePhoto(siteId,id);if(!photo)return json(res,404,{error:'사진을 찾을 수 없습니다.'});const bytes=Buffer.from(photo.data),type=bytes.subarray(0,8).equals(Buffer.from('89504e470d0a1a0a','hex'))?'image/png':'image/jpeg';res.writeHead(200,{'Content-Type':type,'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(bytes);}
@@ -412,7 +415,7 @@ const server = http.createServer(async (req, res) => {
     const articleFile=url.pathname.match(/^\/api\/site-articles\/(\d+)\/files(?:\/(\d+))?$/);
     if(articleFile){
       const [,articleId,fileId]=articleFile,siteId=url.searchParams.get('siteId');
-      if(!fileId&&req.method==='POST'){const chunks=[];let size=0;for await(const chunk of req){size+=chunk.length;if(size>2*1024*1024)throw new Error('파일은 2MB 이하여야 합니다.');chunks.push(chunk);}let name;try{name=decodeURIComponent(req.headers['x-file-name']||'');}catch{throw new Error('파일 이름을 확인해 주세요.');}return json(res,201,{id:store.addArticleFile(siteId,articleId,name,Buffer.concat(chunks))});}
+      if(!fileId&&req.method==='POST'){const chunks=[];let size=0;for await(const chunk of req){size+=chunk.length;if(size>2*1024*1024)throw new Error('파일은 2MB 이하여야 합니다.');chunks.push(chunk);}checkRequestSession(req);let name;try{name=decodeURIComponent(req.headers['x-file-name']||'');}catch{throw new Error('파일 이름을 확인해 주세요.');}return json(res,201,{id:store.addArticleFile(siteId,articleId,name,Buffer.concat(chunks))});}
       if(fileId&&req.method==='DELETE'){store.deleteArticleFile(siteId,articleId,fileId);return json(res,200,{ok:true});}
       if(fileId&&req.method==='GET'){const file=store.articleFile(siteId,articleId,fileId);if(!file)return json(res,404,{error:'첨부파일을 찾을 수 없습니다.'});const name=encodeURIComponent(file.name).replace(/[!'()*]/g,c=>`%${c.charCodeAt(0).toString(16).toUpperCase()}`);res.writeHead(200,{'Content-Type':'application/octet-stream','Content-Disposition':`attachment; filename="attachment"; filename*=UTF-8''${name}`,'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(file.data);}
     }
@@ -470,7 +473,7 @@ const server = http.createServer(async (req, res) => {
     if(costPhotos){
       const siteId=url.searchParams.get('siteId'),id=costPhotos[1],photoId=costPhotos[2];
       if(!photoId&&req.method==='GET')return json(res,200,store.safetyCostPhotos(siteId,id));
-      if(!photoId&&req.method==='POST'){const chunks=[];let size=0;for await(const chunk of req){size+=chunk.length;if(size>2*1024*1024)throw new Error('사진은 2MB 이하여야 합니다.');chunks.push(chunk);}let name;try{name=decodeURIComponent(req.headers['x-file-name']||'');}catch{throw new Error('사진 이름을 확인해 주세요.');}return json(res,201,{id:store.addSafetyCostPhoto(siteId,id,name,Buffer.concat(chunks))});}
+      if(!photoId&&req.method==='POST'){const chunks=[];let size=0;for await(const chunk of req){size+=chunk.length;if(size>2*1024*1024)throw new Error('사진은 2MB 이하여야 합니다.');chunks.push(chunk);}checkRequestSession(req);let name;try{name=decodeURIComponent(req.headers['x-file-name']||'');}catch{throw new Error('사진 이름을 확인해 주세요.');}return json(res,201,{id:store.addSafetyCostPhoto(siteId,id,name,Buffer.concat(chunks))});}
       if(photoId&&req.method==='DELETE'){store.deleteSafetyCostPhoto(siteId,id,photoId);return json(res,200,{ok:true});}
       if(photoId&&req.method==='GET'){const photo=store.safetyCostPhoto(siteId,id,photoId);if(!photo)return json(res,404,{error:'사진을 찾을 수 없습니다.'});const name=encodeURIComponent(photo.name).replace(/[!'()*]/g,c=>`%${c.charCodeAt(0).toString(16).toUpperCase()}`);res.writeHead(200,{'Content-Type':'application/octet-stream','Content-Disposition':`attachment; filename="photo"; filename*=UTF-8''${name}`,'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(photo.data);}
     }
@@ -503,7 +506,7 @@ const server = http.createServer(async (req, res) => {
     if(workerFiles){
       const [,workerId,fileId]=workerFiles,siteId=url.searchParams.get('siteId');
       if(!fileId&&req.method==='GET')return json(res,200,store.workerFiles(siteId,workerId));
-      if(!fileId&&req.method==='POST'){const chunks=[];let size=0;for await(const chunk of req){size+=chunk.length;if(size>2*1024*1024)throw new Error('파일은 2MB 이하여야 합니다.');chunks.push(chunk);}let name;try{name=decodeURIComponent(req.headers['x-file-name']||'');}catch{throw new Error('파일 이름을 확인해 주세요.');}return json(res,201,{id:store.addWorkerFile(siteId,workerId,url.searchParams.get('category'),name,Buffer.concat(chunks))});}
+      if(!fileId&&req.method==='POST'){const chunks=[];let size=0;for await(const chunk of req){size+=chunk.length;if(size>2*1024*1024)throw new Error('파일은 2MB 이하여야 합니다.');chunks.push(chunk);}checkRequestSession(req);let name;try{name=decodeURIComponent(req.headers['x-file-name']||'');}catch{throw new Error('파일 이름을 확인해 주세요.');}return json(res,201,{id:store.addWorkerFile(siteId,workerId,url.searchParams.get('category'),name,Buffer.concat(chunks))});}
       if(fileId&&req.method==='DELETE'){store.deleteWorkerFile(siteId,workerId,fileId);return json(res,200,{ok:true});}
       if(fileId&&req.method==='GET'){const file=store.workerFile(siteId,workerId,fileId);if(!file)return json(res,404,{error:'첨부파일을 찾을 수 없습니다.'});const name=encodeURIComponent(file.name).replace(/[!'()*]/g,c=>`%${c.charCodeAt(0).toString(16).toUpperCase()}`);res.writeHead(200,{'Content-Type':'application/octet-stream','Content-Disposition':`attachment; filename="attachment"; filename*=UTF-8''${name}`,'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(file.data);}
     }
@@ -565,7 +568,7 @@ const server = http.createServer(async (req, res) => {
       const id=instructionPhotos[1],photoId=instructionPhotos[2];
       if(!photoId&&req.method==='GET')return json(res,200,store.instructionPhotos(id));
       if(!photoId&&req.method==='POST'){
-        const chunks=[];let size=0;for await(const chunk of req){size+=chunk.length;if(size>2*1024*1024)throw new Error('사진은 2MB 이하여야 합니다.');chunks.push(chunk);}
+        const chunks=[];let size=0;for await(const chunk of req){size+=chunk.length;if(size>2*1024*1024)throw new Error('사진은 2MB 이하여야 합니다.');chunks.push(chunk);}checkRequestSession(req);
         let name;try{name=decodeURIComponent(req.headers['x-file-name']||'');}catch{throw new Error('사진 이름을 확인해 주세요.');}
         return json(res,201,{id:store.addInstructionPhoto(id,url.searchParams.get('phase'),name,Buffer.concat(chunks))});
       }
@@ -581,7 +584,7 @@ const server = http.createServer(async (req, res) => {
       if(req.method==='GET') return json(res,200,store.attachments(attachList[1]));
       if(req.method==='POST'){
         const chunks=[];let size=0;
-        for await(const chunk of req){size+=chunk.length;if(size>2*1024*1024)throw new Error('파일은 2MB 이하여야 합니다.');chunks.push(chunk);}
+        for await(const chunk of req){size+=chunk.length;if(size>2*1024*1024)throw new Error('파일은 2MB 이하여야 합니다.');chunks.push(chunk);}checkRequestSession(req);
         let name;try{name=decodeURIComponent(req.headers['x-file-name'] || '');}catch{throw new Error('파일 이름을 확인해 주세요.');}
         const id=store.addAttachment(attachList[1],name,Buffer.concat(chunks),url.searchParams.get('category')||'general');return json(res,201,{id});
       }
@@ -612,7 +615,7 @@ const server = http.createServer(async (req, res) => {
     const riskPhotos=url.pathname.match(/^\/api\/documents\/(\d+)\/risk-activities\/(\d+)\/photos(?:\/(\d+))?$/);
     if(riskPhotos){const [,docId,activityId,photoId]=riskPhotos;
       if(!photoId&&req.method==='GET')return json(res,200,store.riskActivityPhotos(docId,activityId));
-      if(!photoId&&req.method==='POST'){const chunks=[];let size=0;for await(const chunk of req){size+=chunk.length;if(size>2*1024*1024)throw new Error('파일은 2MB 이하여야 합니다.');chunks.push(chunk);}let name;try{name=decodeURIComponent(req.headers['x-file-name']||'');}catch{throw new Error('파일 이름을 확인해 주세요.');}return json(res,201,{id:store.addRiskActivityPhoto(docId,activityId,name,Buffer.concat(chunks),url.searchParams.get('purpose')||'photo')});}
+      if(!photoId&&req.method==='POST'){const chunks=[];let size=0;for await(const chunk of req){size+=chunk.length;if(size>2*1024*1024)throw new Error('파일은 2MB 이하여야 합니다.');chunks.push(chunk);}checkRequestSession(req);let name;try{name=decodeURIComponent(req.headers['x-file-name']||'');}catch{throw new Error('파일 이름을 확인해 주세요.');}return json(res,201,{id:store.addRiskActivityPhoto(docId,activityId,name,Buffer.concat(chunks),url.searchParams.get('purpose')||'photo')});}
       if(photoId&&req.method==='DELETE'){store.deleteRiskActivityPhoto(docId,activityId,photoId);return json(res,200,{ok:true});}
       if(photoId&&req.method==='GET'){const photo=store.riskActivityPhoto(docId,activityId,photoId);if(!photo)return json(res,404,{error:'시험 사진을 찾을 수 없습니다.'});const name=encodeURIComponent(photo.name).replace(/[!'()*]/g,c=>`%${c.charCodeAt(0).toString(16).toUpperCase()}`);res.writeHead(200,{'Content-Type':'application/octet-stream','Content-Disposition':`attachment; filename="photo"; filename*=UTF-8''${name}`,'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(photo.data);}
     }
@@ -653,7 +656,7 @@ const server = http.createServer(async (req, res) => {
       if (req.method === 'POST' && part === 'transition') {const input=await body(req);return json(res,200,input.action==='approve'?store.approveDocument(id,input.opinion,input.signature):store.transition(id,input.action,input.opinion));}
     }
     return json(res,404,{error:'요청한 경로가 없습니다.'});
-  } catch (e) { return json(res,[401,403].includes(e.workerStatus)?e.workerStatus:400,{error:e.message || '요청을 처리하지 못했습니다.'}); }
+  } catch (e) { return json(res,[401,403].includes(e.sessionStatus)?e.sessionStatus:400,{error:e.message || '요청을 처리하지 못했습니다.'}); }
 });
 const port = Number(process.env.PORT || 4173);
 server.listen(port, '127.0.0.1', () => console.log(`J웹: http://127.0.0.1:${port} (관리자 로그인 활성)`));
