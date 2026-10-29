@@ -534,6 +534,16 @@ test('현장과 출입자를 분리하고 문서 결재 이력을 보존한다',
   } finally {s.close();}
 });
 
+test('근로자 재접속은 날짜별 출역을 추가하고 수동 변경을 보존한다',()=>{
+  const s=new Store(':memory:');try{
+    const site=s.createSite({name:'가상 현장'}),worker=s.createWorker({siteId:site.id,name:'가상 근로자',category:'직영',company:'가상 회사',occupation:'목공'});
+    s.recordWorkerLogin(worker.id,'2026-10-29');s.recordWorkerLogin(worker.id,'2026-10-30');s.recordWorkerLogin(worker.id,'2026-10-30');
+    assert.deepEqual(s.workerAttendance(worker.id,'2026-10'),['2026-10-29','2026-10-30']);
+    s.setAttendance({siteId:site.id,workerId:worker.id,date:'2026-10-30',present:false});s.recordWorkerLogin(worker.id,'2026-10-30');
+    const row=s.attendance(site.id,'2026-10-30').find(item=>item.id===worker.id);assert.equal(row.present,0);assert.equal(row.source,'manual');
+  }finally{s.close();}
+});
+
 test('현장 QR 가입은 현장별로 열고 만료 또는 중지 시 차단된다',()=>{
   const s=new Store(':memory:');try{
     const a=s.createSite({name:'가상 현장 A'}),b=s.createSite({name:'가상 현장 B'}),key=s.ensureSiteAccess(a.id),otherKey=s.ensureSiteAccess(b.id),input={name:'가상 근로자',category:'직영',company:'가상 업체',occupation:'기타',loginId:'demo_worker',password:'virtual-password-123',acknowledged:true};

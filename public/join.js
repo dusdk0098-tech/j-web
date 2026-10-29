@@ -108,4 +108,4 @@ login.onsubmit=async event=>{
     const data=await response.json();if(!response.ok)throw Error(data.error);adoptSiteAddress();await showWorker(data.worker);
   }catch(error){message.textContent=error.message;button.disabled=false;}
 };
-if(inviteInfo){try{const response=await fetch('/api/worker/session');if(response.ok){const data=await response.json();if(data.worker.site_id===inviteInfo.id){adoptSiteAddress();await showWorker(data.worker);}}}catch{message.textContent='시험 세션을 확인하지 못했습니다.';}}
+if(inviteInfo){try{const response=await fetch('/api/worker/session');if(response.ok){const data=await response.json();if(data.worker.site_id===inviteInfo.id){const access=await fetch('/api/worker/access',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({siteId:inviteInfo.id})});if(!access.ok)throw Error('출역 기록을 확인하지 못했습니다.');adoptSiteAddress();await showWorker(data.worker);}}}catch(error){message.textContent=error.message||'시험 세션을 확인하지 못했습니다.';}}

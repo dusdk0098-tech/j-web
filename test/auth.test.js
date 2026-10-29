@@ -513,12 +513,15 @@ test('관리자 인증 모드가 문서 API를 보호하고 로그아웃을 적�
     const dailyWages=`${base}/api/wages/daily?siteId=${site.id}&month=2024-02`;assert.equal((await fetch(dailyWages,{headers:{cookie:workerCookie}})).status,401);const dailyRows=await (await fetch(dailyWages,{headers:{cookie}})).json();assert.equal(dailyRows[0].days[0].estimated_pay,126);assert.deepEqual(await (await fetch(dailyWages+excluded,{headers:{cookie}})).json(),[]);
     assert.equal((await fetch(`${base}/api/worker/attendance?month=2024-13`,{headers:{cookie:workerCookie}})).status,400);
     assert.equal((await fetch(`${base}/api/worker/session`,{headers:{cookie:workerCookie}})).status,200);
+    const access=(session,siteId)=>fetch(`${base}/api/worker/access`,{method:'POST',headers:{cookie:session,'content-type':'application/json'},body:JSON.stringify({siteId})});
+    assert.equal((await access('',site.id)).status,401);assert.equal((await access(workerCookie,other.id)).status,400);assert.equal((await access(workerCookie,String(site.id))).status,400);assert.equal((await access(workerCookie,site.id)).status,200);
     assert.equal((await fetch(`${base}/api/sites`,{headers:{cookie:workerCookie}})).status,401);
     assert.equal((await fetch(`${base}/api/worker/logout`,{method:'POST',headers:{cookie:workerCookie}})).status,200);
     assert.equal((await fetch(`${base}/api/worker/session`,{headers:{cookie:workerCookie}})).status,401);
     await post('/api/attendance',{siteId:site.id,workerId:own.id,date:today,present:false});
     const secondLogin=await fetch(`${base}/api/worker/login`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({token:inviteToken,loginId:'worker1',password:'virtual-password-123'})});
     assert.equal(secondLogin.status,200);
+    assert.equal((await access(secondLogin.headers.get('set-cookie').split(';')[0],site.id)).status,200);
     const afterManual=await (await fetch(`${base}/api/attendance?siteId=${site.id}&date=${today}`,{headers:{cookie}})).json();
     assert.equal(afterManual.find(row=>row.id===own.id).present,0);assert.equal(afterManual.find(row=>row.id===own.id).source,'manual');
     await fetch(`${base}/api/worker/logout`,{method:'POST',headers:{cookie:secondLogin.headers.get('set-cookie').split(';')[0]}});
