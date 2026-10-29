@@ -107,6 +107,15 @@ export function recordInput(input) {
     }
     if(value.workPlaceId!==undefined){if(!Number.isSafeInteger(value.workPlaceId) || value.workPlaceId<0)throw new Error('작업장소를 확인해 주세요.');details.workPlaceId=value.workPlaceId;}
     if(value.riggingIds!==undefined){if(!Array.isArray(value.riggingIds)||value.riggingIds.length>100||value.riggingIds.some(id=>!Number.isSafeInteger(id)||id<1)||new Set(value.riggingIds).size!==value.riggingIds.length)throw new Error('장구 선택을 확인해 주세요.');details.riggingIds=value.riggingIds;}
+    if(value.heavyLoads!==undefined){
+      if(!Array.isArray(value.heavyLoads)||value.heavyLoads.length>100)throw new Error('중량물 항목을 확인해 주세요.');
+      details.heavyLoads=value.heavyLoads.map(row=>{
+        if(!row||typeof row!=='object'||Array.isArray(row)||!['other','rigging'].includes(row.liftMode))throw new Error('중량물 항목을 확인해 주세요.');
+        const item={};for(const key of ['kind','size','totalWeight','liftWeight']){if(typeof row[key]!=='string'||!row[key].trim()||row[key].length>200)throw new Error('중량물 항목을 확인해 주세요.');item[key]=row[key].trim();}item.liftMode=row.liftMode;
+        if(row.liftMode==='rigging'){if(!Number.isSafeInteger(row.riggingId)||row.riggingId<1||typeof row.lines!=='string'||!row.lines.trim()||row.lines.length>200||typeof row.method!=='string'||!row.method.trim()||row.method.length>200)throw new Error('중량물 장구 정보를 확인해 주세요.');Object.assign(item,{riggingId:row.riggingId,lines:row.lines.trim(),method:row.method.trim()});}
+        return item;
+      });
+    }
     if(value.workers!==undefined){
       if(!Array.isArray(value.workers)||value.workers.length>100)throw new Error('작업자 항목을 확인해 주세요.');
       details.workers=value.workers.map(row=>{

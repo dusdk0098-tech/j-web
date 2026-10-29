@@ -1272,6 +1272,8 @@ export class Store {
     if(doc.details.workPlaceId && !this.db.prepare('SELECT 1 FROM work_places WHERE id=? AND site_id=?').get(doc.details.workPlaceId,doc.siteId))throw new Error('같은 현장의 작업장소를 선택해 주세요.');
     const rigging=this.db.prepare('SELECT 1 FROM rigging WHERE id=? AND site_id=?');
     if((doc.details.riggingIds||[]).some(id=>!rigging.get(id,doc.siteId)))throw new Error('같은 현장의 장구를 선택해 주세요.');
+    const riggingName=this.db.prepare('SELECT name FROM rigging WHERE id=? AND site_id=?');
+    for(const load of doc.details.heavyLoads||[])if(load.liftMode==='rigging'){const item=riggingName.get(load.riggingId,doc.siteId);if(!item||!(doc.details.riggingIds||[]).includes(load.riggingId))throw new Error('계획서에 선택된 같은 현장의 장구를 사용해 주세요.');load.riggingName=item.name;}
   }
   validateSafetyMeeting(doc,current=null){
     if(!['safety_meeting','work_council','joint_inspection'].includes(doc.type))return;

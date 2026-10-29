@@ -1156,6 +1156,21 @@ test('가상 작업계획서 복사는 출처와 연결을 유지하고 결재·
   }finally{s.close();}
 });
 
+test('작업계획 중량물은 장구 연결을 검증하고 복사와 결재에 보존한다',()=>{
+  const s=new Store(':memory:');try{
+    const site=s.createSite({name:'가상 현장'}),other=s.createSite({name:'다른 현장'}),make=siteId=>s.createRigging({siteId,category:'줄걸이',kind:'가상 장구',name:'시험 장구',standards:['시험 규격']}),rig=make(site.id),foreign=make(other.id);
+    const load={kind:'가상 물품',size:'2m',totalWeight:'1t',liftWeight:'0.5t',liftMode:'rigging',riggingId:rig.id,lines:'2줄',method:'가상 연결'},input={siteId:site.id,type:'work_plan',title:'시험 계획',date:'2026-10-30',details:{riggingIds:[rig.id],heavyLoads:[load]}};
+    assert.throws(()=>s.createDocument({...input,details:{...input.details,heavyLoads:[{...load,kind:' '}]}}),/중량물/);
+    assert.throws(()=>s.createDocument({...input,details:{...input.details,heavyLoads:[{...load,lines:''}]}}),/중량물/);
+    assert.throws(()=>s.createDocument({...input,details:{...input.details,riggingIds:[]}}),/장구/);
+    assert.throws(()=>s.createDocument({...input,details:{...input.details,heavyLoads:[{...load,riggingId:foreign.id}]}}),/장구/);
+    const doc=s.createDocument(input);assert.equal(JSON.parse(doc.details).heavyLoads[0].riggingName,'시험 장구');s.transition(doc.id,'submit');const cycle=s.document(doc.id).approval_cycle_id;
+    const copy=s.copyWorkPlan(doc.id,{siteId:site.id,title:'복사',date:'2026-10-31'});assert.equal(JSON.parse(copy.details).heavyLoads[0].method,'가상 연결');
+    s.transition(doc.id,'withdraw');s.updateDocument(doc.id,{...input,details:{...input.details,heavyLoads:[{...load,method:'수정 연결'}]}});assert.equal(JSON.parse(s.approvalCycle(doc.id,cycle).document.details).heavyLoads[0].method,'가상 연결');
+    const otherMode=s.createDocument({...input,title:'기타 방식',details:{heavyLoads:[{...load,liftMode:'other'}]}});assert.deepEqual(JSON.parse(otherMode.details).heavyLoads[0],{kind:load.kind,size:load.size,totalWeight:load.totalWeight,liftWeight:load.liftWeight,liftMode:'other'});
+  }finally{s.close();}
+});
+
 test('장비 점검자 시험 서명은 점검별로 저장하고 결재 당시 보존한다',()=>{
   const s=new Store(':memory:');try{
     const site=s.createSite({name:'가상 현장'}),asset=s.createEquipment({siteId:site.id,kind:'가상 장비',model:'가상 모델',capacity:'',manufacturer:'',registration:''}),doc=s.createDocument({siteId:site.id,type:'work_plan',title:'가상 계획',date:'2026-10-29',details:{equipmentIds:[asset.id]}}),png=new PNG({width:1,height:1});png.data[3]=255;const bytes=PNG.sync.write(png),signature=`data:image/png;base64,${bytes.toString('base64')}`,check={equipmentId:asset.id,date:'2026-10-29',items:[{name:'가상 항목',result:'적정'}]};
