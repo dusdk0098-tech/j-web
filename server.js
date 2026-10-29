@@ -398,6 +398,9 @@ const server = http.createServer(async (req, res) => {
       if(req.method==='GET')return json(res,200,store.ppeIssues(url.searchParams.get('siteId'),url.searchParams.get('month')));
       if(req.method==='POST')return json(res,201,{id:store.addPpeIssue(await body(req))});
     }
+    const ppeIssue=url.pathname.match(/^\/api\/ppe-issues\/(\d+)$/);
+    if(ppeIssue&&req.method==='PUT'){store.updatePpeIssue(ppeIssue[1],await body(req));return json(res,200,{ok:true});}
+    if(ppeIssue&&req.method==='DELETE'){store.deletePpeIssue(url.searchParams.get('siteId'),ppeIssue[1]);return json(res,200,{ok:true});}
     if (url.pathname === '/api/workers') {
       if (req.method === 'GET') return json(res,200,store.workers(url.searchParams.get('siteId'),url.searchParams.get('q') || '',Object.fromEntries(url.searchParams)));
       if (req.method === 'POST') return json(res,201,store.createWorker(await body(req)));

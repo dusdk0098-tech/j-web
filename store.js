@@ -8,6 +8,11 @@ function monthValue(month) {
   return month;
 }
 function dailyRateValue(value){if(typeof value!=='string'||!/^$|^\d{1,9}$/.test(value))throw new Error('시험 일당은 0부터 999999999까지 정수로 입력해 주세요.');return value===''?null:Number(value);}
+function ppeValues(input){
+  const date=dateValue(input.date),item=text(input.item,'보호구');
+  if(!['string','number'].includes(typeof input.quantity)||!/^\d{1,5}$/.test(String(input.quantity)))throw new Error('지급수량을 확인해 주세요.');
+  const quantity=Number(input.quantity);if(quantity<1||quantity>10000)throw new Error('지급수량을 확인해 주세요.');return {date,item,quantity};
+}
 function equipmentDetails(input){
   const details={};
   for(const key of ['owner','businessNumber','insurer']){
@@ -215,10 +220,16 @@ export class Store {
   workerFile(siteId,workerId,fileId){return this.db.prepare('SELECT f.* FROM worker_files f JOIN workers w ON w.id=f.worker_id WHERE w.site_id=? AND w.id=? AND f.id=?').get(Number(siteId),Number(workerId),Number(fileId))||null;}
   deleteWorkerFile(siteId,workerId,fileId){if(!this.workerFile(siteId,workerId,fileId))throw new Error('첨부파일을 찾을 수 없습니다.');this.db.prepare('DELETE FROM worker_files WHERE id=?').run(Number(fileId));}
   addPpeIssue(input){
-    const siteId=Number(input.siteId),workerId=Number(input.workerId),date=dateValue(input.date),item=text(input.item,'보호구');
+    const siteId=Number(input.siteId),workerId=Number(input.workerId),{date,item,quantity}=ppeValues(input);
     const worker=this.db.prepare('SELECT name,category,company,occupation FROM workers WHERE id=? AND site_id=?').get(workerId,siteId);if(!worker)throw new Error('선택한 현장의 출입자를 확인해 주세요.');
-    if(!['string','number'].includes(typeof input.quantity)||!/^\d{1,5}$/.test(String(input.quantity)))throw new Error('지급수량을 확인해 주세요.');const quantity=Number(input.quantity);if(quantity<1||quantity>10000)throw new Error('지급수량을 확인해 주세요.');
     return this.db.prepare('INSERT INTO ppe_issues(site_id,worker_id,date,item,quantity,worker_snapshot) VALUES(?,?,?,?,?,?)').run(siteId,workerId,date,item,quantity,JSON.stringify(worker)).lastInsertRowid;
+  }
+  updatePpeIssue(id,input){
+    const {date,item,quantity}=ppeValues(input);
+    if(!this.db.prepare('UPDATE ppe_issues SET date=?,item=?,quantity=? WHERE id=? AND site_id=?').run(date,item,quantity,Number(id),Number(input.siteId)).changes)throw new Error('선택한 현장의 지급 기록을 확인해 주세요.');
+  }
+  deletePpeIssue(siteId,id){
+    if(!this.db.prepare('DELETE FROM ppe_issues WHERE id=? AND site_id=?').run(Number(id),Number(siteId)).changes)throw new Error('선택한 현장의 지급 기록을 확인해 주세요.');
   }
   addSiteOccupation(siteId,name){
     siteId=Number(siteId);if(!this.db.prepare('SELECT 1 FROM sites WHERE id=?').get(siteId))throw new Error('현장을 선택해 주세요.');

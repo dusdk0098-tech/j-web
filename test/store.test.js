@@ -126,6 +126,18 @@ test('보호구 시험 지급은 현장·월별로 집계하고 기록 당시 �
   }finally{s.close();}
 });
 
+test('보호구 지급 수정과 삭제는 현장을 제한하고 당시 근로자 정보를 보존한다',()=>{
+  const s=new Store(':memory:');try{
+    const site=s.createSite({name:'가상 현장'}),other=s.createSite({name:'다른 현장'}),worker=s.createWorker({siteId:site.id,name:'가상 근로자',category:'직영',company:'가상 회사',occupation:'목공'}),input={siteId:site.id,workerId:worker.id,date:'2024-02-29',item:'가상 안전모',quantity:'2'},id=s.addPpeIssue(input);
+    s.updateWorker(worker.id,{siteId:site.id,name:'변경 이름',category:'외주',company:'변경 회사',occupation:'전기'});
+    assert.throws(()=>s.updatePpeIssue(id,{...input,siteId:other.id}),/현장/);assert.throws(()=>s.updatePpeIssue(id,{...input,quantity:'0'}),/수량/);assert.throws(()=>s.updatePpeIssue(id,{...input,date:'2024-02-30'}),/날짜/);
+    assert.equal(s.ppeIssues(site.id,'2024-02').rows[0].quantity,2);
+    s.updatePpeIssue(id,{...input,date:'2024-03-01',item:'가상 안전화',quantity:'3'});assert.equal(s.ppeIssues(site.id,'2024-02').rows.length,0);
+    const row=s.ppeIssues(site.id,'2024-03').rows[0];assert.equal(row.quantity,3);assert.equal(row.worker.name,'가상 근로자');assert.equal(row.worker.company,'가상 회사');assert.equal(s.workerPpeIssues(site.id,worker.id)[0].item,'가상 안전화');
+    assert.throws(()=>s.deletePpeIssue(other.id,id),/현장/);assert.equal(s.workerPpeIssues(site.id,worker.id).length,1);s.deletePpeIssue(site.id,id);assert.deepEqual(s.ppeIssues(site.id,'2024-03').rows,[]);assert.throws(()=>s.deletePpeIssue(site.id,id),/현장/);
+  }finally{s.close();}
+});
+
 test('자료실 공개와 첨부 접근은 현장과 공개 상태를 지키고 재시작 후에도 유지된다',()=>{
   const dir=mkdtempSync(join(tmpdir(),'j-web-articles-')),path=join(dir,'test.sqlite');let s;
   try{
