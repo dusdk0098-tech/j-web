@@ -138,6 +138,13 @@ const server = http.createServer(async (req, res) => {
       const now=new Date(),date=new Date(now.getTime()-now.getTimezoneOffset()*60000).toISOString().slice(0,10);
       return json(res,200,store.workerNotices(session.worker.id,date));
     }
+    const workerNoticeFile=url.pathname.match(/^\/api\/worker\/notices\/(\d+)\/files\/(\d+)$/);
+    if(workerNoticeFile&&req.method==='GET'){
+      const key=workerKey(workerToken),session=workerSessions.get(key);if(!session||session.expires<=Date.now()){workerSessions.delete(key);return json(res,401,{error:'근로자 로그인이 필요합니다.'});}
+      const now=new Date(),date=new Date(now.getTime()-now.getTimezoneOffset()*60000).toISOString().slice(0,10),file=store.workerNoticeFile(session.worker.id,workerNoticeFile[1],workerNoticeFile[2],date);
+      if(!file)return json(res,404,{error:'첨부파일을 찾을 수 없습니다.'});
+      const name=encodeURIComponent(file.name).replace(/[!'()*]/g,c=>`%${c.charCodeAt(0).toString(16).toUpperCase()}`);res.writeHead(200,{'Content-Type':'application/octet-stream','Content-Disposition':`attachment; filename="attachment"; filename*=UTF-8''${name}`,'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(file.data);
+    }
     if(url.pathname==='/api/worker/instructions' && ['GET','POST'].includes(req.method)){
       const key=workerKey(workerToken),session=workerSessions.get(key);
       if(!session||session.expires<=Date.now()){workerSessions.delete(key);return json(res,401,{error:'근로자 로그인이 필요합니다.'});}

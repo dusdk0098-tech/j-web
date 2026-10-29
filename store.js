@@ -549,7 +549,11 @@ export class Store {
   workerAttendanceUnits(workerId,month){month=monthValue(month);return this.db.prepare('SELECT date,units_hundredths FROM attendance WHERE worker_id=? AND present=1 AND date BETWEEN ? AND ? ORDER BY date').all(Number(workerId),`${month}-01`,`${month}-31`);}
   workerNotices(workerId,date) {
     date=dateValue(date);
-    return this.db.prepare("SELECT d.id,d.title,d.body,d.date,r.read_at FROM workers w JOIN documents d ON d.site_id=w.site_id LEFT JOIN worker_notice_reads r ON r.document_id=d.id AND r.worker_id=w.id WHERE w.id=? AND d.type='notice' AND d.status='approved' AND d.date=? ORDER BY d.id DESC").all(Number(workerId),date);
+    return this.db.prepare("SELECT d.id,d.title,d.body,d.date,r.read_at FROM workers w JOIN documents d ON d.site_id=w.site_id LEFT JOIN worker_notice_reads r ON r.document_id=d.id AND r.worker_id=w.id WHERE w.id=? AND d.type='notice' AND d.status='approved' AND d.date=? ORDER BY d.id DESC").all(Number(workerId),date).map(notice=>({...notice,files:this.attachments(notice.id).map(({id,name,size})=>({id,name,size}))}));
+  }
+  workerNoticeFile(workerId,documentId,fileId,date){
+    date=dateValue(date);
+    return this.db.prepare("SELECT a.name,a.data FROM workers w JOIN documents d ON d.site_id=w.site_id JOIN attachments a ON a.document_id=d.id WHERE w.id=? AND d.id=? AND a.id=? AND d.type='notice' AND d.status='approved' AND d.date=?").get(Number(workerId),Number(documentId),Number(fileId),date)||null;
   }
   workerTraining(workerId,date) {
     date=dateValue(date);

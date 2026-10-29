@@ -520,12 +520,16 @@ test('관리자 인증 모드가 문서 API를 보호하고 로그아웃을 적�
     assert.equal(firstDay.find(row=>row.id===own.id).present,1);
     const makeNotice=async siteId=>(await (await post('/api/documents',{siteId,type:'notice',title:'가상 공지',date:today,body:'가상 위험 안내'})).json());
     const notice=await makeNotice(site.id),draftNotice=await makeNotice(site.id),otherNotice=await makeNotice(other.id);
+    const uploadNotice=async doc=>{const res=await fetch(`${base}/api/documents/${doc.id}/attachments`,{method:'POST',headers:{cookie,'x-file-name':encodeURIComponent('가상 공지.txt')},body:'가상 첨부'});assert.equal(res.status,201);return (await res.json()).id;};
+    const noticeFile=await uploadNotice(notice),draftFile=await uploadNotice(draftNotice),otherFile=await uploadNotice(otherNotice);
     for(const id of [notice.id,otherNotice.id]){await post(`/api/documents/${id}/transition`,{action:'submit'});await post(`/api/documents/${id}/transition`,{action:'approve'});}
     const oldNotice=await (await post('/api/documents',{siteId:site.id,type:'notice',title:'가상 이전 공지',date:'2024-02-01',body:'가상 내용'})).json(),futureNotice=await (await post('/api/documents',{siteId:site.id,type:'notice',title:'가상 미래 공지',date:'2099-02-01',body:'가상 내용'})).json();
+    const oldFile=await uploadNotice(oldNotice),futureFile=await uploadNotice(futureNotice);
     for(const item of [oldNotice,futureNotice]){await post(`/api/documents/${item.id}/transition`,{action:'submit'});await post(`/api/documents/${item.id}/transition`,{action:'approve'});}
     assert.equal((await fetch(`${base}/api/worker/notices`)).status,401);
     const notices=await (await fetch(`${base}/api/worker/notices`,{headers:{cookie:workerCookie}})).json();
     assert.deepEqual(notices.map(n=>n.id),[notice.id]);
+    assert.deepEqual(notices[0].files.map(f=>f.id),[noticeFile]);const fileUrl=(doc,file)=>`${base}/api/worker/notices/${doc.id}/files/${file}`;assert.equal((await fetch(fileUrl(notice,noticeFile))).status,401);const downloaded=await fetch(fileUrl(notice,noticeFile),{headers:{cookie:workerCookie}});assert.equal(downloaded.status,200);assert.equal(downloaded.headers.get('content-type'),'application/octet-stream');assert.equal(downloaded.headers.get('x-content-type-options'),'nosniff');assert.equal(await downloaded.text(),'가상 첨부');for(const [doc,file] of [[notice,otherFile],[draftNotice,draftFile],[otherNotice,otherFile],[oldNotice,oldFile],[futureNotice,futureFile]])assert.equal((await fetch(fileUrl(doc,file),{headers:{cookie:workerCookie}})).status,404);
     const confirmNotice=(id,signature=`data:image/png;base64,${photo.toString('base64')}`)=>fetch(`${base}/api/worker/notices/${id}/confirm`,{method:'POST',headers:{cookie:workerCookie,'content-type':'application/json'},body:JSON.stringify({signature})});
     assert.equal((await confirmNotice(otherNotice.id)).status,400);assert.equal((await confirmNotice(draftNotice.id)).status,400);
     assert.equal((await confirmNotice(oldNotice.id)).status,400);assert.equal((await confirmNotice(futureNotice.id)).status,400);
