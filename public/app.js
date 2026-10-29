@@ -5,6 +5,7 @@ const labels = {dashboard:'현장 현황','manager-check':'관리자 자가점�
 labels['hazards']='의견제안 및 위험신고';
 labels['restaurants']='식대 기본설정';
 labels['meal-checks']='식대 체크';
+labels['meal-statement']='식대 명세서';
 labels['wages']='가상 노임';
 labels['site-articles']='현장 자료실';
 labels['site-photos']='현장사진';
@@ -13,6 +14,7 @@ document.querySelector('[data-page=stops]').insertAdjacentHTML('afterend','<butt
 document.querySelector('[data-page=attendance]').insertAdjacentHTML('afterend','<button data-page="restaurants">식대 기본설정</button>');
 document.querySelector('[data-page=restaurants]').insertAdjacentHTML('afterend','<button data-page="meal-checks">식대 체크</button>');
 document.querySelector('[data-page=meal-checks]').insertAdjacentHTML('afterend','<button data-page="wages">가상 노임</button>');
+document.querySelector('[data-page=meal-checks]').insertAdjacentHTML('afterend','<button data-page="meal-statement">식대 명세서</button>');
 document.querySelector('[data-page=wages]').insertAdjacentHTML('afterend','<button data-page="site-articles">현장 자료실</button>');
 document.querySelector('[data-page=site-articles]').insertAdjacentHTML('beforebegin','<button data-page="site-photos">현장사진</button>');
 document.querySelector('[data-page=workers]').insertAdjacentHTML('afterend','<button data-page="site-occupations">자주 쓰는 직종</button>');
@@ -500,6 +502,13 @@ async function render(){
     $('#wage-add').insertAdjacentHTML('beforebegin',`<a class="outline" href="/api/wages/export?siteId=${siteId}&amp;month=${encodeURIComponent(month)}" download="wages.xlsx">엑셀 내려받기</a>`);
     const edit=r=>showDialog('가상 노임 입력',`<div class="fields"><label>근로자 <select name="workerId" required>${workers.filter(w=>r?w.id===r.worker_id:!records.some(record=>record.worker_id===w.id)).map(w=>`<option value="${w.id}" ${r?.worker_id===w.id?'selected':''}>${esc(w.name)} · ${esc(w.company)}</option>`).join('')}</select></label>${field('gross','가상 노임 (원)',String(r?.gross??0))}${Object.entries(names).map(([key,label])=>field(key,label+' (원)',String(r?.deductions[key]??0))).join('')}</div>`,d=>api('/api/wages',{method:r?'PUT':'POST',body:JSON.stringify({siteId,month,workerId:d.workerId,gross:d.gross,deductions:Object.fromEntries(Object.keys(names).map(key=>[key,d[key]]))})}));
     $('#wage-month').onchange=e=>{if(e.target.value){state.wageMonth=e.target.value;render().catch(showError);}};$('#wage-add').onclick=()=>{if(!workers.some(w=>!records.some(record=>record.worker_id===w.id))){flash('추가할 가상 출입자가 없습니다.',true);return;}edit(null);};content.querySelectorAll('[data-wage]').forEach(b=>b.onclick=()=>edit(records.find(r=>r.worker_id===Number(b.dataset.wage))));return;
+  }
+  if(state.page==='meal-statement'){
+    const month=state.mealStatementMonth||today().slice(0,7),data=await api(`/api/meal-checks/statement?siteId=${state.siteId}&month=${encodeURIComponent(month)}`),kinds={breakfast:'조식',lunch:'중식',dinner:'석식',snack:'간식'},short={breakfast:'조',lunch:'중',dinner:'석',snack:'간'};
+    const [year,monthNumber]=month.split('-').map(Number),dates=Array.from({length:new Date(year,monthNumber,0).getDate()},(_,i)=>`${month}-${String(i+1).padStart(2,'0')}`),workers=new Map();
+    for(const row of data.rows){if(!workers.has(row.worker_id))workers.set(row.worker_id,{name:row.name,company:row.company,category:row.category,days:{},total:0});const worker=workers.get(row.worker_id);(worker.days[row.date]??=[]).push(short[row.kind]);worker.total+=row.price;}
+    content.innerHTML=`<section class="panel meal-statement"><div class="panel-head"><div><h2>가상 식대 명세서</h2><p>${esc(data.site.name)} · ${esc(month)}</p></div><button id="meal-statement-print" class="outline">인쇄</button></div><div class="filters"><label>조회 월 <input id="meal-statement-month" type="month" value="${esc(month)}"></label></div><p class="muted">저장 당시 단가 합계이며 부가세는 포함하지 않습니다. 이름·소속·구분은 현재 출입자 정보입니다.</p>${workers.size?`<div class="table-wrap"><table class="meal-statement-table"><thead><tr><th>이름</th><th>소속</th><th>구분</th>${dates.map(d=>`<th>${Number(d.slice(-2))}</th>`).join('')}<th>금액</th></tr></thead><tbody>${[...workers.values()].map(w=>`<tr><td>${esc(w.name)}</td><td>${esc(w.company)}</td><td>${esc(w.category)}</td>${dates.map(d=>`<td>${esc((w.days[d]||[]).join('·'))}</td>`).join('')}<td>${w.total}원</td></tr>`).join('')}</tbody></table></div>`:'<p>이 달의 식대 기록이 없습니다.</p>'}<h2>식당별 가상 단가 합계</h2>${data.groups.length?`<div class="table-wrap"><table><thead><tr><th>식당</th><th>종류</th><th>기록 단가</th><th>수량</th><th>합계</th></tr></thead><tbody>${data.groups.map(g=>`<tr><td>${esc(g.restaurant_name)}</td><td>${esc(kinds[g.kind])}</td><td>${g.price}원</td><td>${g.quantity}</td><td>${g.total}원</td></tr>`).join('')}</tbody></table></div>`:'<p>기록이 없습니다.</p>'}</section>`;
+    $('#meal-statement-month').onchange=e=>{if(e.target.value){state.mealStatementMonth=e.target.value;render().catch(showError);}};$('#meal-statement-print').onclick=()=>window.print();return;
   }
   if(state.page==='meal-checks'){
     const siteId=state.siteId,date=state.mealDate||today(),[workers,restaurants,checks,monthly]=await Promise.all([api(`/api/attendance?siteId=${siteId}&date=${date}`),api(`/api/restaurants?siteId=${siteId}`),api(`/api/meal-checks?siteId=${siteId}&date=${date}`),api(`/api/meal-checks/month?siteId=${siteId}&month=${date.slice(0,7)}`)]);

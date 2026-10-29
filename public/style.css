@@ -3,3 +3,4 @@
 .plan-diagram{max-width:100%;height:auto}
 #signature, .signature-pad { display:block; max-width:100%; border:1px solid #7c8a95; background:#fff; touch-action:none; }
 .site-photo{max-width:min(240px,100%);height:auto}
+@media print{.meal-statement .table-wrap{overflow:visible}.meal-statement-table{min-width:0;table-layout:fixed;font-size:7px}.meal-statement-table th,.meal-statement-table td{padding:2px;overflow-wrap:anywhere}}

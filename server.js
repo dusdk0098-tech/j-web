@@ -317,6 +317,7 @@ const server = http.createServer(async (req, res) => {
       if(req.method==='PUT'){store.saveWageRecord(await body(req),true);return json(res,200,{ok:true});}
     }
     if(url.pathname==='/api/meal-checks/month'&&req.method==='GET')return json(res,200,store.monthlyMealChecks(url.searchParams.get('siteId'),url.searchParams.get('month')));
+    if(url.pathname==='/api/meal-checks/statement'&&req.method==='GET')return json(res,200,store.mealStatement(url.searchParams.get('siteId'),url.searchParams.get('month')));
     if(url.pathname==='/api/meal-checks/month/worker'&&req.method==='GET')return json(res,200,store.workerMonthlyMealChecks(url.searchParams.get('siteId'),url.searchParams.get('workerId'),url.searchParams.get('month')));
     if(url.pathname==='/api/meal-checks/month/worker'&&req.method==='POST')return json(res,200,{changed:store.setWorkerMonthlyMeals(await body(req))});
     if(url.pathname==='/api/meal-checks'){

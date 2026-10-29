@@ -213,6 +213,13 @@ export class Store {
     month=monthValue(month);
     return this.db.prepare("SELECT w.id,w.name,COUNT(*) AS count,SUM(m.price) AS total FROM meal_checks m JOIN workers w ON w.id=m.worker_id AND w.site_id=m.site_id WHERE m.site_id=? AND m.date BETWEEN ? AND ? GROUP BY w.id,w.name ORDER BY w.name,w.id").all(Number(siteId),`${month}-01`,`${month}-31`);
   }
+  mealStatement(siteId,month) {
+    month=monthValue(month);siteId=Number(siteId);
+    const site=this.db.prepare('SELECT id,name FROM sites WHERE id=?').get(siteId);if(!site)throw new Error('현장을 선택해 주세요.');
+    const rows=this.db.prepare('SELECT m.date,m.kind,m.restaurant_name,m.price,w.id AS worker_id,w.name,w.company,w.category FROM meal_checks m JOIN workers w ON w.id=m.worker_id AND w.site_id=m.site_id WHERE m.site_id=? AND m.date BETWEEN ? AND ? ORDER BY w.name,w.id,m.date,m.kind').all(siteId,`${month}-01`,`${month}-31`);
+    const groups=this.db.prepare('SELECT kind,restaurant_name,price,COUNT(*) AS quantity,SUM(price) AS total FROM meal_checks WHERE site_id=? AND date BETWEEN ? AND ? GROUP BY kind,restaurant_name,price ORDER BY restaurant_name,kind,price').all(siteId,`${month}-01`,`${month}-31`);
+    return {site,month,rows,groups};
+  }
   workerMonthlyMealChecks(siteId,workerId,month) {
     month=monthValue(month);siteId=Number(siteId);workerId=Number(workerId);
     if(!this.db.prepare('SELECT 1 FROM workers WHERE id=? AND site_id=?').get(workerId,siteId))throw new Error('선택한 현장의 출입자를 확인해 주세요.');

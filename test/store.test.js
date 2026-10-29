@@ -68,6 +68,14 @@ test('월간 식대 일괄 변경은 출역일만 대상으로 기존 단가와 
   }finally{s.close();}
 });
 
+test('월간 식대 명세서는 현장과 월을 제한하고 기록 단가별 수량을 집계한다',()=>{
+  const s=new Store(':memory:');try{
+    const site=s.createSite({name:'가상 현장'}),other=s.createSite({name:'다른 현장'}),worker=s.createWorker({siteId:site.id,name:'가상 근로자',category:'직영',company:'가상 회사',occupation:'목공'}),restaurant=s.saveRestaurant({siteId:site.id,name:'가상 식당',mealPrice:'5000',snackPrice:'1000',tax:'0'});
+    for(const date of ['2024-02-01','2024-02-02','2024-03-01']){if(date==='2024-02-02')s.saveRestaurant({siteId:site.id,name:'가상 식당',mealPrice:'7000',snackPrice:'1000',tax:'0'},restaurant.id);s.setAttendance({siteId:site.id,workerId:worker.id,date,present:true});s.saveMealCheck({siteId:site.id,workerId:worker.id,date,kind:'lunch',restaurantId:restaurant.id});}
+    const report=s.mealStatement(site.id,'2024-02');assert.equal(report.site.name,'가상 현장');assert.equal(report.rows.length,2);assert.deepEqual(report.groups.map(g=>[g.price,g.quantity,g.total]),[[5000,1,5000],[7000,1,7000]]);assert.deepEqual(s.mealStatement(other.id,'2024-02').rows,[]);assert.equal(s.mealStatement(site.id,'2024-03').rows.length,1);assert.throws(()=>s.mealStatement(site.id,'2024-13'),/월/);assert.throws(()=>s.mealStatement(999,'2024-02'),/현장/);
+  }finally{s.close();}
+});
+
 test('식당 시험 설정은 현장별로 저장하며 잘못된 수정을 거절한다',()=>{
   const s=new Store(':memory:');try{
     const a=s.createSite({name:'가상 A'}),b=s.createSite({name:'가상 B'}),input={siteId:a.id,name:'가상 식당',mealPrice:'5000',snackPrice:'1000',tax:'600'},restaurant=s.saveRestaurant(input);
