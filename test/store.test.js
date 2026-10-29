@@ -10,12 +10,14 @@ import { PNG } from 'pngjs';
 test('일괄 시험 승인은 같은 현장의 대기 문서만 모두 처리하며 오류 때 전부 되돌린다',()=>{
   const s=new Store(':memory:');try{
     const a=s.createSite({name:'가상 A'}),b=s.createSite({name:'가상 B'}),make=siteId=>s.createDocument({siteId,type:'tbm',title:'가상 문서',date:'2026-10-29'}),one=make(a.id),two=make(a.id),other=make(b.id),draft=make(a.id);
+    const image=new PNG({width:1,height:1});image.data[3]=255;const bytes=PNG.sync.write(image),signature=`data:image/png;base64,${bytes.toString('base64')}`;
     for(const doc of [one,two,other])s.transition(doc.id,'submit');
-    for(const ids of [[],[one.id,one.id],[one.id,draft.id],[one.id,other.id],[one.id,99999],Array(101).fill(one.id)])assert.throws(()=>s.approveDocuments(a.id,ids));
+    for(const ids of [[],[one.id,one.id],[one.id,draft.id],[one.id,other.id],[one.id,99999],Array(101).fill(one.id)])assert.throws(()=>s.approveDocuments(a.id,ids,signature));
+    assert.throws(()=>s.approveDocuments(a.id,[one.id],''),/서명/);
     assert.equal(s.document(one.id).status,'pending');assert.equal(s.events(one.id).length,1);
     s.db.exec(`CREATE TRIGGER test_batch_failure BEFORE INSERT ON events WHEN NEW.document_id=${two.id} AND NEW.action='approve' BEGIN SELECT RAISE(ABORT,'시험 오류'); END`);
-    assert.throws(()=>s.approveDocuments(a.id,[one.id,two.id]),/시험 오류/);assert.equal(s.document(one.id).status,'pending');assert.equal(s.events(one.id).length,1);
-    s.db.exec('DROP TRIGGER test_batch_failure');assert.deepEqual(s.approveDocuments(a.id,[one.id,two.id]),{approved:2});assert.equal(s.document(one.id).status,'approved');assert.equal(s.events(two.id).at(-1).action,'approve');assert.equal(s.document(other.id).status,'pending');
+    assert.throws(()=>s.approveDocuments(a.id,[one.id,two.id],signature),/시험 오류/);assert.equal(s.document(one.id).status,'pending');assert.equal(s.events(one.id).length,1);
+    s.db.exec('DROP TRIGGER test_batch_failure');assert.deepEqual(s.approveDocuments(a.id,[one.id,two.id],signature),{approved:2});assert.equal(s.document(one.id).status,'approved');const event=s.events(two.id).at(-1);assert.equal(event.action,'approve');assert.equal(event.has_signature,1);assert.deepEqual(Buffer.from(s.eventSignature(two.id,event.id)),bytes);assert.equal(s.eventSignature(other.id,event.id),null);assert.equal(s.document(other.id).status,'pending');
   }finally{s.close();}
 });
 

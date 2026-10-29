@@ -100,6 +100,7 @@ export class Store {
     if (!this.db.prepare('PRAGMA table_info(documents)').all().some(c=>c.name==='details')) this.db.exec("ALTER TABLE documents ADD COLUMN details TEXT NOT NULL DEFAULT '{}'");
     if (!this.db.prepare('PRAGMA table_info(workers)').all().some(c=>c.name==='created_date')) this.db.exec('ALTER TABLE workers ADD COLUMN created_date TEXT');
     if (!this.db.prepare('PRAGMA table_info(events)').all().some(c=>c.name==='opinion')) this.db.exec("ALTER TABLE events ADD COLUMN opinion TEXT NOT NULL DEFAULT ''");
+    if (!this.db.prepare('PRAGMA table_info(events)').all().some(c=>c.name==='signature')) this.db.exec('ALTER TABLE events ADD COLUMN signature BLOB');
     if (!this.db.prepare('PRAGMA table_info(work_stops)').all().some(c=>c.name==='photo')) this.db.exec('ALTER TABLE work_stops ADD COLUMN photo BLOB');
     if (!this.db.prepare('PRAGMA table_info(worker_self_checks)').all().some(c=>c.name==='signature')) this.db.exec('ALTER TABLE worker_self_checks ADD COLUMN signature BLOB');
     if (!this.db.prepare('PRAGMA table_info(attachments)').all().some(c=>c.name==='category')) this.db.exec("ALTER TABLE attachments ADD COLUMN category TEXT NOT NULL DEFAULT 'general'");
@@ -1004,7 +1005,7 @@ export class Store {
     doc.details.companyName=company.name;doc.details.companyTrade=company.trade;
     if(doc.details.recipientId){const worker=this.db.prepare('SELECT name FROM workers WHERE id=? AND site_id=? AND company=?').get(doc.details.recipientId,doc.siteId,company.name);if(!worker)throw new Error('선택한 현장과 협력사의 담당자를 확인해 주세요.');doc.details.recipient=worker.name;}
   }
-  transition(id, action, opinion='') {
+  transition(id, action, opinion='', signature=null) {
     const doc = this.document(id);
     if (!doc) throw new Error('문서를 찾을 수 없습니다.');
     const next = transitions[doc.status]?.[action];
@@ -1020,20 +1021,22 @@ export class Store {
         if(details.equipmentIds!==undefined){details.equipmentSnapshot=details.equipmentIds.map(equipmentId=>{const item=get.get(equipmentId,doc.site_id);if(!item)throw new Error('같은 현장의 장비를 확인해 주세요.');return item;});this.db.prepare('UPDATE documents SET details=? WHERE id=?').run(JSON.stringify(details),Number(id));}
       }
       this.db.prepare('UPDATE documents SET status=?,updated_at=CURRENT_TIMESTAMP WHERE id=?').run(next, Number(id));
-      this.db.prepare('INSERT INTO events(document_id,action,from_status,to_status,opinion) VALUES(?,?,?,?,?)').run(Number(id),action,doc.status,next,opinion);
+      this.db.prepare('INSERT INTO events(document_id,action,from_status,to_status,opinion,signature) VALUES(?,?,?,?,?,?)').run(Number(id),action,doc.status,next,opinion,signature);
       this.db.exec('RELEASE document_transition');
     } catch (err) { this.db.exec('ROLLBACK TO document_transition');this.db.exec('RELEASE document_transition');throw err; }
     return this.document(id);
   }
-  approveDocuments(siteId,ids){
+  approveDocuments(siteId,ids,signature){
     if(!Number.isSafeInteger(siteId)||siteId<1||!Array.isArray(ids)||!ids.length||ids.length>100||ids.some(id=>!Number.isSafeInteger(id)||id<1)||new Set(ids).size!==ids.length)throw new Error('선택한 시험 문서를 확인해 주세요.');
+    const bytes=signatureBytes(signature);
     this.db.exec('BEGIN IMMEDIATE');
     try{
       for(const id of ids){const doc=this.document(id);if(!doc||doc.site_id!==siteId||doc.status!=='pending')throw new Error('선택한 현장의 결재 대기 문서를 확인해 주세요.');}
-      for(const id of ids)this.transition(id,'approve');
+      for(const id of ids)this.transition(id,'approve','',bytes);
       this.db.exec('COMMIT');
     }catch(err){this.db.exec('ROLLBACK');throw err;}
     return {approved:ids.length};
   }
-  events(id) { return this.db.prepare('SELECT * FROM events WHERE document_id=? ORDER BY id').all(Number(id)); }
+  events(id) { return this.db.prepare('SELECT id,document_id,action,from_status,to_status,created_at,opinion,signature IS NOT NULL AS has_signature FROM events WHERE document_id=? ORDER BY id').all(Number(id)); }
+  eventSignature(id,eventId){return this.db.prepare('SELECT signature FROM events WHERE document_id=? AND id=? AND signature IS NOT NULL').get(Number(id),Number(eventId))?.signature||null;}
 }

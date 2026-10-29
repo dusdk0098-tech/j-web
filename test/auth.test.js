@@ -114,7 +114,10 @@ test('관리자 인증 모드가 문서 API를 보호하고 로그아웃을 적�
     assert.equal((await fetch(`${base}${resultPath}`)).status,401);assert.equal((await post(resultPath,resultInput)).status,400);
     await post(`/api/documents/${instruction.id}/transition`,{action:'submit'});
     assert.equal((await fetch(`${base}/api/documents/batch-approve`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({siteId:site.id,ids:[instruction.id]})})).status,401);
-    assert.equal((await post('/api/documents/batch-approve',{siteId:site.id,ids:[instruction.id]})).status,200);assert.equal((await (await fetch(`${base}/api/documents/${instruction.id}`,{headers:{cookie}})).json()).status,'approved');
+    assert.equal((await post('/api/documents/batch-approve',{siteId:site.id,ids:[instruction.id]})).status,400);
+    const batchPng=new PNG({width:1,height:1});batchPng.data[3]=255;const batchBytes=PNG.sync.write(batchPng),batchSignature=`data:image/png;base64,${batchBytes.toString('base64')}`;
+    assert.equal((await post('/api/documents/batch-approve',{siteId:site.id,ids:[instruction.id],signature:batchSignature})).status,200);assert.equal((await (await fetch(`${base}/api/documents/${instruction.id}`,{headers:{cookie}})).json()).status,'approved');
+    const batchEvent=(await (await fetch(`${base}/api/documents/${instruction.id}/events`,{headers:{cookie}})).json()).at(-1),batchSignatureUrl=`${base}/api/documents/${instruction.id}/events/${batchEvent.id}/signature`;assert.equal(batchEvent.has_signature,1);assert.equal((await fetch(batchSignatureUrl)).status,401);assert.deepEqual(Buffer.from(await (await fetch(batchSignatureUrl,{headers:{cookie}})).arrayBuffer()),batchBytes);assert.equal((await fetch(`${base}/api/documents/999999/events/${batchEvent.id}/signature`,{headers:{cookie}})).status,404);
     assert.equal((await post(resultPath,resultInput)).status,201);assert.equal((await (await fetch(`${base}${resultPath}`,{headers:{cookie}})).json()).content,'시험 조치');
     assert.equal((await fetch(`${base}/api/rigging?siteId=${site.id}`)).status,401);
     const rigging=await post('/api/rigging',{siteId:site.id,category:'체결장구',kind:'가상 장구',name:'가상 별칭',standards:['가상 규격'],additional:[],spec:'가상 제원'});assert.equal(rigging.status,201);
