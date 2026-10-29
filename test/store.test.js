@@ -1034,6 +1034,7 @@ test('허가서의 사전 조치 시험 점검은 문서별로 저장하고 잘�
     const site=s.createSite({name:'가상 현장'}),base={siteId:site.id,type:'permit',title:'가상 허가서',date:'2041-01-01'},doc=s.createDocument(base),other=s.createDocument(base),nonPermit=s.createDocument({...base,type:'tbm'});
     s.transition(doc.id,'submit');s.transition(doc.id,'approve');const input={date:'2041-01-02',items:[{name:'가상 보호 상태',result:'pass',action:''},{name:'가상 시정',result:'fail',action:'시험 조치'}]},id=s.savePermitCheck(doc.id,input);
     assert.deepEqual(s.permitChecks(doc.id)[0].items,input.items);assert.deepEqual(s.permitChecks(other.id),[]);assert.throws(()=>s.savePermitCheck(nonPermit.id,input),/허가서/);
+    assert.throws(()=>s.savePermitCheck(doc.id,{...input,items:[{name:'가상 항목',result:'',action:''}]}),/점검 결과/);assert.deepEqual(s.permitChecks(doc.id)[0].items,input.items);
     assert.throws(()=>s.savePermitCheck(doc.id,{...input,items:[]},id),/항목/);assert.throws(()=>s.savePermitCheck(doc.id,{...input,items:[{name:'가상',result:'pass',action:'기존 조치'}]},id),/비워/);assert.throws(()=>s.savePermitCheck(other.id,input,id),/찾을 수/);assert.deepEqual(s.permitChecks(doc.id)[0].items,input.items);
     const changed={...input,items:[{name:'수정 항목',result:'fail',action:'보완 예정'}]};s.savePermitCheck(doc.id,changed,id);assert.deepEqual(s.permitChecks(doc.id)[0].items,changed.items);assert.throws(()=>s.deletePermitCheck(other.id,id),/찾을 수/);s.deletePermitCheck(doc.id,id);assert.deepEqual(s.permitChecks(doc.id),[]);
   }finally{s.close();}
@@ -1165,6 +1166,7 @@ test('작업계획서의 기본 항목을 저장하고 잘못된 작업기간은
     s.updateDocument(doc.id,{...base,details:{...details,equipmentIds:[asset.id]}});
     assert.deepEqual(JSON.parse(s.document(doc.id).details).equipmentIds,[asset.id]);
     const check={equipmentId:asset.id,date:'2026-10-22',items:[{name:'가상 점검',result:'부적정'}]};
+    assert.throws(()=>s.addEquipmentCheck(doc.id,{...check,items:[{name:'가상 점검',result:''}]}),/판정/);assert.deepEqual(s.equipmentChecks(doc.id),[]);
     s.addEquipmentCheck(doc.id,check);assert.deepEqual(JSON.parse(s.equipmentChecks(doc.id)[0].items),check.items);
     assert.throws(()=>s.updateDocument(doc.id,{siteId:site.id,type:'work_plan',title:'수정',date:'2026-10-20',details:{...details,periodTo:'2026-10-19'}}),/작업기간/);
     s.updateEquipment(asset.id,{siteId:site.id,kind:'굴착기',model:'수정 모델',capacity:'',manufacturer:'',registration:''});
