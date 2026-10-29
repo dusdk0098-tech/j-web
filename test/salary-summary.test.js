@@ -1,0 +1,16 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { salarySummary } from '../public/salary-summary.js';
+
+test('시험 급여는 종류와 근로 구분에 따라 계산하며 모순은 표시하지 않는다',()=>{
+  const daily=(rate,units=100,category='직영')=>({category,salary_kind:null,daily_rate:rate,units_hundredths:units}),fixed=(kind,amount,category='직영')=>({category,salary_kind:kind,salary_amount:amount});
+  assert.equal(salarySummary([daily(101,50),daily(101,125)]).total,177);
+  assert.equal(salarySummary([fixed('monthly',3000),fixed('monthly',3000)]).total,3000);
+  assert.equal(salarySummary([fixed('yearly',12000),fixed('yearly',12000)]).total,12000);
+  assert.equal(salarySummary([fixed('monthly',3000),daily(50,100,'외주')]).total,3050);
+  assert.match(salarySummary([daily(100),fixed('monthly',3000)]).reason,/혼합/);
+  assert.match(salarySummary([fixed('monthly',3000),fixed('monthly',4000)]).reason,/불일치/);
+  assert.match(salarySummary([fixed('other',100)]).reason,/기타/);
+  assert.match(salarySummary([daily(null)]).reason,/미기록/);
+  assert.match(salarySummary([{...daily(100),category:null}]).reason,/구분/);
+});

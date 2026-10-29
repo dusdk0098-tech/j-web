@@ -139,6 +139,8 @@ export class Store {
     if(!attendanceColumns.includes('source'))this.db.exec('ALTER TABLE attendance ADD COLUMN source TEXT');
     if(!attendanceColumns.includes('units_hundredths'))this.db.exec('ALTER TABLE attendance ADD COLUMN units_hundredths INTEGER CHECK(units_hundredths IS NULL OR units_hundredths BETWEEN 0 AND 999)');
     if(!attendanceColumns.includes('daily_rate'))this.db.exec('ALTER TABLE attendance ADD COLUMN daily_rate INTEGER CHECK(daily_rate IS NULL OR daily_rate BETWEEN 0 AND 999999999)');
+    if(!attendanceColumns.includes('salary_kind'))this.db.exec("ALTER TABLE attendance ADD COLUMN salary_kind TEXT CHECK(salary_kind IS NULL OR salary_kind IN ('monthly','yearly','other'))");
+    if(!attendanceColumns.includes('salary_amount'))this.db.exec('ALTER TABLE attendance ADD COLUMN salary_amount INTEGER CHECK(salary_amount IS NULL OR salary_amount BETWEEN 0 AND 999999999)');
   }
   close() { this.db.close(); }
   managerChecks(siteId) {
@@ -267,7 +269,7 @@ export class Store {
   }
   wageRecords(siteId,month,filters={}) {
     month=monthValue(month);
-    return this.db.prepare("SELECT r.worker_id,r.month,r.gross,r.deductions,r.category_snapshot AS category,COALESCE(r.name_snapshot,'기록 없음') AS name,COALESCE(r.company_snapshot,'기록 없음') AS company,COALESCE(r.occupation_snapshot,'기록 없음') AS occupation,COUNT(a.date) AS attendance_days,SUM(a.units_hundredths) AS units_hundredths,COUNT(a.date)-COUNT(a.units_hundredths) AS units_missing,SUM(CASE WHEN a.daily_rate IS NOT NULL AND a.units_hundredths IS NOT NULL THEN (a.daily_rate*a.units_hundredths+50)/100 END) AS estimated_pay,COUNT(a.date)-COUNT(CASE WHEN a.daily_rate IS NOT NULL AND a.units_hundredths IS NOT NULL THEN a.date END) AS pay_missing FROM wage_records r JOIN workers w ON w.id=r.worker_id AND w.site_id=r.site_id LEFT JOIN attendance a ON a.worker_id=r.worker_id AND a.present=1 AND a.date BETWEEN ? AND ? WHERE r.site_id=? AND r.month=? GROUP BY r.worker_id,r.month ORDER BY name,w.id").all(`${month}-01`,`${month}-31`,Number(siteId),month).map(row=>{const deductions=JSON.parse(row.deductions),total=Object.values(deductions).reduce((a,b)=>a+b,0);return {...row,deductions,total,net:row.gross-total};}).filter(row=>(!filters.company||row.company===filters.company)&&(!filters.category||row.category===filters.category)&&(!filters.q||row.name.toLocaleLowerCase().includes(filters.q.trim().toLocaleLowerCase())));
+    return this.db.prepare("SELECT r.worker_id,r.month,r.gross,r.deductions,r.category_snapshot AS category,COALESCE(r.name_snapshot,'기록 없음') AS name,COALESCE(r.company_snapshot,'기록 없음') AS company,COALESCE(r.occupation_snapshot,'기록 없음') AS occupation,COUNT(a.date) AS attendance_days,SUM(a.units_hundredths) AS units_hundredths,COUNT(a.date)-COUNT(a.units_hundredths) AS units_missing,SUM(CASE WHEN a.salary_kind IS NULL AND a.daily_rate IS NOT NULL AND a.units_hundredths IS NOT NULL THEN (a.daily_rate*a.units_hundredths+50)/100 END) AS estimated_pay,COUNT(a.date)-COUNT(CASE WHEN a.salary_kind IS NULL AND a.daily_rate IS NOT NULL AND a.units_hundredths IS NOT NULL THEN a.date END) AS pay_missing FROM wage_records r JOIN workers w ON w.id=r.worker_id AND w.site_id=r.site_id LEFT JOIN attendance a ON a.worker_id=r.worker_id AND a.present=1 AND a.date BETWEEN ? AND ? WHERE r.site_id=? AND r.month=? GROUP BY r.worker_id,r.month ORDER BY name,w.id").all(`${month}-01`,`${month}-31`,Number(siteId),month).map(row=>{const deductions=JSON.parse(row.deductions),total=Object.values(deductions).reduce((a,b)=>a+b,0);return {...row,deductions,total,net:row.gross-total};}).filter(row=>(!filters.company||row.company===filters.company)&&(!filters.category||row.category===filters.category)&&(!filters.q||row.name.toLocaleLowerCase().includes(filters.q.trim().toLocaleLowerCase())));
   }
   wageSummary(siteId,month,filters={}) {
     const groups=new Map();
@@ -533,14 +535,14 @@ export class Store {
   }
   attendance(siteId, date) {
     date = dateValue(date);
-    return this.db.prepare('SELECT workers.id,workers.name,workers.category,workers.company,workers.occupation,COALESCE(attendance.present,0) AS present,attendance.source,attendance.units_hundredths,attendance.daily_rate FROM workers LEFT JOIN attendance ON attendance.worker_id=workers.id AND attendance.date=? WHERE workers.site_id=? ORDER BY workers.name,workers.id').all(date,Number(siteId));
+    return this.db.prepare('SELECT workers.id,workers.name,workers.category,workers.company,workers.occupation,COALESCE(attendance.present,0) AS present,attendance.source,attendance.units_hundredths,attendance.daily_rate,attendance.salary_kind,attendance.salary_amount FROM workers LEFT JOIN attendance ON attendance.worker_id=workers.id AND attendance.date=? WHERE workers.site_id=? ORDER BY workers.name,workers.id').all(date,Number(siteId));
   }
   monthlyAttendance(siteId,month) {
     month=monthValue(month);
     const workers=this.db.prepare('SELECT id,name,company,occupation FROM workers WHERE site_id=? ORDER BY name,id').all(Number(siteId));
-    const records=this.db.prepare('SELECT attendance.worker_id,attendance.date,attendance.units_hundredths,attendance.daily_rate,attendance.category_snapshot,attendance.company_snapshot,attendance.occupation_snapshot FROM attendance JOIN workers ON workers.id=attendance.worker_id WHERE workers.site_id=? AND attendance.present=1 AND attendance.date BETWEEN ? AND ? ORDER BY attendance.date').all(Number(siteId),`${month}-01`,`${month}-31`);
+    const records=this.db.prepare('SELECT attendance.worker_id,attendance.date,attendance.units_hundredths,attendance.daily_rate,attendance.salary_kind,attendance.salary_amount,attendance.category_snapshot,attendance.company_snapshot,attendance.occupation_snapshot FROM attendance JOIN workers ON workers.id=attendance.worker_id WHERE workers.site_id=? AND attendance.present=1 AND attendance.date BETWEEN ? AND ? ORDER BY attendance.date').all(Number(siteId),`${month}-01`,`${month}-31`);
     const units=new Map(workers.map(w=>[w.id,[]]));
-    for(const record of records)units.get(record.worker_id).push({date:record.date,units_hundredths:record.units_hundredths,daily_rate:record.daily_rate,estimated_pay:record.daily_rate===null||record.units_hundredths===null?null:Math.floor((record.daily_rate*record.units_hundredths+50)/100),category:record.category_snapshot,company:record.company_snapshot,occupation:record.occupation_snapshot});
+    for(const record of records)units.get(record.worker_id).push({date:record.date,units_hundredths:record.units_hundredths,daily_rate:record.daily_rate,salary_kind:record.salary_kind,salary_amount:record.salary_amount,estimated_pay:record.salary_kind!==null||record.daily_rate===null||record.units_hundredths===null?null:Math.floor((record.daily_rate*record.units_hundredths+50)/100),category:record.category_snapshot,company:record.company_snapshot,occupation:record.occupation_snapshot});
     return workers.map(w=>({...w,days:units.get(w.id).map(record=>record.date),units:units.get(w.id)}));
   }
   workerAttendance(workerId,month) {
@@ -705,7 +707,13 @@ export class Store {
   }
   setAttendanceDailyRate(input){
     const date=dateValue(input.date),value=dailyRateValue(input.dailyRate);
-    const result=this.db.prepare('UPDATE attendance SET daily_rate=?,updated_at=CURRENT_TIMESTAMP WHERE worker_id=? AND date=? AND present=1 AND EXISTS(SELECT 1 FROM workers WHERE workers.id=attendance.worker_id AND workers.site_id=?)').run(value,Number(input.workerId),date,Number(input.siteId));
+    const result=this.db.prepare('UPDATE attendance SET daily_rate=?,salary_kind=NULL,salary_amount=NULL,updated_at=CURRENT_TIMESTAMP WHERE worker_id=? AND date=? AND present=1 AND EXISTS(SELECT 1 FROM workers WHERE workers.id=attendance.worker_id AND workers.site_id=?)').run(value,Number(input.workerId),date,Number(input.siteId));
+    if(!result.changes)throw new Error('같은 현장의 출역 기록을 확인해 주세요.');
+  }
+  setAttendanceSalary(input){
+    const date=dateValue(input.date),value=dailyRateValue(input.amount);
+    if(!['monthly','yearly','other'].includes(input.kind)||value===null)throw new Error('시험 급여 종류와 금액을 확인해 주세요.');
+    const result=this.db.prepare('UPDATE attendance SET salary_kind=?,salary_amount=?,updated_at=CURRENT_TIMESTAMP WHERE worker_id=? AND date=? AND present=1 AND EXISTS(SELECT 1 FROM workers WHERE workers.id=attendance.worker_id AND workers.site_id=?)').run(input.kind,value,Number(input.workerId),date,Number(input.siteId));
     if(!result.changes)throw new Error('같은 현장의 출역 기록을 확인해 주세요.');
   }
   updateMonthlyAttendanceDetails(input){
@@ -714,7 +722,7 @@ export class Store {
     const values=fields.map(key=>{if(key==='dailyRate'){const value=dailyRateValue(input[key]);if(value===null)throw new Error('변경할 시험 일당을 입력해 주세요.');return value;}return text(input[key],{category:'구분',company:'소속',occupation:'직종'}[key]);});
     const worker=this.db.prepare('SELECT id FROM workers WHERE id=? AND site_id=?').get(Number(input.workerId),Number(input.siteId));
     if(!worker)throw new Error('선택한 현장의 출입자를 확인해 주세요.');
-    const result=this.db.prepare(`UPDATE attendance SET ${fields.map(key=>key==='dailyRate'?'daily_rate=?':`${key}_snapshot=?`).join(',')},updated_at=CURRENT_TIMESTAMP WHERE worker_id=? AND present=1 AND date BETWEEN ? AND ?`).run(...values,worker.id,`${month}-01`,`${month}-31`);
+    const result=this.db.prepare(`UPDATE attendance SET ${fields.map(key=>key==='dailyRate'?'daily_rate=?,salary_kind=NULL,salary_amount=NULL':`${key}_snapshot=?`).join(',')},updated_at=CURRENT_TIMESTAMP WHERE worker_id=? AND present=1 AND date BETWEEN ? AND ?`).run(...values,worker.id,`${month}-01`,`${month}-31`);
     if(!result.changes)throw new Error('해당 월의 출역 기록이 없습니다.');
     return result.changes;
   }

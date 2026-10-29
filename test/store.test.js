@@ -95,6 +95,22 @@ test('시험 노임은 조회 시점의 해당 근로자 출역과 공수를 별
   }finally{s.close();}
 });
 
+test('월급과 연봉 시험 기록은 일당 계산과 분리되고 기존 노임을 바꾸지 않는다',()=>{
+  const s=new Store(':memory:');try{
+    const site=s.createSite({name:'가상 A'}),other=s.createSite({name:'가상 B'}),worker=s.createWorker({siteId:site.id,name:'가상 근로자',category:'직영',company:'가상 업체',occupation:'목공'}),date='2026-10-01',base={siteId:site.id,workerId:worker.id,date},deductions={income:'0',local:'0',health:'0',care:'0',pension:'0',employment:'0'};
+    s.saveWageRecord({siteId:site.id,workerId:worker.id,month:'2026-10',gross:'1000',deductions});s.setAttendance({...base,present:true});s.setAttendanceUnits({...base,units:'1'});s.setAttendanceDailyRate({...base,dailyRate:'100'});
+    s.setAttendanceSalary({...base,kind:'monthly',amount:'3000'});let row=s.monthlyAttendance(site.id,'2026-10')[0].units[0];assert.equal(row.salary_kind,'monthly');assert.equal(row.salary_amount,3000);assert.equal(row.daily_rate,100);assert.equal(row.estimated_pay,null);assert.equal(s.wageRecords(site.id,'2026-10')[0].estimated_pay,null);assert.equal(s.wageRecords(site.id,'2026-10')[0].gross,1000);
+    assert.throws(()=>s.setAttendanceSalary({...base,siteId:other.id,kind:'yearly',amount:'12000'}),/현장/);assert.throws(()=>s.setAttendanceSalary({...base,kind:'invalid',amount:'100'}),/종류/);assert.throws(()=>s.setAttendanceSalary({...base,kind:'monthly',amount:''}),/종류/);assert.equal(s.attendance(site.id,date)[0].salary_amount,3000);
+    s.setAttendanceSalary({...base,kind:'yearly',amount:'12000'});s.setAttendanceDailyRate({...base,dailyRate:'150'});row=s.monthlyAttendance(site.id,'2026-10')[0].units[0];assert.equal(row.salary_kind,null);assert.equal(row.estimated_pay,150);
+    s.setAttendanceSalary({...base,kind:'other',amount:'10'});s.updateMonthlyAttendanceDetails({siteId:site.id,workerId:worker.id,month:'2026-10',dailyRate:'200'});row=s.monthlyAttendance(site.id,'2026-10')[0].units[0];assert.equal(row.salary_kind,null);assert.equal(row.estimated_pay,200);assert.equal(s.wageRecords(site.id,'2026-10')[0].gross,1000);
+  }finally{s.close();}
+});
+
+test('기존 일당 기록은 급여 구분 추가 후 보존되고 새 급여 설정도 재시작 후 유지된다',()=>{
+  const dir=mkdtempSync(join(tmpdir(),'jweb-salary-')),file=join(dir,'data.sqlite');let s=new Store(file);
+  try{const site=s.createSite({name:'가상 현장'}),worker=s.createWorker({siteId:site.id,name:'가상 근로자',category:'직영',company:'가상 업체',occupation:'목공'}),base={siteId:site.id,workerId:worker.id,date:'2026-10-01'};s.setAttendance({...base,present:true});s.setAttendanceUnits({...base,units:'1'});s.setAttendanceDailyRate({...base,dailyRate:'100'});s.db.exec('ALTER TABLE attendance DROP COLUMN salary_amount');s.db.exec('ALTER TABLE attendance DROP COLUMN salary_kind');s.close();s=new Store(file);let row=s.monthlyAttendance(site.id,'2026-10')[0].units[0];assert.equal(row.daily_rate,100);assert.equal(row.salary_kind,null);assert.equal(row.estimated_pay,100);s.setAttendanceSalary({...base,kind:'monthly',amount:'3000'});s.close();s=new Store(file);row=s.monthlyAttendance(site.id,'2026-10')[0].units[0];assert.equal(row.salary_kind,'monthly');assert.equal(row.salary_amount,3000);assert.equal(row.daily_rate,100);assert.equal(row.estimated_pay,null);}finally{s.close();rmSync(dir,{recursive:true,force:true});}
+});
+
 test('식대 시험 기록은 출역과 현장을 검증하고 기록 단가를 보존한다',()=>{
   const s=new Store(':memory:');try{
     const a=s.createSite({name:'가상 A'}),b=s.createSite({name:'가상 B'}),worker=s.createWorker({siteId:a.id,name:'가상 근로자',category:'직영',company:'가상 회사',occupation:'목공'}),restaurant=s.saveRestaurant({siteId:a.id,name:'가상 식당',mealPrice:'5000',snackPrice:'1000',tax:'0'}),input={siteId:a.id,workerId:worker.id,date:'2024-02-29',kind:'lunch',restaurantId:restaurant.id};
