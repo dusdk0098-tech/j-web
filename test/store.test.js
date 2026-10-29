@@ -192,6 +192,14 @@ test('주간 활동의 자가점검은 현장과 날짜별로 분리된다',()=>
   }finally{s.close();}
 });
 
+test('관리자 시험 휴무는 점검과 구분되고 같은 날짜에 중복 저장되지 않는다',()=>{
+  const s=new Store(':memory:');try{
+    const a=s.createSite({name:'가상 A'}),b=s.createSite({name:'가상 B'}),date='2024-02-29',image=new PNG({width:1,height:1});image.data[3]=255;const signature=`data:image/png;base64,${PNG.sync.write(image).toString('base64')}`,answers=Array.from({length:3},()=>({answer:'O',note:''}));
+    s.saveManagerDayOff(a.id,date);assert.equal(s.managerChecks(a.id)[0].kind,'day_off');assert.equal(s.managerChecks(a.id)[0].answers,null);assert.throws(()=>s.saveManagerDayOff(a.id,date),/이미/);assert.throws(()=>s.saveManagerCheck(a.id,date,answers,signature),/이미/);s.saveManagerCheck(b.id,date,answers,signature);assert.throws(()=>s.saveManagerDayOff(b.id,date),/이미/);assert.throws(()=>s.saveManagerDayOff(999,date),/현장/);assert.throws(()=>s.saveManagerDayOff(a.id,'2024-02-30'),/날짜/);
+    const day=s.weeklyActivity(a.id,'2024-02-27')[2];assert.equal(day.managerChecks,0);assert.equal(day.managerDaysOff,1);assert.equal(s.weeklyActivity(b.id,'2024-02-27')[2].managerDaysOff,0);
+  }finally{s.close();}
+});
+
 test('교육 통계는 확인된 승인 문서만 현장·기간·근로자·종류별로 집계한다',()=>{
   const s=new Store(':memory:');try{const a=s.createSite({name:'가상 A'}),b=s.createSite({name:'가상 B'}),worker=s.createWorker({siteId:a.id,name:'가상 근로자',category:'직영',company:'가상 회사',occupation:'목공'}),other=s.createWorker({siteId:b.id,name:'다른 근로자',category:'직영',company:'가상 회사',occupation:'목공'}),add=(siteId,date,kind)=>s.createDocument({siteId,type:'education',title:'가상 교육',date,details:{kind}});for(const [siteId,w,date,kind] of [[a.id,worker,'2026-10-28','regular'],[a.id,worker,'2026-10-29','regular'],[a.id,worker,'2026-10-29','special'],[b.id,other,'2026-10-29','regular']]){const d=add(siteId,date,kind);s.transition(d.id,'submit');s.transition(d.id,'approve');s.confirmWorkerTraining(w.id,d.id,date,true);}add(a.id,'2026-10-29','regular');s.confirmDailyTraining(worker.id,'2026-10-29',['education'],true);const rows=s.educationReport(a.id,'2026-10-01','2026-10-31');assert.deepEqual(rows.map(r=>[r.kind,r.count]),[['regular',2],['special',1]]);assert.deepEqual(rows[0].documents.map(d=>d.date).sort(),['2026-10-28','2026-10-29']);assert.equal(s.educationReport(a.id,'2026-10-29','2026-10-29').find(r=>r.kind==='regular').count,1);assert.throws(()=>s.educationReport(a.id,'2026-11-01','2026-10-01'),/시작일/);}finally{s.close();}
 });

@@ -368,6 +368,7 @@ test('관리자 인증 모드가 문서 API를 보호하고 로그아웃을 적�
     const managerRecords=await (await fetch(`${base}/api/sites/${site.id}/manager-checks`,{headers:{cookie}})).json();
     assert.equal(managerRecords.length,1);assert.deepEqual(JSON.parse(managerRecords[0].answers),managerAnswers);
     assert.deepEqual(await (await fetch(`${base}/api/sites/${other.id}/manager-checks`,{headers:{cookie}})).json(),[]);
+    const offUrl=`${base}/api/sites/${other.id}/manager-checks/day-off`;assert.equal((await fetch(offUrl,{method:'POST',headers:{cookie:workerCookie}})).status,401);assert.equal((await fetch(offUrl,{method:'POST',headers:{cookie}})).status,201);assert.equal((await fetch(offUrl,{method:'POST',headers:{cookie}})).status,400);const dayOff=(await (await fetch(`${base}/api/sites/${other.id}/manager-checks`,{headers:{cookie}})).json())[0];assert.equal(dayOff.kind,'day_off');assert.equal(dayOff.answers,null);
     assert.equal((await submitStop({anonymous:'true',place:'가상 장소',reason:'가상 위험'})).status,400);
     assert.equal((await submitStop({anonymous:true,place:'가상 장소',reason:'가상 위험',photo:'data:image/png;base64,YWJj'})).status,400);
     assert.equal((await submitStop({anonymous:true,place:'가상 장소',reason:'가상 위험',siteId:other.id,photo:`data:image/png;base64,${photo.toString('base64')}`})).status,201);

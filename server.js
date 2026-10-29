@@ -180,6 +180,8 @@ const server = http.createServer(async (req, res) => {
     }
     if (url.pathname === '/api/types' && req.method === 'GET') return json(res,200,types);
     const managerChecks=url.pathname.match(/^\/api\/sites\/(\d+)\/manager-checks$/);
+    const managerDayOff=url.pathname.match(/^\/api\/sites\/(\d+)\/manager-checks\/day-off$/);
+    if(managerDayOff && req.method==='POST'){const now=new Date(),date=new Date(now.getTime()-now.getTimezoneOffset()*60000).toISOString().slice(0,10);store.saveManagerDayOff(managerDayOff[1],date);return json(res,201,{ok:true});}
     if(managerChecks && req.method==='GET')return json(res,200,store.managerChecks(managerChecks[1]));
     if(managerChecks && req.method==='POST'){
       const input=await body(req);const now=new Date(),date=new Date(now.getTime()-now.getTimezoneOffset()*60000).toISOString().slice(0,10);

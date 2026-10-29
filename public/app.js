@@ -501,9 +501,11 @@ async function render(){
     return;
   }
   if(state.page==='manager-check'){
-    const siteId=state.siteId,checks=await api(`/api/sites/${siteId}/manager-checks`),current=checks.find(c=>c.date===today());
+    const siteId=state.siteId,checks=await api(`/api/sites/${siteId}/manager-checks`),current=checks.find(c=>c.date===today()),previous=checks.filter(c=>c.kind==='check');
     const questions=['안전장구를 착용하였습니까?','음주행위를 하지 않았습니까?','안전체조를 하였습니까?'];
-    content.innerHTML=`<section class="panel"><h2>관리자 시험 자가점검</h2><p>가상 답변과 시험 서명을 사용하세요. 실제 점검이나 본인 확인 기록이 아닙니다.</p>${current?'<p>오늘의 시험 점검이 저장되었습니다.</p>':`<label>이전 시험 내용 불러오기 <select id="previous-manager-check"><option value="">선택</option>${checks.map((c,i)=>`<option value="${i}">${esc(c.date)}</option>`).join('')}</select></label><form id="manager-check-form">${questions.map((q,i)=>`<fieldset><legend>${esc(q)}</legend><label><input type="radio" name="answer${i}" value="O" required> O</label><label><input type="radio" name="answer${i}" value="X"> X</label><label>비고 <input name="note${i}" maxlength="500"></label></fieldset>`).join('')}<p>시험 서명</p><canvas id="manager-signature" class="signature-pad" width="320" height="120" aria-label="관리자 시험 서명 입력 영역"></canvas><button type="button" id="manager-signature-clear">지우기</button><button type="submit">시험 점검 저장</button></form>`}<p id="manager-check-status" role="status"></p></section>`;
+    content.innerHTML=`<section class="panel"><h2>관리자 시험 자가점검</h2><p>가상 답변과 시험 서명을 사용하세요. 실제 점검이나 본인 확인 기록이 아닙니다.</p>${current?`<p>오늘의 ${current.kind==='day_off'?'시험 휴무':'시험 점검'}가 저장되었습니다.</p>`:`<label>이전 시험 내용 불러오기 <select id="previous-manager-check"><option value="">선택</option>${previous.map((c,i)=>`<option value="${i}">${esc(c.date)}</option>`).join('')}</select></label><form id="manager-check-form">${questions.map((q,i)=>`<fieldset><legend>${esc(q)}</legend><label><input type="radio" name="answer${i}" value="O" required> O</label><label><input type="radio" name="answer${i}" value="X"> X</label><label>비고 <input name="note${i}" maxlength="500"></label></fieldset>`).join('')}<p>시험 서명</p><canvas id="manager-signature" class="signature-pad" width="320" height="120" aria-label="관리자 시험 서명 입력 영역"></canvas><button type="button" id="manager-signature-clear">지우기</button><button type="submit">시험 점검 저장</button></form><button type="button" id="manager-day-off">시험 휴무 기록</button>`}<p id="manager-check-status" role="status"></p></section>`;
+    const daysOff=checks.filter(c=>c.kind==='day_off');if(daysOff.length)$('#manager-check-status').insertAdjacentHTML('beforebegin',`<h3>최근 시험 휴무 기록</h3><ul>${daysOff.map(day=>`<li>${esc(day.date)}</li>`).join('')}</ul>`);
+    if(current?.kind==='day_off')return;
     if(current){
       const answers=JSON.parse(current.answers);
       $('#manager-check-status').insertAdjacentHTML('beforebegin',`<h3>${esc(current.date)} 시험 답변</h3>${questions.map((q,i)=>`<p>${esc(q)} ${esc(answers[i].answer)}${answers[i].note?` · 비고: ${esc(answers[i].note)}`:''}</p>`).join('')}`);
@@ -515,7 +517,8 @@ async function render(){
     canvas.onpointerdown=e=>{e.preventDefault();drawing=true;signed=true;canvas.setPointerCapture(e.pointerId);const [x,y]=point(e);ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(x+.1,y+.1);ctx.stroke();};
     canvas.onpointermove=e=>{if(drawing){const [x,y]=point(e);ctx.lineTo(x,y);ctx.stroke();}};canvas.onpointerup=canvas.onpointercancel=()=>{drawing=false;};
     $('#manager-signature-clear').onclick=()=>{ctx.clearRect(0,0,canvas.width,canvas.height);signed=false;};
-    $('#previous-manager-check').onchange=e=>{if(e.target.value==='')return;const answers=JSON.parse(checks[Number(e.target.value)].answers);answers.forEach((a,i)=>{form.elements[`answer${i}`].value=a.answer;form.elements[`note${i}`].value=a.note;});};
+    $('#previous-manager-check').onchange=e=>{if(e.target.value==='')return;const answers=JSON.parse(previous[Number(e.target.value)].answers);answers.forEach((a,i)=>{form.elements[`answer${i}`].value=a.answer;form.elements[`note${i}`].value=a.note;});};
+    $('#manager-day-off').onclick=async()=>{try{await api(`/api/sites/${siteId}/manager-checks/day-off`,{method:'POST'});flash('시험 휴무를 기록했습니다.');await render();}catch(error){$('#manager-check-status').textContent=error.message;}};
     form.onsubmit=async e=>{e.preventDefault();try{if(!signed)throw Error('시험 서명을 입력해 주세요.');const answers=questions.map((_,i)=>({answer:form.elements[`answer${i}`].value,note:form.elements[`note${i}`].value}));await api(`/api/sites/${siteId}/manager-checks`,{method:'POST',body:JSON.stringify({answers,signature:canvas.toDataURL('image/png')})});flash('관리자 시험 점검을 저장했습니다.');await render();}catch(error){$('#manager-check-status').textContent=error.message;}};
     return;
   }

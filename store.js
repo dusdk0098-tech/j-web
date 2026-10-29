@@ -73,6 +73,7 @@ export class Store {
       CREATE TABLE IF NOT EXISTS worker_notice_reads (worker_id INTEGER NOT NULL REFERENCES workers(id),document_id INTEGER NOT NULL REFERENCES documents(id),read_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(worker_id,document_id));
       CREATE TABLE IF NOT EXISTS worker_self_checks (worker_id INTEGER NOT NULL REFERENCES workers(id),date TEXT NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(worker_id,date));
       CREATE TABLE IF NOT EXISTS manager_self_checks (site_id INTEGER NOT NULL REFERENCES sites(id),date TEXT NOT NULL,answers TEXT NOT NULL,signature BLOB NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(site_id,date));
+      CREATE TABLE IF NOT EXISTS manager_days_off (site_id INTEGER NOT NULL REFERENCES sites(id),date TEXT NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(site_id,date));
       CREATE TABLE IF NOT EXISTS worker_training_checks (worker_id INTEGER NOT NULL REFERENCES workers(id),document_id INTEGER NOT NULL REFERENCES documents(id),created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(worker_id,document_id));
       CREATE TABLE IF NOT EXISTS worker_daily_training (worker_id INTEGER NOT NULL REFERENCES workers(id),date TEXT NOT NULL,kind TEXT NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(worker_id,date,kind));
       CREATE TABLE IF NOT EXISTS training_target_config (document_id INTEGER PRIMARY KEY REFERENCES documents(id));
@@ -121,15 +122,18 @@ export class Store {
   }
   close() { this.db.close(); }
   managerChecks(siteId) {
-    return this.db.prepare('SELECT date,answers,created_at FROM manager_self_checks WHERE site_id=? ORDER BY date DESC LIMIT 30').all(Number(siteId));
+    return this.db.prepare("SELECT date,answers,created_at,'check' AS kind FROM manager_self_checks WHERE site_id=? UNION ALL SELECT date,NULL AS answers,created_at,'day_off' AS kind FROM manager_days_off WHERE site_id=? ORDER BY date DESC LIMIT 30").all(Number(siteId),Number(siteId));
   }
   saveManagerCheck(siteId,date,answers,signature) {
     date=dateValue(date);
     if(!this.db.prepare('SELECT 1 FROM sites WHERE id=?').get(Number(siteId)))throw new Error('현장을 선택해 주세요.');
     if(!Array.isArray(answers) || answers.length!==3 || answers.some(a=>!a || !['O','X'].includes(a.answer) || typeof a.note!=='string' || a.note.length>500))throw new Error('세 항목의 O/X와 비고를 확인해 주세요.');
     const bytes=signatureBytes(signature);
-    if(this.db.prepare('SELECT 1 FROM manager_self_checks WHERE site_id=? AND date=?').get(Number(siteId),date))throw new Error('오늘의 시험 점검은 이미 저장되었습니다.');
-    this.db.prepare('INSERT INTO manager_self_checks(site_id,date,answers,signature) VALUES(?,?,?,?)').run(Number(siteId),date,JSON.stringify(answers),bytes);
+    this.db.exec('BEGIN IMMEDIATE');try{if(this.db.prepare('SELECT 1 FROM manager_self_checks WHERE site_id=? AND date=? UNION ALL SELECT 1 FROM manager_days_off WHERE site_id=? AND date=?').get(Number(siteId),date,Number(siteId),date))throw new Error('오늘의 시험 점검 또는 휴무가 이미 저장되었습니다.');this.db.prepare('INSERT INTO manager_self_checks(site_id,date,answers,signature) VALUES(?,?,?,?)').run(Number(siteId),date,JSON.stringify(answers),bytes);this.db.exec('COMMIT');}catch(error){this.db.exec('ROLLBACK');throw error;}
+  }
+  saveManagerDayOff(siteId,date){
+    date=dateValue(date);siteId=Number(siteId);if(!this.db.prepare('SELECT 1 FROM sites WHERE id=?').get(siteId))throw new Error('현장을 선택해 주세요.');
+    this.db.exec('BEGIN IMMEDIATE');try{if(this.db.prepare('SELECT 1 FROM manager_self_checks WHERE site_id=? AND date=? UNION ALL SELECT 1 FROM manager_days_off WHERE site_id=? AND date=?').get(siteId,date,siteId,date))throw new Error('오늘의 시험 점검 또는 휴무가 이미 저장되었습니다.');this.db.prepare('INSERT INTO manager_days_off(site_id,date) VALUES(?,?)').run(siteId,date);this.db.exec('COMMIT');}catch(error){this.db.exec('ROLLBACK');throw error;}
   }
   sites() { return this.db.prepare('SELECT * FROM sites ORDER BY name').all(); }
   sitePhotos(siteId,from='',to='',query=''){
@@ -792,7 +796,7 @@ export class Store {
   }
   weeklyActivity(siteId,start){
     start=dateValue(start);siteId=Number(siteId);if(!this.db.prepare('SELECT 1 FROM sites WHERE id=?').get(siteId))throw new Error('현장을 선택해 주세요.');
-    const day=new Date(`${start}T00:00:00Z`),dates=Array.from({length:7},(_,i)=>{const value=new Date(day.getTime()+i*86400000).toISOString().slice(0,10);return dateValue(value);}),end=dates[6],rows=dates.map(date=>({date,attendance:0,attendanceCategories:[],attendanceOccupations:[],documents:{},noticeReads:0,trainingChecks:0,trainingByType:{tbm:0,education:0},workerChecks:0,managerChecks:0,hazardReports:0})),byDate=new Map(rows.map(row=>[row.date,row]));
+    const day=new Date(`${start}T00:00:00Z`),dates=Array.from({length:7},(_,i)=>{const value=new Date(day.getTime()+i*86400000).toISOString().slice(0,10);return dateValue(value);}),end=dates[6],rows=dates.map(date=>({date,attendance:0,attendanceCategories:[],attendanceOccupations:[],documents:{},noticeReads:0,trainingChecks:0,trainingByType:{tbm:0,education:0},workerChecks:0,managerChecks:0,managerDaysOff:0,hazardReports:0})),byDate=new Map(rows.map(row=>[row.date,row]));
     for(const row of this.db.prepare('SELECT a.date,COUNT(*) AS n FROM attendance a JOIN workers w ON w.id=a.worker_id WHERE w.site_id=? AND a.present=1 AND a.date BETWEEN ? AND ? GROUP BY a.date').all(siteId,start,end))byDate.get(row.date).attendance=row.n;
     for(const row of this.db.prepare("SELECT a.date,COALESCE(a.category_snapshot,'기록 없음') AS category,COALESCE(a.occupation_snapshot,'기록 없음') AS occupation,COUNT(*) AS n FROM attendance a JOIN workers w ON w.id=a.worker_id WHERE w.site_id=? AND a.present=1 AND a.date BETWEEN ? AND ? GROUP BY a.date,category,occupation").all(siteId,start,end)){
       const day=byDate.get(row.date);
@@ -800,6 +804,7 @@ export class Store {
     }
     for(const row of this.db.prepare('SELECT c.date,COUNT(*) AS n FROM worker_self_checks c JOIN workers w ON w.id=c.worker_id WHERE w.site_id=? AND c.date BETWEEN ? AND ? GROUP BY c.date').all(siteId,start,end))byDate.get(row.date).workerChecks=row.n;
     for(const row of this.db.prepare('SELECT date,COUNT(*) AS n FROM manager_self_checks WHERE site_id=? AND date BETWEEN ? AND ? GROUP BY date').all(siteId,start,end))byDate.get(row.date).managerChecks=row.n;
+    for(const row of this.db.prepare('SELECT date,COUNT(*) AS n FROM manager_days_off WHERE site_id=? AND date BETWEEN ? AND ? GROUP BY date').all(siteId,start,end))byDate.get(row.date).managerDaysOff=row.n;
     for(const row of this.db.prepare("SELECT date(created_at,'localtime') AS day,COUNT(*) AS n FROM hazard_reports WHERE site_id=? AND date(created_at,'localtime') BETWEEN ? AND ? GROUP BY day").all(siteId,start,end))byDate.get(row.day).hazardReports=row.n;
     for(const row of this.db.prepare('SELECT date,type,COUNT(*) AS n FROM documents WHERE site_id=? AND date BETWEEN ? AND ? GROUP BY date,type').all(siteId,start,end))byDate.get(row.date).documents[row.type]=row.n;
     for(const row of this.db.prepare("SELECT d.date,COUNT(*) AS n FROM worker_notice_reads c JOIN documents d ON d.id=c.document_id JOIN workers w ON w.id=c.worker_id AND w.site_id=d.site_id WHERE d.site_id=? AND d.date BETWEEN ? AND ? AND d.type='notice' AND d.status='approved' GROUP BY d.date").all(siteId,start,end))byDate.get(row.date).noticeReads=row.n;
