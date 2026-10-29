@@ -740,6 +740,8 @@ test('위험성평가 시험 활동은 완료 후에도 문서별로 관리된�
     assert.throws(()=>s.saveRiskActivity(doc.id,{...input,kind:'weekly',periodFrom:'2026-11-01',periodTo:'2026-10-01'},id),/관리기간/);
     s.saveRiskActivity(doc.id,{...input,kind:'weekly',periodFrom:'2026-10-01',periodTo:'2026-10-31',entryMode:'scan'},id);assert.equal(s.riskActivities(doc.id)[0].entry_mode,'scan');
     const pdf=Buffer.from('%PDF-1.4\n가상 회의록'),minutes=s.addRiskActivityPhoto(doc.id,id,'시험.pdf',pdf,'minutes');assert.equal(s.riskActivityPhotos(doc.id,id).find(p=>p.id===minutes).purpose,'minutes');assert.deepEqual(Buffer.from(s.riskActivityPhoto(doc.id,id,minutes).data),pdf);
+    assert.throws(()=>s.saveRiskActivity(doc.id,{...input,kind:'weekly',entryMode:'manual'},id),/회의록 첨부/);assert.throws(()=>s.saveRiskActivity(doc.id,input,id),/회의록 첨부/);assert.equal(s.riskActivities(doc.id)[0].entry_mode,'scan');assert.deepEqual(Buffer.from(s.riskActivityPhoto(doc.id,id,minutes).data),pdf);
+    s.deleteRiskActivityPhoto(doc.id,id,minutes);s.saveRiskActivity(doc.id,{...input,kind:'weekly',entryMode:'manual'},id);assert.equal(s.riskActivities(doc.id)[0].entry_mode,'manual');
     assert.throws(()=>s.addRiskActivityPhoto(doc.id,id,'시험.pdf',pdf),/PNG/);assert.throws(()=>s.saveRiskActivity(doc.id,{...input,entryMode:'scan'}),/방식/);
     assert.throws(()=>s.deleteRiskActivity(other.id,id),/찾을 수/);s.deleteRiskActivity(doc.id,id);assert.equal(s.riskActivities(doc.id).length,0);assert.equal(s.riskActivityPhoto(doc.id,id,photoId),null);
   }finally{s.close();}

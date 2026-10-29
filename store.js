@@ -789,6 +789,7 @@ export class Store {
     const from=input.periodFrom||'',to=input.periodTo||'',mode=input.entryMode||'manual';if(!['manual','scan'].includes(mode)||mode==='scan'&&input.kind!=='weekly')throw new Error('회의록 작성 방식을 확인해 주세요.');
     if((from||to)&&(!from||!to||dateValue(from)>dateValue(to)))throw new Error('관리기간을 확인해 주세요.');
     const current=id===null?null:this.db.prepare('SELECT worker_snapshot FROM risk_activities WHERE id=? AND document_id=?').get(Number(id),Number(documentId));if(id!==null&&!current)throw new Error('시험 활동을 찾을 수 없습니다.');
+    if(current&&(input.kind!=='weekly'||mode!=='scan')&&this.db.prepare("SELECT 1 FROM risk_activity_photos WHERE activity_id=? AND purpose='minutes' LIMIT 1").get(Number(id)))throw new Error('회의록 첨부를 삭제한 뒤 작성 방식을 변경해 주세요.');
     let workers=current?.worker_snapshot||'[]';
     if(input.workerIds!==undefined){if(!Array.isArray(input.workerIds)||input.workerIds.length>100||input.workerIds.some(value=>!Number.isSafeInteger(value)||value<1)||new Set(input.workerIds).size!==input.workerIds.length)throw new Error('참석자를 확인해 주세요.');
       const doc=this.document(documentId),lookup=this.db.prepare('SELECT id,name,company FROM workers WHERE id=? AND site_id=?'),previous=JSON.parse(workers);workers=JSON.stringify(input.workerIds.map(workerId=>{const worker=lookup.get(workerId,doc.site_id);if(!worker)throw new Error('같은 현장의 참석자를 선택해 주세요.');return previous.find(item=>item.id===workerId)||worker;}));}
