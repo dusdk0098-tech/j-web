@@ -3,6 +3,7 @@ import { selectBatchDocuments } from './batch-print.js';
 import { siteQrSession } from './site-qr.js';
 import { selectTbmSources, mergeTbmSource } from './tbm-sources.js';
 import { trainingGroups, trainingRoster } from './training-groups.js';
+import { restaurantPrice } from './restaurant-price.js';
 
 const $ = (s) => document.querySelector(s);
 const content = $('#content'), siteSelect = $('#site-select'), dialog = $('#dialog'), notice = $('#notice');
@@ -711,7 +712,12 @@ async function render(){
     const kinds={breakfast:'조식',lunch:'중식',dinner:'석식',snack:'간식'};
     content.insertAdjacentHTML('beforeend',`<section class="panel"><h2>직영 출역 시 시험 식대 자동 적용</h2><p class="muted">가상 출입자의 구분이 정확히 직영일 때 신규 출역에 적용합니다. 설정 변경은 기존 출역에 소급되지 않으며 출역 취소 시 식대 기록을 유지합니다.</p><form id="meal-defaults" class="fields">${Object.entries(kinds).map(([kind,label])=>`<label>${esc(label)} <select name="${kind}"><option value="">자동 적용 안 함</option>${items.map(r=>`<option value="${r.id}" ${defaults.some(d=>d.kind===kind&&d.restaurant_id===r.id)?'selected':''}>${esc(r.name)}</option>`).join('')}</select></label>`).join('')}<button type="submit">시험 설정 저장</button></form></section>`);
     $('#meal-defaults').onsubmit=async e=>{e.preventDefault();try{const form=new FormData(e.currentTarget),selected=Object.keys(kinds).filter(k=>form.get(k)).map(k=>({kind:k,restaurantId:form.get(k)}));await api('/api/meal-defaults',{method:'PUT',body:JSON.stringify({siteId,items:selected})});flash('시험 자동 적용 설정을 저장했습니다.');await render();}catch(error){showError(error);}};
-    const edit=r=>showDialog(r?'식당 수정':'식당 등록',`<div class="fields">${field('name','식당명',r?.name||'')}${field('mealPrice','식비 (원)',String(r?.meal_price??0))}${field('snackPrice','간식비 (원)',String(r?.snack_price??0))}${field('tax','부가세 (원)',String(r?.tax??0))}</div>`,d=>api(r?`/api/restaurants/${r.id}`:'/api/restaurants',{method:r?'PUT':'POST',body:JSON.stringify({...d,siteId})}));
+    const edit=r=>{
+      showDialog(r?'식당 수정':'식당 등록',`<div class="fields">${field('name','식당명',r?.name||'')}${field('mealPrice','식비 (원)',String(r?.meal_price??0))}${field('snackPrice','간식비 (원)',String(r?.snack_price??0))}${field('tax','부가세 (원)',String(r?.tax??0))}<p id="restaurant-total" aria-live="polite"></p><p class="muted">식비를 변경하면 식비의 10%를 소수점 아래에서 버려 부가세로 입력합니다. 부가세는 직접 수정할 수 있습니다. 합계에는 간식비가 포함되지 않습니다.</p></div>`,d=>api(r?`/api/restaurants/${r.id}`:'/api/restaurants',{method:r?'PUT':'POST',body:JSON.stringify({...d,siteId})}));
+      const price=$('#dialog-form [name=mealPrice]'),tax=$('#dialog-form [name=tax]'),total=$('#restaurant-total');
+      const refresh=auto=>{const result=restaurantPrice(price.value,tax.value,auto);if(!result){total.textContent='식비와 부가세는 0 이상의 정수로 입력해 주세요.';return;}if(auto)tax.value=String(result.tax);total.textContent=`식비와 부가세 합계: ${result.total.toLocaleString('ko-KR')}원`;};
+      price.addEventListener('input',()=>refresh(true));tax.addEventListener('input',()=>refresh(false));refresh(false);
+    };
     $('#restaurant-add').onclick=()=>edit(null);content.querySelectorAll('[data-restaurant]').forEach(b=>b.onclick=()=>edit(items.find(r=>r.id===Number(b.dataset.restaurant))));return;
   }
   if(state.page==='companies'){
