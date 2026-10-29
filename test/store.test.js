@@ -730,6 +730,19 @@ test('위험성평가 반려 의견은 필수이며 처리 이력에 보존된�
   } finally {s.close();}
 });
 
+test('TBM 작성자 시험 서명은 수정 시 지워지고 결재 요청 당시 사본이 보존된다',()=>{
+  const s=new Store(':memory:');try{
+    const site=s.createSite({name:'가상 현장'}),input={siteId:site.id,type:'tbm',title:'가상 TBM',date:'2026-10-29'},doc=s.createDocument(input),other=s.createDocument(input),png=new PNG({width:1,height:1});png.data[3]=255;const bytes=PNG.sync.write(png),signature=`data:image/png;base64,${bytes.toString('base64')}`;
+    assert.throws(()=>s.saveTbmSignature(doc.id,'invalid'),/서명/);s.saveTbmSignature(doc.id,signature);s.saveTbmSignature(other.id,signature);
+    const file=s.addAttachment(doc.id,'가상.txt',Buffer.from('가상'));assert.equal(s.tbmSignature(doc.id),null);assert.ok(s.tbmSignature(other.id));
+    s.saveTbmSignature(doc.id,signature);s.deleteAttachment(file);assert.equal(s.tbmSignature(doc.id),null);
+    s.saveTbmSignature(doc.id,signature);s.setTrainingTargets(doc.id,[]);assert.equal(s.tbmSignature(doc.id),null);
+    s.saveTbmSignature(doc.id,signature);s.updateDocument(doc.id,{...input,title:'수정된 TBM'});assert.equal(s.tbmSignature(doc.id),null);
+    const reviewer=s.createReviewer({siteId:site.id,loginId:'tbm_author_review',name:'가상 결재자',password:'virtual-password-123'});s.setApprovalLine(doc.id,[reviewer.id]);s.saveTbmSignature(doc.id,signature);s.transition(doc.id,'submit');const cycle=s.document(doc.id).approval_cycle_id;assert.equal(s.reviewerPayload(s.document(doc.id)).linked.authorSignature,true);assert.deepEqual(Buffer.from(s.reviewerLinkedSignature(s.document(doc.id),'author',0)),bytes);assert.throws(()=>s.saveTbmSignature(doc.id,signature),/수정 가능한/);
+    s.transition(doc.id,'withdraw');s.updateDocument(doc.id,input);assert.equal(s.tbmSignature(doc.id),null);assert.deepEqual(Buffer.from(s.approvalCycleFile(doc.id,cycle,'author-signature',0,0).data),bytes);s.transition(doc.id,'submit');assert.equal(s.reviewerPayload(s.document(doc.id)).linked.authorSignature,false);assert.equal(s.reviewerLinkedSignature(s.document(doc.id),'author',0),null);
+  }finally{s.close();}
+});
+
 test('TBM의 작업 내용과 위험요인을 분리해 저장하고 잘못된 수정은 보존한다',()=>{
   const s=new Store(':memory:');
   try {
