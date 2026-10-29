@@ -11,3 +11,5 @@
 .hazard-print{display:none}
 .worker-hazard-photo{max-width:100%;max-height:320px;height:auto}
 @media print{#content.hazard-printing>.hazard-list{display:none!important}#content.hazard-printing>.hazard-print{display:block}}
+.training-roster-signature{max-width:130px;max-height:48px;object-fit:contain}
+@media print{.training-target-controls,.training-roster-download{display:none!important}.training-roster .table-wrap{overflow:visible}.training-roster table{min-width:0;width:100%;table-layout:fixed}.training-roster th,.training-roster td{overflow-wrap:anywhere}.training-roster tr{break-inside:avoid}.training-roster thead{display:table-header-group}}

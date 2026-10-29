@@ -10,3 +10,12 @@ export function trainingGroups(workers,kind){
   }
   return [...groups].map(([label,ids])=>({label,ids})).sort((a,b)=>(a.label||'').localeCompare(b.label||'','ko'));
 }
+
+export function trainingRoster(targets){
+  return targets.workers.filter(worker=>!targets.configured||worker.selected).map(worker=>({
+    id:worker.id,name:worker.name,
+    company:worker.present?worker.attendance_company:worker.company,
+    occupation:worker.present?worker.attendance_occupation:null,
+    confirmed:!!worker.daily_confirmed,hasSignature:!!worker.daily_has_signature
+  }));
+}
