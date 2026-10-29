@@ -1,11 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { riskScaleOptions, riskScore, copyRiskItem, groupRiskItems } from '../public/risk-scale.js';
+import { riskScaleOptions, riskScore, copyRiskItem, copyRiskImprovement, groupRiskItems } from '../public/risk-scale.js';
 import { Store } from '../store.js';
 
 test('이전 위험요인을 가져올 때 검토 의견을 복사하지 않는다',()=>{
   const original={task:'가상 작업',hazard:'가상 위험',contractorId:123,supervisorOpinion:'감독',safetyOpinion:'안전',healthOpinion:'보건',managerOpinion:'소장'},copy=copyRiskItem(original);
   assert.equal(copy.task,'가상 작업');assert.equal(copy.hazard,'가상 위험');assert.equal(copy.contractorId,123);for(const key of ['supervisorOpinion','safetyOpinion','healthOpinion','managerOpinion'])assert.equal(copy[key],'');assert.equal(original.safetyOpinion,'안전');
+});
+
+test('개선 정보 복사는 같은 공정과 협력사에 선택한 항목만 적용한다',()=>{
+  const rows=[{processName:' 공정 A ',contractor:'업체 A',dueDate:'2026-11-01',responsible:'가상 담당'},{processName:'공정 A',contractor:'업체 A',dueDate:'',responsible:'기존 담당'},{processName:'공정 A',contractor:'업체 B',dueDate:''},{processName:'공정 B',contractor:'업체 A',dueDate:''},{processName:'',contractor:'',dueDate:''}];
+  const result=copyRiskImprovement(rows,0,'dueDate');assert.equal(result[1].dueDate,'2026-11-01');assert.equal(result[1].responsible,'기존 담당');assert.equal(result[2].dueDate,'');assert.equal(result[3].dueDate,'');assert.equal(rows[1].dueDate,'');assert.equal(copyRiskImprovement(rows,4,'dueDate'),rows);assert.equal(copyRiskImprovement(rows,0,'hazard'),rows);
 });
 
 test('위험요인은 공정과 협력사 조합별로 묶고 기존 미기록도 보존한다',()=>{

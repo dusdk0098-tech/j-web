@@ -15,6 +15,12 @@ export function copyRiskItem(item){
   return {...item,supervisorOpinion:'',safetyOpinion:'',healthOpinion:'',managerOpinion:''};
 }
 
+export function copyRiskImprovement(items, sourceIndex, field){
+  const source=items[sourceIndex];
+  if(!source?.processName?.trim()||!['dueDate','completionDate','responsible'].includes(field))return items;
+  return items.map(item=>item.processName.trim()===source.processName.trim()&&item.contractor.trim()===source.contractor.trim()?{...item,[field]:source[field]}:item);
+}
+
 export function groupRiskItems(items){
   const groups=new Map();
   for(const item of items){const process=item.processName||'',contractor=item.contractor||'',key=JSON.stringify([process,contractor]);if(!groups.has(key))groups.set(key,{process,contractor,items:[]});groups.get(key).items.push(item);}
