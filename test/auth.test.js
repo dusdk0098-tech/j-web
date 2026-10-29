@@ -209,6 +209,9 @@ test('관리자 인증 모드가 문서 API를 보호하고 로그아웃을 적�
     assert.equal((await fetch(adminPpe)).status,401);assert.equal((await fetch(adminPpe,{headers:{cookie:workerCookie}})).status,401);assert.equal((await (await fetch(adminPpe,{headers:{cookie}})).json()).length,1);
     assert.equal((await fetch(`${base}/api/workers/${own.id}/ppe-issues?siteId=${other.id}`,{headers:{cookie}})).status,400);assert.equal((await fetch(ownPpe)).status,401);
     const ownIssues=await (await fetch(`${ownPpe}?siteId=${other.id}&workerId=999`,{headers:{cookie:workerCookie}})).json();assert.equal(ownIssues.length,1);assert.equal(ownIssues[0].item,'가상 안전모');
+    const windInput={siteId:site.id,type:'checklist',title:'가상 기상 점검',date:'2040-01-01',details:{kind:'wind',answers:Array.from({length:9},()=>({answer:'해당없음',note:''}))}};
+    assert.equal((await fetch(`${base}/api/documents`,{method:'POST',headers:{cookie:workerCookie,'content-type':'application/json'},body:JSON.stringify(windInput)})).status,401);
+    const windResponse=await post('/api/documents',windInput);assert.equal(windResponse.status,201);const windDocument=await windResponse.json();assert.equal((await post(`/api/documents/${windDocument.id}/transition`,{action:'submit'})).status,200);
     assert.equal(await (await fetch(`${base}/api/workers/${own.id}/join-record?siteId=${other.id}`,{headers:{cookie}})).json(),null);
     assert.deepEqual(Buffer.from(await (await fetch(`${base}/api/workers/${own.id}/join-record/signature?siteId=${site.id}`,{headers:{cookie}})).arrayBuffer()),joinBytes);
     const recipientCompany=await (await post('/api/companies',{siteId:site.id,name:'가상 업체',trade:'시험'})).json();
