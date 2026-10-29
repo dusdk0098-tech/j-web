@@ -102,14 +102,14 @@ const server = http.createServer(async (req, res) => {
       const input=await body(req),now=Date.now(),site=input.siteKey?store.siteFromAccess(input.siteKey):store.invitation(input.token),accountKey=site&&typeof input.loginId==='string'&&/^[a-zA-Z0-9_]{3,40}$/.test(input.loginId)?`${site.id}:${input.loginId}`:'invalid';
       workerFailures=workerFailures.filter(t=>t>now-5*60*1000);for(const [key,times] of workerAccountFailures){const recent=times.filter(t=>t>now-5*60*1000);if(recent.length)workerAccountFailures.set(key,recent);else workerAccountFailures.delete(key);}
       const failures=workerAccountFailures.get(accountKey)||[];if(workerFailures.length>=100||failures.length>=10)return json(res,429,{error:'잠시 후 다시 로그인해 주세요.'});
-      const worker=store.authenticateWorker(input.token,input.loginId,input.password,input.siteKey);
-      if(!worker){workerFailures.push(now);failures.push(now);workerAccountFailures.set(accountKey,failures);return json(res,401,{error:'가입 링크 또는 로그인 정보를 확인해 주세요.'});}
+      const authenticated=store.authenticateWorker(input.token,input.loginId,input.password,input.siteKey,true);
+      if(!authenticated){workerFailures.push(now);failures.push(now);workerAccountFailures.set(accountKey,failures);return json(res,401,{error:'가입 링크 또는 로그인 정보를 확인해 주세요.'});}
+      const {worker,credentialHash}=authenticated;
       const current=new Date(now),date=new Date(now-current.getTimezoneOffset()*60000).toISOString().slice(0,10);
       if(store.workerAccessBlocked(worker.site_id,date))return json(res,403,{error:'해당 현장은 오늘 근로자 접속이 차단되었습니다.'});
-      store.recordWorkerLogin(worker.id,date);
-      workerAccountFailures.delete(accountKey);workerSessions.delete(workerKey(workerToken));
+      const raw=randomBytes(32).toString('base64url');store.recordWorkerLogin(worker.id,date,credentialHash,()=>{const currentSite=input.siteKey?store.siteFromAccess(input.siteKey):store.invitation(input.token);if(!currentSite||currentSite.id!==worker.site_id){const error=new Error('가입 링크 또는 로그인 정보를 확인해 주세요.');error.sessionStatus=401;throw error;}workerSessions.delete(workerKey(workerToken));workerSessions.set(workerKey(raw),{worker,expires:now+8*60*60*1000});});
+      workerAccountFailures.delete(accountKey);
       for(const [key,session] of workerSessions)if(session.expires<=now)workerSessions.delete(key);
-      const raw=randomBytes(32).toString('base64url');workerSessions.set(workerKey(raw),{worker,expires:now+8*60*60*1000});
       res.setHeader('Set-Cookie',`jweb_worker=${raw}; HttpOnly; SameSite=Strict; Path=/; Max-Age=28800${secureCookie}`);return json(res,200,{worker});
     }
     if(url.pathname==='/api/worker/session' && req.method==='GET'){

@@ -846,9 +846,9 @@ export class Store {
     else this.db.prepare('DELETE FROM site_worker_blocks WHERE site_id=? AND date=? AND kind=?').run(siteId,date,kind);
   }
   workerAccessBlocked(siteId,date){return !!this.db.prepare('SELECT 1 FROM site_worker_blocks WHERE site_id=? AND date=? LIMIT 1').get(Number(siteId),dateValue(date));}
-  recordWorkerLogin(workerId,date) {
+  recordWorkerLogin(workerId,date,verifiedCredential=null,onLogin=null) {
     date=dateValue(date);
-    this.db.exec('BEGIN IMMEDIATE');try{const worker=this.db.prepare('SELECT site_id FROM workers WHERE id=?').get(Number(workerId));if(!worker)throw new Error('근로자를 확인해 주세요.');if(this.workerAccessBlocked(worker.site_id,date))throw new Error('해당 현장은 오늘 근로자 접속이 차단되었습니다.');const result=this.db.prepare("INSERT OR IGNORE INTO attendance(worker_id,date,present,company_snapshot,occupation_snapshot,category_snapshot,source) SELECT id,?,1,company,occupation,category,'login' FROM workers WHERE id=?").run(date,Number(workerId));if(result.changes)this.applyMealDefaults(workerId,date);this.db.exec('COMMIT');}catch(error){this.db.exec('ROLLBACK');throw error;}
+    this.db.exec('BEGIN IMMEDIATE');try{const worker=this.db.prepare('SELECT site_id FROM workers WHERE id=?').get(Number(workerId));if(!worker)throw new Error('근로자를 확인해 주세요.');if(verifiedCredential&&!this.db.prepare('SELECT 1 FROM worker_accounts WHERE worker_id=? AND site_id=? AND password_hash=?').get(Number(workerId),worker.site_id,verifiedCredential)){const error=new Error('가입 링크 또는 로그인 정보를 확인해 주세요.');error.sessionStatus=401;throw error;}if(this.workerAccessBlocked(worker.site_id,date))throw new Error('해당 현장은 오늘 근로자 접속이 차단되었습니다.');const result=this.db.prepare("INSERT OR IGNORE INTO attendance(worker_id,date,present,company_snapshot,occupation_snapshot,category_snapshot,source) SELECT id,?,1,company,occupation,category,'login' FROM workers WHERE id=?").run(date,Number(workerId));if(result.changes)this.applyMealDefaults(workerId,date);if(onLogin)onLogin();this.db.exec('COMMIT');}catch(error){this.db.exec('ROLLBACK');throw error;}
   }
   attendanceReport(siteId, from, to, group) {
     from=dateValue(from); to=dateValue(to);
@@ -941,14 +941,14 @@ export class Store {
     const account=this.db.prepare('SELECT login_id FROM worker_accounts WHERE site_id=? AND worker_id=?').get(Number(siteId),Number(workerId));if(!account)throw new Error('선택한 현장의 시험 계정을 확인해 주세요.');
     const salt=randomBytes(16),hash=scryptSync(password,salt,32);this.db.prepare('UPDATE worker_accounts SET salt=?,password_hash=? WHERE site_id=? AND worker_id=?').run(salt,hash,Number(siteId),Number(workerId));return account.login_id;
   }
-  authenticateWorker(token,loginId,password,siteKey=null) {
+  authenticateWorker(token,loginId,password,siteKey=null,withCredential=false) {
     const site=siteKey?this.siteFromAccess(siteKey):this.invitation(token);
     if(!site || typeof loginId!=='string' || !/^[a-zA-Z0-9_]{3,40}$/.test(loginId) || typeof password!=='string' || password.length>256)return null;
     const account=this.db.prepare('SELECT worker_id,salt,password_hash FROM worker_accounts WHERE site_id=? AND login_id=?').get(site.id,loginId);
     if(!account)return null;
     const hash=scryptSync(password,account.salt,32);
     if(!timingSafeEqual(hash,account.password_hash))return null;
-    return this.db.prepare('SELECT workers.id,workers.name,workers.site_id,sites.name AS site_name FROM workers JOIN sites ON sites.id=workers.site_id WHERE workers.id=?').get(account.worker_id);
+    const worker=this.db.prepare('SELECT workers.id,workers.name,workers.site_id,sites.name AS site_name FROM workers JOIN sites ON sites.id=workers.site_id WHERE workers.id=?').get(account.worker_id);return withCredential&&worker?{worker,credentialHash:Buffer.from(account.password_hash)}:worker;
   }
   documents(siteId, type = '', query = '', from = '', to = '') {
     if(from)from=dateValue(from);if(to)to=dateValue(to);
