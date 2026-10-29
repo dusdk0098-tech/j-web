@@ -600,6 +600,21 @@ test('노사협의체 회의 안건과 출역자를 현장별로 저장한다',(
   }finally{s.close();}
 });
 
+test('회의 사용자 측 관리자 선택은 현장과 당시 명부를 보존한다',()=>{
+  const s=new Store(':memory:');try{
+    const site=s.createSite({name:'가상 현장'}),other=s.createSite({name:'다른 현장'}),make=(siteId,name,category='현장관리자')=>s.createWorker({siteId,name,category,company:'가상 업체',occupation:'가상 직종'}),manager=make(site.id,'가상 관리자'),foreign=make(other.id,'다른 현장 관리자'),worker=make(site.id,'가상 근로자','직영');
+    s.setAttendance({siteId:site.id,workerId:worker.id,date:'2026-10-29',present:true});
+    for(const type of ['work_council','safety_meeting']){
+      const input={siteId:site.id,type,title:'가상 회의',date:'2026-10-29',details:{...(type==='work_council'?{kind:'정기 회의'}:{}),managerIds:[manager.id],workerIds:[worker.id],employerParticipants:['직접 입력']}};
+      const doc=s.createDocument(input),stored=JSON.parse(doc.details);assert.equal(stored.managerSnapshot[0].name,'가상 관리자');assert.deepEqual(stored.employerParticipants,['직접 입력']);
+      assert.throws(()=>s.updateDocument(doc.id,{...input,details:{...input.details,managerIds:[foreign.id]}}),/현장관리자/);assert.throws(()=>s.updateDocument(doc.id,{...input,details:{...input.details,managerIds:[worker.id]}}),/참석자/);assert.throws(()=>s.updateDocument(doc.id,{...input,details:{...input.details,managerIds:[manager.id,manager.id]}}),/참석자/);
+      s.updateWorker(manager.id,{siteId:site.id,name:'이름 변경',category:'직영',company:'변경 업체',occupation:'변경 직종'});s.updateDocument(doc.id,input);assert.equal(JSON.parse(s.document(doc.id).details).managerSnapshot[0].name,'가상 관리자');s.updateWorker(manager.id,{siteId:site.id,name:'가상 관리자',category:'현장관리자',company:'가상 업체',occupation:'가상 직종'});
+      const {managerIds,...withoutManagers}=input.details;s.updateDocument(doc.id,{...input,details:withoutManagers});assert.equal(JSON.parse(s.document(doc.id).details).managerSnapshot[0].id,manager.id);
+      s.updateDocument(doc.id,{...input,details:{...input.details,managerIds:[]}});assert.deepEqual(JSON.parse(s.document(doc.id).details).managerSnapshot,[]);
+    }
+  }finally{s.close();}
+});
+
 test('회의별 사용자 측 가상 참석자는 입력을 검증하고 저장한다',()=>{
   const s=new Store(':memory:');try{
     const site=s.createSite({name:'가상 현장'});

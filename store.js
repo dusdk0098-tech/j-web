@@ -1235,7 +1235,7 @@ export class Store {
     if(!['safety_meeting','work_council','joint_inspection'].includes(doc.type))return;
     const previous=current&&current.date===doc.date?JSON.parse(current.details).workerSnapshot||[]:[],attendance=this.attendance(doc.siteId,doc.date);
     doc.details.workerSnapshot=doc.details.workerIds.map(id=>{const old=previous.find(row=>row.id===id),worker=attendance.find(row=>row.id===id&&row.present);if(old)return old;if(!worker)throw new Error('같은 현장의 해당 날짜 출역자를 선택해 주세요.');return {id:worker.id,name:worker.name,company:worker.company,occupation:worker.occupation};});
-    if(doc.type==='joint_inspection'){
+    {
       const prior=current?JSON.parse(current.details).managerSnapshot||[]:[],ids=doc.details.managerIds??prior.map(row=>row.id),lookup=this.db.prepare("SELECT id,name,company,occupation FROM workers WHERE id=? AND site_id=? AND category='현장관리자'");
       if(ids.some(id=>doc.details.workerIds.includes(id)))throw new Error('관리자와 근로자를 중복 선택할 수 없습니다.');
       doc.details.managerIds=ids;doc.details.managerSnapshot=ids.map(id=>{const old=prior.find(row=>row.id===id),manager=lookup.get(id,doc.siteId);if(old)return old;if(!manager)throw new Error('같은 현장의 가상 현장관리자를 선택해 주세요.');return manager;});

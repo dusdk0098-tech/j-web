@@ -67,6 +67,7 @@ export function recordInput(input) {
     for(const key of ['timeFrom','timeTo']){const time=value[key]??'';if(typeof time!=='string'||time&&!/^(?:[01]\d|2[0-3]):(?:00|05|10|15|20|25|30|35|40|45|50|55)$|^24:00$/.test(time))throw new Error('회의시간을 확인해 주세요.');details[key]=time;}
     if((details.timeFrom||details.timeTo)&&(!details.timeFrom||!details.timeTo||details.timeFrom>=details.timeTo))throw new Error('회의시간을 확인해 주세요.');
     const ids=value.workerIds??[];if(!Array.isArray(ids)||ids.length>100||ids.some(id=>!Number.isSafeInteger(id)||id<1)||new Set(ids).size!==ids.length)throw new Error('참석자를 확인해 주세요.');details.workerIds=ids;
+    if(value.managerIds!==undefined){const managers=value.managerIds;if(!Array.isArray(managers)||managers.length>100||managers.some(id=>!Number.isSafeInteger(id)||id<1)||new Set(managers).size!==managers.length||managers.some(id=>ids.includes(id)))throw new Error('관리자 참석자를 확인해 주세요.');details.managerIds=managers;}
     if(type!=='joint_inspection'){const names=value.employerParticipants??[];if(!Array.isArray(names)||names.length>100||names.some(name=>typeof name!=='string'||!name.trim()||name.trim().length>200||/[\x00-\x1f\x7f]/.test(name)))throw new Error('사용자 측 참석자를 확인해 주세요.');details.employerParticipants=names.map(name=>name.trim());}
     if(type==='work_council'){
       if(!['임시 회의','정기 회의'].includes(value.kind))throw new Error('회의 종류를 확인해 주세요.');details.kind=value.kind;
@@ -74,7 +75,6 @@ export function recordInput(input) {
     }
     if(type==='joint_inspection'){
       for(const key of ['improvements','result','other']){if(typeof (value[key]??'')!=='string'||(value[key]??'').length>2000)throw new Error('합동 점검 항목을 확인해 주세요.');details[key]=(value[key]??'').trim();}
-      if(value.managerIds!==undefined){const managers=value.managerIds;if(!Array.isArray(managers)||managers.length>100||managers.some(id=>!Number.isSafeInteger(id)||id<1)||new Set(managers).size!==managers.length||managers.some(id=>ids.includes(id)))throw new Error('관리자 참석자를 확인해 주세요.');details.managerIds=managers;}
       const items=value.items??[];if(!Array.isArray(items)||items.length>100)throw new Error('점검 항목을 확인해 주세요.');
       details.items=items.map(item=>{if(!item||typeof item.name!=='string'||!item.name.trim()||item.name.length>500||!['양호','보완사항','N/A'].includes(item.result))throw new Error('점검 항목을 확인해 주세요.');return {name:item.name.trim(),result:item.result};});
     }
