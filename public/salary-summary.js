@@ -24,3 +24,14 @@ export function salaryDay(day){
   if(day.salary_kind){const labels={monthly:'월급',yearly:'연봉',other:'기타'};return {kind:labels[day.salary_kind]||'미기록',amount:day.salary_amount??'미기록'};}
   return day.daily_rate===null||day.daily_rate===undefined?{kind:'미기록',amount:'미기록'}:{kind:'일당',amount:day.daily_rate};
 }
+
+export function groupWageRecords(records){
+  const groups=new Map();
+  for(const row of records){
+    let group=groups.get(row.occupation);
+    if(!group){group={occupation:row.occupation,rows:[],units_hundredths:null,units_missing:0,gross:0};groups.set(row.occupation,group);}
+    group.rows.push(row);group.gross+=row.gross;group.units_missing+=row.units_missing;
+    if(row.units_hundredths!==null)group.units_hundredths=(group.units_hundredths??0)+row.units_hundredths;
+  }
+  return [...groups.values()].sort((a,b)=>a.occupation.localeCompare(b.occupation,'ko'));
+}
