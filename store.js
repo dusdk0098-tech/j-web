@@ -1243,7 +1243,7 @@ export class Store {
     if (!current) throw new Error('문서를 찾을 수 없습니다.');
     if(current.type==='cost' && Array.isArray(JSON.parse(current.details).rows))throw new Error('월간 사용내역서는 보존된 내역을 변경할 수 없습니다. 새 문서를 작성해 주세요.');
     if (current.status !== 'draft' && current.status !== 'rejected') throw new Error('임시저장 또는 반려된 문서만 수정할 수 있습니다.');
-    if(current.type==='work_plan'&&(input.details===undefined||input.details&&typeof input.details==='object'&&!Array.isArray(input.details))){const previous=JSON.parse(current.details),details={...input.details};for(const key of ['heavyLoads','equipmentAssignments'])if(details[key]===undefined&&previous[key]!==undefined)details[key]=previous[key];input={...input,details};}
+    if(current.type==='work_plan'&&(input.details===undefined||input.details&&typeof input.details==='object'&&!Array.isArray(input.details))){const previous=JSON.parse(current.details),details={...input.details};for(const key of ['heavyLoads','equipmentAssignments','safetyMeasures'])if(details[key]===undefined&&previous[key]!==undefined)details[key]=previous[key];input={...input,details};}
     const d = recordInput(input);
     if (d.siteId !== current.site_id || d.type !== current.type) throw new Error('문서의 현장과 유형은 변경할 수 없습니다.');
     if(d.type==='checklist'&&d.details.kind!=='morning'&&this.db.prepare("SELECT 1 FROM attachments WHERE document_id=? AND category='morning_hazard_photo' LIMIT 1").get(Number(id)))throw new Error('점검 항목 사진을 삭제한 뒤 점검 종류를 변경해 주세요.');
@@ -1287,6 +1287,7 @@ export class Store {
     const exists=this.db.prepare('SELECT 1 FROM equipment WHERE id=? AND site_id=?');
     if((doc.details.equipmentIds||[]).some(id=>!exists.get(id,doc.siteId)))throw new Error('같은 현장의 장비를 선택해 주세요.');
     if(doc.details.equipmentAssignments){const equipment=this.db.prepare('SELECT kind,model,registration FROM equipment WHERE id=? AND site_id=?'),worker=this.db.prepare('SELECT name,company FROM workers WHERE id=? AND site_id=?');doc.details.equipmentAssignments=doc.details.equipmentAssignments.map(row=>{const item=equipment.get(row.equipmentId,doc.siteId),driver=worker.get(row.workerId,doc.siteId);if(!item||!driver||!(doc.details.equipmentIds||[]).includes(row.equipmentId))throw new Error('계획서에 선택된 같은 현장의 장비와 운전원을 확인해 주세요.');return {...row,equipmentLabel:[item.kind,item.model,item.registration].filter(Boolean).join(' · '),driverName:driver.name,driverCompany:driver.company};});}
+    if(doc.details.safetyMeasures){const equipment=this.db.prepare('SELECT kind,model,registration FROM equipment WHERE id=? AND site_id=?');doc.details.safetyMeasures=doc.details.safetyMeasures.map(row=>{if(!row.equipmentId)return row;const item=equipment.get(row.equipmentId,doc.siteId);if(!item||!(doc.details.equipmentIds||[]).includes(row.equipmentId))throw new Error('안전대책에 연결할 같은 현장의 선택된 장비를 확인해 주세요.');return {...row,equipmentLabel:[item.kind,item.model,item.registration].filter(Boolean).join(' · ')};});}
     if(doc.details.workPlaceId && !this.db.prepare('SELECT 1 FROM work_places WHERE id=? AND site_id=?').get(doc.details.workPlaceId,doc.siteId))throw new Error('같은 현장의 작업장소를 선택해 주세요.');
     const rigging=this.db.prepare('SELECT 1 FROM rigging WHERE id=? AND site_id=?');
     if((doc.details.riggingIds||[]).some(id=>!rigging.get(id,doc.siteId)))throw new Error('같은 현장의 장구를 선택해 주세요.');

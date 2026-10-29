@@ -845,6 +845,18 @@ test('현장과 출입자를 분리하고 문서 결재 이력을 보존한다',
   } finally {s.close();}
 });
 
+test('계획서 안전대책은 선택 장비를 검증하고 이전 작성과 결재 기록을 보존한다',()=>{
+  const s=new Store(':memory:');try{
+    const site=s.createSite({name:'가상 현장'}),other=s.createSite({name:'다른 현장'}),makeEquipment=siteId=>s.createEquipment({siteId,kind:'가상 장비',model:'모델',capacity:'',manufacturer:'',registration:''}),equipment=makeEquipment(site.id),unselected=makeEquipment(site.id),foreign=makeEquipment(other.id),row={accidentType:'가상 유형',hazard:'가상 위험',measure:'가상 조치',equipmentId:equipment.id},input={siteId:site.id,type:'work_plan',title:'가상 계획',date:'2026-10-30',details:{equipmentIds:[equipment.id],safetyMeasures:[row,{accidentType:'',hazard:'공통 위험',measure:''}]}};
+    for(const bad of [{...row,equipmentId:foreign.id},{...row,equipmentId:unselected.id},{...row,hazard:'x'.repeat(2001)},{accidentType:'',hazard:'',measure:''}])assert.throws(()=>s.createDocument({...input,details:{...input.details,safetyMeasures:[bad]}}));
+    const doc=s.createDocument(input),saved=JSON.parse(doc.details);assert.equal(saved.safetyMeasures[0].equipmentLabel,'가상 장비 · 모델');assert.equal(saved.safetyMeasures[1].hazard,'공통 위험');
+    s.updateDocument(doc.id,{...input,details:{equipmentIds:[equipment.id]}});assert.equal(JSON.parse(s.document(doc.id).details).safetyMeasures[0].hazard,'가상 위험');assert.throws(()=>s.updateDocument(doc.id,{...input,details:{equipmentIds:[]}}),/장비/);assert.equal(JSON.parse(s.document(doc.id).details).safetyMeasures.length,2);
+    s.transition(doc.id,'submit');const cycle=s.document(doc.id).approval_cycle_id,copy=s.copyWorkPlan(doc.id,{siteId:site.id,title:'복사',date:'2026-10-31'});assert.equal(JSON.parse(copy.details).safetyMeasures[0].measure,'가상 조치');
+    s.transition(doc.id,'withdraw');s.updateDocument(doc.id,{...input,details:{...input.details,safetyMeasures:[{...row,measure:'수정 조치'}]}});assert.equal(JSON.parse(s.approvalCycle(doc.id,cycle).document.details).safetyMeasures[0].measure,'가상 조치');
+    s.updateDocument(doc.id,{...input,details:{equipmentIds:[],safetyMeasures:[]}});assert.deepEqual(JSON.parse(s.document(doc.id).details).safetyMeasures,[]);
+  }finally{s.close();}
+});
+
 test('문서 작성 시험 권한은 현장과 작성자를 제한하며 취소 후 권한을 재검사한다',()=>{
   const s=new Store(':memory:');try{
     const a=s.createSite({name:'가상 A'}),b=s.createSite({name:'가상 B'}),invite=s.createInvitation(a.id),make=id=>s.join(invite.token,{name:id,category:'직영',company:'가상 업체',occupation:'가상 직종',loginId:id,password:'virtual-password-123',acknowledged:true}),one=make('author_one'),two=make('author_two'),company=s.createCompany({siteId:a.id,name:'가상 업체',trade:'가상 공종'}),other=s.createCompany({siteId:b.id,name:'다른 업체',trade:'가상 공종'}),input={siteId:b.id,type:'risk',title:'가상 평가',date:'2026-10-29',details:{items:[{task:'가상 작업',contractorId:company.id}]}};
