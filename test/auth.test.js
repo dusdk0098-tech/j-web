@@ -542,6 +542,7 @@ test('관리자 인증 모드가 문서 API를 보호하고 로그아웃을 적�
     const noticeSig=`${base}/api/documents/${notice.id}/notice-reads/${own.id}/signature`;
     assert.equal((await fetch(noticeSig,{headers:{cookie:workerCookie}})).status,401);
     assert.deepEqual(Buffer.from(await (await fetch(noticeSig,{headers:{cookie}})).arrayBuffer()),photo);
+    const noticePreview=await fetch(`${noticeSig}?preview=1`,{headers:{cookie}});assert.equal(noticePreview.headers.get('content-type'),'image/png');assert.equal(noticePreview.headers.get('x-content-type-options'),'nosniff');assert.deepEqual(Buffer.from(await noticePreview.arrayBuffer()),photo);assert.equal((await fetch(`${noticeSig}?preview=1`,{headers:{cookie:workerCookie}})).status,401);assert.equal((await fetch(`${base}/api/documents/${otherNotice.id}/notice-reads/${own.id}/signature?preview=1`,{headers:{cookie}})).status,404);
     assert.equal((await fetch(`${base}/api/documents/${risk.id}/notice-reads`,{headers:{cookie}})).status,400);
     const stranger=await (await post('/api/workers',{siteId:other.id,name:'다른 근로자',category:'직영',company:'다른 업체',occupation:'전기'})).json();
     await post('/api/attendance',{siteId:site.id,workerId:own.id,date:'2024-02-29',present:true});

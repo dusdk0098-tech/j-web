@@ -596,7 +596,7 @@ export class Store {
   noticeReads(documentId) {
     const doc=this.document(documentId);
     if(!doc || doc.type!=='notice')throw new Error('유해·위험 공지를 확인해 주세요.');
-    return this.db.prepare('SELECT w.id,w.name,w.company,r.read_at,r.signature IS NOT NULL AS has_signature FROM worker_notice_reads r JOIN workers w ON w.id=r.worker_id WHERE r.document_id=? AND w.site_id=? ORDER BY r.read_at,w.id').all(Number(documentId),doc.site_id);
+    return this.db.prepare('SELECT w.id,w.name,w.company,a.occupation_snapshot AS attendance_occupation,r.read_at,r.signature IS NOT NULL AS has_signature FROM worker_notice_reads r JOIN workers w ON w.id=r.worker_id LEFT JOIN attendance a ON a.worker_id=w.id AND a.date=? AND a.present=1 WHERE r.document_id=? AND w.site_id=? ORDER BY r.read_at,w.id').all(doc.date,Number(documentId),doc.site_id);
   }
   noticeSignature(documentId,workerId) {
     return this.db.prepare("SELECT r.signature FROM worker_notice_reads r JOIN documents d ON d.id=r.document_id JOIN workers w ON w.id=r.worker_id AND w.site_id=d.site_id WHERE d.id=? AND d.type='notice' AND w.id=? AND r.signature IS NOT NULL").get(Number(documentId),Number(workerId))?.signature || null;

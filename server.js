@@ -594,7 +594,7 @@ const server = http.createServer(async (req, res) => {
     const noticeSignature=url.pathname.match(/^\/api\/documents\/(\d+)\/notice-reads\/(\d+)\/signature$/);
     if(noticeSignature && req.method==='GET'){
       const signature=store.noticeSignature(noticeSignature[1],noticeSignature[2]);if(!signature)return json(res,404,{error:'시험 서명을 찾을 수 없습니다.'});
-      res.writeHead(200,{'Content-Type':'application/octet-stream','Content-Disposition':'attachment; filename="test-notice-signature.png"','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(signature);
+      const preview=url.searchParams.get('preview')==='1';res.writeHead(200,{'Content-Type':preview?'image/png':'application/octet-stream',...(preview?{}:{'Content-Disposition':'attachment; filename="test-notice-signature.png"'}),'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(signature);
     }
     if (match) {
       const [,id,part] = match;

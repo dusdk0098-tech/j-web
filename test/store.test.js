@@ -240,6 +240,14 @@ test('가상 공지는 지정 현장과 날짜에 게시되고 이력을 원자�
   }finally{s.close();}
 });
 
+test('공지 확인 명단은 공지일 출역 당시의 직종을 표시한다',()=>{
+  const s=new Store(':memory:');try{
+    const site=s.createSite({name:'가상 현장'}),input={siteId:site.id,name:'가상 근로자',category:'직영',company:'가상 업체',occupation:'목공'},worker=s.createWorker(input),doc=s.createDocument({siteId:site.id,type:'notice',title:'가상 공지',date:'2026-10-29',body:'가상 내용'}),png=new PNG({width:1,height:1});png.data[3]=255;const signature=`data:image/png;base64,${PNG.sync.write(png).toString('base64')}`;
+    s.setAttendance({siteId:site.id,workerId:worker.id,date:doc.date,present:true});s.publishNotice(doc.id);s.confirmWorkerNotice(worker.id,doc.id,signature,doc.date);s.updateWorker(worker.id,{...input,occupation:'전기'});
+    assert.equal(s.noticeReads(doc.id)[0].attendance_occupation,'목공');s.db.prepare('UPDATE attendance SET occupation_snapshot=NULL WHERE worker_id=? AND date=?').run(worker.id,doc.date);assert.equal(s.noticeReads(doc.id)[0].attendance_occupation,null);
+  }finally{s.close();}
+});
+
 test('주간 활동은 7일과 현장을 제한하고 문서·가상 확인을 날짜별로 집계한다',()=>{
   const s=new Store(':memory:');try{const a=s.createSite({name:'가상 A'}),b=s.createSite({name:'가상 B'}),worker=s.createWorker({siteId:a.id,name:'가상 근로자',category:'직영',company:'가상 회사',occupation:'목공'});s.setAttendance({siteId:a.id,workerId:worker.id,date:'2024-02-29',present:true});const add=(siteId,date,type)=>s.createDocument({siteId,date,type,title:'가상 문서'}),notice=add(a.id,'2024-02-29','notice'),tbm=add(a.id,'2024-03-01','tbm');add(b.id,'2024-02-29','notice');for(const doc of [notice,tbm]){s.transition(doc.id,'submit');s.transition(doc.id,'approve');}const png=new PNG({width:1,height:1});png.data[3]=255;s.confirmWorkerNotice(worker.id,notice.id,`data:image/png;base64,${PNG.sync.write(png).toString('base64')}`,'2024-02-29');s.confirmWorkerTraining(worker.id,tbm.id,'2024-03-01',true);const rows=s.weeklyActivity(a.id,'2024-02-27');assert.equal(rows.length,7);assert.equal(rows[6].date,'2024-03-04');const leap=rows.find(r=>r.date==='2024-02-29');assert.equal(leap.attendance,1);assert.equal(leap.documents.notice,1);assert.equal(leap.noticeReads,1);assert.equal(rows.find(r=>r.date==='2024-03-01').trainingChecks,1);assert.equal(s.weeklyActivity(b.id,'2024-02-27').find(r=>r.date==='2024-02-29').noticeReads,0);assert.throws(()=>s.weeklyActivity(a.id,'2024-02-30'),/날짜/);}finally{s.close();}
 });
