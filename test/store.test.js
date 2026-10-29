@@ -16,6 +16,15 @@ test('가상 노임 직종별 합계는 현장과 월, 기록 당시 직종으�
   }finally{s.close();}
 });
 
+test('가상 노임 검색과 합계는 저장 당시 소속·구분과 현장·월을 기준으로 한다',()=>{
+  const s=new Store(':memory:');try{
+    const a=s.createSite({name:'가상 A'}),b=s.createSite({name:'가상 B'}),add=(siteId,name,company,category)=>s.createWorker({siteId,name,company,category,occupation:'목공'}),one=add(a.id,'가상 한','업체 A','협력'),two=add(a.id,'가상 둘','업체 B','직영'),other=add(b.id,'가상 셋','업체 A','협력'),deductions={income:'0',local:'0',health:'0',care:'0',pension:'0',employment:'0'};
+    for(const [siteId,worker,month] of [[a.id,one,'2024-02'],[a.id,two,'2024-02'],[a.id,one,'2024-03'],[b.id,other,'2024-02']])s.saveWageRecord({siteId,workerId:worker.id,month,gross:'1000',deductions});
+    s.updateWorker(one.id,{siteId:a.id,name:'변경 이름',company:'새 업체',category:'직영',occupation:'전기'});
+    const filter={company:'업체 A',category:'협력',q:'가상 한'},records=s.wageRecords(a.id,'2024-02',filter);assert.equal(records.length,1);assert.equal(records[0].worker_id,one.id);assert.equal(records[0].category,'협력');assert.equal(s.wageSummary(a.id,'2024-02',filter)[0].gross,1000);assert.equal(s.wageRecords(a.id,'2024-02',{company:'새 업체'}).length,0);assert.equal(s.wageRecords(a.id,'2024-02',{company:'업체 B',category:'협력'}).length,0);assert.equal(s.wageRecords(b.id,'2024-02',filter).length,0);assert.equal(s.wageRecords(a.id,'2024-03',filter).length,1);
+  }finally{s.close();}
+});
+
 test('가상 노임은 현장과 월별로 수동 공제액을 검증하고 기존 기록을 보존한다',()=>{
   const s=new Store(':memory:');try{
     const a=s.createSite({name:'가상 A'}),b=s.createSite({name:'가상 B'}),worker=s.createWorker({siteId:a.id,name:'가상 근로자',category:'직영',company:'가상 회사',occupation:'목공'}),deductions={income:'100',local:'10',health:'20',care:'3',pension:'50',employment:'5'},input={siteId:a.id,workerId:worker.id,month:'2024-02',gross:'1000',deductions};
@@ -886,7 +895,7 @@ test('이전 가상 노임의 알 수 없는 당시 소속은 채우지 않는�
     const old=new DatabaseSync(path);
     old.exec("CREATE TABLE sites (id INTEGER PRIMARY KEY,name TEXT NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP); INSERT INTO sites(id,name) VALUES(1,'가상 현장'); CREATE TABLE workers (id INTEGER PRIMARY KEY,site_id INTEGER NOT NULL,name TEXT NOT NULL,category TEXT NOT NULL,company TEXT NOT NULL,occupation TEXT NOT NULL); INSERT INTO workers VALUES(1,1,'가상 근로자','직영','현재 소속','목공'); CREATE TABLE wage_records (site_id INTEGER NOT NULL,worker_id INTEGER NOT NULL,month TEXT NOT NULL,gross INTEGER NOT NULL,deductions TEXT NOT NULL,PRIMARY KEY(worker_id,month))");
     old.prepare('INSERT INTO wage_records VALUES(?,?,?,?,?)').run(1,1,'2024-02',1000,JSON.stringify({income:100,local:10,health:20,care:3,pension:50,employment:5}));old.close();
-    for(let i=0;i<2;i++){const s=new Store(path);try{const row=s.wageRecords(1,'2024-02')[0];assert.equal(row.company,'기록 없음');assert.equal(row.name,'기록 없음');assert.equal(row.net,812);}finally{s.close();}}
+    for(let i=0;i<2;i++){const s=new Store(path);try{const row=s.wageRecords(1,'2024-02')[0];assert.equal(row.company,'기록 없음');assert.equal(row.name,'기록 없음');assert.equal(row.category,null);assert.equal(row.net,812);assert.equal(s.wageRecords(1,'2024-02',{category:'직영'}).length,0);}finally{s.close();}}
   }finally{rmSync(dir,{recursive:true,force:true});}
 });
 

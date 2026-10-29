@@ -111,7 +111,7 @@ export class Store {
     if (!this.db.prepare('PRAGMA table_info(instruction_results)').all().some(c=>c.name==='signature')) this.db.exec('ALTER TABLE instruction_results ADD COLUMN signature BLOB');
     const attendanceColumns=this.db.prepare('PRAGMA table_info(attendance)').all().map(c=>c.name);
     const wageColumns=this.db.prepare('PRAGMA table_info(wage_records)').all().map(c=>c.name);
-    for(const column of ['name_snapshot','company_snapshot','occupation_snapshot'])if(!wageColumns.includes(column))this.db.exec(`ALTER TABLE wage_records ADD COLUMN ${column} TEXT`);
+    for(const column of ['name_snapshot','company_snapshot','occupation_snapshot','category_snapshot'])if(!wageColumns.includes(column))this.db.exec(`ALTER TABLE wage_records ADD COLUMN ${column} TEXT`);
     if(!attendanceColumns.includes('company_snapshot'))this.db.exec('ALTER TABLE attendance ADD COLUMN company_snapshot TEXT');
     if(!attendanceColumns.includes('occupation_snapshot'))this.db.exec('ALTER TABLE attendance ADD COLUMN occupation_snapshot TEXT');
     if(!attendanceColumns.includes('category_snapshot'))this.db.exec('ALTER TABLE attendance ADD COLUMN category_snapshot TEXT');
@@ -235,25 +235,25 @@ export class Store {
   applyMealDefaults(workerId,date) {
     this.db.prepare("INSERT OR IGNORE INTO meal_checks(site_id,worker_id,date,kind,restaurant_id,restaurant_name,price) SELECT w.site_id,w.id,?,d.kind,r.id,r.name,CASE WHEN d.kind='snack' THEN r.snack_price ELSE r.meal_price END FROM workers w JOIN meal_defaults d ON d.site_id=w.site_id JOIN restaurants r ON r.id=d.restaurant_id AND r.site_id=w.site_id WHERE w.id=? AND w.category='직영'").run(date,Number(workerId));
   }
-  wageRecords(siteId,month) {
+  wageRecords(siteId,month,filters={}) {
     month=monthValue(month);
-    return this.db.prepare("SELECT r.worker_id,r.month,r.gross,r.deductions,COALESCE(r.name_snapshot,'기록 없음') AS name,COALESCE(r.company_snapshot,'기록 없음') AS company,COALESCE(r.occupation_snapshot,'기록 없음') AS occupation,COUNT(a.date) AS attendance_days,SUM(a.units_hundredths) AS units_hundredths,COUNT(a.date)-COUNT(a.units_hundredths) AS units_missing,SUM(CASE WHEN a.daily_rate IS NOT NULL AND a.units_hundredths IS NOT NULL THEN (a.daily_rate*a.units_hundredths+50)/100 END) AS estimated_pay,COUNT(a.date)-COUNT(CASE WHEN a.daily_rate IS NOT NULL AND a.units_hundredths IS NOT NULL THEN a.date END) AS pay_missing FROM wage_records r JOIN workers w ON w.id=r.worker_id AND w.site_id=r.site_id LEFT JOIN attendance a ON a.worker_id=r.worker_id AND a.present=1 AND a.date BETWEEN ? AND ? WHERE r.site_id=? AND r.month=? GROUP BY r.worker_id,r.month ORDER BY name,w.id").all(`${month}-01`,`${month}-31`,Number(siteId),month).map(row=>{const deductions=JSON.parse(row.deductions),total=Object.values(deductions).reduce((a,b)=>a+b,0);return {...row,deductions,total,net:row.gross-total};});
+    return this.db.prepare("SELECT r.worker_id,r.month,r.gross,r.deductions,r.category_snapshot AS category,COALESCE(r.name_snapshot,'기록 없음') AS name,COALESCE(r.company_snapshot,'기록 없음') AS company,COALESCE(r.occupation_snapshot,'기록 없음') AS occupation,COUNT(a.date) AS attendance_days,SUM(a.units_hundredths) AS units_hundredths,COUNT(a.date)-COUNT(a.units_hundredths) AS units_missing,SUM(CASE WHEN a.daily_rate IS NOT NULL AND a.units_hundredths IS NOT NULL THEN (a.daily_rate*a.units_hundredths+50)/100 END) AS estimated_pay,COUNT(a.date)-COUNT(CASE WHEN a.daily_rate IS NOT NULL AND a.units_hundredths IS NOT NULL THEN a.date END) AS pay_missing FROM wage_records r JOIN workers w ON w.id=r.worker_id AND w.site_id=r.site_id LEFT JOIN attendance a ON a.worker_id=r.worker_id AND a.present=1 AND a.date BETWEEN ? AND ? WHERE r.site_id=? AND r.month=? GROUP BY r.worker_id,r.month ORDER BY name,w.id").all(`${month}-01`,`${month}-31`,Number(siteId),month).map(row=>{const deductions=JSON.parse(row.deductions),total=Object.values(deductions).reduce((a,b)=>a+b,0);return {...row,deductions,total,net:row.gross-total};}).filter(row=>(!filters.company||row.company===filters.company)&&(!filters.category||row.category===filters.category)&&(!filters.q||row.name.toLocaleLowerCase().includes(filters.q.trim().toLocaleLowerCase())));
   }
-  wageSummary(siteId,month) {
+  wageSummary(siteId,month,filters={}) {
     const groups=new Map();
-    for(const row of this.wageRecords(siteId,month)){let group=groups.get(row.occupation);if(!group){group={occupation:row.occupation,count:0,gross:0,deductions:0,net:0};groups.set(row.occupation,group);}group.count++;group.gross+=row.gross;group.deductions+=row.total;group.net+=row.net;}
+    for(const row of this.wageRecords(siteId,month,filters)){let group=groups.get(row.occupation);if(!group){group={occupation:row.occupation,count:0,gross:0,deductions:0,net:0};groups.set(row.occupation,group);}group.count++;group.gross+=row.gross;group.deductions+=row.total;group.net+=row.net;}
     return [...groups.values()].sort((a,b)=>a.occupation.localeCompare(b.occupation,'ko'));
   }
   saveWageRecord(input,update=false) {
     const siteId=Number(input.siteId),workerId=Number(input.workerId),month=monthValue(input.month);
-    const worker=this.db.prepare('SELECT name,company,occupation FROM workers WHERE id=? AND site_id=?').get(workerId,siteId);if(!worker)throw new Error('선택한 현장의 출입자를 확인해 주세요.');
+    const worker=this.db.prepare('SELECT name,company,occupation,category FROM workers WHERE id=? AND site_id=?').get(workerId,siteId);if(!worker)throw new Error('선택한 현장의 출입자를 확인해 주세요.');
     const amount=(value)=>{if(typeof value!=='string'||!/^\d{1,9}$/.test(value))throw new Error('금액은 0 이상의 정수로 입력해 주세요.');return Number(value);},gross=amount(input.gross);
     if(!input.deductions||typeof input.deductions!=='object'||Array.isArray(input.deductions))throw new Error('공제 항목을 확인해 주세요.');
     const deductions=Object.fromEntries(['income','local','health','care','pension','employment'].map(key=>[key,amount(input.deductions[key])]));
     if(Object.values(deductions).reduce((a,b)=>a+b,0)>gross)throw new Error('공제액 합계가 노임보다 큽니다.');
     if(update){
       if(!this.db.prepare('UPDATE wage_records SET gross=?,deductions=? WHERE site_id=? AND worker_id=? AND month=?').run(gross,JSON.stringify(deductions),siteId,workerId,month).changes)throw new Error('수정할 노임 기록을 찾을 수 없습니다.');
-    }else if(!this.db.prepare('INSERT INTO wage_records(site_id,worker_id,month,gross,deductions,name_snapshot,company_snapshot,occupation_snapshot) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(worker_id,month) DO NOTHING').run(siteId,workerId,month,gross,JSON.stringify(deductions),worker.name,worker.company,worker.occupation).changes)throw new Error('이미 등록된 노임 기록입니다. 수정을 이용해 주세요.');
+    }else if(!this.db.prepare('INSERT INTO wage_records(site_id,worker_id,month,gross,deductions,name_snapshot,company_snapshot,occupation_snapshot,category_snapshot) VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(worker_id,month) DO NOTHING').run(siteId,workerId,month,gross,JSON.stringify(deductions),worker.name,worker.company,worker.occupation,worker.category).changes)throw new Error('이미 등록된 노임 기록입니다. 수정을 이용해 주세요.');
   }
   mealChecks(siteId,date) {
     date=dateValue(date);

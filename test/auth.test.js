@@ -10,6 +10,7 @@ import { once } from 'node:events';
 import { LocalAuth,sessionToken } from '../auth.js';
 import jsQR from 'jsqr';
 import { PNG } from 'pngjs';
+import { readSheet } from 'read-excel-file/node';
 
 test('세션 만료, 로그아웃 및 로그인 시도 제한',()=>{
   assert.throws(()=>new LocalAuth(''),/12자/);
@@ -189,6 +190,7 @@ test('관리자 인증 모드가 문서 API를 보호하고 로그아웃을 적�
     assert.equal((await post('/api/wages',wage)).status,200);assert.equal((await (await fetch(wagePath,{headers:{cookie}})).json())[0].net,812);
     const wageSummary=`${base}/api/wages/summary?siteId=${site.id}&month=2024-02`;assert.equal((await fetch(wageSummary,{headers:{cookie:workerCookie}})).status,401);assert.equal((await (await fetch(wageSummary,{headers:{cookie}})).json())[0].gross,1000);
     const wageExport=`${base}/api/wages/export?siteId=${site.id}&month=2024-02`;assert.equal((await fetch(wageExport)).status,401);assert.equal((await fetch(wageExport,{headers:{cookie:workerCookie}})).status,401);const wageFile=await fetch(wageExport,{headers:{cookie}});assert.equal(wageFile.status,200);assert.match(wageFile.headers.get('content-type'),/spreadsheet/);assert.ok((await wageFile.arrayBuffer()).byteLength>0);
+    const excluded=`&category=${encodeURIComponent('없는 구분')}`;assert.deepEqual(await (await fetch(wagePath+excluded,{headers:{cookie}})).json(),[]);assert.deepEqual(await (await fetch(wageSummary+excluded,{headers:{cookie}})).json(),[]);const filteredFile=await fetch(wageExport+excluded,{headers:{cookie}});assert.equal((await readSheet(Buffer.from(await filteredFile.arrayBuffer()))).length,1);
     assert.equal((await post('/api/wages',{...wage,gross:'2000'})).status,400);assert.equal((await (await fetch(wagePath,{headers:{cookie}})).json())[0].gross,1000);
     assert.equal((await fetch(`${base}/api/wages`,{method:'PUT',headers:{cookie,'content-type':'application/json'},body:JSON.stringify({...wage,gross:'2000'})})).status,200);
     const mealPath=`${base}/api/meal-checks`,mealDate='2024-02-29';

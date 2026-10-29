@@ -315,13 +315,13 @@ const server = http.createServer(async (req, res) => {
     }
     const siteArticle=url.pathname.match(/^\/api\/site-articles\/(\d+)$/);
     if(siteArticle&&req.method==='PUT')return json(res,200,store.saveSiteArticle(await body(req),siteArticle[1]));
-    if(url.pathname==='/api/wages/summary'&&req.method==='GET')return json(res,200,store.wageSummary(url.searchParams.get('siteId'),url.searchParams.get('month')));
+    if(url.pathname==='/api/wages/summary'&&req.method==='GET')return json(res,200,store.wageSummary(url.searchParams.get('siteId'),url.searchParams.get('month'),Object.fromEntries(url.searchParams)));
     if(url.pathname==='/api/wages/export'&&req.method==='GET'){
-      const data=await wageSpreadsheet(store.wageRecords(url.searchParams.get('siteId'),url.searchParams.get('month')));
+      const data=await wageSpreadsheet(store.wageRecords(url.searchParams.get('siteId'),url.searchParams.get('month'),Object.fromEntries(url.searchParams)));
       res.writeHead(200,{'Content-Type':'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet','Content-Disposition':'attachment; filename=wages.xlsx','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(data);
     }
     if(url.pathname==='/api/wages'){
-      if(req.method==='GET')return json(res,200,store.wageRecords(url.searchParams.get('siteId'),url.searchParams.get('month')));
+      if(req.method==='GET')return json(res,200,store.wageRecords(url.searchParams.get('siteId'),url.searchParams.get('month'),Object.fromEntries(url.searchParams)));
       if(req.method==='POST'){store.saveWageRecord(await body(req));return json(res,200,{ok:true});}
       if(req.method==='PUT'){store.saveWageRecord(await body(req),true);return json(res,200,{ok:true});}
     }
