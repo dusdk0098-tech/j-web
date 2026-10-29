@@ -624,7 +624,7 @@ export class Store {
       UNION ALL SELECT 'risk',a.date,d.title,'시험 활동의 선택 명단',d.id FROM risk_activities a JOIN documents d ON d.id=a.document_id WHERE d.site_id=(SELECT site FROM ctx) AND d.type='risk' AND EXISTS(SELECT 1 FROM json_each(a.worker_snapshot) w WHERE json_extract(w.value,'$.id')=(SELECT worker FROM ctx))
       UNION ALL SELECT 'work_plan',d.date,d.title,'계획서에 지정된 작업자',d.id FROM documents d WHERE d.site_id=(SELECT site FROM ctx) AND d.type='work_plan' AND d.status='approved' AND EXISTS(SELECT 1 FROM json_each(d.details,'$.workers') w WHERE json_extract(w.value,'$.workerId')=(SELECT worker FROM ctx))
       UNION ALL SELECT 'instruction',d.date,d.title,'지정된 시험 수신자',d.id FROM documents d WHERE d.site_id=(SELECT site FROM ctx) AND d.type='instruction' AND d.status='approved' AND json_extract(d.details,'$.recipientId')=(SELECT worker FROM ctx)
-    ) SELECT kind,date,title,detail,document_id FROM activity WHERE kind IN (${kinds.map(()=>'?').join(',')}) ORDER BY date DESC,kind,title,document_id DESC LIMIT 101 OFFSET ?`;
+    ) SELECT kind,date,title,detail,document_id,CASE WHEN kind='checklist' THEN EXISTS(SELECT 1 FROM worker_self_checks c WHERE c.worker_id=(SELECT worker FROM ctx) AND c.date=activity.date AND c.signature IS NOT NULL) ELSE 0 END AS has_signature FROM activity WHERE kind IN (${kinds.map(()=>'?').join(',')}) ORDER BY date DESC,kind,title,document_id DESC LIMIT 101 OFFSET ?`;
     const rows=this.db.prepare(query).all(siteId,workerId,...kinds,offset),hasMore=rows.length>100;
     return {items:rows.slice(0,100),nextOffset:hasMore?offset+100:null};
   }

@@ -463,6 +463,7 @@ test('관리자 인증 모드가 문서 API를 보호하고 로그아웃을 적�
     const checkList=await (await fetch(`${base}/api/sites/${site.id}/self-checks?date=${checked.check.date}`,{headers:{cookie}})).json();
     assert.equal(checkList.length,1);assert.equal(checkList[0].name,'가상 근로자');assert.ok(checkList[0].created_at);assert.equal(checkList[0].has_signature,1);
     const signaturePath=`/api/sites/${site.id}/self-checks/${own.id}/signature?date=${checked.check.date}`;
+    {const activityUrl=`${base}/api/workers/${own.id}/activities?siteId=${site.id}&kind=checklist`,response=await fetch(activityUrl,{headers:{cookie}}),activityRows=await response.json();assert.equal(response.status,200);assert.equal(activityRows.items[0].date,checked.check.date);assert.equal(activityRows.items[0].has_signature,1);assert.equal((await fetch(activityUrl,{headers:{cookie:workerCookie}})).status,401);}
     assert.equal((await fetch(`${base}${signaturePath}`,{headers:{cookie:workerCookie}})).status,401);
     const signatureResponse=await fetch(`${base}${signaturePath}`,{headers:{cookie}});
     assert.equal(signatureResponse.status,200);assert.deepEqual(Buffer.from(await signatureResponse.arrayBuffer()),photo);
