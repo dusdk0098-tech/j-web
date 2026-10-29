@@ -233,7 +233,7 @@ test('계절별 시험 점검은 문항과 선택지를 검증하고 모든 답�
 test('기상·전기·화재 시험 점검은 문항 수와 판정 및 제출 조건을 확인한다',()=>{
   const s=new Store(':memory:');try{
     const site=s.createSite({name:'가상 현장'});
-    for(const [kind,length] of [['wet_season',6],['heavy_rain',11],['electrical',12],['fire',5]]){
+    for(const [kind,length] of [['wet_season',6],['heavy_rain',11],['electrical',12],['fire',5],['formwork',7],['falling',8],['confined',4],['excavation',8]]){
       const answers=Array.from({length},()=>({answer:'해당없음',note:'가상 비고'}));if(kind==='heavy_rain')answers[0].answer='O';answers[length-1].answer='';
       const input={siteId:site.id,type:'checklist',title:'가상 점검',date:'2041-01-01',details:{kind,answers}},doc=s.createDocument(input);
       assert.throws(()=>s.transition(doc.id,'submit'),/필수/);assert.throws(()=>s.updateDocument(doc.id,{...input,details:{kind,answers:answers.slice(1)}}),/문항/);
