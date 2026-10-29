@@ -86,6 +86,7 @@ export class Store {
       CREATE TABLE IF NOT EXISTS events (id INTEGER PRIMARY KEY, document_id INTEGER NOT NULL REFERENCES documents(id), action TEXT NOT NULL, from_status TEXT NOT NULL, to_status TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
       CREATE TABLE IF NOT EXISTS risk_activities (id INTEGER PRIMARY KEY, document_id INTEGER NOT NULL REFERENCES documents(id), kind TEXT NOT NULL,date TEXT NOT NULL,place TEXT NOT NULL,host TEXT NOT NULL,participants TEXT NOT NULL,content TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS permit_checks (id INTEGER PRIMARY KEY,document_id INTEGER NOT NULL REFERENCES documents(id),date TEXT NOT NULL,items TEXT NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+      CREATE TABLE IF NOT EXISTS permit_extensions (id INTEGER PRIMARY KEY,document_id INTEGER NOT NULL REFERENCES documents(id),date_from TEXT NOT NULL,date_to TEXT NOT NULL,time_from TEXT NOT NULL,time_to TEXT NOT NULL,signature BLOB NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
       CREATE TABLE IF NOT EXISTS risk_activity_photos (id INTEGER PRIMARY KEY, activity_id INTEGER NOT NULL REFERENCES risk_activities(id) ON DELETE CASCADE, name TEXT NOT NULL,data BLOB NOT NULL);
       CREATE TABLE IF NOT EXISTS hazard_reports (id INTEGER PRIMARY KEY,site_id INTEGER NOT NULL REFERENCES sites(id),title TEXT NOT NULL,body TEXT NOT NULL,reporter TEXT NOT NULL,photo BLOB,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);`);
     if (!this.db.prepare('PRAGMA table_info(documents)').all().some(c=>c.name==='details')) this.db.exec("ALTER TABLE documents ADD COLUMN details TEXT NOT NULL DEFAULT '{}'");
@@ -790,6 +791,16 @@ export class Store {
     return this.db.prepare('INSERT INTO permit_checks(document_id,date,items) VALUES(?,?,?)').run(Number(documentId),date,JSON.stringify(items)).lastInsertRowid;
   }
   deletePermitCheck(documentId,id){this.permitChecks(documentId);if(!this.db.prepare('DELETE FROM permit_checks WHERE id=? AND document_id=?').run(Number(id),Number(documentId)).changes)throw new Error('시험 점검을 찾을 수 없습니다.');}
+  permitExtensions(documentId){const doc=this.document(documentId);if(!doc||doc.type!=='permit')throw new Error('시험 작업허가서를 확인해 주세요.');return this.db.prepare('SELECT id,date_from,date_to,time_from,time_to,created_at FROM permit_extensions WHERE document_id=? ORDER BY date_from DESC,id DESC').all(Number(documentId));}
+  permitExtensionSignature(documentId,id){this.permitExtensions(documentId);return this.db.prepare('SELECT signature FROM permit_extensions WHERE id=? AND document_id=?').get(Number(id),Number(documentId))?.signature||null;}
+  savePermitExtension(documentId,input,id=null){
+    this.permitExtensions(documentId);const from=dateValue(input.dateFrom),to=dateValue(input.dateTo),timeFrom=input.timeFrom??'',timeTo=input.timeTo??'',valid=time=>typeof time==='string'&&/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(time);
+    if(from>to||typeof timeFrom!=='string'||typeof timeTo!=='string'||(timeFrom||timeTo)&&(!valid(timeFrom)||!valid(timeTo)||from===to&&timeFrom>timeTo))throw new Error('연장 기간과 시간을 확인해 주세요.');
+    const signature=signatureBytes(input.signature);
+    if(id!==null){if(!this.db.prepare('UPDATE permit_extensions SET date_from=?,date_to=?,time_from=?,time_to=?,signature=? WHERE id=? AND document_id=?').run(from,to,timeFrom,timeTo,signature,Number(id),Number(documentId)).changes)throw new Error('시험 연장 기록을 찾을 수 없습니다.');return Number(id);}
+    return this.db.prepare('INSERT INTO permit_extensions(document_id,date_from,date_to,time_from,time_to,signature) VALUES(?,?,?,?,?,?)').run(Number(documentId),from,to,timeFrom,timeTo,signature).lastInsertRowid;
+  }
+  deletePermitExtension(documentId,id){this.permitExtensions(documentId);if(!this.db.prepare('DELETE FROM permit_extensions WHERE id=? AND document_id=?').run(Number(id),Number(documentId)).changes)throw new Error('시험 연장 기록을 찾을 수 없습니다.');}
   riskActivities(documentId){const doc=this.document(documentId);if(!doc||doc.type!=='risk')throw new Error('위험성평가를 확인해 주세요.');return this.db.prepare('SELECT * FROM risk_activities WHERE document_id=? ORDER BY date DESC,id DESC').all(Number(documentId));}
   saveRiskActivity(documentId,input,id=null){
     this.riskActivities(documentId);

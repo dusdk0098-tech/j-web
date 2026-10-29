@@ -592,10 +592,20 @@ test('허가서의 사전 조치 시험 점검은 문서별로 저장하고 잘�
   }finally{s.close();}
 });
 
+test('시험 허가 연장은 기간과 서명을 검증하고 문서별로 분리한다',()=>{
+  const s=new Store(':memory:');try{
+    const site=s.createSite({name:'가상 현장'}),base={siteId:site.id,type:'permit',title:'가상 허가서',date:'2041-01-01'},doc=s.createDocument(base),other=s.createDocument(base),nonPermit=s.createDocument({...base,type:'tbm'}),png=new PNG({width:1,height:1});png.data[3]=255;const bytes=PNG.sync.write(png),signature=`data:image/png;base64,${bytes.toString('base64')}`,input={dateFrom:'2041-01-01',dateTo:'2041-01-02',timeFrom:'07:15',timeTo:'16:45',signature};
+    const id=s.savePermitExtension(doc.id,input);assert.deepEqual(Buffer.from(s.permitExtensionSignature(doc.id,id)),bytes);assert.deepEqual(s.permitExtensions(other.id),[]);assert.equal(s.permitExtensionSignature(other.id,id),null);assert.throws(()=>s.savePermitExtension(nonPermit.id,input),/허가서/);
+    for(const bad of [{...input,dateTo:'2040-12-31'},{...input,dateTo:input.dateFrom,timeFrom:'17:00',timeTo:'08:00'},{...input,timeTo:''},{...input,timeFrom:'25:00'},{...input,signature:'invalid'}])assert.throws(()=>s.savePermitExtension(doc.id,bad,id));
+    assert.equal(s.permitExtensions(doc.id)[0].time_from,'07:15');assert.deepEqual(Buffer.from(s.permitExtensionSignature(doc.id,id)),bytes);assert.throws(()=>s.savePermitExtension(other.id,input,id),/찾을 수/);
+    s.savePermitExtension(doc.id,{...input,timeFrom:'',timeTo:''},id);assert.equal(s.permitExtensions(doc.id)[0].time_from,'');assert.throws(()=>s.deletePermitExtension(other.id,id),/찾을 수/);s.deletePermitExtension(doc.id,id);assert.equal(s.permitExtensionSignature(doc.id,id),null);
+  }finally{s.close();}
+});
+
 test('허가서 시험 점검은 데이터베이스를 다시 열어도 유지된다',()=>{
   const dir=mkdtempSync(join(tmpdir(),'jweb-permit-check-'));let s;try{
-    const path=join(dir,'test.sqlite');s=new Store(path);const site=s.createSite({name:'가상 현장'}),doc=s.createDocument({siteId:site.id,type:'permit',title:'가상 허가서',date:'2041-01-01'}),items=[{name:'가상 점검',result:'fail',action:'가상 조치'}];s.savePermitCheck(doc.id,{date:'2041-01-02',items});s.close();s=null;
-    s=new Store(path);assert.deepEqual(s.permitChecks(doc.id)[0].items,items);
+    const path=join(dir,'test.sqlite');s=new Store(path);const site=s.createSite({name:'가상 현장'}),doc=s.createDocument({siteId:site.id,type:'permit',title:'가상 허가서',date:'2041-01-01'}),items=[{name:'가상 점검',result:'fail',action:'가상 조치'}];s.savePermitCheck(doc.id,{date:'2041-01-02',items});const png=new PNG({width:1,height:1});png.data[3]=255;const signature=`data:image/png;base64,${PNG.sync.write(png).toString('base64')}`,extensionId=s.savePermitExtension(doc.id,{dateFrom:'2041-01-03',dateTo:'2041-01-04',signature});s.close();s=null;
+    s=new Store(path);assert.deepEqual(s.permitChecks(doc.id)[0].items,items);assert.equal(s.permitExtensions(doc.id)[0].date_to,'2041-01-04');assert.ok(s.permitExtensionSignature(doc.id,extensionId));
   }finally{if(s)s.close();assert.ok(resolve(dir).startsWith(resolve(tmpdir())+sep));rmSync(dir,{recursive:true,force:true});}
 });
 
