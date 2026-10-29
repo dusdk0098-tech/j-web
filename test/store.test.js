@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve, sep } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { PNG } from 'pngjs';
+import { jointExamples } from '../public/joint-examples.js';
 
 test('가상 결재자는 현장과 순서에 따라 문서를 승인하고 우회 요청을 거절한다',()=>{
   const s=new Store(':memory:');try{
@@ -543,6 +544,15 @@ test('합동 안전점검은 판정과 출역자를 검증하고 잘못된 수�
     assert.throws(()=>s.updateDocument(doc.id,{...input,details:{...input.details,items:[{name:'가상 항목',result:'미확인'}]}}),/점검 항목/);
     assert.throws(()=>s.updateDocument(doc.id,{...input,date:'2026-10-30'}),/출역자/);
     assert.equal(JSON.parse(s.document(doc.id).details).workerSnapshot[0].id,worker.id);
+  }finally{s.close();}
+});
+
+test('합동 점검 가상 예시 64개를 문서에 저장하고 판정을 수정한다',()=>{
+  const s=new Store(':memory:');try{
+    const site=s.createSite({name:'가상 현장'}),items=jointExamples('civil',0),input={siteId:site.id,type:'joint_inspection',title:'가상 점검',date:'2026-10-29',details:{items}};
+    const doc=s.createDocument(input);assert.equal(JSON.parse(doc.details).items.length,64);
+    items[0].result='보완사항';s.updateDocument(doc.id,input);const stored=JSON.parse(s.document(doc.id).details).items;assert.equal(stored[0].result,'보완사항');assert.equal(stored[1].result,'N/A');
+    assert.deepEqual(JSON.parse(s.previousJointInspection(site.id,'2026-10-30').items),stored);
   }finally{s.close();}
 });
 

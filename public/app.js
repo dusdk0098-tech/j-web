@@ -6,6 +6,7 @@ import { trainingGroups, trainingRoster, filterEducationReport } from './trainin
 import { restaurantPrice } from './restaurant-price.js';
 import { salarySummary, salaryDay, groupWageRecords } from './salary-summary.js';
 import { attendanceMealChange } from './attendance-meals.js';
+import { jointExamples } from './joint-examples.js';
 
 const $ = (s) => document.querySelector(s);
 const content = $('#content'), siteSelect = $('#site-select'), dialog = $('#dialog'), notice = $('#notice');
@@ -254,6 +255,9 @@ async function editDocument(doc=null) {
         $('#daily-fields').insertAdjacentHTML('afterbegin',`<label>중요 보완사항<textarea name="jointImprovements">${esc(details.improvements||'')}</textarea></label><label>조치 결과<textarea name="jointResult">${esc(details.result||'')}</textarea></label><label>기타 사항<textarea name="jointOther">${esc(details.other||'')}</textarea></label><fieldset><legend>점검 내용</legend><div id="joint-items"></div><button type="button" id="joint-add">점검 항목 추가</button> <button type="button" id="joint-previous">이전 항목 불러오기</button></fieldset>`);
         const addItem=item=>{const list=$('#joint-items');list.insertAdjacentHTML('beforeend',`<div data-joint-item><label>점검 내용<input value="${esc(item.name||'')}" required maxlength="500"></label><label>판정<select>${['양호','보완사항','N/A'].map(v=>`<option ${v===item.result?'selected':''}>${v}</option>`).join('')}</select></label><button type="button" data-joint-remove>삭제</button></div>`);list.lastElementChild.querySelector('[data-joint-remove]').onclick=e=>e.currentTarget.parentElement.remove();};
         (details.items||[]).forEach(addItem);$('#joint-add').onclick=()=>addItem({});
+        $('#joint-add').insertAdjacentHTML('afterend',' <button type="button" data-joint-example="common">공통 가상 예시</button> <button type="button" data-joint-example="building">건축 가상 예시</button> <button type="button" data-joint-example="civil">토목 가상 예시</button> <button type="button" id="joint-clear">전체 항목 삭제</button><p class="muted">가상 예시 항목이며 모든 판정은 N/A로 시작합니다. 실제 점검 결과로 사용하지 마세요.</p>');
+        $('#joint-clear').onclick=()=>{$('#joint-items').replaceChildren();$('#dialog-error').textContent='';};
+        document.querySelectorAll('[data-joint-example]').forEach(button=>button.onclick=()=>{try{const items=jointExamples(button.dataset.jointExample,$('#joint-items').children.length);items.forEach(addItem);$('#dialog-error').textContent=`가상 예시 ${items.length}개를 불러왔습니다.`;}catch(error){$('#dialog-error').textContent=error.message;}});
         $('#joint-previous').onclick=async()=>{try{if($('#joint-items').children.length)throw new Error('입력한 항목이 있습니다. 삭제 후 다시 불러와 주세요.');const date=dateInput.value,previous=await api(`/api/joint-inspection/previous?siteId=${siteId}&before=${encodeURIComponent(date)}`);if(!container.isConnected||dateInput.value!==date||select.value!=='joint_inspection')return;if($('#joint-items').children.length)throw new Error('입력한 항목이 있어 가져오지 않았습니다.');if(!previous)throw new Error('이전 점검 문서가 없습니다.');const items=JSON.parse(previous.items||'[]');items.forEach(item=>addItem({name:item.name,result:'N/A'}));$('#dialog-error').textContent=`${previous.date}의 항목 ${items.length}개를 불러왔습니다. 판정을 다시 선택하세요.`;}catch(error){if(container.isConnected)$('#dialog-error').textContent=error.message;}};
       }
       let workerRequest=0;
