@@ -101,6 +101,7 @@ test('보호구 시험 지급은 현장·월별로 집계하고 기록 당시 �
     const site=s.createSite({name:'가상 현장'}),other=s.createSite({name:'다른 현장'}),worker=s.createWorker({siteId:site.id,name:'가상 근로자',category:'직영',company:'가상 회사',occupation:'목공'}),input={siteId:site.id,workerId:worker.id,date:'2024-02-29',item:'안전모',quantity:'2'};
     s.addPpeIssue(input);s.addPpeIssue({...input,quantity:'1'});s.addPpeIssue({...input,date:'2024-03-01',item:'안전화'});s.updateWorker(worker.id,{siteId:site.id,name:'변경 이름',category:'외주',company:'변경 회사',occupation:'전기'});
     const report=s.ppeIssues(site.id,'2024-02');assert.equal(report.rows.length,2);assert.deepEqual(report.totals.map(r=>[r.item,r.quantity]),[['안전모',3]]);assert.equal(report.rows[0].worker.name,'가상 근로자');assert.equal(report.rows[0].worker.company,'가상 회사');
+    assert.equal(s.workerPpeIssues(site.id,worker.id).length,3);assert.throws(()=>s.workerPpeIssues(other.id,worker.id),/현장/);
     assert.equal(s.ppeIssues(other.id,'2024-02').rows.length,0);assert.equal(s.ppeIssues(site.id,'2024-03').rows.length,1);assert.throws(()=>s.addPpeIssue({...input,siteId:other.id}),/현장/);for(const quantity of ['0','-1','1.2',true,'10001'])assert.throws(()=>s.addPpeIssue({...input,quantity}),/수량/);assert.throws(()=>s.ppeIssues(site.id,'2024-13'),/월/);
   }finally{s.close();}
 });

@@ -74,6 +74,10 @@ const server = http.createServer(async (req, res) => {
       if(!session || session.expires<=Date.now()){workerSessions.delete(key);return json(res,401,{error:'근로자 로그인이 필요합니다.'});}
       return json(res,200,{days:store.workerAttendance(session.worker.id,url.searchParams.get('month'))});
     }
+    if(url.pathname==='/api/worker/ppe-issues'&&req.method==='GET'){
+      const key=workerKey(workerToken),session=workerSessions.get(key);if(!session||session.expires<=Date.now()){workerSessions.delete(key);return json(res,401,{error:'근로자 로그인이 필요합니다.'});}
+      return json(res,200,store.workerPpeIssues(session.worker.site_id,session.worker.id));
+    }
     const workerArticleFile=url.pathname.match(/^\/api\/worker\/articles\/(\d+)\/files\/(\d+)$/);
     if(workerArticleFile&&req.method==='GET'){
       const key=workerKey(workerToken),session=workerSessions.get(key);if(!session||session.expires<=Date.now()){workerSessions.delete(key);return json(res,401,{error:'근로자 로그인이 필요합니다.'});}
@@ -373,6 +377,8 @@ const server = http.createServer(async (req, res) => {
       if (req.method === 'POST') return json(res,201,store.createWorker(await body(req)));
     }
     const worker=url.pathname.match(/^\/api\/workers\/(\d+)$/);
+    const workerPpe=url.pathname.match(/^\/api\/workers\/(\d+)\/ppe-issues$/);
+    if(workerPpe&&req.method==='GET')return json(res,200,store.workerPpeIssues(url.searchParams.get('siteId'),workerPpe[1]));
     const workerJoin=url.pathname.match(/^\/api\/workers\/(\d+)\/join-record(?:\/(signature))?$/);
     if(workerJoin&&req.method==='GET'){
       const siteId=url.searchParams.get('siteId');

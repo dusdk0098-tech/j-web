@@ -185,6 +185,10 @@ export class Store {
     const rows=this.db.prepare('SELECT id,date,item,quantity,worker_id,worker_snapshot FROM ppe_issues WHERE site_id=? AND date BETWEEN ? AND ? ORDER BY date DESC,id DESC').all(siteId,`${month}-01`,`${month}-31`).map(({worker_snapshot,...row})=>({...row,worker:JSON.parse(worker_snapshot)}));
     const totals=this.db.prepare('SELECT item,SUM(quantity) AS quantity FROM ppe_issues WHERE site_id=? AND date BETWEEN ? AND ? GROUP BY item ORDER BY item').all(siteId,`${month}-01`,`${month}-31`);return {rows,totals};
   }
+  workerPpeIssues(siteId,workerId){
+    siteId=Number(siteId);workerId=Number(workerId);if(!this.db.prepare('SELECT 1 FROM workers WHERE id=? AND site_id=?').get(workerId,siteId))throw new Error('선택한 현장의 출입자를 확인해 주세요.');
+    return this.db.prepare('SELECT id,date,item,quantity FROM ppe_issues WHERE site_id=? AND worker_id=? ORDER BY date DESC,id DESC').all(siteId,workerId);
+  }
   addPpeIssue(input){
     const siteId=Number(input.siteId),workerId=Number(input.workerId),date=dateValue(input.date),item=text(input.item,'보호구');
     const worker=this.db.prepare('SELECT name,category,company,occupation FROM workers WHERE id=? AND site_id=?').get(workerId,siteId);if(!worker)throw new Error('선택한 현장의 출입자를 확인해 주세요.');
