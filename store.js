@@ -891,6 +891,10 @@ export class Store {
   }
   reviewerDocuments(reviewerId){return this.db.prepare("SELECT d.id,d.site_id,d.type,d.title,d.date FROM documents d JOIN approval_steps s ON s.document_id=d.id JOIN reviewers r ON r.id=s.reviewer_id AND r.site_id=d.site_id WHERE r.id=? AND r.active=1 AND d.status='pending' AND s.state='pending' AND NOT EXISTS (SELECT 1 FROM approval_steps prior WHERE prior.document_id=d.id AND prior.position<s.position AND prior.state<>'approved') ORDER BY d.date DESC,d.id DESC").all(Number(reviewerId));}
   reviewerDocument(reviewerId,id){return this.reviewerDocuments(reviewerId).some(doc=>doc.id===Number(id))?this.document(id):null;}
+  priorReviewerEvents(doc,reviewerId){
+    if(!doc.approval_cycle_id)return [];
+    return this.db.prepare("SELECT e.id,e.reviewer_name,e.opinion,e.created_at,e.signature IS NOT NULL AS has_signature FROM events e JOIN approval_steps prior ON prior.document_id=e.document_id AND prior.reviewer_id=e.reviewer_id AND prior.state='approved' JOIN approval_steps current ON current.document_id=e.document_id AND current.reviewer_id=? AND current.state='pending' AND prior.position<current.position WHERE e.document_id=? AND e.approval_cycle_id=? AND e.action='approve' ORDER BY prior.position,e.id").all(Number(reviewerId),doc.id,doc.approval_cycle_id);
+  }
   liveReviewerLinks(doc){
     if(doc.type==='risk')return {type:'risk',activities:this.riskActivities(doc.id).map(activity=>({...activity,worker_snapshot:JSON.parse(activity.worker_snapshot||'[]'),files:this.riskActivityPhotos(doc.id,activity.id)}))};
     if(doc.type==='permit')return {type:'permit',checks:this.permitChecks(doc.id),extensions:this.permitExtensions(doc.id)};
