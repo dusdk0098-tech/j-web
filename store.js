@@ -495,6 +495,7 @@ export class Store {
     return this.db.prepare('SELECT id,equipment_id,date,items,created_at,equipment_snapshot,inspector,signature IS NOT NULL AS has_signature FROM equipment_checks WHERE document_id=? ORDER BY date DESC,id DESC').all(Number(documentId));
   }
   equipmentCheckSignature(documentId,checkId){return this.db.prepare('SELECT signature FROM equipment_checks WHERE document_id=? AND id=? AND signature IS NOT NULL').get(Number(documentId),Number(checkId))?.signature||null;}
+  deleteEquipmentCheck(documentId,checkId){this.equipmentChecks(documentId);if(!this.db.prepare('DELETE FROM equipment_checks WHERE document_id=? AND id=?').run(Number(documentId),Number(checkId)).changes)throw new Error('시험 점검을 찾을 수 없습니다.');}
   addEquipmentCheck(documentId,input){
     const doc=this.document(documentId);if(!doc || doc.type!=='work_plan')throw new Error('작업계획서를 확인해 주세요.');
     const details=JSON.parse(doc.details),equipmentId=Number(input.equipmentId),date=dateValue(input.date);
