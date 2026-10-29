@@ -89,6 +89,7 @@ test('관리자 인증 모드가 문서 API를 보호하고 로그아웃을 적�
     assert.equal((await fetch(`${base}/api/sites`)).status,401);
     const scaleModule=await fetch(`${base}/risk-scale.js`);assert.equal(scaleModule.status,200);assert.match(scaleModule.headers.get('content-type'),/text\/javascript/);assert.match(await scaleModule.text(),/export function riskScaleOptions/);
     const batchModule=await fetch(`${base}/batch-print.js`);assert.equal(batchModule.status,200);assert.match(batchModule.headers.get('content-type'),/text\/javascript/);assert.match(await batchModule.text(),/export function selectBatchDocuments/);
+    const workerLinkModule=await fetch(`${base}/worker-link.js`);assert.equal(workerLinkModule.status,200);assert.match(workerLinkModule.headers.get('content-type'),/text\/javascript/);assert.match(await workerLinkModule.text(),/export function workerSitePath/);
     const homeIcon=await fetch(`${base}/jweb-icon.svg`);assert.equal(homeIcon.status,200);assert.match(homeIcon.headers.get('content-type'),/image\/svg\+xml/);assert.equal((await fetch(`${base}/worker.webmanifest?site=invalid`)).status,404);
     assert.equal((await fetch(`${base}/api/join?token=invalid`)).status,404);
     const login=await fetch(`${base}/api/login`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({password:'test-password-12345'})});

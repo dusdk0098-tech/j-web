@@ -1,10 +1,12 @@
-const params=new URLSearchParams(location.search),token=params.get('token'),siteKey=params.get('site');
+import { workerSitePath,replaceWorkerSiteAddress } from './worker-link.js';
+const params=new URLSearchParams(location.search),token=params.get('token');let siteKey=params.get('site');
 const site=document.querySelector('#join-site'), message=document.querySelector('#join-message'), form=document.querySelector('#join-form');
 form.querySelector('p').textContent='이 시험 화면은 가상 인적사항·아이디·보호구 선택·서명 이미지와 암호의 해시를 이 컴퓨터의 시험 데이터베이스에 저장합니다. 실제 개인정보와 실제 암호 대신 가상 정보를 입력하세요.';
 form.setAttribute('autocomplete','off');
 form.insertAdjacentHTML('beforebegin','<form id="worker-login" hidden><h2>이미 가입한 근로자</h2><p>시험 로그인 시 오늘의 출역이 자동 기록될 수 있습니다. 실제 출입 확인으로 사용하지 마세요.</p><div class="fields"><label>시험 아이디<input name="loginId" required pattern="[A-Za-z0-9_]{3,40}" autocomplete="username"></label><label>시험 암호<input name="password" type="password" required minlength="12" maxlength="256" autocomplete="current-password"></label></div><div class="action-row"><button class="primary">로그인</button></div></form>');
 const login=document.querySelector('#worker-login');
 let inviteInfo=null;
+function adoptSiteAddress(){const key=siteKey||inviteInfo?.siteKey,path=workerSitePath(key);if(!path)return;siteKey=key;if(!replaceWorkerSiteAddress(key,history)&&!document.querySelector('#worker-path-warning')){const warning=document.createElement('p'),link=document.createElement('a');warning.id='worker-path-warning';warning.textContent='주소가 자동으로 바뀌지 않았습니다. ';link.href=path;link.textContent='현장 로그인 주소 열기';warning.append(link);site.after(warning);}}
 function signaturePad(canvas){
   const ctx=canvas.getContext('2d');let drawing=false,signed=false;
   const point=e=>{const rect=canvas.getBoundingClientRect();return [(e.clientX-rect.left)*canvas.width/rect.width,(e.clientY-rect.top)*canvas.height/rect.height];};
@@ -31,7 +33,7 @@ try {
 } catch(error) {site.textContent='';message.textContent=error.message;}
 form.onsubmit=async event=>{
   event.preventDefault();const submit=form.querySelector('button[type=submit], button:not([type])');submit.disabled=true;
-  try {const equipment=[...form.querySelectorAll('[name=equipment]:checked')].map(input=>input.value),profile=Object.fromEntries(['birthDate','phone','emergencyName','emergencyPhone','address','nationality'].map(key=>[key,form.elements[key].value])),response=await fetch('/api/join',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...Object.fromEntries(new FormData(form)),profile,equipment,signature:joinPad.value(),acknowledged:form.elements.acknowledged.checked,token})});const data=await response.json();if(!response.ok)throw Error(data.error);form.reset();joinPad.clear();form.hidden=true;message.textContent='시험 등록이 완료되었습니다. 위에서 로그인하세요.';}catch(error){message.textContent=error.message;submit.disabled=false;}
+  try {const equipment=[...form.querySelectorAll('[name=equipment]:checked')].map(input=>input.value),profile=Object.fromEntries(['birthDate','phone','emergencyName','emergencyPhone','address','nationality'].map(key=>[key,form.elements[key].value])),response=await fetch('/api/join',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...Object.fromEntries(new FormData(form)),profile,equipment,signature:joinPad.value(),acknowledged:form.elements.acknowledged.checked,token})});const data=await response.json();if(!response.ok)throw Error(data.error);adoptSiteAddress();form.reset();joinPad.clear();form.hidden=true;message.textContent='시험 등록이 완료되었습니다. 위에서 로그인하세요.';}catch(error){message.textContent=error.message;submit.disabled=false;}
 };
 async function showWorker(worker){
     const button=login.querySelector('button');
@@ -102,7 +104,7 @@ login.onsubmit=async event=>{
   event.preventDefault();const button=login.querySelector('button');button.disabled=true;
   try{
     const response=await fetch('/api/worker/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...Object.fromEntries(new FormData(login)),token,siteKey})});
-    const data=await response.json();if(!response.ok)throw Error(data.error);await showWorker(data.worker);
+    const data=await response.json();if(!response.ok)throw Error(data.error);adoptSiteAddress();await showWorker(data.worker);
   }catch(error){message.textContent=error.message;button.disabled=false;}
 };
-if(inviteInfo){try{const response=await fetch('/api/worker/session');if(response.ok){const data=await response.json();if(data.worker.site_id===inviteInfo.id)await showWorker(data.worker);}}catch{message.textContent='시험 세션을 확인하지 못했습니다.';}}
+if(inviteInfo){try{const response=await fetch('/api/worker/session');if(response.ok){const data=await response.json();if(data.worker.site_id===inviteInfo.id){adoptSiteAddress();await showWorker(data.worker);}}}catch{message.textContent='시험 세션을 확인하지 못했습니다.';}}
