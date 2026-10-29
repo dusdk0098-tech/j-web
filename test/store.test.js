@@ -1021,6 +1021,22 @@ test('작업계획서의 역할별 작업자는 현장을 검증하고 당시 �
   }finally{s.close();}
 });
 
+test('위험요인의 등록 협력사는 현장별로 검증되고 결재 당시 이름이 보존된다',()=>{
+  const s=new Store(':memory:');try{
+    const site=s.createSite({name:'가상 현장 A'}),other=s.createSite({name:'가상 현장 B'}),company=s.createCompany({siteId:site.id,name:'가상 업체 A',trade:'가상 공종'}),foreign=s.createCompany({siteId:other.id,name:'다른 현장 업체',trade:'가상 공종'}),reviewer=s.createReviewer({siteId:site.id,loginId:'risk_company_review',name:'가상 결재자',password:'virtual-password-123'});
+    const input={siteId:site.id,type:'risk',title:'가상 평가',date:'2026-10-29',details:{scale:'3x3',items:[{contractorId:company.id,contractor:'위조된 이름',task:'작업 A'},{contractor:'직접 입력',task:'작업 B'}]}};
+    const doc=s.createDocument(input),rows=JSON.parse(doc.details).items;assert.equal(rows[0].contractor,'가상 업체 A');assert.equal(rows[1].contractor,'직접 입력');
+    for(const id of [foreign.id,999999])assert.throws(()=>s.updateDocument(doc.id,{...input,details:{items:[{contractorId:id}]}}),/현장/);
+    for(const id of [-1,0,'1',1.5])assert.throws(()=>s.updateDocument(doc.id,{...input,details:{items:[{contractorId:id}]}}),/협력사/);
+    assert.equal(JSON.parse(s.document(doc.id).details).items[0].contractor,'가상 업체 A');
+    s.setApprovalLine(doc.id,[reviewer.id]);s.transition(doc.id,'submit');const cycle=s.document(doc.id).approval_cycle_id;
+    s.updateCompany(company.id,{siteId:site.id,name:'이름 변경',trade:'가상 공종'});
+    assert.equal(JSON.parse(s.reviewerPayload(s.document(doc.id)).document.details).items[0].contractor,'가상 업체 A');assert.equal(JSON.parse(s.approvalCycle(doc.id,cycle).document.details).items[0].contractor,'가상 업체 A');
+    s.transition(doc.id,'withdraw');assert.equal(JSON.parse(s.updateDocument(doc.id,input).details).items[0].contractor,'이름 변경');
+    assert.equal(JSON.parse(s.createDocument({...input,details:{contractorId:company.id,task:'이전 형식'}}).details).contractor,'이름 변경');
+  }finally{s.close();}
+});
+
 test('위험요인의 가상 공정과 협력사는 저장과 결재 요청에서 보존된다',()=>{
   const s=new Store(':memory:');try{
     const site=s.createSite({name:'가상 현장'}),reviewer=s.createReviewer({siteId:site.id,loginId:'risk_process_review',name:'가상 결재자',password:'virtual-password-123'}),input={siteId:site.id,type:'risk',title:'가상 평가',date:'2026-10-29',details:{scale:'3x3',items:[{processName:'공정 A',contractor:'가상 업체 A',task:'가상 작업 A'},{processName:'공정 A',contractor:'가상 업체 B',task:'가상 작업 B'},{task:'이전 형태'}]}};

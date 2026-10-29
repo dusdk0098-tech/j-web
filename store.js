@@ -966,6 +966,7 @@ export class Store {
     this.validatePlanEquipment(d);
     this.validateSafetyMeeting(d);
     this.validateInstructionRecipient(d);
+    this.validateRiskContractors(d);
     if(d.type==='safety_log')d.details.attendanceSnapshot={present:this.attendance(d.siteId,d.date).filter(row=>row.present).length,capturedAt:new Date().toISOString()};
     const id = this.db.prepare('INSERT INTO documents(site_id,type,title,date,body,details) VALUES(?,?,?,?,?,?)').run(d.siteId,d.type,d.title,d.date,d.body,JSON.stringify(d.details)).lastInsertRowid;
     return this.document(id);
@@ -1102,6 +1103,7 @@ export class Store {
     this.validatePlanEquipment(d);
     this.validateSafetyMeeting(d,current);
     this.validateInstructionRecipient(d);
+    this.validateRiskContractors(d);
     if(d.type==='safety_log'){
       const previous=JSON.parse(current.details).attendanceSnapshot;
       if(current.date===d.date){if(previous)d.details.attendanceSnapshot=previous;}
@@ -1109,6 +1111,11 @@ export class Store {
     }
     this.db.exec('BEGIN IMMEDIATE');try{this.db.prepare('UPDATE documents SET title=?,date=?,body=?,details=?,updated_at=CURRENT_TIMESTAMP WHERE id=?').run(d.title,d.date,d.body,JSON.stringify(d.details),Number(id));if(d.type==='checklist')this.db.prepare('DELETE FROM checklist_signatures WHERE document_id=?').run(Number(id));if(d.type==='tbm')this.db.prepare('DELETE FROM tbm_signatures WHERE document_id=?').run(Number(id));this.db.exec('COMMIT');}catch(error){this.db.exec('ROLLBACK');throw error;}
     return this.document(id);
+  }
+  validateRiskContractors(doc){
+    if(doc.type!=='risk')return;
+    const find=this.db.prepare('SELECT name FROM companies WHERE id=? AND site_id=?');
+    for(const row of Array.isArray(doc.details.items)?doc.details.items:[doc.details])if(row.contractorId){const company=find.get(row.contractorId,doc.siteId);if(!company)throw new Error('같은 현장의 협력사를 선택해 주세요.');row.contractor=company.name;}
   }
   validatePlanEquipment(doc) {
     if(doc.type!=='work_plan')return;

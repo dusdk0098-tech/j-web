@@ -4,8 +4,8 @@ import { riskScaleOptions, riskScore, copyRiskItem, groupRiskItems } from '../pu
 import { Store } from '../store.js';
 
 test('이전 위험요인을 가져올 때 검토 의견을 복사하지 않는다',()=>{
-  const original={task:'가상 작업',hazard:'가상 위험',supervisorOpinion:'감독',safetyOpinion:'안전',healthOpinion:'보건',managerOpinion:'소장'},copy=copyRiskItem(original);
-  assert.equal(copy.task,'가상 작업');assert.equal(copy.hazard,'가상 위험');for(const key of ['supervisorOpinion','safetyOpinion','healthOpinion','managerOpinion'])assert.equal(copy[key],'');assert.equal(original.safetyOpinion,'안전');
+  const original={task:'가상 작업',hazard:'가상 위험',contractorId:123,supervisorOpinion:'감독',safetyOpinion:'안전',healthOpinion:'보건',managerOpinion:'소장'},copy=copyRiskItem(original);
+  assert.equal(copy.task,'가상 작업');assert.equal(copy.hazard,'가상 위험');assert.equal(copy.contractorId,123);for(const key of ['supervisorOpinion','safetyOpinion','healthOpinion','managerOpinion'])assert.equal(copy[key],'');assert.equal(original.safetyOpinion,'안전');
 });
 
 test('위험요인은 공정과 협력사 조합별로 묶고 기존 미기록도 보존한다',()=>{

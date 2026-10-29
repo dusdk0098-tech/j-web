@@ -188,6 +188,7 @@ export function recordInput(input) {
       for(const key of ['processName','contractor','riskCategory','riskType','legalBasis','responsible','supervisorOpinion','safetyOpinion','healthOpinion','managerOpinion']){
         if(item[key]!==undefined){if(typeof item[key]!=='string' || item[key].length>2000)throw new Error('위험성평가 항목을 확인해 주세요.');row[key]=item[key].trim();}
       }
+      if(item.contractorId!==undefined){if(!Number.isSafeInteger(item.contractorId)||item.contractorId<1)throw new Error('협력사를 확인해 주세요.');row.contractorId=item.contractorId;}
       for(const key of ['grade','likelihood','severity'])if(item[key]!==undefined){
         if(typeof item[key]!=='string')throw new Error('위험성 척도 입력을 확인해 주세요.');
         const v=item[key],scale=value.scale||'';
