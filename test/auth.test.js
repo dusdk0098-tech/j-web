@@ -39,6 +39,26 @@ test('관리자 암호가 없으면 서버는 시작하지 않는다',async()=>{
   } finally {rmSync(dir,{recursive:true,force:true});}
 });
 
+test('초대 화면을 연 뒤 현장 QR이 바뀌어도 가입과 로그인은 현재 접속 주소를 돌려준다',{timeout:30000},async()=>{
+  const dir=mkdtempSync(join(tmpdir(),'jweb-rotated-join-')),reservation=createServer();await new Promise(resolve=>reservation.listen(0,'127.0.0.1',resolve));const port=reservation.address().port;await new Promise(resolve=>reservation.close(resolve));
+  const child=spawn(process.execPath,['server.js'],{cwd:process.cwd(),env:{...process.env,PORT:String(port),JWEB_DATA_DIR:dir,JWEB_ADMIN_PASSWORD:'test-password-12345'},stdio:['ignore','pipe','pipe']});
+  try{
+    await Promise.race([once(child.stdout,'data'),once(child,'exit').then(()=>{throw Error('시험 서버가 종료됐습니다.');})]);
+    const base=`http://127.0.0.1:${port}`,send=(path,method='GET',data,cookie)=>fetch(base+path,{method,headers:{...(data?{'content-type':'application/json'}:{}),...(cookie?{cookie}:{})},...(data?{body:JSON.stringify(data)}:{})});
+    const admin=(await send('/api/login','POST',{password:'test-password-12345'})).headers.get('set-cookie').split(';')[0],site=await (await send('/api/sites','POST',{name:'가상 현장'},admin)).json();
+    const invite=await (await send(`/api/sites/${site.id}/invitation`,'POST',{},admin)).json(),token=new URL(invite.link).searchParams.get('token'),before=await (await send(`/api/join?token=${token}`)).json();
+    const rotated=await (await send(`/api/sites/${site.id}/access/rotate`,'POST',{},admin)).json(),current=new URL(rotated.link).searchParams.get('site');assert.notEqual(current,before.siteKey);
+    const input={token,name:'가상 근로자',category:'직영',company:'가상 업체',occupation:'목공',loginId:'rotated_worker',password:'virtual-password-123',acknowledged:true};
+    const joined=await send('/api/join','POST',input);assert.equal(joined.status,201);assert.equal((await joined.json()).siteKey,current);
+    const rotatedAgain=await (await send(`/api/sites/${site.id}/access/rotate`,'POST',{},admin)).json(),loginKey=new URL(rotatedAgain.link).searchParams.get('site');assert.notEqual(loginKey,current);
+    const login=await send('/api/worker/login','POST',{token,loginId:input.loginId,password:input.password});assert.equal(login.status,200);const cookie=login.headers.get('set-cookie').split(';')[0];assert.equal((await login.json()).siteKey,loginKey);
+    const rotatedThird=await (await send(`/api/sites/${site.id}/access/rotate`,'POST',{},admin)).json(),accessKey=new URL(rotatedThird.link).searchParams.get('site');assert.notEqual(accessKey,loginKey);
+    const access=await send('/api/worker/access','POST',{siteId:site.id,token},cookie);assert.equal(access.status,200);assert.equal((await access.json()).siteKey,accessKey);
+    assert.equal((await send('/api/worker/access','POST',{siteId:site.id,siteKey:before.siteKey},cookie)).status,400);
+    assert.equal((await send(`/worker.webmanifest?site=${accessKey}`)).status,200);for(const oldKey of [before.siteKey,current,loginKey])assert.equal((await send(`/worker.webmanifest?site=${oldKey}`)).status,404);
+  }finally{if(child.exitCode===null){const exited=once(child,'exit');child.kill();await exited;}rmSync(dir,{recursive:true,force:true});}
+});
+
 test('기본 서류 분류 API는 관리자 인증과 변경 확인을 적용한다',{timeout:30000},async()=>{
   const dir=mkdtempSync(join(tmpdir(),'jweb-basic-category-')),reservation=createServer();
   await new Promise(resolve=>reservation.listen(0,'127.0.0.1',resolve));const port=reservation.address().port;await new Promise(resolve=>reservation.close(resolve));

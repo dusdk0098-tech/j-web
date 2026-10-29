@@ -110,7 +110,7 @@ const server = http.createServer(async (req, res) => {
       const raw=randomBytes(32).toString('base64url');store.recordWorkerLogin(worker.id,date,credentialHash,()=>{const currentSite=input.siteKey?store.siteFromAccess(input.siteKey):store.invitation(input.token);if(!currentSite||currentSite.id!==worker.site_id){const error=new Error('가입 링크 또는 로그인 정보를 확인해 주세요.');error.sessionStatus=401;throw error;}workerSessions.delete(workerKey(workerToken));workerSessions.set(workerKey(raw),{worker,expires:now+8*60*60*1000});});
       workerAccountFailures.delete(accountKey);
       for(const [key,session] of workerSessions)if(session.expires<=now)workerSessions.delete(key);
-      res.setHeader('Set-Cookie',`jweb_worker=${raw}; HttpOnly; SameSite=Strict; Path=/; Max-Age=28800${secureCookie}`);return json(res,200,{worker});
+      res.setHeader('Set-Cookie',`jweb_worker=${raw}; HttpOnly; SameSite=Strict; Path=/; Max-Age=28800${secureCookie}`);return json(res,200,{worker,siteKey:store.siteAccessKey(worker.site_id)});
     }
     if(url.pathname==='/api/worker/session' && req.method==='GET'){
       const key=workerKey(workerToken),session=workerSessions.get(key);
@@ -121,7 +121,7 @@ const server = http.createServer(async (req, res) => {
       const key=workerKey(workerToken),session=workerSessions.get(key);
       if(!session || session.expires<=Date.now()){workerSessions.delete(key);return json(res,401,{error:'근로자 로그인이 필요합니다.'});}
       const input=await body(req),site=input.siteKey?store.siteFromAccess(input.siteKey):store.invitation(input.token);if(!Number.isSafeInteger(input.siteId)||input.siteId!==session.worker.site_id||!site||site.id!==session.worker.site_id)return json(res,400,{error:'유효한 현장 접속 주소를 확인해 주세요.'});
-      const now=new Date(),date=new Date(now.getTime()-now.getTimezoneOffset()*60000).toISOString().slice(0,10);store.recordWorkerLogin(session.worker.id,date,null,()=>{const failure=workerSessionError(workerToken,session);if(failure)throw Object.assign(new Error(failure.error),{sessionStatus:failure.status});const currentSite=input.siteKey?store.siteFromAccess(input.siteKey):store.invitation(input.token);if(!currentSite||currentSite.id!==session.worker.site_id)throw new Error('유효한 현장 접속 주소를 확인해 주세요.');});return json(res,200,{ok:true});
+      const now=new Date(),date=new Date(now.getTime()-now.getTimezoneOffset()*60000).toISOString().slice(0,10);store.recordWorkerLogin(session.worker.id,date,null,()=>{const failure=workerSessionError(workerToken,session);if(failure)throw Object.assign(new Error(failure.error),{sessionStatus:failure.status});const currentSite=input.siteKey?store.siteFromAccess(input.siteKey):store.invitation(input.token);if(!currentSite||currentSite.id!==session.worker.site_id)throw new Error('유효한 현장 접속 주소를 확인해 주세요.');});return json(res,200,{ok:true,siteKey:store.siteAccessKey(session.worker.site_id)});
     }
     if(url.pathname==='/api/worker/permissions'&&req.method==='GET'){
       const session=workerSessions.get(workerKey(workerToken));if(!session||session.expires<=Date.now())return json(res,401,{error:'근로자 로그인이 필요합니다.'});return json(res,200,store.workerPermissions(session.worker.site_id,session.worker.id));
@@ -335,7 +335,7 @@ const server = http.createServer(async (req, res) => {
     if (inviteSite && req.method === 'DELETE') return json(res,200,{revoked:store.revokeInvitations(inviteSite[1])});
     if (url.pathname === '/api/join') {
       if (req.method === 'GET') {const invite=store.invitation(url.searchParams.get('token'));return invite?json(res,200,{id:invite.id,name:invite.name,siteKey:store.siteAccessKey(invite.id),companies:store.companies(invite.id).map(c=>c.name),occupations:store.siteOccupations(invite.id).map(o=>o.name)}):json(res,404,{error:'유효하지 않거나 만료된 가입 링크입니다.'});}
-      if (req.method === 'POST') {const input=await body(req);store.join(input.token,input);return json(res,201,{ok:true});}
+      if (req.method === 'POST') {const input=await body(req),worker=store.join(input.token,input);return json(res,201,{ok:true,siteKey:store.siteAccessKey(worker.site_id)});}
     }
     if (url.pathname === '/api/sites') {
       if (req.method === 'GET') return json(res,200,store.sites());
