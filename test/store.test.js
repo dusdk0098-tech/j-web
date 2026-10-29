@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { Store } from '../store.js';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve, sep } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { PNG } from 'pngjs';
 
@@ -580,6 +580,23 @@ test('작업허가서의 위험작업과 기간을 저장하고 잘못된 수정
     assert.throws(()=>s.updateDocument(doc.id,{...input,details:{...details,periodTo:'2026-10-28'}}),/작업기간/);
     assert.deepEqual(JSON.parse(s.document(doc.id).details),details);
   }finally{s.close();}
+});
+
+test('허가서의 사전 조치 시험 점검은 문서별로 저장하고 잘못된 수정을 보존한다',()=>{
+  const s=new Store(':memory:');try{
+    const site=s.createSite({name:'가상 현장'}),base={siteId:site.id,type:'permit',title:'가상 허가서',date:'2041-01-01'},doc=s.createDocument(base),other=s.createDocument(base),nonPermit=s.createDocument({...base,type:'tbm'});
+    s.transition(doc.id,'submit');s.transition(doc.id,'approve');const input={date:'2041-01-02',items:[{name:'가상 보호 상태',result:'pass',action:''},{name:'가상 시정',result:'fail',action:'시험 조치'}]},id=s.savePermitCheck(doc.id,input);
+    assert.deepEqual(s.permitChecks(doc.id)[0].items,input.items);assert.deepEqual(s.permitChecks(other.id),[]);assert.throws(()=>s.savePermitCheck(nonPermit.id,input),/허가서/);
+    assert.throws(()=>s.savePermitCheck(doc.id,{...input,items:[]},id),/항목/);assert.throws(()=>s.savePermitCheck(doc.id,{...input,items:[{name:'가상',result:'pass',action:'기존 조치'}]},id),/비워/);assert.throws(()=>s.savePermitCheck(other.id,input,id),/찾을 수/);assert.deepEqual(s.permitChecks(doc.id)[0].items,input.items);
+    const changed={...input,items:[{name:'수정 항목',result:'fail',action:'보완 예정'}]};s.savePermitCheck(doc.id,changed,id);assert.deepEqual(s.permitChecks(doc.id)[0].items,changed.items);assert.throws(()=>s.deletePermitCheck(other.id,id),/찾을 수/);s.deletePermitCheck(doc.id,id);assert.deepEqual(s.permitChecks(doc.id),[]);
+  }finally{s.close();}
+});
+
+test('허가서 시험 점검은 데이터베이스를 다시 열어도 유지된다',()=>{
+  const dir=mkdtempSync(join(tmpdir(),'jweb-permit-check-'));let s;try{
+    const path=join(dir,'test.sqlite');s=new Store(path);const site=s.createSite({name:'가상 현장'}),doc=s.createDocument({siteId:site.id,type:'permit',title:'가상 허가서',date:'2041-01-01'}),items=[{name:'가상 점검',result:'fail',action:'가상 조치'}];s.savePermitCheck(doc.id,{date:'2041-01-02',items});s.close();s=null;
+    s=new Store(path);assert.deepEqual(s.permitChecks(doc.id)[0].items,items);
+  }finally{if(s)s.close();assert.ok(resolve(dir).startsWith(resolve(tmpdir())+sep));rmSync(dir,{recursive:true,force:true});}
 });
 
 test('재해 보고서의 가상 재해자와 발생 내용을 보존하고 잘못된 값을 거절한다',()=>{

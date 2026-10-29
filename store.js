@@ -85,6 +85,7 @@ export class Store {
       CREATE TABLE IF NOT EXISTS join_acknowledgements (worker_id INTEGER PRIMARY KEY REFERENCES workers(id),notice_version TEXT NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
       CREATE TABLE IF NOT EXISTS events (id INTEGER PRIMARY KEY, document_id INTEGER NOT NULL REFERENCES documents(id), action TEXT NOT NULL, from_status TEXT NOT NULL, to_status TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
       CREATE TABLE IF NOT EXISTS risk_activities (id INTEGER PRIMARY KEY, document_id INTEGER NOT NULL REFERENCES documents(id), kind TEXT NOT NULL,date TEXT NOT NULL,place TEXT NOT NULL,host TEXT NOT NULL,participants TEXT NOT NULL,content TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS permit_checks (id INTEGER PRIMARY KEY,document_id INTEGER NOT NULL REFERENCES documents(id),date TEXT NOT NULL,items TEXT NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
       CREATE TABLE IF NOT EXISTS risk_activity_photos (id INTEGER PRIMARY KEY, activity_id INTEGER NOT NULL REFERENCES risk_activities(id) ON DELETE CASCADE, name TEXT NOT NULL,data BLOB NOT NULL);
       CREATE TABLE IF NOT EXISTS hazard_reports (id INTEGER PRIMARY KEY,site_id INTEGER NOT NULL REFERENCES sites(id),title TEXT NOT NULL,body TEXT NOT NULL,reporter TEXT NOT NULL,photo BLOB,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);`);
     if (!this.db.prepare('PRAGMA table_info(documents)').all().some(c=>c.name==='details')) this.db.exec("ALTER TABLE documents ADD COLUMN details TEXT NOT NULL DEFAULT '{}'");
@@ -781,6 +782,14 @@ export class Store {
     return this.document(id);
   }
   document(id) { return this.db.prepare('SELECT * FROM documents WHERE id=?').get(Number(id)); }
+  permitChecks(documentId){const doc=this.document(documentId);if(!doc||doc.type!=='permit')throw new Error('시험 작업허가서를 확인해 주세요.');return this.db.prepare('SELECT * FROM permit_checks WHERE document_id=? ORDER BY date DESC,id DESC').all(Number(documentId)).map(row=>({...row,items:JSON.parse(row.items)}));}
+  savePermitCheck(documentId,input,id=null){
+    this.permitChecks(documentId);const date=dateValue(input.date);if(!Array.isArray(input.items)||input.items.length<1||input.items.length>20)throw new Error('점검 항목은 1개부터 20개까지 입력해 주세요.');
+    const items=input.items.map(item=>{if(!item||typeof item!=='object'||Array.isArray(item)||!['pass','fail'].includes(item.result)||typeof item.action!=='string'||item.action.length>1000)throw new Error('점검 결과를 확인해 주세요.');const name=text(item.name,'점검 항목',500),action=item.action.trim();if(item.result==='pass'&&action)throw new Error('적정 항목의 조치 내용을 비워 주세요.');return {name,result:item.result,action};});
+    if(id!==null){if(!this.db.prepare('UPDATE permit_checks SET date=?,items=? WHERE id=? AND document_id=?').run(date,JSON.stringify(items),Number(id),Number(documentId)).changes)throw new Error('시험 점검을 찾을 수 없습니다.');return Number(id);}
+    return this.db.prepare('INSERT INTO permit_checks(document_id,date,items) VALUES(?,?,?)').run(Number(documentId),date,JSON.stringify(items)).lastInsertRowid;
+  }
+  deletePermitCheck(documentId,id){this.permitChecks(documentId);if(!this.db.prepare('DELETE FROM permit_checks WHERE id=? AND document_id=?').run(Number(id),Number(documentId)).changes)throw new Error('시험 점검을 찾을 수 없습니다.');}
   riskActivities(documentId){const doc=this.document(documentId);if(!doc||doc.type!=='risk')throw new Error('위험성평가를 확인해 주세요.');return this.db.prepare('SELECT * FROM risk_activities WHERE document_id=? ORDER BY date DESC,id DESC').all(Number(documentId));}
   saveRiskActivity(documentId,input,id=null){
     this.riskActivities(documentId);
