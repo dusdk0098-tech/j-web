@@ -12,6 +12,23 @@ import { Store } from '../store.js';
 import { DatabaseSync } from 'node:sqlite';
 import { createHash } from 'node:crypto';
 import { ReviewerSessions } from '../auth.js';
+import { pathToFileURL } from 'node:url';
+
+test('결재 저장이 잠금을 기다리는 동안 세션이 폐기되면 승인하지 않는다',{timeout:30000},async()=>{
+  const dir=mkdtempSync(join(tmpdir(),'jweb-review-lock-')),reservation=createServer();await new Promise(resolve=>reservation.listen(0,'127.0.0.1',resolve));const port=reservation.address().port;await new Promise(resolve=>reservation.close(resolve));
+  const source=pathToFileURL(join(process.cwd(),'store.js')).href,trace=`import {Store} from ${JSON.stringify(source)};const original=Store.prototype.reviewerTransition;Store.prototype.reviewerTransition=function(...args){process.stdout.write('REVIEW_SAVE\\n');return original.apply(this,args)};`,child=spawn(process.execPath,['--import',`data:text/javascript,${encodeURIComponent(trace)}`,'server.js'],{cwd:process.cwd(),env:{...process.env,PORT:String(port),JWEB_DATA_DIR:dir,JWEB_ADMIN_PASSWORD:'virtual-admin-password'},stdio:['ignore','pipe','pipe']});let db,locked=false;
+  try{
+    await Promise.race([once(child.stdout,'data'),once(child,'exit').then(()=>{throw Error('시험 서버가 종료됐습니다.');})]);
+    const base=`http://127.0.0.1:${port}`,send=(path,method='GET',data,cookie)=>fetch(base+path,{method,headers:{...(data===undefined?{}:{'content-type':'application/json'}),...(cookie?{cookie}:{})},...(data===undefined?{}:{body:JSON.stringify(data)})});
+    const admin=(await send('/api/login','POST',{password:'virtual-admin-password'})).headers.get('set-cookie').split(';')[0],site=await (await send('/api/sites','POST',{name:'가상 현장'},admin)).json(),reviewer=await (await send('/api/reviewers','POST',{siteId:site.id,loginId:'lock_reviewer',name:'가상 결재자',password:'virtual-password-123'},admin)).json(),doc=await (await send('/api/documents','POST',{siteId:site.id,type:'tbm',title:'가상 교육',date:'2026-10-30'},admin)).json(),path=`/api/documents/${doc.id}`;
+    assert.equal((await send(`${path}/approval-line`,'PUT',{reviewerIds:[reviewer.id]},admin)).status,200);assert.equal((await send(`${path}/transition`,'POST',{action:'submit'},admin)).status,200);
+    const cookie=(await send('/api/reviewer/login','POST',{loginId:'lock_reviewer',password:'virtual-password-123'})).headers.get('set-cookie').split(';')[0],png=new PNG({width:1,height:1});png.data[3]=255;const signature=`data:image/png;base64,${PNG.sync.write(png).toString('base64')}`;
+    db=new DatabaseSync(join(dir,'jweb.sqlite'));db.exec('PRAGMA busy_timeout=3000; BEGIN IMMEDIATE');locked=true;
+    const started=once(child.stdout,'data'),pending=send(`/api/reviewer/documents/${doc.id}/decision`,'POST',{action:'approve',signature},cookie);pending.catch(()=>{});assert.match(String((await started)[0]),/REVIEW_SAVE/);
+    db.prepare('DELETE FROM reviewer_sessions WHERE token_hash=?').run(createHash('sha256').update(cookie.split('=')[1]).digest('hex'));db.exec('COMMIT');locked=false;
+    assert.equal((await pending).status,401);assert.equal((await (await send(path,'GET',undefined,admin)).json()).status,'pending');assert.equal((await (await send(`${path}/events`,'GET',undefined,admin)).json()).filter(event=>event.action==='approve').length,0);
+  }finally{if(db){if(locked)db.exec('ROLLBACK');db.close();}if(child.exitCode===null){const exited=once(child,'exit');child.kill();await exited;}rmSync(dir,{recursive:true,force:true});}
+});
 
 test('인증 도중 계정이 변경되면 이전 인증으로 새 세션을 만들지 못한다',()=>{
   const s=new Store(':memory:');try{
