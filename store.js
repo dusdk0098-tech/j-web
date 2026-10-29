@@ -93,6 +93,7 @@ export class Store {
     if (!this.db.prepare('PRAGMA table_info(worker_daily_training)').all().some(c=>c.name==='signature')) this.db.exec('ALTER TABLE worker_daily_training ADD COLUMN signature BLOB');
     if (!this.db.prepare('PRAGMA table_info(join_acknowledgements)').all().some(c=>c.name==='signature')) this.db.exec('ALTER TABLE join_acknowledgements ADD COLUMN signature BLOB');
     if (!this.db.prepare('PRAGMA table_info(join_acknowledgements)').all().some(c=>c.name==='equipment')) this.db.exec("ALTER TABLE join_acknowledgements ADD COLUMN equipment TEXT NOT NULL DEFAULT '[]'");
+    if (!this.db.prepare('PRAGMA table_info(join_acknowledgements)').all().some(c=>c.name==='profile')) this.db.exec('ALTER TABLE join_acknowledgements ADD COLUMN profile TEXT');
     for(const [key,definition] of [['period_from',"TEXT NOT NULL DEFAULT ''"],['period_to',"TEXT NOT NULL DEFAULT ''"],['entry_mode',"TEXT NOT NULL DEFAULT 'manual'"]])if(!this.db.prepare('PRAGMA table_info(risk_activities)').all().some(c=>c.name===key))this.db.exec(`ALTER TABLE risk_activities ADD COLUMN ${key} ${definition}`);
     if(!this.db.prepare('PRAGMA table_info(risk_activities)').all().some(c=>c.name==='worker_snapshot'))this.db.exec("ALTER TABLE risk_activities ADD COLUMN worker_snapshot TEXT NOT NULL DEFAULT '[]'");
     if(!this.db.prepare('PRAGMA table_info(risk_activity_photos)').all().some(c=>c.name==='purpose'))this.db.exec("ALTER TABLE risk_activity_photos ADD COLUMN purpose TEXT NOT NULL DEFAULT 'photo'");
@@ -645,6 +646,14 @@ export class Store {
     if(input.acknowledged!==true)throw new Error('시험 안내를 확인해 주세요.');
     const equipment=input.equipment??[];
     if(!Array.isArray(equipment)||new Set(equipment).size!==equipment.length||equipment.some(item=>!['안전모','안전화','안전대','보안경','장갑'].includes(item)))throw new Error('시험 보호구를 확인해 주세요.');
+    let profile=null;if(input.profile!==undefined){
+      if(!input.profile||typeof input.profile!=='object'||Array.isArray(input.profile))throw new Error('시험 인적사항을 확인해 주세요.');
+      const keys=['birthDate','phone','emergencyName','emergencyPhone','address','nationality'];
+      if(Object.keys(input.profile).some(key=>!keys.includes(key)))throw new Error('시험 인적사항을 확인해 주세요.');
+      profile=Object.fromEntries(keys.map(key=>{const value=input.profile[key]??'';if(typeof value!=='string'||value.length>200||/[\x00-\x1f\x7f]/.test(value))throw new Error('시험 인적사항을 확인해 주세요.');return [key,value.trim()];}));
+      if(profile.birthDate)profile.birthDate=dateValue(profile.birthDate);
+      if([profile.phone,profile.emergencyPhone].some(value=>value&&!/^[0-9+() -]{3,30}$/.test(value)))throw new Error('시험 전화번호를 확인해 주세요.');
+    }
     const signature=input.signature===undefined?null:signatureBytes(input.signature);
     if(typeof input.loginId!=='string' || !/^[a-zA-Z0-9_]{3,40}$/.test(input.loginId))throw new Error('아이디는 영문, 숫자, 밑줄 3~40자로 입력해 주세요.');
     if(typeof input.password!=='string' || input.password.length<12 || input.password.length>256)throw new Error('암호는 12자 이상 256자 이하여야 합니다.');
@@ -654,13 +663,13 @@ export class Store {
     try {
       const worker=this.createWorker({...input,siteId:invite.id});
       this.db.prepare('INSERT INTO worker_accounts(worker_id,site_id,login_id,salt,password_hash) VALUES(?,?,?,?,?)').run(worker.id,invite.id,input.loginId,salt,passwordHash);
-      this.db.prepare('INSERT INTO join_acknowledgements(worker_id,notice_version,equipment,signature) VALUES(?,?,?,?)').run(worker.id,'demo-v1',JSON.stringify(equipment),signature);
+      this.db.prepare('INSERT INTO join_acknowledgements(worker_id,notice_version,equipment,signature,profile) VALUES(?,?,?,?,?)').run(worker.id,'demo-v1',JSON.stringify(equipment),signature,profile?JSON.stringify(profile):null);
       this.db.exec('COMMIT');return worker;
     } catch(error) {this.db.exec('ROLLBACK');throw error;}
   }
   joinAcknowledgement(siteId,workerId){
-    const row=this.db.prepare('SELECT a.notice_version,a.created_at,a.equipment,a.signature IS NOT NULL AS has_signature FROM join_acknowledgements a JOIN workers w ON w.id=a.worker_id WHERE w.site_id=? AND w.id=?').get(Number(siteId),Number(workerId));
-    return row?{...row,equipment:JSON.parse(row.equipment)}:null;
+    const row=this.db.prepare('SELECT a.notice_version,a.created_at,a.equipment,a.profile,a.signature IS NOT NULL AS has_signature FROM join_acknowledgements a JOIN workers w ON w.id=a.worker_id WHERE w.site_id=? AND w.id=?').get(Number(siteId),Number(workerId));
+    return row?{...row,equipment:JSON.parse(row.equipment),profile:row.profile?JSON.parse(row.profile):null}:null;
   }
   joinSignature(siteId,workerId){return this.db.prepare('SELECT a.signature FROM join_acknowledgements a JOIN workers w ON w.id=a.worker_id WHERE w.site_id=? AND w.id=? AND a.signature IS NOT NULL').get(Number(siteId),Number(workerId))?.signature||null;}
   authenticateWorker(token,loginId,password) {

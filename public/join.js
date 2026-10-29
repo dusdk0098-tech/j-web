@@ -1,6 +1,7 @@
 const token=new URLSearchParams(location.search).get('token');
 const site=document.querySelector('#join-site'), message=document.querySelector('#join-message'), form=document.querySelector('#join-form');
-form.querySelector('p').textContent='이 시험 화면은 이름·구분·소속·직종·아이디·보호구 선택·서명 이미지와 암호의 해시를 이 컴퓨터의 시험 데이터베이스에 저장합니다. 실제 개인정보와 실제 암호 대신 가상 정보를 입력하세요.';
+form.querySelector('p').textContent='이 시험 화면은 가상 인적사항·아이디·보호구 선택·서명 이미지와 암호의 해시를 이 컴퓨터의 시험 데이터베이스에 저장합니다. 실제 개인정보와 실제 암호 대신 가상 정보를 입력하세요.';
+form.setAttribute('autocomplete','off');
 form.insertAdjacentHTML('beforebegin','<form id="worker-login" hidden><h2>이미 가입한 근로자</h2><p>시험 로그인 시 오늘의 출역이 자동 기록될 수 있습니다. 실제 출입 확인으로 사용하지 마세요.</p><div class="fields"><label>시험 아이디<input name="loginId" required pattern="[A-Za-z0-9_]{3,40}" autocomplete="username"></label><label>시험 암호<input name="password" type="password" required minlength="12" maxlength="256" autocomplete="current-password"></label></div><div class="action-row"><button class="primary">로그인</button></div></form>');
 const login=document.querySelector('#worker-login');
 let inviteInfo=null;
@@ -14,6 +15,7 @@ function signaturePad(canvas){
   return {clear(){ctx.clearRect(0,0,canvas.width,canvas.height);signed=false;},value(){if(!signed)throw Error('시험 서명을 입력해 주세요.');return canvas.toDataURL('image/png');}};
 }
 form.querySelector('.fields').insertAdjacentHTML('beforeend','<label>시험 아이디<input name="loginId" required pattern="[A-Za-z0-9_]{3,40}" autocomplete="username"></label><label>시험 암호<input name="password" type="password" required minlength="12" maxlength="256" autocomplete="new-password"></label>');
+form.querySelector('.fields').insertAdjacentHTML('beforeend','<label>가상 생년월일<input name="birthDate" type="date"></label><label>가상 전화번호<input name="phone" type="tel" maxlength="30"></label><label>가상 비상연락 대상<input name="emergencyName" maxlength="200"></label><label>가상 비상연락처<input name="emergencyPhone" type="tel" maxlength="30"></label><label>가상 주소<input name="address" maxlength="200"></label><label>가상 국적<input name="nationality" maxlength="200"></label>');
 form.querySelector('.action-row').insertAdjacentHTML('beforebegin','<fieldset><legend>가상 보호구 확인</legend><p>가상 항목만 선택하세요. 실제 지급이나 착용을 증명하지 않습니다.</p><label><input type="checkbox" name="equipment" value="안전모"> 안전모</label><label><input type="checkbox" name="equipment" value="안전화"> 안전화</label><label><input type="checkbox" name="equipment" value="안전대"> 안전대</label><label><input type="checkbox" name="equipment" value="보안경"> 보안경</label><label><input type="checkbox" name="equipment" value="장갑"> 장갑</label></fieldset><p>시험 서명 입력</p><canvas width="320" height="120" class="signature-pad" aria-label="가입 시험 서명 입력 영역"></canvas><button type="button" id="join-signature-clear">서명 지우기</button>');
 const joinPad=signaturePad(form.querySelector('canvas'));form.querySelector('#join-signature-clear').onclick=()=>joinPad.clear();
 try {
@@ -27,7 +29,7 @@ try {
 } catch(error) {site.textContent='';message.textContent=error.message;}
 form.onsubmit=async event=>{
   event.preventDefault();const submit=form.querySelector('button[type=submit], button:not([type])');submit.disabled=true;
-  try {const equipment=[...form.querySelectorAll('[name=equipment]:checked')].map(input=>input.value),response=await fetch('/api/join',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...Object.fromEntries(new FormData(form)),equipment,signature:joinPad.value(),acknowledged:form.elements.acknowledged.checked,token})});const data=await response.json();if(!response.ok)throw Error(data.error);form.reset();joinPad.clear();form.hidden=true;message.textContent='시험 등록이 완료되었습니다. 위에서 로그인하세요.';}catch(error){message.textContent=error.message;submit.disabled=false;}
+  try {const equipment=[...form.querySelectorAll('[name=equipment]:checked')].map(input=>input.value),profile=Object.fromEntries(['birthDate','phone','emergencyName','emergencyPhone','address','nationality'].map(key=>[key,form.elements[key].value])),response=await fetch('/api/join',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...Object.fromEntries(new FormData(form)),profile,equipment,signature:joinPad.value(),acknowledged:form.elements.acknowledged.checked,token})});const data=await response.json();if(!response.ok)throw Error(data.error);form.reset();joinPad.clear();form.hidden=true;message.textContent='시험 등록이 완료되었습니다. 위에서 로그인하세요.';}catch(error){message.textContent=error.message;submit.disabled=false;}
 };
 async function showWorker(worker){
     const button=login.querySelector('button');

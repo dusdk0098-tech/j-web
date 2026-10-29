@@ -385,7 +385,7 @@ test('현장과 출입자를 분리하고 문서 결재 이력을 보존한다',
     assert.throws(()=>s.join(invite.token,input),/확인/);
     assert.throws(()=>s.join(invite.token,{...input,acknowledged:'true'}),/확인/);
     assert.equal(s.workers(a.id).length,1);
-    s.join(invite.token,{...input,acknowledged:true});
+    const joined=s.join(invite.token,{...input,acknowledged:true});assert.equal(s.joinAcknowledgement(a.id,joined.id).profile,null);
     assert.equal(s.authenticateWorker(invite.token,'worker1','virtual-password-123').name,'가상 근로자');
     assert.equal(s.authenticateWorker(invite.token,'worker1','wrong-password'),null);
     assert.throws(()=>s.join(invite.token,{...input,acknowledged:true}),/아이디/);

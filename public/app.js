@@ -70,7 +70,7 @@ async function editWorker(worker=null){
   }catch(error){showError(error);}
 }
 async function showJoinRecord(worker){
-  try{const record=await api(`/api/workers/${worker.id}/join-record?siteId=${state.siteId}`);showDialog('시험 가입 기록',record?`<p>가상 보호구: ${esc(record.equipment.join(', ')||'선택 없음')}</p><p>안내 확인: ${esc(record.created_at)} (UTC)</p>${record.has_signature?`<p><a href="/api/workers/${worker.id}/join-record/signature?siteId=${state.siteId}">시험 서명 다운로드</a></p>`:'<p>시험 서명 없음</p>'}<p class="muted">실제 보호구 지급이나 본인 확인을 증명하지 않습니다.</p>`:'<p>가입 기록이 없습니다.</p>',async()=>{});}catch(error){showError(error);}
+  try{const record=await api(`/api/workers/${worker.id}/join-record?siteId=${state.siteId}`),labels={birthDate:'생년월일',phone:'전화번호',emergencyName:'비상연락 대상',emergencyPhone:'비상연락처',address:'주소',nationality:'국적'};showDialog('시험 가입 기록',record?`<p>가상 보호구: ${esc(record.equipment.join(', ')||'선택 없음')}</p>${record.profile?Object.entries(labels).map(([key,label])=>`<p>가상 ${esc(label)}: ${esc(record.profile[key]||'미입력')}</p>`).join(''):'<p>가상 인적사항 미기록</p>'}<p>안내 확인: ${esc(record.created_at)} (UTC)</p>${record.has_signature?`<p><a href="/api/workers/${worker.id}/join-record/signature?siteId=${state.siteId}">시험 서명 다운로드</a></p>`:'<p>시험 서명 없음</p>'}<p class="muted">실제 보호구 지급이나 본인 확인을 증명하지 않습니다.</p>`:'<p>가입 기록이 없습니다.</p>',async()=>{});}catch(error){showError(error);}
 }
 const dailyFields={weather:'날씨',progress:'공정률 (%)',todayWork:'금일 작업',tomorrowWork:'명일 작업',remarks:'비고'};
 const basicCategories=['안전·보건 경영 방침','안전·보건 관리 규정','안전·보건 조직도','안전·보건 관리 책임자 선임계','안전·보건 계획 및 이사회 의사록','유해·위험 방지 계획서','위험성 평가 실시 규정','안전 관리 계획서','위원회 운영규정','위원회 회의록','재해 기록 보존','하도급 업체 선정 및 평가 기준','안전·보건관리책임자 업무 수행 평가','중대재해 대응 매뉴얼','비상사태 시나리오','비상사태 모의 훈련 결과 보고서'];
