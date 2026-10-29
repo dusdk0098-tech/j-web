@@ -6,6 +6,7 @@
   "type": "module",
   "scripts": {
     "start": "node server.js",
+    "proxy": "node https-proxy.js",
     "test": "node --test"
   },
   "engines": {

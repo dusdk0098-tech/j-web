@@ -9,4 +9,8 @@ data/
 .env
 .env.*
 *.log
+*.pem
+*.key
+*.p12
+*.pfx
 node_modules/

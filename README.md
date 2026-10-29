@@ -25,7 +25,29 @@ npm start
 
 이 로그인은 단일 관리자와 로컬 서버에 한정됩니다. 서버를 재시작하면 로그인 세션이 만료됩니다. 다중 사용자, 현장별 권한, 안전한 외부 배포는 아직 지원하지 않습니다.
 
-휴대전화 QR 시험을 위한 HTTPS 중계 주소는 `JWEB_PUBLIC_ORIGIN`에 경로 없이 설정할 수 있습니다. 예: `https://example.test`. 이 경우 서버는 계속 `127.0.0.1`에서만 수신하며 지정된 호스트와 HTTPS 출처만 허용하고 QR에 지정된 주소를 넣으며 세션 쿠키에 Secure를 추가합니다. 별도로 올바른 인증서를 사용하는 HTTPS 역방향 프록시가 해당 호스트 헤더를 유지해 로컬 서버에 전달해야 합니다. 이 설정은 프록시나 인증서, 방화벽을 생성하지 않습니다. 초대 토큰이 URL에 있으므로 프록시 접근 기록에 전체 URL을 남기지 않도록 구성해야 합니다. 인증·권한·운영 보안이 미완성이므로 가상 자료만 사용하고 외부 공개나 실사용에 이용하지 마세요.
+휴대전화 QR 시험을 위한 HTTPS 중계 주소는 `JWEB_PUBLIC_ORIGIN`에 경로 없이 설정할 수 있습니다. 예: `https://example.test:8443`. 이 경우 서버는 계속 `127.0.0.1`에서만 수신하며 지정된 호스트와 HTTPS 출처만 허용하고 QR에 지정된 주소를 넣으며 세션 쿠키에 Secure를 추가합니다. 주소 설정만으로 중계, 인증서 또는 방화벽이 만들어지지는 않습니다. 인증·권한·운영 보안이 미완성이므로 가상 자료만 사용하고 외부 공개나 실사용에 이용하지 마세요.
+
+내장 시험 중계는 별도의 터미널에서 `npm run proxy`로 실행합니다. 서버와 중계에 같은 `JWEB_PUBLIC_ORIGIN`과 `PORT`를 설정하고, 중계에는 `JWEB_TLS_CERT`와 `JWEB_TLS_KEY`에 인증서와 개인키 파일 경로를 지정합니다. 중계는 기본적으로 이 컴퓨터에서만 수신합니다. 휴대전화 시험 시 `JWEB_PROXY_BIND`에 이 컴퓨터의 접근 가능한 IP 주소를 지정해야 합니다. 중계 포트는 HTTPS 주소에 지정하며 서버 포트와 달라야 합니다. 주소의 이름이 휴대전화에서 해당 IP로 연결되고 인증서가 그 이름에 맞으며 휴대전화에서 신뢰되어야 합니다. 네트워크와 방화벽도 해당 연결을 허용해야 합니다.
+
+인증서와 개인키는 직접 준비하고 저장소 밖에 보관하세요. 이 중계는 접속 URL을 기록하지 않지만, 다른 중계나 서버를 사용할 때도 가입 토큰이 포함된 전체 URL을 접근 기록에 남기지 않도록 설정해야 합니다. 서버와 중계를 시작한 뒤에는 HTTPS 주소로 관리자 화면을 열어 시험 QR을 만듭니다.
+
+예를 들어, 다음 예시의 주소·IP·파일 경로를 실제 준비한 값으로 바꾼 뒤 PowerShell 두 개에서 각각 실행합니다. 두 터미널의 주소는 같아야 합니다.
+
+```powershell
+# 첫 번째 터미널: 시험 서버
+$env:JWEB_PUBLIC_ORIGIN = 'https://example.test:8443'
+$env:JWEB_ADMIN_PASSWORD = [System.Net.NetworkCredential]::new('', (Read-Host '시험 관리자 암호' -AsSecureString)).Password
+npm start
+```
+
+```powershell
+# 두 번째 터미널: HTTPS 시험 중계
+$env:JWEB_PUBLIC_ORIGIN = 'https://example.test:8443'
+$env:JWEB_PROXY_BIND = '192.168.1.10'
+$env:JWEB_TLS_CERT = 'C:\path\certificate.pem'
+$env:JWEB_TLS_KEY = 'C:\path\private-key.pem'
+npm run proxy
+```
 
 자동 시험은 OpenSSL을 사용할 수 있을 때 임시 인증서와 로컬 HTTPS 중계를 만들고 가상 가입 QR의 판독, 가입 및 로그인 API를 확인합니다. OpenSSL이 없으면 이 시험은 건너뜁니다. 이 시험은 실제 휴대전화나 운영용 인증서를 검증하지 않습니다.
 
