@@ -230,6 +230,19 @@ test('계절별 시험 점검은 문항과 선택지를 검증하고 모든 답�
   }finally{s.close();}
 });
 
+test('기상·전기·화재 시험 점검은 문항 수와 판정 및 제출 조건을 확인한다',()=>{
+  const s=new Store(':memory:');try{
+    const site=s.createSite({name:'가상 현장'});
+    for(const [kind,length] of [['wet_season',6],['heavy_rain',11],['electrical',12],['fire',5]]){
+      const answers=Array.from({length},()=>({answer:'해당없음',note:'가상 비고'}));if(kind==='heavy_rain')answers[0].answer='O';answers[length-1].answer='';
+      const input={siteId:site.id,type:'checklist',title:'가상 점검',date:'2041-01-01',details:{kind,answers}},doc=s.createDocument(input);
+      assert.throws(()=>s.transition(doc.id,'submit'),/필수/);assert.throws(()=>s.updateDocument(doc.id,{...input,details:{kind,answers:answers.slice(1)}}),/문항/);
+      if(kind==='heavy_rain')assert.throws(()=>s.updateDocument(doc.id,{...input,details:{kind,answers:answers.map((a,i)=>i===0?{...a,answer:'해당없음'}:a)}}),/답변/);
+      answers[length-1].answer='X';s.updateDocument(doc.id,input);assert.equal(s.transition(doc.id,'submit').status,'pending');assert.deepEqual(JSON.parse(s.document(doc.id).details).answers,answers);
+    }
+  }finally{s.close();}
+});
+
 test('기본 서류 분류를 현장별로 저장하고 검색한다',()=>{
   const s=new Store(':memory:');try{const a=s.createSite({name:'가상 현장 A'}),b=s.createSite({name:'가상 현장 B'}),input={siteId:a.id,type:'basic',title:'가상 서류',date:'2026-10-29',details:{category:'안전·보건 조직도'}};const doc=s.createDocument(input);assert.equal(JSON.parse(doc.details).category,'안전·보건 조직도');assert.equal(s.documents(a.id,'basic','조직도').length,1);assert.equal(s.documents(b.id,'basic','조직도').length,0);assert.throws(()=>s.updateDocument(doc.id,{...input,details:{category:'가'.repeat(201)}}),/분류/);assert.equal(JSON.parse(s.document(doc.id).details).category,'안전·보건 조직도');}finally{s.close();}
 });
