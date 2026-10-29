@@ -618,14 +618,16 @@ test('관리자 인증 모드가 문서 API를 보호하고 로그아웃을 적�
     assert.equal((await fetch(`${base}/api/worker/training`)).status,401);
     let trainingList=await (await fetch(`${base}/api/worker/training`,{headers:{cookie:workerCookie}})).json();
     assert.deepEqual(trainingList.map(row=>row.id),[training.id]);
-    const checkTraining=(documentId,rightsConfirmed=true)=>fetch(`${base}/api/worker/training`,{method:'POST',headers:{cookie:workerCookie,'content-type':'application/json'},body:JSON.stringify({documentId,rightsConfirmed})});
+    const checkTraining=(documentId,rightsConfirmed=true,signature)=>fetch(`${base}/api/worker/training`,{method:'POST',headers:{cookie:workerCookie,'content-type':'application/json'},body:JSON.stringify({documentId,rightsConfirmed,signature})});
     for(const id of [trainingOther.id,trainingDraft.id,trainingPast.id])assert.equal((await checkTraining(id)).status,400);
     assert.equal((await checkTraining(training.id,false)).status,400);
     assert.equal((await checkTraining(training.id)).status,200);assert.equal((await checkTraining(training.id)).status,200);
-    trainingList=await (await fetch(`${base}/api/worker/training`,{headers:{cookie:workerCookie}})).json();assert.ok(trainingList[0].created_at);
+    assert.equal((await checkTraining(training.id,true,'invalid')).status,400);assert.equal((await checkTraining(training.id,true,`data:image/png;base64,${photo.toString('base64')}`)).status,200);
+    trainingList=await (await fetch(`${base}/api/worker/training`,{headers:{cookie:workerCookie}})).json();assert.ok(trainingList[0].created_at);assert.equal(trainingList[0].has_signature,1);
     assert.equal((await fetch(`${base}/api/documents/${training.id}/training-checks`,{headers:{cookie:workerCookie}})).status,401);
     const participants=await (await fetch(`${base}/api/documents/${training.id}/training-checks`,{headers:{cookie}})).json();
     assert.equal(participants.length,1);assert.equal(participants[0].name,'가상 근로자');assert.equal(participants[0].rights_ack,'demo-v1');
+    assert.equal(participants[0].has_signature,1);const trainingCheckImage=`${base}/api/documents/${training.id}/training-checks/${own.id}/signature`;assert.equal((await fetch(trainingCheckImage)).status,401);assert.equal((await fetch(trainingCheckImage,{headers:{cookie:workerCookie}})).status,401);assert.deepEqual(Buffer.from(await (await fetch(trainingCheckImage,{headers:{cookie}})).arrayBuffer()),photo);assert.equal((await fetch(`${base}/api/documents/${trainingOther.id}/training-checks/${own.id}/signature`,{headers:{cookie}})).status,404);
     const educationReport=`${base}/api/education/report?siteId=${site.id}&from=${today}&to=${today}`;
     assert.equal((await fetch(educationReport)).status,401);assert.equal((await fetch(educationReport,{headers:{cookie:workerCookie}})).status,401);
     const educationRows=await (await fetch(educationReport,{headers:{cookie}})).json();assert.equal(educationRows.length,1);assert.equal(educationRows[0].id,own.id);assert.equal(educationRows[0].birth_date,'2000-02-29');assert.equal(educationRows[0].count,1);assert.deepEqual(educationRows[0].documents.map(d=>d.id),[training.id]);

@@ -136,6 +136,7 @@ export class Store {
     if(!this.db.prepare('PRAGMA table_info(hazard_reports)').all().some(c=>c.name==='response'))this.db.exec("ALTER TABLE hazard_reports ADD COLUMN response TEXT NOT NULL DEFAULT ''");
     if (!this.db.prepare('PRAGMA table_info(worker_notice_reads)').all().some(c=>c.name==='signature')) this.db.exec('ALTER TABLE worker_notice_reads ADD COLUMN signature BLOB');
     if (!this.db.prepare('PRAGMA table_info(worker_training_checks)').all().some(c=>c.name==='rights_ack')) this.db.exec('ALTER TABLE worker_training_checks ADD COLUMN rights_ack TEXT');
+    if (!this.db.prepare('PRAGMA table_info(worker_training_checks)').all().some(c=>c.name==='signature')) this.db.exec('ALTER TABLE worker_training_checks ADD COLUMN signature BLOB');
     if (!this.db.prepare('PRAGMA table_info(equipment)').all().some(c=>c.name==='details')) this.db.exec("ALTER TABLE equipment ADD COLUMN details TEXT NOT NULL DEFAULT '{}'");
     if (!this.db.prepare('PRAGMA table_info(equipment_checks)').all().some(c=>c.name==='equipment_snapshot')) this.db.exec('ALTER TABLE equipment_checks ADD COLUMN equipment_snapshot TEXT');
     if (!this.db.prepare('PRAGMA table_info(equipment_checks)').all().some(c=>c.name==='inspector')) this.db.exec('ALTER TABLE equipment_checks ADD COLUMN inspector TEXT');
@@ -598,7 +599,7 @@ export class Store {
   }
   workerTraining(workerId,date) {
     date=dateValue(date);
-    return this.db.prepare("SELECT d.id,d.type,d.title,c.created_at FROM workers w JOIN documents d ON d.site_id=w.site_id LEFT JOIN worker_training_checks c ON c.worker_id=w.id AND c.document_id=d.id WHERE w.id=? AND d.type IN ('tbm','education') AND d.status='approved' AND d.date=? AND (NOT EXISTS (SELECT 1 FROM training_target_config t WHERE t.document_id=d.id) OR EXISTS (SELECT 1 FROM training_targets t WHERE t.document_id=d.id AND t.worker_id=w.id)) ORDER BY d.id DESC").all(Number(workerId),date);
+    return this.db.prepare("SELECT d.id,d.type,d.title,d.body,d.details,c.created_at,c.signature IS NOT NULL AS has_signature FROM workers w JOIN documents d ON d.site_id=w.site_id LEFT JOIN worker_training_checks c ON c.worker_id=w.id AND c.document_id=d.id WHERE w.id=? AND d.type IN ('tbm','education') AND d.status='approved' AND d.date=? AND (NOT EXISTS (SELECT 1 FROM training_target_config t WHERE t.document_id=d.id) OR EXISTS (SELECT 1 FROM training_targets t WHERE t.document_id=d.id AND t.worker_id=w.id)) ORDER BY d.id DESC").all(Number(workerId),date).map(row=>{const details=JSON.parse(row.details);return {...row,details:{kind:details.kind||'',otherTitle:details.otherTitle||'',instructor:details.instructor||'',weather:details.weather||'',work:details.work||'',hazards:details.hazards||''}};});
   }
   dailyTraining(workerId,date) {
     return this.db.prepare('SELECT kind,created_at,signature IS NOT NULL AS has_signature FROM worker_daily_training WHERE worker_id=? AND date=? ORDER BY kind').all(Number(workerId),dateValue(date));
@@ -620,12 +621,13 @@ export class Store {
   documentTrainingSignature(documentId,workerId){
     return this.db.prepare("SELECT c.signature FROM documents d JOIN workers w ON w.site_id=d.site_id JOIN worker_daily_training c ON c.worker_id=w.id AND c.date=d.date AND c.kind=d.type WHERE d.id=? AND w.id=? AND d.type IN ('tbm','education') AND c.signature IS NOT NULL AND (NOT EXISTS (SELECT 1 FROM training_target_config t WHERE t.document_id=d.id) OR EXISTS (SELECT 1 FROM training_targets t WHERE t.document_id=d.id AND t.worker_id=w.id))").get(Number(documentId),Number(workerId))?.signature||null;
   }
-  confirmWorkerTraining(workerId,documentId,date,rightsConfirmed) {
+  confirmWorkerTraining(workerId,documentId,date,rightsConfirmed,signature) {
     date=dateValue(date);
     const doc=this.db.prepare("SELECT d.id FROM workers w JOIN documents d ON d.site_id=w.site_id WHERE w.id=? AND d.id=? AND d.type IN ('tbm','education') AND d.status='approved' AND d.date=? AND (NOT EXISTS (SELECT 1 FROM training_target_config t WHERE t.document_id=d.id) OR EXISTS (SELECT 1 FROM training_targets t WHERE t.document_id=d.id AND t.worker_id=w.id))").get(Number(workerId),Number(documentId),date);
     if(!doc)throw new Error('오늘 참여할 교육 문서를 확인해 주세요.');
     if(rightsConfirmed!==true)throw new Error('권리와 의무를 확인해 주세요.');
-    this.db.prepare("INSERT OR IGNORE INTO worker_training_checks(worker_id,document_id,rights_ack) VALUES(?,?,'demo-v1')").run(Number(workerId),doc.id);
+    const bytes=signature===undefined?null:signatureBytes(signature);
+    this.db.prepare("INSERT INTO worker_training_checks(worker_id,document_id,rights_ack,signature) VALUES(?,?,'demo-v1',?) ON CONFLICT(worker_id,document_id) DO UPDATE SET rights_ack=CASE WHEN excluded.signature IS NOT NULL THEN COALESCE(worker_training_checks.rights_ack,excluded.rights_ack) ELSE worker_training_checks.rights_ack END,signature=COALESCE(worker_training_checks.signature,excluded.signature)").run(Number(workerId),doc.id,bytes);
   }
   confirmWorkerNotice(workerId,documentId,signature,date) {
     date=dateValue(date);
@@ -645,8 +647,9 @@ export class Store {
   trainingChecks(documentId) {
     const doc=this.document(documentId);
     if(!doc || !['tbm','education'].includes(doc.type))throw new Error('교육 문서를 확인해 주세요.');
-    return this.db.prepare('SELECT w.name,w.company,c.created_at,c.rights_ack FROM worker_training_checks c JOIN workers w ON w.id=c.worker_id WHERE c.document_id=? AND w.site_id=? ORDER BY c.created_at,w.id').all(Number(documentId),doc.site_id);
+    return this.db.prepare('SELECT w.id,w.name,w.company,c.created_at,c.rights_ack,c.signature IS NOT NULL AS has_signature FROM worker_training_checks c JOIN workers w ON w.id=c.worker_id WHERE c.document_id=? AND w.site_id=? ORDER BY c.created_at,w.id').all(Number(documentId),doc.site_id);
   }
+  trainingCheckSignature(documentId,workerId){return this.db.prepare("SELECT c.signature FROM worker_training_checks c JOIN documents d ON d.id=c.document_id JOIN workers w ON w.id=c.worker_id AND w.site_id=d.site_id WHERE d.id=? AND d.type IN ('tbm','education') AND w.id=? AND c.signature IS NOT NULL").get(Number(documentId),Number(workerId))?.signature||null;}
   workerActivities(siteId,workerId,kinds=[],offset=0){
     siteId=Number(siteId);workerId=Number(workerId);
     if(!this.db.prepare('SELECT 1 FROM workers WHERE id=? AND site_id=?').get(workerId,siteId))throw new Error('같은 현장의 출입자를 확인해 주세요.');

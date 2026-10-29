@@ -1463,6 +1463,15 @@ test('이전 결재 이력은 의견 항목 추가 후에도 보존된다',()=>{
   } finally {rmSync(dir,{recursive:true,force:true});}
 });
 
+test('교육 문서별 서명은 기존 확인을 보존하고 같은 종류의 당일 서명과 구분한다',()=>{
+  const s=new Store(':memory:');try{
+    const site=s.createSite({name:'가상 현장'}),other=s.createSite({name:'다른 현장'}),make=id=>s.createWorker({siteId:id,name:'가상 근로자',category:'직영',company:'가상 회사',occupation:'가상 직종'}),worker=make(site.id),stranger=make(site.id),foreign=make(other.id),doc=s.createDocument({siteId:site.id,type:'tbm',title:'가상 교육',date:'2026-10-29',body:'가상 교육 내용',details:{work:'가상 작업',hazards:'가상 위험'}}),png=new PNG({width:1,height:1});png.data[3]=255;const bytes=PNG.sync.write(png),signature=`data:image/png;base64,${bytes.toString('base64')}`;
+    s.setTrainingTargets(doc.id,[worker.id]);s.transition(doc.id,'submit');s.transition(doc.id,'approve');s.db.prepare("INSERT INTO worker_training_checks(worker_id,document_id,created_at,rights_ack) VALUES(?,?,'2026-10-29 09:00:00',NULL)").run(worker.id,doc.id);
+    const visible=s.workerTraining(worker.id,'2026-10-29')[0];assert.equal(visible.body,'가상 교육 내용');assert.equal(visible.details.hazards,'가상 위험');assert.equal(visible.has_signature,0);assert.equal(s.workerTraining(stranger.id,'2026-10-29').length,0);assert.throws(()=>s.confirmWorkerTraining(foreign.id,doc.id,'2026-10-29',true,signature),/교육 문서/);assert.throws(()=>s.confirmWorkerTraining(worker.id,doc.id,'2026-10-29',false,signature),/권리/);assert.throws(()=>s.confirmWorkerTraining(worker.id,doc.id,'2026-10-29',true,'invalid'),/서명/);
+    assert.equal(s.trainingCheckSignature(doc.id,worker.id),null);s.confirmWorkerTraining(worker.id,doc.id,'2026-10-29',true,signature);const checked=s.trainingChecks(doc.id)[0];assert.equal(checked.created_at,'2026-10-29 09:00:00');assert.equal(checked.rights_ack,'demo-v1');assert.equal(checked.has_signature,1);assert.deepEqual(Buffer.from(s.trainingCheckSignature(doc.id,worker.id)),bytes);assert.equal(s.documentTrainingSignature(doc.id,worker.id),null);assert.equal(s.trainingCheckSignature(doc.id,stranger.id),null);
+  }finally{s.close();}
+});
+
 test('이전 교육 참가 기록에 확인되지 않은 권리 확인을 추가하지 않는다',()=>{
   const dir=mkdtempSync(join(tmpdir(),'j-web-training-'));
   const path=join(dir,'test.sqlite');
@@ -1473,8 +1482,8 @@ test('이전 교육 참가 기록에 확인되지 않은 권리 확인을 추가
     for(let i=0;i<2;i++){
       const s=new Store(path);
       try {
-        const row=s.db.prepare('SELECT worker_id,document_id,created_at,rights_ack FROM worker_training_checks').get();
-        assert.equal(row.worker_id,1);assert.equal(row.document_id,2);assert.equal(row.created_at,'2026-10-28 09:00:00');assert.equal(row.rights_ack,null);
+        const row=s.db.prepare('SELECT worker_id,document_id,created_at,rights_ack,signature FROM worker_training_checks').get();
+        assert.equal(row.worker_id,1);assert.equal(row.document_id,2);assert.equal(row.created_at,'2026-10-28 09:00:00');assert.equal(row.rights_ack,null);assert.equal(row.signature,null);
       } finally {s.close();}
     }
   } finally {rmSync(dir,{recursive:true,force:true});}

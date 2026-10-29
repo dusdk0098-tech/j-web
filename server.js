@@ -241,7 +241,7 @@ const server = http.createServer(async (req, res) => {
       if(!session || session.expires<=Date.now()){workerSessions.delete(key);return json(res,401,{error:'근로자 로그인이 필요합니다.'});}
       const input=req.method==='POST'?await body(req):null,now=new Date(),date=new Date(now.getTime()-now.getTimezoneOffset()*60000).toISOString().slice(0,10);
       if(req.method==='GET')return json(res,200,store.workerTraining(session.worker.id,date));
-      store.confirmWorkerTraining(session.worker.id,input.documentId,date,input.rightsConfirmed);return json(res,200,{ok:true});
+      store.confirmWorkerTraining(session.worker.id,input.documentId,date,input.rightsConfirmed,input.signature);return json(res,200,{ok:true});
     }
     if(url.pathname==='/api/worker/hazard-reports' && ['GET','POST'].includes(req.method)){
       const key=workerKey(workerToken),session=workerSessions.get(key);if(!session||session.expires<=Date.now()){workerSessions.delete(key);return json(res,401,{error:'근로자 로그인이 필요합니다.'});}
@@ -654,6 +654,8 @@ const server = http.createServer(async (req, res) => {
     if(approvalCycle&&req.method==='GET'){const [,id,cycleId,kind,parentId,fileId]=approvalCycle;if(!kind){const cycle=store.approvalCycle(id,cycleId);return cycle?json(res,200,cycle):json(res,404,{error:'결재 자료를 찾을 수 없습니다.'});}const file=store.approvalCycleFile(id,cycleId,kind,parentId,fileId);if(!file)return json(res,404,{error:'결재 파일을 찾을 수 없습니다.'});const name=encodeURIComponent(file.name).replace(/[!'()*]/g,c=>`%${c.charCodeAt(0).toString(16).toUpperCase()}`);res.writeHead(200,{'Content-Type':'application/octet-stream','Content-Disposition':`attachment; filename="file"; filename*=UTF-8''${name}`,'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(file.data);}
     const eventSignature=url.pathname.match(/^\/api\/documents\/(\d+)\/events\/(\d+)\/signature$/);
     if(eventSignature&&req.method==='GET'){const signature=store.eventSignature(eventSignature[1],eventSignature[2]);if(!signature)return json(res,404,{error:'시험 서명을 찾을 수 없습니다.'});res.writeHead(200,{'Content-Type':'image/png','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(signature);}
+    const trainingCheckSignature=url.pathname.match(/^\/api\/documents\/(\d+)\/training-checks\/(\d+)\/signature$/);
+    if(trainingCheckSignature&&req.method==='GET'){const signature=store.trainingCheckSignature(trainingCheckSignature[1],trainingCheckSignature[2]);if(!signature)return json(res,404,{error:'시험 서명을 찾을 수 없습니다.'});res.writeHead(200,{'Content-Type':'image/png','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(signature);}
     const documentTrainingSignature=url.pathname.match(/^\/api\/documents\/(\d+)\/training-signatures\/(\d+)$/);
     if(documentTrainingSignature&&req.method==='GET'){const signature=store.documentTrainingSignature(documentTrainingSignature[1],documentTrainingSignature[2]);if(!signature)return json(res,404,{error:'시험 서명을 찾을 수 없습니다.'});res.writeHead(200,{'Content-Type':'image/png','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(signature);}
     const match = url.pathname.match(/^\/api\/documents\/(\d+)(?:\/(events|transition|publish-notice|copy-notice-files|notice-reads|training-checks|training-targets))?$/);
