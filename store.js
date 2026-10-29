@@ -89,6 +89,7 @@ export class Store {
       CREATE TABLE IF NOT EXISTS tbm_signatures (document_id INTEGER PRIMARY KEY REFERENCES documents(id),signature BLOB NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
       CREATE TABLE IF NOT EXISTS joint_inspection_signatures (document_id INTEGER PRIMARY KEY REFERENCES documents(id),signature BLOB NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
       CREATE TABLE IF NOT EXISTS meeting_signatures (document_id INTEGER PRIMARY KEY REFERENCES documents(id),signature BLOB NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+      CREATE TABLE IF NOT EXISTS worker_meeting_checks (document_id INTEGER NOT NULL REFERENCES documents(id),worker_id INTEGER NOT NULL REFERENCES workers(id),signature BLOB NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(document_id,worker_id));
       CREATE TABLE IF NOT EXISTS worker_notice_reads (worker_id INTEGER NOT NULL REFERENCES workers(id),document_id INTEGER NOT NULL REFERENCES documents(id),read_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(worker_id,document_id));
       CREATE TABLE IF NOT EXISTS worker_self_checks (worker_id INTEGER NOT NULL REFERENCES workers(id),date TEXT NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(worker_id,date));
       CREATE TABLE IF NOT EXISTS manager_self_checks (site_id INTEGER NOT NULL REFERENCES sites(id),date TEXT NOT NULL,answers TEXT NOT NULL,signature BLOB NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(site_id,date));
@@ -572,6 +573,22 @@ export class Store {
   workerNoticeFile(workerId,documentId,fileId,date){
     date=dateValue(date);
     return this.db.prepare("SELECT a.name,a.data FROM workers w JOIN documents d ON d.site_id=w.site_id JOIN attachments a ON a.document_id=d.id WHERE w.id=? AND d.id=? AND a.id=? AND d.type='notice' AND d.status='approved' AND d.date=?").get(Number(workerId),Number(documentId),Number(fileId),date)||null;
+  }
+  workerMeetings(workerId){
+    const rows=this.db.prepare("SELECT d.id,d.type,d.title,d.date,d.body,d.details,c.created_at FROM workers w JOIN documents d ON d.site_id=w.site_id LEFT JOIN worker_meeting_checks c ON c.document_id=d.id AND c.worker_id=w.id WHERE w.id=? AND d.type IN ('work_council','safety_meeting') AND d.status='approved' ORDER BY d.date DESC,d.id DESC").all(Number(workerId));
+    return rows.map(row=>{const details=JSON.parse(row.details);return {...row,details:{place:details.place||'',timeFrom:details.timeFrom||'',timeTo:details.timeTo||'',host:details.host||'',decisions:details.decisions||'',discussion:details.discussion||''},selected:(details.workerSnapshot||[]).some(person=>person.id===Number(workerId))};}).filter(row=>row.selected).map(({selected,...row})=>row);
+  }
+  confirmWorkerMeeting(workerId,documentId,signature){
+    if(!Number.isSafeInteger(documentId)||!this.workerMeetings(workerId).some(row=>row.id===documentId))throw new Error('지정된 승인 회의를 확인해 주세요.');
+    const bytes=signatureBytes(signature);this.db.prepare('INSERT OR IGNORE INTO worker_meeting_checks(document_id,worker_id,signature) VALUES(?,?,?)').run(documentId,Number(workerId),bytes);
+  }
+  meetingChecks(documentId){
+    const doc=this.document(documentId);if(!doc||!['work_council','safety_meeting'].includes(doc.type))throw new Error('회의 문서를 확인해 주세요.');
+    return this.db.prepare('SELECT worker_id,created_at FROM worker_meeting_checks WHERE document_id=? ORDER BY worker_id').all(doc.id);
+  }
+  meetingWorkerSignature(documentId,workerId){
+    const doc=this.document(documentId);if(!doc||!['work_council','safety_meeting'].includes(doc.type))return null;
+    return this.db.prepare('SELECT signature FROM worker_meeting_checks WHERE document_id=? AND worker_id=?').get(doc.id,Number(workerId))?.signature||null;
   }
   workerTraining(workerId,date) {
     date=dateValue(date);

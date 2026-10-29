@@ -215,6 +215,11 @@ const server = http.createServer(async (req, res) => {
       let name;try{name=decodeURIComponent(req.headers['x-file-name']||'');}catch{throw new Error('사진 이름을 확인해 주세요.');}
       return json(res,201,{id:store.addWorkerInstructionPhoto(session.worker.id,id,url.searchParams.get('phase'),name,Buffer.concat(chunks))});
     }
+    if(url.pathname==='/api/worker/meetings'&&['GET','POST'].includes(req.method)){
+      const key=workerKey(workerToken),session=workerSessions.get(key);if(!session||session.expires<=Date.now()){workerSessions.delete(key);return json(res,401,{error:'근로자 로그인이 필요합니다.'});}
+      if(req.method==='GET')return json(res,200,store.workerMeetings(session.worker.id));
+      const input=await body(req);store.confirmWorkerMeeting(session.worker.id,input.documentId,input.signature);return json(res,200,{ok:true});
+    }
     if(url.pathname==='/api/worker/self-check' && ['GET','POST'].includes(req.method)){
       const key=workerKey(workerToken),session=workerSessions.get(key);
       if(!session || session.expires<=Date.now()){workerSessions.delete(key);return json(res,401,{error:'근로자 로그인이 필요합니다.'});}
@@ -576,6 +581,8 @@ const server = http.createServer(async (req, res) => {
       if(photoId&&req.method==='DELETE'){store.deleteInstructionPhoto(id,photoId);return json(res,200,{ok:true});}
       if(photoId&&req.method==='GET'){const photo=store.instructionPhoto(id,photoId);if(!photo)return json(res,404,{error:'시험 사진을 찾을 수 없습니다.'});const name=encodeURIComponent(photo.name).replace(/[!'()*]/g,c=>`%${c.charCodeAt(0).toString(16).toUpperCase()}`);res.writeHead(200,{'Content-Type':'application/octet-stream','Content-Disposition':`attachment; filename="photo"; filename*=UTF-8''${name}`,'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(photo.data);}
     }
+    const meetingChecks=url.pathname.match(/^\/api\/documents\/(\d+)\/meeting-checks(?:\/(\d+)\/signature)?$/);
+    if(meetingChecks&&req.method==='GET'){const [,id,workerId]=meetingChecks;if(!workerId)return json(res,200,store.meetingChecks(id));const signature=store.meetingWorkerSignature(id,workerId);if(!signature)return json(res,404,{error:'시험 서명을 찾을 수 없습니다.'});res.writeHead(200,{'Content-Type':'image/png','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(signature);}
     const checklistSignature=url.pathname.match(/^\/api\/documents\/(\d+)\/checklist-signature(?:\/(image))?$/);
     if(checklistSignature){const [,id,image]=checklistSignature;if(req.method==='POST'&&!image){const input=await body(req);store.saveChecklistSignature(id,input.signature);return json(res,200,{ok:true});}if(req.method==='GET'){const saved=store.checklistSignature(id);if(!image)return json(res,200,{hasSignature:!!saved,createdAt:saved?.created_at||null});if(!saved)return json(res,404,{error:'시험 서명을 찾을 수 없습니다.'});res.writeHead(200,{'Content-Type':'image/png','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(saved.signature);}}
     const tbmSignature=url.pathname.match(/^\/api\/documents\/(\d+)\/tbm-signature(?:\/(image))?$/);

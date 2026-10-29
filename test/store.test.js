@@ -600,6 +600,18 @@ test('노사협의체 회의 안건과 출역자를 현장별로 저장한다',(
   }finally{s.close();}
 });
 
+test('회의 참가 시험 서명은 승인된 지정 근로자만 기록한다',()=>{
+  const s=new Store(':memory:');try{
+    const site=s.createSite({name:'가상 현장'}),other=s.createSite({name:'다른 현장'}),make=(siteId,name)=>s.createWorker({siteId,name,category:'직영',company:'가상 업체',occupation:'가상 직종'}),worker=make(site.id,'가상 근로자'),stranger=make(site.id,'다른 근로자'),foreign=make(other.id,'다른 현장');
+    s.setAttendance({siteId:site.id,workerId:worker.id,date:'2026-10-29',present:true});const png=new PNG({width:1,height:1});png.data[3]=255;const bytes=PNG.sync.write(png),signature=`data:image/png;base64,${bytes.toString('base64')}`;
+    for(const type of ['work_council','safety_meeting']){
+      const doc=s.createDocument({siteId:site.id,type,title:'가상 회의',body:'가상 내용',date:'2026-10-29',details:{...(type==='work_council'?{kind:'정기 회의',decisions:'가상 의결'}:{}),workerIds:[worker.id]}});assert.throws(()=>s.confirmWorkerMeeting(worker.id,doc.id,signature),/승인/);s.transition(doc.id,'submit');s.transition(doc.id,'approve');
+      assert.equal(s.workerMeetings(worker.id).find(row=>row.id===doc.id).body,'가상 내용');assert.equal(s.workerMeetings(stranger.id).length,0);assert.equal(s.workerMeetings(foreign.id).length,0);assert.throws(()=>s.confirmWorkerMeeting(stranger.id,doc.id,signature),/승인/);assert.throws(()=>s.confirmWorkerMeeting(foreign.id,doc.id,signature),/승인/);assert.throws(()=>s.confirmWorkerMeeting(worker.id,doc.id,'invalid'),/서명/);
+      s.confirmWorkerMeeting(worker.id,doc.id,signature);s.confirmWorkerMeeting(worker.id,doc.id,signature);assert.equal(s.meetingChecks(doc.id).length,1);assert.equal(s.meetingChecks(doc.id)[0].worker_id,worker.id);assert.deepEqual(Buffer.from(s.meetingWorkerSignature(doc.id,worker.id)),bytes);assert.equal(s.meetingWorkerSignature(doc.id,stranger.id),null);assert.ok(s.workerMeetings(worker.id).find(row=>row.id===doc.id).created_at);
+    }
+  }finally{s.close();}
+});
+
 test('회의 작성자 시험 서명은 문서 변경 시 초기화하고 결재 요청 때 보존한다',()=>{
   const s=new Store(':memory:');try{
     const site=s.createSite({name:'가상 현장'}),png=new PNG({width:1,height:1});png.data[3]=255;const bytes=PNG.sync.write(png),signature=`data:image/png;base64,${bytes.toString('base64')}`;
