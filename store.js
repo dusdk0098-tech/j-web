@@ -1135,6 +1135,15 @@ export class Store {
     } catch (err) { this.db.exec('ROLLBACK TO document_transition');this.db.exec('RELEASE document_transition');throw err; }
     return this.document(id);
   }
+  publishNotice(id){
+    const doc=this.document(id);
+    if(!doc||doc.type!=='notice'||doc.status!=='draft')throw new Error('임시저장된 공지를 확인해 주세요.');
+    if(this.approvalLine(id).length)throw new Error('지정된 시험 결재선을 먼저 해제해 주세요.');
+    if(!doc.body.trim())throw new Error('공지 내용을 입력해 주세요.');
+    this.db.exec('SAVEPOINT publish_notice');
+    try{this.db.prepare("UPDATE documents SET status='approved',updated_at=CURRENT_TIMESTAMP WHERE id=?").run(doc.id);this.db.prepare("INSERT INTO events(document_id,action,from_status,to_status) VALUES(?,'publish','draft','approved')").run(doc.id);this.db.exec('RELEASE publish_notice');}catch(error){this.db.exec('ROLLBACK TO publish_notice');this.db.exec('RELEASE publish_notice');throw error;}
+    return this.document(id);
+  }
   approveDocument(id,opinion,signature){return this.transition(id,'approve',opinion,signatureBytes(signature));}
   reviewerTransition(id,reviewerId,action,opinion,signature){if(!['approve','reject'].includes(action)||!this.reviewerDocument(reviewerId,id))throw new Error('현재 차례의 결재자를 확인해 주세요.');return this.transition(id,action,opinion,action==='approve'?signatureBytes(signature):null,Number(reviewerId));}
   approveDocuments(siteId,ids,signature){

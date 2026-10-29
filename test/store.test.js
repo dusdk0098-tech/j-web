@@ -229,6 +229,17 @@ test('식당 시험 설정은 현장별로 저장하며 잘못된 수정을 거�
   }finally{s.close();}
 });
 
+test('가상 공지는 지정 현장과 날짜에 게시되고 이력을 원자적으로 기록한다',()=>{
+  const s=new Store(':memory:');try{
+    const a=s.createSite({name:'가상 A'}),b=s.createSite({name:'가상 B'}),worker=siteId=>s.createWorker({siteId,name:'가상 근로자',category:'직영',company:'가상 업체',occupation:'목공'}),one=worker(a.id),other=worker(b.id),input={siteId:a.id,type:'notice',title:'가상 공지',body:'가상 내용',date:'2026-10-30'},doc=s.createDocument(input);
+    assert.deepEqual(s.workerNotices(one.id,'2026-10-30'),[]);assert.equal(s.publishNotice(doc.id).status,'approved');assert.deepEqual(s.events(doc.id).map(e=>e.action),['publish']);
+    assert.deepEqual(s.workerNotices(one.id,'2026-10-30').map(d=>d.id),[doc.id]);assert.deepEqual(s.workerNotices(one.id,'2026-10-29'),[]);assert.deepEqual(s.workerNotices(other.id,'2026-10-30'),[]);assert.throws(()=>s.publishNotice(doc.id),/임시저장/);
+    const empty=s.createDocument({...input,body:''});assert.throws(()=>s.publishNotice(empty.id),/내용/);const tbm=s.createDocument({...input,type:'tbm'});assert.throws(()=>s.publishNotice(tbm.id),/공지/);
+    const reviewer=s.createReviewer({siteId:a.id,loginId:'notice_review',name:'가상 결재자',password:'virtual-password-123'}),reviewed=s.createDocument(input);s.setApprovalLine(reviewed.id,[reviewer.id]);assert.throws(()=>s.publishNotice(reviewed.id),/결재선/);assert.equal(s.document(reviewed.id).status,'draft');
+    const failing=s.createDocument(input);s.db.exec("CREATE TRIGGER fail_notice_publish BEFORE INSERT ON events WHEN NEW.action='publish' BEGIN SELECT RAISE(ABORT,'시험 오류'); END");assert.throws(()=>s.publishNotice(failing.id),/시험 오류/);assert.equal(s.document(failing.id).status,'draft');assert.deepEqual(s.events(failing.id),[]);
+  }finally{s.close();}
+});
+
 test('주간 활동은 7일과 현장을 제한하고 문서·가상 확인을 날짜별로 집계한다',()=>{
   const s=new Store(':memory:');try{const a=s.createSite({name:'가상 A'}),b=s.createSite({name:'가상 B'}),worker=s.createWorker({siteId:a.id,name:'가상 근로자',category:'직영',company:'가상 회사',occupation:'목공'});s.setAttendance({siteId:a.id,workerId:worker.id,date:'2024-02-29',present:true});const add=(siteId,date,type)=>s.createDocument({siteId,date,type,title:'가상 문서'}),notice=add(a.id,'2024-02-29','notice'),tbm=add(a.id,'2024-03-01','tbm');add(b.id,'2024-02-29','notice');for(const doc of [notice,tbm]){s.transition(doc.id,'submit');s.transition(doc.id,'approve');}const png=new PNG({width:1,height:1});png.data[3]=255;s.confirmWorkerNotice(worker.id,notice.id,`data:image/png;base64,${PNG.sync.write(png).toString('base64')}`,'2024-02-29');s.confirmWorkerTraining(worker.id,tbm.id,'2024-03-01',true);const rows=s.weeklyActivity(a.id,'2024-02-27');assert.equal(rows.length,7);assert.equal(rows[6].date,'2024-03-04');const leap=rows.find(r=>r.date==='2024-02-29');assert.equal(leap.attendance,1);assert.equal(leap.documents.notice,1);assert.equal(leap.noticeReads,1);assert.equal(rows.find(r=>r.date==='2024-03-01').trainingChecks,1);assert.equal(s.weeklyActivity(b.id,'2024-02-27').find(r=>r.date==='2024-02-29').noticeReads,0);assert.throws(()=>s.weeklyActivity(a.id,'2024-02-30'),/날짜/);}finally{s.close();}
 });
