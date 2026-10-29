@@ -74,6 +74,8 @@ export class Store {
       CREATE TABLE IF NOT EXISTS equipment_checks (id INTEGER PRIMARY KEY,document_id INTEGER NOT NULL REFERENCES documents(id),equipment_id INTEGER NOT NULL REFERENCES equipment(id),date TEXT NOT NULL,items TEXT NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,UNIQUE(document_id,equipment_id,date));
       CREATE TABLE IF NOT EXISTS workers (id INTEGER PRIMARY KEY, site_id INTEGER NOT NULL REFERENCES sites(id), name TEXT NOT NULL, category TEXT NOT NULL, company TEXT NOT NULL, occupation TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS worker_accounts (worker_id INTEGER PRIMARY KEY REFERENCES workers(id),site_id INTEGER NOT NULL REFERENCES sites(id),login_id TEXT NOT NULL,salt BLOB NOT NULL,password_hash BLOB NOT NULL,UNIQUE(site_id,login_id));
+      CREATE TABLE IF NOT EXISTS worker_permissions (worker_id INTEGER NOT NULL REFERENCES workers(id),permission TEXT NOT NULL,PRIMARY KEY(worker_id,permission));
+      CREATE TABLE IF NOT EXISTS delegated_attendance_events (id INTEGER PRIMARY KEY,site_id INTEGER NOT NULL REFERENCES sites(id),actor_id INTEGER NOT NULL REFERENCES workers(id),actor_name TEXT NOT NULL,worker_id INTEGER NOT NULL REFERENCES workers(id),worker_name TEXT NOT NULL,date TEXT NOT NULL,present INTEGER NOT NULL CHECK(present IN (0,1)),created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
       CREATE TABLE IF NOT EXISTS worker_files (id INTEGER PRIMARY KEY,worker_id INTEGER NOT NULL REFERENCES workers(id),category TEXT NOT NULL,name TEXT NOT NULL,data BLOB NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
       CREATE TABLE IF NOT EXISTS attendance (worker_id INTEGER NOT NULL REFERENCES workers(id), date TEXT NOT NULL, present INTEGER NOT NULL CHECK(present IN (0,1)), updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY(worker_id,date));
       CREATE TABLE IF NOT EXISTS documents (id INTEGER PRIMARY KEY, site_id INTEGER NOT NULL REFERENCES sites(id), type TEXT NOT NULL, title TEXT NOT NULL, date TEXT NOT NULL, body TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'draft', updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
@@ -710,15 +712,35 @@ export class Store {
     this.db.prepare('INSERT OR IGNORE INTO worker_self_checks(worker_id,date,signature,answers) VALUES(?,?,?,?)').run(Number(workerId),date,bytes,JSON.stringify(Object.fromEntries(['equipment','sober','exercise','briefing'].map(key=>[key,answers[key]]))));
     return this.workerSelfCheck(workerId,date);
   }
+  workerPermissions(siteId,workerId){
+    if(!this.db.prepare('SELECT 1 FROM workers WHERE id=? AND site_id=?').get(Number(workerId),Number(siteId)))throw new Error('선택한 현장의 출입자를 확인해 주세요.');
+    return this.db.prepare('SELECT permission FROM worker_permissions WHERE worker_id=? ORDER BY permission').all(Number(workerId)).map(row=>row.permission);
+  }
+  setWorkerPermissions(siteId,workerId,permissions){
+    this.workerPermissions(siteId,workerId);if(!Array.isArray(permissions)||permissions.some(value=>value!=='attendance')||new Set(permissions).size!==permissions.length)throw new Error('시험 권한을 확인해 주세요.');
+    if(permissions.length&&!this.db.prepare('SELECT 1 FROM worker_accounts WHERE site_id=? AND worker_id=?').get(Number(siteId),Number(workerId)))throw new Error('시험 계정이 있는 출입자를 선택해 주세요.');
+    this.db.exec('SAVEPOINT permission_update');try{this.db.prepare('DELETE FROM worker_permissions WHERE worker_id=?').run(Number(workerId));for(const permission of permissions)this.db.prepare('INSERT INTO worker_permissions(worker_id,permission) VALUES(?,?)').run(Number(workerId),permission);this.db.exec('RELEASE permission_update');}catch(error){this.db.exec('ROLLBACK TO permission_update');this.db.exec('RELEASE permission_update');throw error;}
+    return this.workerPermissions(siteId,workerId);
+  }
+  delegatedAttendance(siteId,actorId,date){
+    if(!this.workerPermissions(siteId,actorId).includes('attendance'))throw new Error('출역 관리 시험 권한이 필요합니다.');
+    return this.attendance(siteId,date).map(({id,name,category,company,occupation,present})=>({id,name,category,company,occupation,present}));
+  }
+  setDelegatedAttendance(siteId,actorId,input){
+    if(!this.workerPermissions(siteId,actorId).includes('attendance'))throw new Error('출역 관리 시험 권한이 필요합니다.');
+    const date=dateValue(input.date),actor=this.db.prepare('SELECT name FROM workers WHERE id=? AND site_id=?').get(Number(actorId),Number(siteId)),target=this.db.prepare('SELECT name FROM workers WHERE id=? AND site_id=?').get(Number(input.workerId),Number(siteId));if(!target)throw new Error('같은 현장의 출입자를 확인해 주세요.');
+    this.db.exec('BEGIN IMMEDIATE');try{this.setAttendance({siteId,workerId:input.workerId,date,present:input.present});this.db.prepare("UPDATE attendance SET source='delegated' WHERE worker_id=? AND date=?").run(Number(input.workerId),date);this.db.prepare('INSERT INTO delegated_attendance_events(site_id,actor_id,actor_name,worker_id,worker_name,date,present) VALUES(?,?,?,?,?,?,?)').run(Number(siteId),Number(actorId),actor.name,Number(input.workerId),target.name,date,input.present?1:0);this.db.exec('COMMIT');}catch(error){this.db.exec('ROLLBACK');throw error;}
+  }
+  delegatedAttendanceEvents(siteId,date){date=dateValue(date);return this.db.prepare('SELECT id,actor_name,worker_name,present,created_at FROM delegated_attendance_events WHERE site_id=? AND date=? ORDER BY id DESC').all(Number(siteId),date);}
   setAttendance(input) {
     const date = dateValue(input.date);
     if (typeof input.present !== 'boolean') throw new Error('출역 상태를 확인해 주세요.');
     const worker = this.db.prepare('SELECT id,company,occupation,category FROM workers WHERE id=? AND site_id=?').get(Number(input.workerId),Number(input.siteId));
     if (!worker) throw new Error('선택한 현장의 출입자를 확인해 주세요.');
-    this.db.exec('BEGIN IMMEDIATE');try{
+    this.db.exec('SAVEPOINT attendance_update');try{
     const previous=this.db.prepare('SELECT present FROM attendance WHERE worker_id=? AND date=?').get(worker.id,date);
     this.db.prepare("INSERT INTO attendance(worker_id,date,present,company_snapshot,occupation_snapshot,category_snapshot,source) VALUES(?,?,?,?,?,?,'manual') ON CONFLICT(worker_id,date) DO UPDATE SET company_snapshot=CASE WHEN attendance.present=0 AND excluded.present=1 THEN excluded.company_snapshot ELSE attendance.company_snapshot END,occupation_snapshot=CASE WHEN attendance.present=0 AND excluded.present=1 THEN excluded.occupation_snapshot ELSE attendance.occupation_snapshot END,category_snapshot=CASE WHEN attendance.present=0 AND excluded.present=1 THEN excluded.category_snapshot ELSE attendance.category_snapshot END,present=excluded.present,source='manual',updated_at=CURRENT_TIMESTAMP").run(worker.id,date,input.present?1:0,input.present?worker.company:null,input.present?worker.occupation:null,input.present?worker.category:null);
-    if(input.present&&!previous?.present)this.applyMealDefaults(worker.id,date);this.db.exec('COMMIT');}catch(error){this.db.exec('ROLLBACK');throw error;}
+    if(input.present&&!previous?.present)this.applyMealDefaults(worker.id,date);this.db.exec('RELEASE attendance_update');}catch(error){this.db.exec('ROLLBACK TO attendance_update');this.db.exec('RELEASE attendance_update');throw error;}
   }
   setAttendanceUnits(input){
     const date=dateValue(input.date),value=input.units;if(typeof value!=='string'||!/^$|^\d(?:\.\d{1,2})?$/.test(value))throw new Error('시험 공수는 0부터 9.99까지 입력해 주세요.');

@@ -117,6 +117,15 @@ const server = http.createServer(async (req, res) => {
       const input=await body(req);if(!Number.isSafeInteger(input.siteId)||input.siteId!==session.worker.site_id)return json(res,400,{error:'로그인한 현장을 확인해 주세요.'});
       const now=new Date(),date=new Date(now.getTime()-now.getTimezoneOffset()*60000).toISOString().slice(0,10);store.recordWorkerLogin(session.worker.id,date);return json(res,200,{ok:true});
     }
+    if(url.pathname==='/api/worker/permissions'&&req.method==='GET'){
+      const session=workerSessions.get(workerKey(workerToken));if(!session||session.expires<=Date.now())return json(res,401,{error:'근로자 로그인이 필요합니다.'});return json(res,200,store.workerPermissions(session.worker.site_id,session.worker.id));
+    }
+    if(url.pathname==='/api/worker/managed-attendance'&&['GET','PUT'].includes(req.method)){
+      const session=workerSessions.get(workerKey(workerToken));if(!session||session.expires<=Date.now())return json(res,401,{error:'근로자 로그인이 필요합니다.'});const {site_id:siteId,id:workerId}=session.worker;
+      if(!store.workerPermissions(siteId,workerId).includes('attendance'))return json(res,403,{error:'출역 관리 시험 권한이 필요합니다.'});
+      if(req.method==='GET')return json(res,200,store.delegatedAttendance(siteId,workerId,url.searchParams.get('date')));
+      const input=await body(req);store.setDelegatedAttendance(siteId,workerId,input);return json(res,200,{ok:true});
+    }
     if(url.pathname==='/api/worker/attendance' && req.method==='GET'){
       const key=workerKey(workerToken),session=workerSessions.get(key);
       if(!session || session.expires<=Date.now()){workerSessions.delete(key);return json(res,401,{error:'근로자 로그인이 필요합니다.'});}
@@ -465,6 +474,8 @@ const server = http.createServer(async (req, res) => {
       if (req.method === 'POST') return json(res,201,store.createWorker(await body(req)));
     }
     const worker=url.pathname.match(/^\/api\/workers\/(\d+)$/);
+    const workerPermissions=url.pathname.match(/^\/api\/workers\/(\d+)\/permissions$/);
+    if(workerPermissions){if(req.method==='GET')return json(res,200,store.workerPermissions(url.searchParams.get('siteId'),workerPermissions[1]));if(req.method==='PUT'){const input=await body(req);return json(res,200,store.setWorkerPermissions(input.siteId,workerPermissions[1],input.permissions));}}
     const workerActivity=url.pathname.match(/^\/api\/workers\/(\d+)\/activities$/);
     if(workerActivity&&req.method==='GET'){const raw=url.searchParams.get('offset')||'0';if(!/^\d+$/.test(raw))throw new Error('활동 검색 조건을 확인해 주세요.');return json(res,200,store.workerActivities(url.searchParams.get('siteId'),workerActivity[1],url.searchParams.getAll('kind'),Number(raw)));}
     const workerPassword=url.pathname.match(/^\/api\/workers\/(\d+)\/password$/);
@@ -504,6 +515,7 @@ const server = http.createServer(async (req, res) => {
       if (req.method === 'POST') {store.setAttendance(await body(req));return json(res,200,{ok:true});}
     }
     if (url.pathname === '/api/attendance/report' && req.method === 'GET') return json(res,200,store.attendanceReport(url.searchParams.get('siteId'),url.searchParams.get('from'),url.searchParams.get('to'),url.searchParams.get('group')));
+    if (url.pathname === '/api/attendance/delegated-events' && req.method === 'GET') return json(res,200,store.delegatedAttendanceEvents(url.searchParams.get('siteId'),url.searchParams.get('date')));
     if (url.pathname === '/api/documents') {
       if (req.method === 'GET') return json(res,200,store.documents(url.searchParams.get('siteId'),url.searchParams.get('type') || '',url.searchParams.get('q') || '',url.searchParams.get('from') || '',url.searchParams.get('to') || ''));
       if (req.method === 'POST') return json(res,201,store.createDocument(await body(req)));

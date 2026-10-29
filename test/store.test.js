@@ -727,6 +727,17 @@ test('현장과 출입자를 분리하고 문서 결재 이력을 보존한다',
   } finally {s.close();}
 });
 
+test('출역 관리 시험 권한은 현장과 계정에 한정되고 변경 이력을 원자적으로 남긴다',()=>{
+  const dir=mkdtempSync(join(tmpdir(),'jweb-delegated-')),file=join(dir,'data.sqlite');let s=new Store(file);
+  try{
+    const a=s.createSite({name:'가상 A'}),b=s.createSite({name:'가상 B'}),invite=s.createInvitation(a.id),actor=s.join(invite.token,{name:'가상 담당',category:'직영',company:'가상 업체',occupation:'가상 직종',loginId:'delegated_worker',password:'virtual-password-123',acknowledged:true}),make=siteId=>s.createWorker({siteId,name:'가상 대상',category:'직영',company:'가상 업체',occupation:'가상 직종'}),target=make(a.id),foreign=make(b.id),date='2026-10-29';
+    assert.deepEqual(s.workerPermissions(a.id,actor.id),[]);assert.throws(()=>s.delegatedAttendance(a.id,actor.id,date),/권한/);assert.throws(()=>s.setWorkerPermissions(a.id,target.id,['attendance']),/계정/);assert.throws(()=>s.setWorkerPermissions(b.id,actor.id,['attendance']),/현장/);assert.throws(()=>s.setWorkerPermissions(a.id,actor.id,['unknown']),/권한/);
+    s.setWorkerPermissions(a.id,actor.id,['attendance']);assert.throws(()=>s.setDelegatedAttendance(a.id,actor.id,{workerId:foreign.id,date,present:true}),/현장/);s.setDelegatedAttendance(a.id,actor.id,{workerId:target.id,date:` ${date} `,present:true});assert.equal(s.attendance(a.id,date).find(row=>row.id===target.id).source,'delegated');assert.equal(s.delegatedAttendance(a.id,actor.id,date).find(row=>row.id===target.id).present,1);assert.equal('daily_rate' in s.delegatedAttendance(a.id,actor.id,date)[0],false);
+    s.db.exec("CREATE TRIGGER fail_delegated_event BEFORE INSERT ON delegated_attendance_events BEGIN SELECT RAISE(ABORT,'기록 시험 오류'); END");assert.throws(()=>s.setDelegatedAttendance(a.id,actor.id,{workerId:target.id,date,present:false}),/기록 시험 오류/);assert.equal(s.attendance(a.id,date).find(row=>row.id===target.id).present,1);s.db.exec('DROP TRIGGER fail_delegated_event');s.close();s=new Store(file);
+    assert.deepEqual(s.workerPermissions(a.id,actor.id),['attendance']);assert.equal(s.delegatedAttendanceEvents(a.id,date)[0].actor_name,'가상 담당');assert.deepEqual(s.delegatedAttendanceEvents(b.id,date),[]);s.setWorkerPermissions(a.id,actor.id,[]);assert.throws(()=>s.setDelegatedAttendance(a.id,actor.id,{workerId:target.id,date,present:false}),/권한/);assert.equal(s.attendance(a.id,date).find(row=>row.id===target.id).present,1);
+  }finally{s.close();rmSync(dir,{recursive:true,force:true});}
+});
+
 test('현장별 휴일과 작업 종료는 독립적으로 접속과 자동 출역을 차단한다',()=>{
   const dir=mkdtempSync(join(tmpdir(),'jweb-blocks-')),file=join(dir,'data.sqlite');let s=new Store(file);
   try{
