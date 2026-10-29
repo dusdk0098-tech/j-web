@@ -1,3 +1,5 @@
+import { riskScaleOptions } from './public/risk-scale.js';
+
 export const types = {
   notice: '유해·위험 공지', tbm: 'TBM', education: '안전 교육 서류',
   inspection: '안전 점검 일지', patrol: '순회 점검 일지', safety_log: '안전 업무 일지',
@@ -182,7 +184,7 @@ export function recordInput(input) {
       for(const key of ['grade','likelihood','severity'])if(item[key]!==undefined){
         if(typeof item[key]!=='string')throw new Error('위험성 척도 입력을 확인해 주세요.');
         const v=item[key],scale=value.scale||'';
-        if(v&&((key==='grade'&&(scale!=='three-level'||!['상','중','하'].includes(v)))||(key==='likelihood'&&(!['3x3','5x4'].includes(scale)||!(/^\d$/.test(v))||Number(v)<1||Number(v)>(scale==='3x3'?3:5)))||(key==='severity'&&(!['3x3','5x4'].includes(scale)||!(/^\d$/.test(v))||Number(v)<1||Number(v)>(scale==='3x3'?3:4)))))throw new Error('위험성 척도 입력을 확인해 주세요.');
+        if(v&&!riskScaleOptions(scale,key).includes(v))throw new Error('위험성 척도 입력을 확인해 주세요.');
         row[key]=v;
       }
       for(const key of ['dueDate','completionDate']){
