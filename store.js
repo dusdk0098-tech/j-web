@@ -563,6 +563,9 @@ export class Store {
     if(!['tbm','education','meeting'].includes(kind))throw new Error('교육 종류를 확인해 주세요.');
     return this.db.prepare('SELECT c.signature FROM worker_daily_training c JOIN workers w ON w.id=c.worker_id WHERE w.site_id=? AND w.id=? AND c.date=? AND c.kind=? AND c.signature IS NOT NULL').get(Number(siteId),Number(workerId),dateValue(date),kind)?.signature || null;
   }
+  documentTrainingSignature(documentId,workerId){
+    return this.db.prepare("SELECT c.signature FROM documents d JOIN workers w ON w.site_id=d.site_id JOIN worker_daily_training c ON c.worker_id=w.id AND c.date=d.date AND c.kind=d.type WHERE d.id=? AND w.id=? AND d.type IN ('tbm','education') AND c.signature IS NOT NULL AND (NOT EXISTS (SELECT 1 FROM training_target_config t WHERE t.document_id=d.id) OR EXISTS (SELECT 1 FROM training_targets t WHERE t.document_id=d.id AND t.worker_id=w.id))").get(Number(documentId),Number(workerId))?.signature||null;
+  }
   confirmWorkerTraining(workerId,documentId,date,rightsConfirmed) {
     date=dateValue(date);
     const doc=this.db.prepare("SELECT d.id FROM workers w JOIN documents d ON d.site_id=w.site_id WHERE w.id=? AND d.id=? AND d.type IN ('tbm','education') AND d.status='approved' AND d.date=? AND (NOT EXISTS (SELECT 1 FROM training_target_config t WHERE t.document_id=d.id) OR EXISTS (SELECT 1 FROM training_targets t WHERE t.document_id=d.id AND t.worker_id=w.id))").get(Number(workerId),Number(documentId),date);
