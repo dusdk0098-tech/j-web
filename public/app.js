@@ -9,6 +9,7 @@ import { attendanceMealChange } from './attendance-meals.js';
 import { jointExamples } from './joint-examples.js';
 import { mergeSafetyLogSources } from './safety-log-sources.js';
 import { mountMusculoskeletal } from './musculoskeletal.js';
+import { scheduleTypes } from './schedule.js';
 
 const $ = (s) => document.querySelector(s);
 const content = $('#content'), siteSelect = $('#site-select'), dialog = $('#dialog'), notice = $('#notice');
@@ -26,6 +27,7 @@ labels['basic-categories']='기본 서류 분류';
 labels['ppe-issues']='보호구 지급';
 labels['reviewers']='시험 결재자';
 labels['worker-access-blocks']='출입자 접속 차단';
+labels['schedules']='일정 관리';
 document.querySelector('[data-page=stops]').insertAdjacentHTML('afterend','<button data-page="hazards">의견제안 및 위험신고</button>');
 document.querySelector('[data-page=attendance]').insertAdjacentHTML('afterend','<button data-page="restaurants">식대 기본설정</button>');
 document.querySelector('[data-page=restaurants]').insertAdjacentHTML('afterend','<button data-page="meal-checks">식대 체크</button>');
@@ -38,6 +40,7 @@ document.querySelector('[data-page=workers]').insertAdjacentHTML('afterend','<bu
 document.querySelector('[data-page=site-occupations]').insertAdjacentHTML('afterend','<button data-page="ppe-issues">보호구 지급</button>');
 document.querySelector('[data-page=documents]').insertAdjacentHTML('afterend','<button data-page="basic-categories">기본 서류 분류</button>');
 document.querySelector('[data-page=approval]').insertAdjacentHTML('afterend','<button data-page="reviewers">시험 결재자</button>');
+document.querySelector('[data-page=documents]').insertAdjacentHTML('beforebegin','<button data-page="schedules">일정 관리</button>');
 const statusLabels = {draft:'임시저장',pending:'결재 대기',approved:'승인',rejected:'반려'};
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const today = () => new Date(Date.now() - new Date().getTimezoneOffset()*60000).toISOString().slice(0,10);
@@ -613,6 +616,19 @@ async function render(){
   document.querySelectorAll('[data-page]').forEach(b=>b.classList.toggle('selected',b.dataset.page===state.page));
   if(!state.siteId){content.innerHTML='<section class="panel empty">먼저 현장을 추가해 주세요. 시험을 위해 가상의 현장명을 사용하세요.</section>';return;}
   if(state.detail)return renderDetail();
+  if(state.page==='schedules'){
+    const siteId=state.siteId,month=state.scheduleMonth||today().slice(0,7),query=state.query,view=state.scheduleView||'calendar',rows=await api(`/api/schedules?${new URLSearchParams({siteId:String(siteId),month,q:query})}`);
+    if(state.siteId!==siteId||state.page!=='schedules'||(state.scheduleMonth||today().slice(0,7))!==month||state.query!==query)return;
+    const days=new Date(Number(month.slice(0,4)),Number(month.slice(5,7)),0).getDate(),first=new Date(Number(month.slice(0,4)),Number(month.slice(5,7))-1,1).getDay(),item=row=>`<button type="button" data-schedule-edit="${row.id}">${esc(row.kind)} · ${esc(row.content)}</button>`;
+    const table=rows.length?`<div class="table-wrap"><table><thead><tr><th>구분</th><th>기간</th><th>내용</th><th>관리</th></tr></thead><tbody>${rows.map(row=>`<tr><td>${esc(row.kind)}</td><td>${esc(row.start_date)} ${esc(row.start_time)} ~ ${esc(row.end_date)} ${esc(row.end_time)}</td><td>${esc(row.content)}</td><td>${item(row)}</td></tr>`).join('')}</tbody></table></div>`:'<p>등록된 시험 일정이 없습니다.</p>';
+    const calendar=`<div class="block-calendar schedule-calendar">${['일','월','화','수','목','금','토'].map(day=>`<strong>${day}</strong>`).join('')}${'<span></span>'.repeat(first)}${Array.from({length:days},(_,i)=>{const day=`${month}-${String(i+1).padStart(2,'0')}`;return `<div><strong>${i+1}</strong>${rows.filter(row=>row.start_date<=day&&row.end_date>=day).map(item).join('')}</div>`;}).join('')}</div>`;
+    content.innerHTML=`<section class="panel"><div class="panel-head"><h2>가상 일정 관리</h2><button type="button" id="schedule-add">일정 등록</button></div><p class="muted">가상 기록이며 실제 업무 알림이나 다른 사용자와의 공유는 지원하지 않습니다.</p><div class="filters"><button type="button" id="schedule-prev">이전 달</button><button type="button" id="schedule-next">다음 달</button><button type="button" id="schedule-today">오늘</button><label>조회 월 <input type="month" id="schedule-month" value="${esc(month)}"></label><label>검색어 <input id="schedule-query" maxlength="200" value="${esc(query)}"></label><button type="button" id="schedule-load">조회</button><button type="button" id="schedule-view">${view==='calendar'?'표 형태로 보기':'달력 형태로 보기'}</button></div>${view==='calendar'?calendar:table}</section>`;
+    $('#schedule-load').onclick=()=>{const value=$('#schedule-month').value;if(!/^\d{4}-(0[1-9]|1[0-2])$/.test(value)){flash('조회할 월을 확인해 주세요.',true);return;}state.scheduleMonth=value;state.query=$('#schedule-query').value;render().catch(showError);};
+    $('#schedule-view').onclick=()=>{state.scheduleView=view==='calendar'?'list':'calendar';render().catch(showError);};
+    const shift=offset=>{const date=new Date(Number(month.slice(0,4)),Number(month.slice(5,7))-1+offset,1),year=date.getFullYear();if(year<1000||year>9999)return;state.scheduleMonth=`${year}-${String(date.getMonth()+1).padStart(2,'0')}`;render().catch(showError);};$('#schedule-prev').onclick=()=>shift(-1);$('#schedule-next').onclick=()=>shift(1);$('#schedule-today').onclick=()=>{state.scheduleMonth=today().slice(0,7);render().catch(showError);};
+    const edit=row=>showDialog(row?'가상 일정 수정':'가상 일정 등록',`<div class="fields"><label>구분<select name="kind" required><option value="">선택하세요</option>${scheduleTypes.map(type=>`<option ${row?.kind===type?'selected':''}>${esc(type)}</option>`).join('')}</select></label>${field('startDate','시작일',row?.start_date||today(),'date')}${field('startTime','시작 시각',row?.start_time||'','time',false)}${field('endDate','종료일',row?.end_date||today(),'date')}${field('endTime','종료 시각',row?.end_time||'','time',false)}${field('content','내용',row?.content||'')}</div>${row?'<button type="button" id="schedule-delete">가상 일정 삭제</button>':''}`,data=>api(row?`/api/schedules/${row.id}`:'/api/schedules',{method:row?'PUT':'POST',body:JSON.stringify({...data,siteId})}));
+    $('#schedule-add').onclick=()=>edit(null);content.querySelectorAll('[data-schedule-edit]').forEach(button=>button.onclick=()=>{const row=rows.find(item=>item.id===Number(button.dataset.scheduleEdit));edit(row);$('#schedule-delete').onclick=async()=>{if(!confirm('가상 일정을 삭제할까요?'))return;try{await api(`/api/schedules/${row.id}`,{method:'DELETE',body:JSON.stringify({siteId})});dialog.close();await render();}catch(error){$('#dialog-error').textContent=error.message;}};});return;
+  }
   if(state.page==='worker-access-blocks'){
     const siteId=state.siteId,month=state.blockMonth||today().slice(0,7),currentMonth=today().slice(0,7),path=value=>`/api/sites/${siteId}/worker-access-blocks?month=${encodeURIComponent(value)}`,[blocks,currentBlocks]=await Promise.all([api(path(month)),month===currentMonth?Promise.resolve(null):api(path(currentMonth))]);if(state.siteId!==siteId||state.page!=='worker-access-blocks'||(state.blockMonth||today().slice(0,7))!==month)return;
     const todayBlocks=currentBlocks||blocks,days=new Date(Number(month.slice(0,4)),Number(month.slice(5,7)),0).getDate(),ended=todayBlocks.some(row=>row.date===today()&&row.kind==='ended');

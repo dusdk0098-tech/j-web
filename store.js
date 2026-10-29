@@ -2,6 +2,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { createHash, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
 import { dateValue, recordInput, text, transitions } from './domain.js';
 import { PNG } from 'pngjs';
+import { scheduleTypes } from './public/schedule.js';
 
 function monthValue(month) {
   if(typeof month!=='string' || !/^\d{4}-(0[1-9]|1[0-2])$/.test(month) || Number(month.slice(0,4))<1000)throw new Error('조회할 월을 확인해 주세요.');
@@ -51,6 +52,7 @@ export class Store {
       CREATE TABLE IF NOT EXISTS sites (id INTEGER PRIMARY KEY, name TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
       CREATE TABLE IF NOT EXISTS site_access (site_id INTEGER PRIMARY KEY REFERENCES sites(id),access_key TEXT NOT NULL UNIQUE);
       CREATE TABLE IF NOT EXISTS site_registration (site_id INTEGER PRIMARY KEY REFERENCES sites(id),expires_at INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS schedules (id INTEGER PRIMARY KEY,site_id INTEGER NOT NULL REFERENCES sites(id),kind TEXT NOT NULL,start_date TEXT NOT NULL,end_date TEXT NOT NULL,start_time TEXT NOT NULL,end_time TEXT NOT NULL,content TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS site_worker_blocks (site_id INTEGER NOT NULL REFERENCES sites(id),date TEXT NOT NULL,kind TEXT NOT NULL CHECK(kind IN ('holiday','ended')),PRIMARY KEY(site_id,date,kind));
       CREATE TABLE IF NOT EXISTS site_articles (id INTEGER PRIMARY KEY,site_id INTEGER NOT NULL REFERENCES sites(id),category TEXT NOT NULL,title TEXT NOT NULL,body TEXT NOT NULL,visible INTEGER NOT NULL CHECK(visible IN (0,1)),created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
       CREATE TABLE IF NOT EXISTS site_photos (id INTEGER PRIMARY KEY,site_id INTEGER NOT NULL REFERENCES sites(id),name TEXT NOT NULL,date TEXT NOT NULL,description TEXT NOT NULL DEFAULT '',data BLOB NOT NULL);
@@ -213,6 +215,20 @@ export class Store {
     if(!this.db.prepare('UPDATE site_photos SET date=?,description=? WHERE site_id=? AND id=?').run(date,input.description.trim(),Number(siteId),Number(id)).changes)throw new Error('사진을 찾을 수 없습니다.');
   }
   deleteSitePhoto(siteId,id){if(!this.db.prepare('DELETE FROM site_photos WHERE site_id=? AND id=?').run(Number(siteId),Number(id)).changes)throw new Error('사진을 찾을 수 없습니다.');}
+  schedules(siteId,month,query='') {
+    month=monthValue(month);if(typeof query!=='string'||query.length>200)throw new Error('검색어를 확인해 주세요.');
+    return this.db.prepare('SELECT * FROM schedules WHERE site_id=? AND substr(start_date,1,7)<=? AND substr(end_date,1,7)>=? AND instr(content,?)>0 ORDER BY start_date,start_time,id').all(Number(siteId),month,month,query);
+  }
+  saveSchedule(input,id=null){
+    const siteId=Number(input.siteId);if(!this.db.prepare('SELECT 1 FROM sites WHERE id=?').get(siteId))throw new Error('현장을 선택해 주세요.');
+    if(!scheduleTypes.includes(input.kind))throw new Error('일정 구분을 확인해 주세요.');
+    const start=dateValue(input.startDate),end=dateValue(input.endDate),startTime=input.startTime??'',endTime=input.endTime??'',content=text(input.content,'일정 내용',200);
+    if(![startTime,endTime].every(t=>typeof t==='string'&&(t===''||/^([01]\d|2[0-3]):[0-5]\d$/.test(t)))||start>end||(start===end&&startTime&&endTime&&startTime>endTime))throw new Error('일정 기간과 시간을 확인해 주세요.');
+    if(id===null)id=this.db.prepare('INSERT INTO schedules(site_id,kind,start_date,end_date,start_time,end_time,content) VALUES(?,?,?,?,?,?,?)').run(siteId,input.kind,start,end,startTime,endTime,content).lastInsertRowid;
+    else if(!this.db.prepare('UPDATE schedules SET kind=?,start_date=?,end_date=?,start_time=?,end_time=?,content=? WHERE id=? AND site_id=?').run(input.kind,start,end,startTime,endTime,content,Number(id),siteId).changes)throw new Error('선택한 현장의 일정을 확인해 주세요.');
+    return this.db.prepare('SELECT * FROM schedules WHERE id=? AND site_id=?').get(Number(id),siteId);
+  }
+  deleteSchedule(siteId,id){if(!this.db.prepare('DELETE FROM schedules WHERE site_id=? AND id=?').run(Number(siteId),Number(id)).changes)throw new Error('선택한 현장의 일정을 확인해 주세요.');}
   siteArticles(siteId,category='',query='') {
     if(!['','안전·보건','기타'].includes(category)||typeof query!=='string'||query.length>200)throw new Error('검색 조건을 확인해 주세요.');
     return this.db.prepare("SELECT id,category,title,body,visible,created_at FROM site_articles WHERE site_id=? AND (?='' OR category=?) AND (instr(title,?)>0 OR instr(body,?)>0) ORDER BY id DESC").all(Number(siteId),category,category,query,query).map(a=>({...a,files:this.articleFiles(a.id)}));

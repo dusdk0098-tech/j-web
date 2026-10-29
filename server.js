@@ -31,7 +31,7 @@ const workerKey=raw=>typeof raw==='string' && /^[\w-]{43}$/.test(raw)?createHash
 function workerSessionError(raw,expected){const now=new Date(),session=workerSessions.get(workerKey(raw));if(session!==expected||!session||session.expires<=now.getTime())return {status:401,error:'근로자 로그인이 필요합니다.'};const date=new Date(now.getTime()-now.getTimezoneOffset()*60000).toISOString().slice(0,10);return store.workerAccessBlocked(session.worker.site_id,date)?{status:403,error:'해당 현장은 오늘 근로자 접속이 차단되었습니다.'}:null;}
 delete process.env.JWEB_ADMIN_PASSWORD;
 const mime = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg':'image/svg+xml', '.png':'image/png' };
-const assets = new Set(['/','/app.js','/batch-print.js','/risk-scale.js','/musculoskeletal.js','/worker-link.js','/worker-documents.js','/site-qr.js','/tbm-sources.js','/training-groups.js','/restaurant-price.js','/salary-summary.js','/attendance-meals.js','/joint-examples.js','/safety-log-sources.js','/style.css','/jweb-icon.svg','/jweb-icon-192.png','/jweb-icon-512.png','/join','/join.js','/login','/login.js','/review','/review.js']);
+const assets = new Set(['/','/app.js','/schedule.js','/batch-print.js','/risk-scale.js','/musculoskeletal.js','/worker-link.js','/worker-documents.js','/site-qr.js','/tbm-sources.js','/training-groups.js','/restaurant-price.js','/salary-summary.js','/attendance-meals.js','/joint-examples.js','/safety-log-sources.js','/style.css','/jweb-icon.svg','/jweb-icon-192.png','/jweb-icon-512.png','/join','/join.js','/login','/login.js','/review','/review.js']);
 const json = (res, code, value) => { res.writeHead(code, {'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}); res.end(JSON.stringify(value)); };
 function checkRequestSession(req){const failure=req.checkSession?.();if(failure)throw Object.assign(new Error(failure.error),{sessionStatus:failure.status});}
 async function body(req,max=65536) {
@@ -431,6 +431,13 @@ const server = http.createServer(async (req, res) => {
       if(fileId&&req.method==='DELETE'){store.deleteArticleFile(siteId,articleId,fileId);return json(res,200,{ok:true});}
       if(fileId&&req.method==='GET'){const file=store.articleFile(siteId,articleId,fileId);if(!file)return json(res,404,{error:'첨부파일을 찾을 수 없습니다.'});const name=encodeURIComponent(file.name).replace(/[!'()*]/g,c=>`%${c.charCodeAt(0).toString(16).toUpperCase()}`);res.writeHead(200,{'Content-Type':'application/octet-stream','Content-Disposition':`attachment; filename="attachment"; filename*=UTF-8''${name}`,'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(file.data);}
     }
+    if(url.pathname==='/api/schedules'){
+      if(req.method==='GET')return json(res,200,store.schedules(url.searchParams.get('siteId'),url.searchParams.get('month'),url.searchParams.get('q')||''));
+      if(req.method==='POST')return json(res,201,store.saveSchedule(await body(req)));
+    }
+    const schedule=url.pathname.match(/^\/api\/schedules\/(\d+)$/);
+    if(schedule&&req.method==='PUT')return json(res,200,store.saveSchedule(await body(req),schedule[1]));
+    if(schedule&&req.method==='DELETE'){const input=await body(req);store.deleteSchedule(input.siteId,schedule[1]);return json(res,200,{ok:true});}
     if(url.pathname==='/api/site-articles'){
       if(req.method==='GET')return json(res,200,store.siteArticles(url.searchParams.get('siteId'),url.searchParams.get('category')||'',url.searchParams.get('q')||''));
       if(req.method==='POST')return json(res,201,store.saveSiteArticle(await body(req)));
