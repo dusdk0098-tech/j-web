@@ -1021,6 +1021,19 @@ test('작업계획서의 역할별 작업자는 현장을 검증하고 당시 �
   }finally{s.close();}
 });
 
+test('승인된 위험요인의 개선 정보는 후속 수정해도 결재 사본을 보존한다',()=>{
+  const s=new Store(':memory:');try{
+    const site=s.createSite({name:'가상 현장'}),other=s.createSite({name:'다른 현장'}),reviewer=s.createReviewer({siteId:site.id,loginId:'improve_review',name:'가상 결재자',password:'virtual-password-123'});
+    const doc=s.createDocument({siteId:site.id,type:'risk',title:'가상 평가',date:'2026-10-29',details:{items:[{task:'첫 작업',dueDate:'2026-10-30',responsible:'기존 담당'},{task:'둘째 작업'}]}}),update={siteId:site.id,index:0,dueDate:'2026-11-01',completionDate:'2026-11-02',responsible:'새 담당'};
+    assert.throws(()=>s.updateRiskImprovement(doc.id,update),/승인/);s.setApprovalLine(doc.id,[reviewer.id]);s.transition(doc.id,'submit');const cycle=s.document(doc.id).approval_cycle_id;assert.throws(()=>s.updateRiskImprovement(doc.id,update),/승인/);
+    const png=new PNG({width:1,height:1});png.data[3]=255;s.reviewerTransition(doc.id,reviewer.id,'approve','',`data:image/png;base64,${PNG.sync.write(png).toString('base64')}`);
+    for(const invalid of [{...update,siteId:other.id},{...update,index:2},{...update,index:'0'},{...update,dueDate:'2026-02-30'},{...update,responsible:'x'.repeat(2001)}])assert.throws(()=>s.updateRiskImprovement(doc.id,invalid));
+    const result=JSON.parse(s.updateRiskImprovement(doc.id,{...update,task:'위조'}).details);assert.equal(result.items[0].task,'첫 작업');assert.equal(result.items[0].dueDate,'2026-11-01');assert.equal(result.items[0].completionDate,'2026-11-02');assert.equal(result.items[0].responsible,'새 담당');assert.equal(result.items[1].task,'둘째 작업');
+    const captured=JSON.parse(s.approvalCycle(doc.id,cycle).document.details);assert.equal(captured.items[0].dueDate,'2026-10-30');assert.equal(captured.items[0].responsible,'기존 담당');
+    const legacy=s.createDocument({siteId:site.id,type:'risk',title:'이전 평가',date:'2026-10-29',details:{task:'이전 형식'}});s.transition(legacy.id,'submit');s.transition(legacy.id,'approve');assert.equal(JSON.parse(s.updateRiskImprovement(legacy.id,{...update,index:0}).details).responsible,'새 담당');
+  }finally{s.close();}
+});
+
 test('위험요인의 등록 협력사는 현장별로 검증되고 결재 당시 이름이 보존된다',()=>{
   const s=new Store(':memory:');try{
     const site=s.createSite({name:'가상 현장 A'}),other=s.createSite({name:'가상 현장 B'}),company=s.createCompany({siteId:site.id,name:'가상 업체 A',trade:'가상 공종'}),foreign=s.createCompany({siteId:other.id,name:'다른 현장 업체',trade:'가상 공종'}),reviewer=s.createReviewer({siteId:site.id,loginId:'risk_company_review',name:'가상 결재자',password:'virtual-password-123'});

@@ -1112,6 +1112,18 @@ export class Store {
     this.db.exec('BEGIN IMMEDIATE');try{this.db.prepare('UPDATE documents SET title=?,date=?,body=?,details=?,updated_at=CURRENT_TIMESTAMP WHERE id=?').run(d.title,d.date,d.body,JSON.stringify(d.details),Number(id));if(d.type==='checklist')this.db.prepare('DELETE FROM checklist_signatures WHERE document_id=?').run(Number(id));if(d.type==='tbm')this.db.prepare('DELETE FROM tbm_signatures WHERE document_id=?').run(Number(id));this.db.exec('COMMIT');}catch(error){this.db.exec('ROLLBACK');throw error;}
     return this.document(id);
   }
+  updateRiskImprovement(documentId,input){
+    const doc=this.document(documentId);
+    if(!doc||doc.type!=='risk'||doc.site_id!==Number(input.siteId))throw new Error('같은 현장의 위험성평가를 확인해 주세요.');
+    if(doc.status!=='approved')throw new Error('승인된 위험성평가만 개선 정보를 변경할 수 있습니다.');
+    const details=JSON.parse(doc.details),items=Array.isArray(details.items)?details.items:[details],index=input.index;
+    if(!Number.isSafeInteger(index)||index<0||index>=items.length)throw new Error('위험요인을 확인해 주세요.');
+    const values={};for(const key of ['dueDate','completionDate']){if(typeof input[key]!=='string')throw new Error('개선 날짜를 확인해 주세요.');values[key]=input[key]?dateValue(input[key]):'';}
+    if(typeof input.responsible!=='string'||input.responsible.length>2000)throw new Error('담당자를 확인해 주세요.');values.responsible=input.responsible.trim();
+    Object.assign(items[index],values);
+    this.db.prepare('UPDATE documents SET details=?,updated_at=CURRENT_TIMESTAMP WHERE id=?').run(JSON.stringify(details),doc.id);
+    return this.document(doc.id);
+  }
   validateRiskContractors(doc){
     if(doc.type!=='risk')return;
     const find=this.db.prepare('SELECT name FROM companies WHERE id=? AND site_id=?');
