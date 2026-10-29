@@ -55,6 +55,28 @@ test('HTTPS 중계 주소는 QR과 보안 쿠키에 사용되고 다른 주소�
   }finally{child.kill();await once(child,'exit').catch(()=>{});rmSync(dir,{recursive:true,force:true});}
 });
 
+test('근로자 로그인 실패 제한은 현장과 계정별로 적용된다',async()=>{
+  const dir=mkdtempSync(join(tmpdir(),'j-web-worker-limit-'));
+  const reservation=createServer();await new Promise(resolve=>reservation.listen(0,'127.0.0.1',resolve));const port=reservation.address().port;await new Promise(resolve=>reservation.close(resolve));
+  const child=spawn(process.execPath,['server.js'],{cwd:process.cwd(),env:{...process.env,PORT:String(port),JWEB_DATA_DIR:dir,JWEB_ADMIN_PASSWORD:'test-password-12345'},stdio:['ignore','pipe','pipe']});
+  try{
+    await Promise.race([once(child.stdout,'data'),once(child,'exit').then(()=>{throw new Error('시험 서버가 종료됐습니다.');})]);
+    const base=`http://127.0.0.1:${port}`,send=(path,data,cookie)=>fetch(`${base}${path}`,{method:'POST',headers:{'content-type':'application/json',...(cookie?{cookie}:{})},body:JSON.stringify(data)});
+    const admin=await send('/api/login',{password:'test-password-12345'}),cookie=admin.headers.get('set-cookie').split(';')[0];
+    const site=await (await send('/api/sites',{name:'가상 현장'},cookie)).json(),invitation=await (await send(`/api/sites/${site.id}/invitation`,{},cookie)).json(),token=new URL(invitation.link).searchParams.get('token'),access=await (await send(`/api/sites/${site.id}/access`,{},cookie)).json(),siteKey=new URL(access.link).searchParams.get('site');
+    for(const loginId of ['worker_a','worker_b'])assert.equal((await send('/api/join',{token,name:'가상 근로자',category:'직영',company:'가상 업체',occupation:'가상 직종',loginId,password:'virtual-password-123',acknowledged:true})).status,201);
+    for(let i=0;i<10;i++)assert.equal((await send('/api/worker/login',{token,loginId:'worker_a',password:'wrong'})).status,401);
+    assert.equal((await send('/api/worker/login',{siteKey,loginId:'worker_a',password:'virtual-password-123'})).status,429);
+    assert.equal((await send('/api/worker/login',{siteKey,loginId:'worker_b',password:'virtual-password-123'})).status,200);
+    assert.equal((await send('/api/worker/login',{token,loginId:'worker_a',password:'virtual-password-123'})).status,429);
+    const other=await (await send('/api/sites',{name:'다른 가상 현장'},cookie)).json(),otherInvite=await (await send(`/api/sites/${other.id}/invitation`,{},cookie)).json(),otherToken=new URL(otherInvite.link).searchParams.get('token');
+    assert.equal((await send('/api/join',{token:otherToken,name:'가상 근로자',category:'직영',company:'가상 업체',occupation:'가상 직종',loginId:'worker_a',password:'virtual-password-123',acknowledged:true})).status,201);
+    assert.equal((await send('/api/worker/login',{token:otherToken,loginId:'worker_a',password:'virtual-password-123'})).status,200);
+    for(let i=0;i<90;i++)assert.equal((await send('/api/worker/login',{token,loginId:`unknown_${i}`,password:'wrong'})).status,401);
+    assert.equal((await send('/api/worker/login',{token:otherToken,loginId:'worker_a',password:'virtual-password-123'})).status,429);
+  }finally{child.kill();await once(child,'exit').catch(()=>{});rmSync(dir,{recursive:true,force:true});}
+});
+
 test('관리자 인증 모드가 문서 API를 보호하고 로그아웃을 적용한다',async()=>{
   const dir=mkdtempSync(join(tmpdir(),'j-web-auth-'));
   const reservation=createServer();await new Promise(resolve=>reservation.listen(0,'127.0.0.1',resolve));
