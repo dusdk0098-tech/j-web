@@ -910,6 +910,19 @@ test('시험 암호 재설정은 현장과 계정을 검증하고 새 해시와 
   }finally{s.close();}
 });
 
+test('가입 확인 후 초대 중지·만료 또는 현장 주소 교체가 완료되면 가입을 저장하지 않는다',()=>{
+  const dir=mkdtempSync(join(tmpdir(),'jweb-join-race-')),file=join(dir,'jweb.sqlite'),s=new Store(file),other=new Store(file);try{
+    const input={name:'가상 근로자',category:'직영',company:'가상 업체',occupation:'가상 직종',loginId:'race_worker',password:'virtual-password-123',acknowledged:true};
+    for(const mode of ['revoked','expired','closed','rotated']){
+      const site=s.createSite({name:`가상 현장 ${mode}`}),invite=s.createInvitation(site.id),siteKey=s.siteAccessKey(site.id);s.openSiteRegistration(site.id);
+      if(mode==='revoked'||mode==='expired'){const original=s.invitation.bind(s);let first=true;s.invitation=token=>{const result=original(token);if(first){first=false;if(mode==='revoked')other.revokeInvitations(site.id);else other.db.prepare('UPDATE invitations SET expires_at=0 WHERE site_id=?').run(site.id);}return result;};assert.throws(()=>s.join(invite.token,input),/만료/);s.invitation=original;}
+      else if(mode==='closed'){const original=s.siteRegistrationOpen.bind(s);let first=true;s.siteRegistrationOpen=id=>{const result=original(id);if(first){first=false;other.revokeInvitations(site.id);}return result;};assert.throws(()=>s.join(null,{...input,siteKey}),/중지|만료/);s.siteRegistrationOpen=original;}
+      else{const original=s.siteFromAccess.bind(s);let first=true;s.siteFromAccess=key=>{const result=original(key);if(first){first=false;other.rotateSiteAccess(site.id);}return result;};assert.throws(()=>s.join(null,{...input,siteKey}),/만료|주소/);s.siteFromAccess=original;}
+      assert.equal(s.workers(site.id).length,0);assert.equal(s.db.prepare('SELECT count(*) AS n FROM worker_accounts WHERE site_id=?').get(site.id).n,0);
+    }
+  }finally{other.close();s.close();rmSync(dir,{recursive:true,force:true});}
+});
+
 test('현장 QR 가입은 현장별로 열고 만료 또는 중지 시 차단된다',()=>{
   const s=new Store(':memory:');try{
     const a=s.createSite({name:'가상 현장 A'}),b=s.createSite({name:'가상 현장 B'}),key=s.ensureSiteAccess(a.id),otherKey=s.ensureSiteAccess(b.id),input={name:'가상 근로자',category:'직영',company:'가상 업체',occupation:'기타',loginId:'demo_worker',password:'virtual-password-123',acknowledged:true};

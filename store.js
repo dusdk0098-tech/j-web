@@ -922,6 +922,9 @@ export class Store {
     const salt=randomBytes(16),passwordHash=scryptSync(input.password,salt,32);
     this.db.exec('BEGIN IMMEDIATE');
     try {
+      const current=input.siteKey?this.siteFromAccess(input.siteKey):this.invitation(token);
+      if(!current||current.id!==invite.id)throw new Error('유효하지 않거나 만료된 가입 링크입니다.');
+      if(input.siteKey&&!this.siteRegistrationOpen(current.id))throw new Error('이 현장의 시험 가입이 중지되었거나 만료되었습니다.');
       const worker=this.createWorker({...input,siteId:invite.id});
       this.db.prepare('INSERT INTO worker_accounts(worker_id,site_id,login_id,salt,password_hash) VALUES(?,?,?,?,?)').run(worker.id,invite.id,input.loginId,salt,passwordHash);
       this.db.prepare('INSERT INTO join_acknowledgements(worker_id,notice_version,equipment,signature,profile) VALUES(?,?,?,?,?)').run(worker.id,'demo-v1',JSON.stringify(equipment),signature,profile?JSON.stringify(profile):null);
