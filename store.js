@@ -642,8 +642,9 @@ export class Store {
     }
     this.db.prepare('INSERT INTO work_stops(site_id,worker_id,place,reason,photo) VALUES(?,?,?,?,?)').run(worker.site_id,input.anonymous?null:worker.id,place,reason,photo);
   }
-  workStops(siteId) {
-    return this.db.prepare("SELECT s.id,s.place,s.reason,s.created_at,s.photo IS NOT NULL AS has_photo,CASE WHEN s.worker_id IS NULL THEN '익명' ELSE w.name END AS requester FROM work_stops s LEFT JOIN workers w ON w.id=s.worker_id WHERE s.site_id=? ORDER BY s.id DESC").all(Number(siteId));
+  workStops(siteId,query='') {
+    if(typeof query!=='string'||query.length>200)throw new Error('검색어를 확인해 주세요.');
+    return this.db.prepare("SELECT s.id,s.place,s.reason,s.created_at,s.photo IS NOT NULL AS has_photo,CASE WHEN s.worker_id IS NULL THEN '익명' ELSE w.name END AS requester FROM work_stops s LEFT JOIN workers w ON w.id=s.worker_id WHERE s.site_id=? AND (instr(s.place,?)>0 OR instr(s.reason,?)>0 OR (s.worker_id IS NOT NULL AND instr(w.name,?)>0)) ORDER BY s.id DESC").all(Number(siteId),query,query,query);
   }
   workStopPhoto(siteId,id) {return this.db.prepare('SELECT photo FROM work_stops WHERE site_id=? AND id=? AND photo IS NOT NULL').get(Number(siteId),Number(id))?.photo || null;}
   createHazardReport(siteId,input,workerId=null){
