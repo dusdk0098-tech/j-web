@@ -54,8 +54,15 @@ test('기본 서류 분류 API는 관리자 인증과 변경 확인을 적용한
     const doc=await (await send('/api/documents','POST',{siteId:site.id,type:'basic',title:'시험 문서',date:'2026-10-29',details:{categoryId:childCategory.id}},cookie)).json();
     const list=await (await send(url,'GET',undefined,cookie)).json();assert.deepEqual(list.find(row=>row.id===childCategory.id).documentIds,[doc.id]);
     const path=`/api/basic-categories/${root.id}?siteId=${site.id}`;
-    assert.equal((await send(path,'DELETE',{expectedCategoryIds:[root.id,childCategory.id],expectedDocumentIds:[]},cookie)).status,400);
-    assert.equal((await send(path,'DELETE',{expectedCategoryIds:[root.id,childCategory.id],expectedDocumentIds:[doc.id]},cookie)).status,200);
+    const expectedCategories=list.filter(row=>row.id===root.id||row.parent_id===root.id),expectedDocumentVersions=expectedCategories.flatMap(row=>row.documentVersions);
+    assert.equal((await send(path,'DELETE',{expectedCategories,expectedDocumentVersions:[]},cookie)).status,400);
+    assert.equal((await send(`/api/documents/${doc.id}`,'DELETE',{siteId:site.id,expectedVersion:doc.basic_version})).status,401);
+    const changed=await (await send(`/api/documents/${doc.id}`,'PUT',{siteId:site.id,type:'basic',title:'바뀐 문서',date:'2026-10-29',details:{categoryId:childCategory.id}},cookie)).json();
+    assert.equal((await send(path,'DELETE',{expectedCategories,expectedDocumentVersions},cookie)).status,400);
+    assert.equal((await send(`/api/documents/${doc.id}`,'DELETE',{siteId:site.id,expectedVersion:doc.basic_version},cookie)).status,400);
+    assert.equal((await send(`/api/documents/${doc.id}`,'DELETE',{siteId:site.id,expectedVersion:changed.basic_version},cookie)).status,200);
+    const current=await (await send(url,'GET',undefined,cookie)).json();
+    assert.equal((await send(path,'DELETE',{expectedCategories:current,expectedDocumentVersions:[]},cookie)).status,200);
     assert.deepEqual(await (await send(url,'GET',undefined,cookie)).json(),[]);
   }finally{if(child.exitCode===null){const exited=once(child,'exit');child.kill();await exited;}rmSync(dir,{recursive:true,force:true});}
 });

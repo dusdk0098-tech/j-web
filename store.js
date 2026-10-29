@@ -84,6 +84,7 @@ export class Store {
       CREATE TABLE IF NOT EXISTS worker_files (id INTEGER PRIMARY KEY,worker_id INTEGER NOT NULL REFERENCES workers(id),category TEXT NOT NULL,name TEXT NOT NULL,data BLOB NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
       CREATE TABLE IF NOT EXISTS attendance (worker_id INTEGER NOT NULL REFERENCES workers(id), date TEXT NOT NULL, present INTEGER NOT NULL CHECK(present IN (0,1)), updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY(worker_id,date));
       CREATE TABLE IF NOT EXISTS documents (id INTEGER PRIMARY KEY, site_id INTEGER NOT NULL REFERENCES sites(id), type TEXT NOT NULL, title TEXT NOT NULL, date TEXT NOT NULL, body TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'draft', updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+      CREATE TABLE IF NOT EXISTS basic_document_versions (document_id INTEGER PRIMARY KEY REFERENCES documents(id),version TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS work_plan_copies (document_id INTEGER PRIMARY KEY REFERENCES documents(id),source_document_id INTEGER NOT NULL REFERENCES documents(id));
       CREATE TABLE IF NOT EXISTS reviewers (id INTEGER PRIMARY KEY,site_id INTEGER NOT NULL REFERENCES sites(id),login_id TEXT NOT NULL UNIQUE,name TEXT NOT NULL,salt BLOB NOT NULL,password_hash BLOB NOT NULL,active INTEGER NOT NULL DEFAULT 1 CHECK(active IN (0,1)));
       CREATE TABLE IF NOT EXISTS approval_steps (document_id INTEGER NOT NULL REFERENCES documents(id),position INTEGER NOT NULL,reviewer_id INTEGER NOT NULL REFERENCES reviewers(id),state TEXT NOT NULL DEFAULT 'pending' CHECK(state IN ('pending','approved','rejected')),PRIMARY KEY(document_id,position),UNIQUE(document_id,reviewer_id));
@@ -118,6 +119,15 @@ export class Store {
     if (!this.db.prepare('PRAGMA table_info(documents)').all().some(c=>c.name==='details')) this.db.exec("ALTER TABLE documents ADD COLUMN details TEXT NOT NULL DEFAULT '{}'");
     this.db.exec(`CREATE TRIGGER IF NOT EXISTS basic_category_insert BEFORE INSERT ON documents WHEN NEW.type='basic' AND COALESCE(json_extract(NEW.details,'$.categoryId'),0)>0 AND NOT EXISTS(SELECT 1 FROM basic_categories WHERE id=json_extract(NEW.details,'$.categoryId') AND site_id=NEW.site_id) BEGIN SELECT RAISE(ABORT,'기본 서류 분류를 확인해 주세요.'); END;
       CREATE TRIGGER IF NOT EXISTS basic_category_update BEFORE UPDATE OF details,site_id,type ON documents WHEN NEW.type='basic' AND COALESCE(json_extract(NEW.details,'$.categoryId'),0)>0 AND NOT EXISTS(SELECT 1 FROM basic_categories WHERE id=json_extract(NEW.details,'$.categoryId') AND site_id=NEW.site_id) BEGIN SELECT RAISE(ABORT,'기본 서류 분류를 확인해 주세요.'); END;`);
+    this.db.exec('BEGIN IMMEDIATE');try{
+      this.db.exec(`INSERT OR IGNORE INTO basic_document_versions(document_id,version) SELECT id,lower(hex(randomblob(16))) FROM documents WHERE type='basic';
+      CREATE TRIGGER IF NOT EXISTS basic_version_insert AFTER INSERT ON documents WHEN NEW.type='basic' BEGIN INSERT INTO basic_document_versions(document_id,version) VALUES(NEW.id,lower(hex(randomblob(16)))); END;
+      CREATE TRIGGER IF NOT EXISTS basic_version_update AFTER UPDATE ON documents WHEN NEW.type='basic' BEGIN UPDATE basic_document_versions SET version=lower(hex(randomblob(16))) WHERE document_id=NEW.id; END;`);
+      for(const table of ['attachments','events','approval_steps','approval_cycles'])for(const action of ['INSERT','UPDATE','DELETE']){
+        const ids=action==='INSERT'?'NEW.document_id':action==='DELETE'?'OLD.document_id':'OLD.document_id,NEW.document_id';
+        this.db.exec(`CREATE TRIGGER IF NOT EXISTS basic_version_${table}_${action.toLowerCase()} AFTER ${action} ON ${table} BEGIN UPDATE basic_document_versions SET version=lower(hex(randomblob(16))) WHERE document_id IN (${ids}); END;`);
+      }this.db.exec('COMMIT');
+    }catch(error){this.db.exec('ROLLBACK');throw error;}
     if (!this.db.prepare('PRAGMA table_info(meal_checks)').all().some(c=>c.name==='tax_snapshot')) this.db.exec('ALTER TABLE meal_checks ADD COLUMN tax_snapshot INTEGER CHECK(tax_snapshot IS NULL OR tax_snapshot BETWEEN 0 AND 999999999)');
     if (!this.db.prepare('PRAGMA table_info(documents)').all().some(c=>c.name==='approval_cycle_id')) this.db.exec('ALTER TABLE documents ADD COLUMN approval_cycle_id INTEGER');
     if (!this.db.prepare('PRAGMA table_info(workers)').all().some(c=>c.name==='created_date')) this.db.exec('ALTER TABLE workers ADD COLUMN created_date TEXT');
@@ -236,8 +246,8 @@ export class Store {
   basicCategories(siteId){
     siteId=Number(siteId);if(!this.db.prepare('SELECT 1 FROM sites WHERE id=?').get(siteId))throw new Error('현장을 선택해 주세요.');
     const rows=this.db.prepare('SELECT id,parent_id,name,description,position FROM basic_categories WHERE site_id=? ORDER BY position,id').all(siteId);
-    const docs=this.db.prepare("SELECT id,json_extract(details,'$.categoryId') AS category_id FROM documents WHERE site_id=? AND type='basic' AND COALESCE(json_extract(details,'$.categoryId'),0)>0").all(siteId);
-    return rows.map(row=>({...row,documentIds:docs.filter(doc=>doc.category_id===row.id).map(doc=>doc.id)}));
+    const docs=this.db.prepare("SELECT d.id,json_extract(d.details,'$.categoryId') AS category_id,v.version FROM documents d JOIN basic_document_versions v ON v.document_id=d.id WHERE d.site_id=? AND d.type='basic' AND COALESCE(json_extract(d.details,'$.categoryId'),0)>0").all(siteId);
+    return rows.map(row=>{const linked=docs.filter(doc=>doc.category_id===row.id);return {...row,documentIds:linked.map(doc=>doc.id),documentVersions:linked.map(doc=>({id:doc.id,version:doc.version}))};});
   }
   saveBasicCategory(siteId,input,id=null){
     siteId=Number(siteId);const name=text(input.name,'분류 이름',80),description=input.description??'';
@@ -260,20 +270,29 @@ export class Store {
   }
   deleteBasicCategory(siteId,id,input){
     siteId=Number(siteId);id=Number(id);
-    const validIds=ids=>Array.isArray(ids)&&ids.every(value=>Number.isSafeInteger(value)&&value>0)&&new Set(ids).size===ids.length;
-    if(!validIds(input.expectedCategoryIds)||!validIds(input.expectedDocumentIds))throw new Error('삭제할 분류와 문서를 다시 확인해 주세요.');
+    if(!Array.isArray(input.expectedCategories)||input.expectedCategories.some(item=>!item||!Number.isSafeInteger(item.id)||item.id<1||!(item.parent_id===null||Number.isSafeInteger(item.parent_id))||typeof item.name!=='string'||typeof item.description!=='string'||!Number.isSafeInteger(item.position))||new Set(input.expectedCategories.map(item=>item.id)).size!==input.expectedCategories.length||!Array.isArray(input.expectedDocumentVersions)||input.expectedDocumentVersions.some(item=>!item||!Number.isSafeInteger(item.id)||item.id<1||typeof item.version!=='string'||!/^[a-f0-9]{32}$/.test(item.version))||new Set(input.expectedDocumentVersions.map(item=>item.id)).size!==input.expectedDocumentVersions.length)throw new Error('삭제할 분류와 문서를 다시 확인해 주세요.');
     this.db.exec('BEGIN IMMEDIATE');try{
       const all=this.basicCategories(siteId),item=all.find(row=>row.id===id);if(!item)throw new Error('분류를 찾을 수 없습니다.');
-      const selected=all.filter(row=>row.id===id||row.parent_id===id),categoryIds=selected.map(row=>row.id),documentIds=selected.flatMap(row=>row.documentIds);
-      const same=(a,b)=>JSON.stringify([...a].sort((x,y)=>x-y))===JSON.stringify([...b].sort((x,y)=>x-y));
-      if(!same(categoryIds,input.expectedCategoryIds)||!same(documentIds,input.expectedDocumentIds))throw new Error('분류나 문서가 변경되었습니다. 다시 조회해 주세요.');
-      for(const docId of documentIds){
-        this.db.prepare('DELETE FROM approval_cycle_files WHERE cycle_id IN (SELECT id FROM approval_cycles WHERE document_id=?)').run(docId);
-        for(const table of ['events','approval_steps','approval_cycles','attachments'])this.db.prepare(`DELETE FROM ${table} WHERE document_id=?`).run(docId);
-        this.db.prepare("DELETE FROM documents WHERE id=? AND site_id=? AND type='basic'").run(docId,siteId);
-      }
+      const selected=all.filter(row=>row.id===id||row.parent_id===id),versions=selected.flatMap(row=>row.documentVersions),documentIds=versions.map(item=>item.id);
+      const sameCategories=(a,b)=>JSON.stringify([...a].map(({id,parent_id,name,description,position})=>({id,parent_id,name,description,position})).sort((x,y)=>x.id-y.id))===JSON.stringify([...b].map(({id,parent_id,name,description,position})=>({id,parent_id,name,description,position})).sort((x,y)=>x.id-y.id));
+      const sameVersions=(a,b)=>JSON.stringify([...a].map(({id,version})=>({id,version})).sort((x,y)=>x.id-y.id))===JSON.stringify([...b].map(({id,version})=>({id,version})).sort((x,y)=>x.id-y.id));
+      if(!sameCategories(selected,input.expectedCategories)||!sameVersions(versions,input.expectedDocumentVersions))throw new Error('분류나 문서가 변경되었습니다. 다시 조회해 주세요.');
+      for(const docId of documentIds)this.removeBasicDocumentData(siteId,docId);
       this.db.prepare('DELETE FROM basic_categories WHERE site_id=? AND parent_id=?').run(siteId,id);
       this.db.prepare('DELETE FROM basic_categories WHERE site_id=? AND id=?').run(siteId,id);this.db.exec('COMMIT');
+    }catch(error){this.db.exec('ROLLBACK');throw error;}
+  }
+  removeBasicDocumentData(siteId,id){
+    this.db.prepare('DELETE FROM approval_cycle_files WHERE cycle_id IN (SELECT id FROM approval_cycles WHERE document_id=?)').run(id);
+    for(const table of ['events','approval_steps','approval_cycles','attachments','basic_document_versions'])this.db.prepare(`DELETE FROM ${table} WHERE document_id=?`).run(id);
+    this.db.prepare("DELETE FROM documents WHERE id=? AND site_id=? AND type='basic'").run(id,siteId);
+  }
+  deleteBasicDocument(siteId,id,expectedVersion){
+    siteId=Number(siteId);id=Number(id);if(typeof expectedVersion!=='string'||!/^[a-f0-9]{32}$/.test(expectedVersion))throw new Error('문서를 다시 조회해 주세요.');
+    this.db.exec('BEGIN IMMEDIATE');try{
+      const doc=this.document(id);if(!doc||doc.type!=='basic'||doc.site_id!==siteId)throw new Error('선택한 현장의 기본 서류를 확인해 주세요.');
+      if(doc.basic_version!==expectedVersion)throw new Error('문서가 변경되었습니다. 다시 조회해 주세요.');
+      this.removeBasicDocumentData(siteId,id);this.db.exec('COMMIT');
     }catch(error){this.db.exec('ROLLBACK');throw error;}
   }
   validateBasicCategory(doc){
@@ -1170,7 +1189,7 @@ export class Store {
     const id = this.db.prepare('INSERT INTO documents(site_id,type,title,date,body,details) VALUES(?,?,?,?,?,?)').run(d.siteId,d.type,d.title,d.date,d.body,JSON.stringify(d.details)).lastInsertRowid;
     return this.document(id);
   }
-  document(id) { return this.db.prepare('SELECT documents.*,(SELECT source_document_id FROM work_plan_copies WHERE document_id=documents.id) AS copied_from FROM documents WHERE id=?').get(Number(id)); }
+  document(id) { const doc=this.db.prepare('SELECT documents.*,(SELECT source_document_id FROM work_plan_copies WHERE document_id=documents.id) AS copied_from,(SELECT version FROM basic_document_versions WHERE document_id=documents.id) AS basic_version FROM documents WHERE id=?').get(Number(id));if(doc&&doc.type!=='basic')delete doc.basic_version;return doc; }
   copyWorkPlan(id,input){
     const source=this.document(id);if(!source||source.type!=='work_plan'||source.site_id!==Number(input.siteId))throw new Error('같은 현장의 작업계획서를 확인해 주세요.');
     this.db.exec('SAVEPOINT copy_work_plan');try{const copy=this.createDocument({siteId:source.site_id,type:'work_plan',title:input.title,date:input.date,body:source.body,details:JSON.parse(source.details)});this.db.prepare('INSERT INTO work_plan_copies(document_id,source_document_id) VALUES(?,?)').run(copy.id,source.id);this.db.exec('RELEASE copy_work_plan');return this.document(copy.id);}catch(error){this.db.exec('ROLLBACK TO copy_work_plan');this.db.exec('RELEASE copy_work_plan');throw error;}

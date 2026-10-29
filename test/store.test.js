@@ -564,16 +564,35 @@ test('계층형 기본 서류 분류는 현장별로 관리하고 확인된 문�
     assert.throws(()=>s.updateDocument(doc.id,{...input,details:{category:'기존 클라이언트'}}),/새로고침/);
     s.transition(doc.id,'submit');s.transition(doc.id,'approve');
     const legacy=s.createDocument({...input,title:'직접 입력',details:{category:'교육자료'}}),elsewhere=s.createDocument({...input,siteId:b.id,details:{categoryId:foreign}});
-    assert.throws(()=>s.deleteBasicCategory(a.id,root,{expectedCategoryIds:[root,child],expectedDocumentIds:[]}),/변경/);
+    const snapshot=()=>{const selected=s.basicCategories(a.id).filter(row=>row.id===root||row.parent_id===root);return {expectedCategories:selected,expectedDocumentVersions:selected.flatMap(row=>row.documentVersions)};};
+    const stale=snapshot();s.saveBasicCategory(a.id,{name:'변경된 분류'},child);assert.throws(()=>s.deleteBasicCategory(a.id,root,stale),/변경/);
+    const empty=snapshot();empty.expectedDocumentVersions=[];assert.throws(()=>s.deleteBasicCategory(a.id,root,empty),/변경/);
     assert.ok(s.document(doc.id));assert.ok(s.attachment(file));
     s.db.exec("CREATE TRIGGER fail_category_delete BEFORE DELETE ON basic_categories BEGIN SELECT RAISE(ABORT,'시험 실패'); END");
-    assert.throws(()=>s.deleteBasicCategory(a.id,root,{expectedCategoryIds:[root,child],expectedDocumentIds:[doc.id]}),/시험 실패/);
+    assert.throws(()=>s.deleteBasicCategory(a.id,root,snapshot()),/시험 실패/);
     assert.ok(s.document(doc.id));assert.ok(s.attachment(file));assert.equal(s.basicCategories(a.id).length,3);
     s.db.exec('DROP TRIGGER fail_category_delete');
-    s.deleteBasicCategory(a.id,root,{expectedCategoryIds:[root,child],expectedDocumentIds:[doc.id]});
+    s.deleteBasicCategory(a.id,root,snapshot());
     assert.equal(s.document(doc.id),undefined);assert.equal(s.attachment(file),undefined);assert.ok(s.document(legacy.id));assert.ok(s.document(elsewhere.id));
     assert.deepEqual(s.basicCategories(a.id).map(row=>row.id),[other]);assert.equal(s.db.prepare('PRAGMA foreign_key_check').all().length,0);
     const replacement=s.saveBasicCategory(a.id,{name:'새 분류'});assert.ok(replacement>root&&replacement>child);
+  }finally{s.close();}
+});
+
+test('기본 서류 개별 삭제는 표시 후 문서와 첨부의 변경을 확인한다',()=>{
+  const s=new Store(':memory:');try{
+    const a=s.createSite({name:'가상 A'}),b=s.createSite({name:'가상 B'}),category=s.saveBasicCategory(a.id,{name:'분류'}),input={siteId:a.id,type:'basic',title:'가상 문서',date:'2026-10-29',details:{categoryId:category}};
+    let doc=s.createDocument(input),stale=doc.basic_version,categorySnapshot=()=>{const selected=s.basicCategories(a.id);return {expectedCategories:selected,expectedDocumentVersions:selected.flatMap(row=>row.documentVersions)};};
+    const beforeChange=categorySnapshot();s.updateDocument(doc.id,{...input,title:'바뀐 문서'});assert.throws(()=>s.deleteBasicCategory(a.id,category,beforeChange),/변경/);assert.throws(()=>s.deleteBasicDocument(a.id,doc.id,stale),/변경/);
+    stale=s.document(doc.id).basic_version;const beforeFile=categorySnapshot(),file=s.addAttachment(doc.id,'가상.txt',Buffer.from('내용'));assert.throws(()=>s.deleteBasicDocument(a.id,doc.id,stale),/변경/);assert.throws(()=>s.deleteBasicCategory(a.id,category,beforeFile),/변경/);
+    stale=s.document(doc.id).basic_version;s.deleteAttachment(file);s.addAttachment(doc.id,'가상.txt',Buffer.from('내용'));assert.throws(()=>s.deleteBasicDocument(a.id,doc.id,stale),/변경/);
+    doc=s.document(doc.id);assert.throws(()=>s.deleteBasicDocument(b.id,doc.id,doc.basic_version),/현장/);
+    const other=s.createDocument({siteId:a.id,type:'tbm',title:'다른 유형',date:'2026-10-29'});assert.throws(()=>s.deleteBasicDocument(a.id,other.id,doc.basic_version),/기본 서류/);
+    stale=s.document(doc.id).basic_version;const beforeSubmit=categorySnapshot();s.transition(doc.id,'submit');assert.throws(()=>s.deleteBasicDocument(a.id,doc.id,stale),/변경/);assert.throws(()=>s.deleteBasicCategory(a.id,category,beforeSubmit),/변경/);s.transition(doc.id,'approve');doc=s.document(doc.id);
+    s.db.exec("CREATE TRIGGER fail_basic_delete BEFORE DELETE ON documents WHEN OLD.type='basic' BEGIN SELECT RAISE(ABORT,'시험 실패'); END");
+    assert.throws(()=>s.deleteBasicDocument(a.id,doc.id,doc.basic_version),/시험 실패/);assert.ok(s.document(doc.id));assert.equal(s.attachments(doc.id).length,1);
+    s.db.exec('DROP TRIGGER fail_basic_delete');s.deleteBasicDocument(a.id,doc.id,doc.basic_version);assert.equal(s.document(doc.id),undefined);assert.ok(s.document(other.id));assert.equal(s.db.prepare('PRAGMA foreign_key_check').all().length,0);
+    const next=s.createDocument(input);assert.notEqual(next.basic_version,doc.basic_version);assert.throws(()=>s.deleteBasicDocument(a.id,next.id,doc.basic_version),/변경/);
   }finally{s.close();}
 });
 
@@ -583,6 +602,8 @@ test('기본 서류 분류와 문서 연결은 저장소를 다시 열어도 유
     const site=s.createSite({name:'가상 현장'}),root=s.saveBasicCategory(site.id,{name:'대분류'}),child=s.saveBasicCategory(site.id,{parentId:root,name:'소분류'});
     const doc=s.createDocument({siteId:site.id,type:'basic',title:'시험 문서',date:'2026-10-29',details:{categoryId:child}});
     s.close();s=new Store(path);assert.deepEqual(s.basicCategories(site.id).find(row=>row.id===child).documentIds,[doc.id]);assert.equal(JSON.parse(s.document(doc.id).details).category,'대분류 / 소분류');
+    s.close();const old=new DatabaseSync(path);old.exec('DROP TABLE basic_document_versions');old.close();s=new Store(path);
+    assert.ok(s.document(doc.id).basic_version);assert.equal(s.basicCategories(site.id).find(row=>row.id===child).documentIds[0],doc.id);
   }finally{s.close();rmSync(dir,{recursive:true,force:true});}
 });
 

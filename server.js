@@ -482,7 +482,7 @@ const server = http.createServer(async (req, res) => {
     if(basicCategory){
       const siteId=url.searchParams.get('siteId');
       if(req.method==='PUT')return json(res,200,{id:store.saveBasicCategory(siteId,await body(req),basicCategory[1])});
-      if(req.method==='DELETE'){store.deleteBasicCategory(siteId,basicCategory[1],await body(req));return json(res,200,{ok:true});}
+      if(req.method==='DELETE'){store.deleteBasicCategory(siteId,basicCategory[1],await body(req,2097152));return json(res,200,{ok:true});}
     }
     if (url.pathname === '/api/companies') {
       if(req.method==='GET')return json(res,200,store.companies(url.searchParams.get('siteId')));
@@ -697,6 +697,7 @@ const server = http.createServer(async (req, res) => {
       if (req.method === 'PUT' && part === 'training-targets') {const input=await body(req);store.setTrainingTargets(id,input.workerIds);return json(res,200,{ok:true});}
       if (req.method === 'GET' && !part) { const d=store.document(id); return d ? json(res,200,d) : json(res,404,{error:'문서를 찾을 수 없습니다.'}); }
       if (req.method === 'PUT' && !part) return json(res,200,store.updateDocument(id,await body(req)));
+      if (req.method === 'DELETE' && !part) {const input=await body(req);store.deleteBasicDocument(input.siteId,id,input.expectedVersion);return json(res,200,{ok:true});}
       if (req.method === 'POST' && part === 'transition') {const input=await body(req);return json(res,200,input.action==='approve'?store.approveDocument(id,input.opinion,input.signature):store.transition(id,input.action,input.opinion));}
     }
     return json(res,404,{error:'요청한 경로가 없습니다.'});
