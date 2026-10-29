@@ -887,6 +887,22 @@ export class Store {
   }
   reviewerDocuments(reviewerId){return this.db.prepare("SELECT d.id,d.site_id,d.type,d.title,d.date FROM documents d JOIN approval_steps s ON s.document_id=d.id JOIN reviewers r ON r.id=s.reviewer_id AND r.site_id=d.site_id WHERE r.id=? AND r.active=1 AND d.status='pending' AND s.state='pending' AND NOT EXISTS (SELECT 1 FROM approval_steps prior WHERE prior.document_id=d.id AND prior.position<s.position AND prior.state<>'approved') ORDER BY d.date DESC,d.id DESC").all(Number(reviewerId));}
   reviewerDocument(reviewerId,id){return this.reviewerDocuments(reviewerId).some(doc=>doc.id===Number(id))?this.document(id):null;}
+  reviewerLinks(doc){
+    if(doc.type==='risk')return {type:'risk',activities:this.riskActivities(doc.id).map(activity=>({...activity,worker_snapshot:JSON.parse(activity.worker_snapshot||'[]'),files:this.riskActivityPhotos(doc.id,activity.id)}))};
+    if(doc.type!=='work_plan')return null;const details=JSON.parse(doc.details||'{}'),equipmentIds=details.equipmentIds||[],riggingIds=details.riggingIds||[],snapshots=Array.isArray(details.equipmentSnapshot)?details.equipmentSnapshot:null;
+    const equipment=this.equipment(doc.site_id).filter(item=>equipmentIds.includes(item.id)).map(item=>{const snapshot=snapshots?.find(row=>row.id===item.id);return {info:snapshot||item,snapshot:!!snapshot,files:this.equipmentAttachments(doc.site_id,item.id)};});
+    const rigging=this.rigging(doc.site_id).filter(item=>riggingIds.includes(item.id)).map(item=>({info:{...item,details:JSON.parse(item.details)},files:this.riggingPhotos(doc.site_id,item.id)}));
+    const place=this.workPlaces(doc.site_id).find(item=>item.id===details.workPlaceId);
+    return {type:'plan',equipment,rigging,place:place?{info:{...place,details:JSON.parse(place.details)},files:this.workPlacePhotos(doc.site_id,place.id)}:null,checks:this.equipmentChecks(doc.id).map(check=>({...check,items:JSON.parse(check.items),equipment_snapshot:check.equipment_snapshot?JSON.parse(check.equipment_snapshot):null}))};
+  }
+  reviewerLinkedFile(doc,kind,parentId,fileId){
+    if(kind==='risk'&&doc.type==='risk')return this.riskActivityPhoto(doc.id,parentId,fileId);
+    if(doc.type!=='work_plan')return null;const details=JSON.parse(doc.details||'{}'),parent=Number(parentId);
+    if(kind==='equipment'&&(details.equipmentIds||[]).includes(parent))return this.equipmentAttachment(doc.site_id,parent,fileId);
+    if(kind==='rigging'&&(details.riggingIds||[]).includes(parent))return this.riggingPhoto(doc.site_id,parent,fileId);
+    if(kind==='place'&&details.workPlaceId===parent)return this.workPlacePhoto(doc.site_id,parent,fileId);
+    return null;
+  }
   createDocument(input) {
     const d = recordInput(input);
     if (!this.db.prepare('SELECT id FROM sites WHERE id=?').get(d.siteId)) throw new Error('현장을 선택해 주세요.');
@@ -932,7 +948,7 @@ export class Store {
     return this.db.prepare('INSERT INTO risk_activities(document_id,kind,date,place,host,participants,content,period_from,period_to,entry_mode,worker_snapshot) VALUES(?,?,?,?,?,?,?,?,?,?,?)').run(Number(documentId),input.kind,date,fields.place,fields.host,fields.participants,fields.content,from,to,mode,workers).lastInsertRowid;
   }
   deleteRiskActivity(documentId,id){this.riskActivities(documentId);if(!this.db.prepare('DELETE FROM risk_activities WHERE id=? AND document_id=?').run(Number(id),Number(documentId)).changes)throw new Error('시험 활동을 찾을 수 없습니다.');}
-  riskActivityPhotos(documentId,id){if(!this.db.prepare('SELECT 1 FROM risk_activities WHERE id=? AND document_id=?').get(Number(id),Number(documentId)))throw new Error('시험 활동을 찾을 수 없습니다.');return this.db.prepare('SELECT id,name,purpose,length(data) AS size FROM risk_activity_photos WHERE activity_id=? ORDER BY id').all(Number(id));}
+  riskActivityPhotos(documentId,id){if(!this.db.prepare('SELECT 1 FROM risk_activities WHERE id=? AND document_id=?').get(Number(id),Number(documentId)))throw new Error('시험 활동을 찾을 수 없습니다.');return this.db.prepare("SELECT id,name,purpose,length(data) AS size,CASE WHEN substr(data,1,8)=X'89504E470D0A1A0A' THEN 'image/png' WHEN substr(data,1,3)=X'FFD8FF' THEN 'image/jpeg' ELSE NULL END AS image_type FROM risk_activity_photos WHERE activity_id=? ORDER BY id").all(Number(id));}
   addRiskActivityPhoto(documentId,id,name,data,purpose='photo'){
     const photos=this.riskActivityPhotos(documentId,id);if(photos.length>=20)throw new Error('시험 사진은 20개까지 가능합니다.');
     if(typeof name!=='string'||!name.trim()||name.length>200||/[\\/\x00-\x1f\x7f]/.test(name))throw new Error('사진 이름을 확인해 주세요.');
