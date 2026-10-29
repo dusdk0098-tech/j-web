@@ -5,3 +5,8 @@ export function riskScaleOptions(scale, field) {
   if (field === 'severity') return scale === '3x3' ? ['1', '2', '3'] : ['1', '2', '3', '4'];
   return [];
 }
+
+export function riskScore(scale, likelihood, severity) {
+  if (!riskScaleOptions(scale, 'likelihood').includes(likelihood) || !riskScaleOptions(scale, 'severity').includes(severity)) return null;
+  return Number(likelihood) * Number(severity);
+}

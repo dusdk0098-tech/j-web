@@ -1,4 +1,4 @@
-import { riskScaleOptions } from './public/risk-scale.js';
+import { riskScaleOptions, riskScore } from './public/risk-scale.js';
 
 export const types = {
   notice: '유해·위험 공지', tbm: 'TBM', education: '안전 교육 서류',
@@ -188,6 +188,7 @@ export function recordInput(input) {
         if(v&&!riskScaleOptions(scale,key).includes(v))throw new Error('위험성 척도 입력을 확인해 주세요.');
         row[key]=v;
       }
+      const score=riskScore(value.scale||'',row.likelihood,row.severity);if(score!==null)row.score=score;
       for(const key of ['dueDate','completionDate']){
         if(item[key]!==undefined){if(typeof item[key]!=='string')throw new Error('위험성평가 날짜를 확인해 주세요.');row[key]=item[key]?dateValue(item[key]):'';}
       }
