@@ -126,6 +126,20 @@ test('보호구 시험 지급은 현장·월별로 집계하고 기록 당시 �
   }finally{s.close();}
 });
 
+test('자료실 공개와 첨부 접근은 현장과 공개 상태를 지키고 재시작 후에도 유지된다',()=>{
+  const dir=mkdtempSync(join(tmpdir(),'j-web-articles-')),path=join(dir,'test.sqlite');let s;
+  try{
+    s=new Store(path);const a=s.createSite({name:'가상 현장 A'}),b=s.createSite({name:'가상 현장 B'}),add=siteId=>s.createWorker({siteId,name:'가상 근로자',category:'직영',company:'가상 업체',occupation:'목공'}),one=add(a.id),two=add(a.id),other=add(b.id);
+    const input={siteId:a.id,category:'안전·보건',title:'가상 공개 자료',body:'가상 내용',visible:true},article=s.saveSiteArticle(input),file=s.addArticleFile(a.id,article.id,'가상.txt',Buffer.from('가상 파일'));
+    const privateArticle=s.saveSiteArticle({...input,title:'가상 비공개',visible:false}),privateFile=s.addArticleFile(a.id,privateArticle.id,'비공개.txt',Buffer.from('비공개'));
+    const foreign=s.saveSiteArticle({...input,siteId:b.id,title:'다른 현장 자료'}),foreignFile=s.addArticleFile(b.id,foreign.id,'다른.txt',Buffer.from('다른 파일'));s.close();
+    s=new Store(path);for(const worker of [one,two]){assert.deepEqual(s.workerArticles(worker.id).map(row=>row.id),[article.id]);assert.equal(Buffer.from(s.workerArticleFile(worker.id,article.id,file).data).toString(),'가상 파일');assert.equal(s.workerArticleFile(worker.id,privateArticle.id,privateFile),null);assert.equal(s.workerArticleFile(worker.id,foreign.id,foreignFile),null);}
+    assert.deepEqual(s.workerArticles(other.id).map(row=>row.id),[foreign.id]);assert.equal(s.workerArticleFile(other.id,article.id,file),null);
+    assert.throws(()=>s.saveSiteArticle({...input,siteId:b.id},article.id),/현장/);s.saveSiteArticle({...input,visible:false},article.id);assert.equal(s.workerArticleFile(one.id,article.id,file),null);assert.deepEqual(s.workerArticles(two.id),[]);s.close();
+    s=new Store(path);assert.equal(s.workerArticleFile(one.id,article.id,file),null);assert.equal(Buffer.from(s.articleFile(a.id,article.id,file).data).toString(),'가상 파일');
+  }finally{if(s)s.close();rmSync(dir,{recursive:true,force:true});}
+});
+
 test('출입자 시험 서류는 현장과 출입자별로 분리하고 첨부를 검증한다',()=>{
   const s=new Store(':memory:');try{
     const site=s.createSite({name:'가상 현장'}),other=s.createSite({name:'다른 현장'}),worker=s.createWorker({siteId:site.id,name:'가상 근로자',category:'직영',company:'가상 회사',occupation:'목공'}),bytes=Buffer.from('가상 문서');
