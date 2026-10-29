@@ -1013,7 +1013,7 @@ export class Store {
     if(typeof opinion!=='string' || opinion.length>2000)throw new Error('검토 의견을 확인해 주세요.');
     opinion=opinion.trim();
     if(doc.type==='risk' && action==='reject' && !opinion)throw new Error('반려 의견을 입력해 주세요.');
-    this.db.exec('BEGIN IMMEDIATE');
+    this.db.exec('SAVEPOINT document_transition');
     try {
       if(doc.type==='work_plan'&&action==='submit'){
         const details=JSON.parse(doc.details),get=this.db.prepare('SELECT id,kind,model,capacity,manufacturer,registration,details FROM equipment WHERE id=? AND site_id=?');
@@ -1021,9 +1021,19 @@ export class Store {
       }
       this.db.prepare('UPDATE documents SET status=?,updated_at=CURRENT_TIMESTAMP WHERE id=?').run(next, Number(id));
       this.db.prepare('INSERT INTO events(document_id,action,from_status,to_status,opinion) VALUES(?,?,?,?,?)').run(Number(id),action,doc.status,next,opinion);
-      this.db.exec('COMMIT');
-    } catch (err) { this.db.exec('ROLLBACK'); throw err; }
+      this.db.exec('RELEASE document_transition');
+    } catch (err) { this.db.exec('ROLLBACK TO document_transition');this.db.exec('RELEASE document_transition');throw err; }
     return this.document(id);
+  }
+  approveDocuments(siteId,ids){
+    if(!Number.isSafeInteger(siteId)||siteId<1||!Array.isArray(ids)||!ids.length||ids.length>100||ids.some(id=>!Number.isSafeInteger(id)||id<1)||new Set(ids).size!==ids.length)throw new Error('선택한 시험 문서를 확인해 주세요.');
+    this.db.exec('BEGIN IMMEDIATE');
+    try{
+      for(const id of ids){const doc=this.document(id);if(!doc||doc.site_id!==siteId||doc.status!=='pending')throw new Error('선택한 현장의 결재 대기 문서를 확인해 주세요.');}
+      for(const id of ids)this.transition(id,'approve');
+      this.db.exec('COMMIT');
+    }catch(err){this.db.exec('ROLLBACK');throw err;}
+    return {approved:ids.length};
   }
   events(id) { return this.db.prepare('SELECT * FROM events WHERE document_id=? ORDER BY id').all(Number(id)); }
 }

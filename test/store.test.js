@@ -7,6 +7,18 @@ import { join, resolve, sep } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { PNG } from 'pngjs';
 
+test('일괄 시험 승인은 같은 현장의 대기 문서만 모두 처리하며 오류 때 전부 되돌린다',()=>{
+  const s=new Store(':memory:');try{
+    const a=s.createSite({name:'가상 A'}),b=s.createSite({name:'가상 B'}),make=siteId=>s.createDocument({siteId,type:'tbm',title:'가상 문서',date:'2026-10-29'}),one=make(a.id),two=make(a.id),other=make(b.id),draft=make(a.id);
+    for(const doc of [one,two,other])s.transition(doc.id,'submit');
+    for(const ids of [[],[one.id,one.id],[one.id,draft.id],[one.id,other.id],[one.id,99999],Array(101).fill(one.id)])assert.throws(()=>s.approveDocuments(a.id,ids));
+    assert.equal(s.document(one.id).status,'pending');assert.equal(s.events(one.id).length,1);
+    s.db.exec(`CREATE TRIGGER test_batch_failure BEFORE INSERT ON events WHEN NEW.document_id=${two.id} AND NEW.action='approve' BEGIN SELECT RAISE(ABORT,'시험 오류'); END`);
+    assert.throws(()=>s.approveDocuments(a.id,[one.id,two.id]),/시험 오류/);assert.equal(s.document(one.id).status,'pending');assert.equal(s.events(one.id).length,1);
+    s.db.exec('DROP TRIGGER test_batch_failure');assert.deepEqual(s.approveDocuments(a.id,[one.id,two.id]),{approved:2});assert.equal(s.document(one.id).status,'approved');assert.equal(s.events(two.id).at(-1).action,'approve');assert.equal(s.document(other.id).status,'pending');
+  }finally{s.close();}
+});
+
 test('가상 노임 직종별 합계는 현장과 월, 기록 당시 직종으로 구분한다',()=>{
   const s=new Store(':memory:');try{
     const a=s.createSite({name:'가상 A'}),b=s.createSite({name:'가상 B'}),add=(siteId,name,occupation)=>s.createWorker({siteId,name,category:'직영',company:'가상 회사',occupation}),one=add(a.id,'가상 1','목공'),two=add(a.id,'가상 2','목공'),other=add(b.id,'다른 현장','목공'),deductions={income:'100',local:'10',health:'20',care:'3',pension:'50',employment:'5'};
