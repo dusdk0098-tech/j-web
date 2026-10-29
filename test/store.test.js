@@ -705,6 +705,20 @@ test('재해 보고서의 가상 재해자와 발생 내용을 보존하고 잘�
   }finally{s.close();}
 });
 
+test('교육 서명 표시는 설정된 대상자와 같은 현장·날짜·종류에 한정한다',()=>{
+  const s=new Store(':memory:');try{
+    const site=s.createSite({name:'가상 현장'}),otherSite=s.createSite({name:'다른 현장'}),add=siteId=>s.createWorker({siteId,name:'가상 근로자',category:'직영',company:'가상 업체',occupation:'목공'}),one=add(site.id),two=add(site.id),other=add(otherSite.id);
+    const png=new PNG({width:1,height:1});png.data[3]=255;const signature=`data:image/png;base64,${PNG.sync.write(png).toString('base64')}`;
+    for(const worker of [one,two,other])s.confirmDailyTraining(worker.id,'2026-10-29',['tbm'],true,signature);
+    const doc=s.createDocument({siteId:site.id,type:'tbm',title:'가상 교육',date:'2026-10-29'});
+    assert.deepEqual(s.trainingTargets(doc.id).signedWorkers.map(w=>w.id).sort(),[one.id,two.id].sort());
+    s.setTrainingTargets(doc.id,[one.id]);assert.deepEqual(s.trainingTargets(doc.id).signedWorkers.map(w=>w.id),[one.id]);
+    s.setTrainingTargets(doc.id,[]);assert.deepEqual(s.trainingTargets(doc.id).signedWorkers,[]);
+    const later=s.createDocument({siteId:site.id,type:'tbm',title:'다음날',date:'2026-10-30'}),education=s.createDocument({siteId:site.id,type:'education',title:'다른 종류',date:'2026-10-29'});
+    assert.deepEqual(s.trainingTargets(later.id).signedWorkers,[]);assert.deepEqual(s.trainingTargets(education.id).signedWorkers,[]);
+  }finally{s.close();}
+});
+
 test('교육 대상은 현장별로 제한되고 결재 요청 후 변경할 수 없다',()=>{
   const s=new Store(':memory:');
   try {
