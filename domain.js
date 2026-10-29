@@ -223,6 +223,11 @@ export function recordInput(input) {
     };
     if(value.items!==undefined){if(!Array.isArray(value.items) || value.items.length>100)throw new Error('위험성평가 항목을 확인해 주세요.');details.items=value.items.map(validate);}
     else details=validate(value);
+    if(value.musculoskeletalItems!==undefined){
+      if(!Array.isArray(value.musculoskeletalItems)||value.musculoskeletalItems.length>100)throw new Error('근골격계 항목을 확인해 주세요.');
+      const keys=['processName','contractor','contractorId','task','hazard','existingMeasures','additionalMeasures','grade','likelihood','severity','score'];
+      details.musculoskeletalItems=value.musculoskeletalItems.map(item=>{if(!item||typeof item.selected!=='boolean')throw new Error('근골격계 선택을 확인해 주세요.');const row=validate(item);return {...Object.fromEntries(keys.filter(key=>Object.hasOwn(row,key)).map(key=>[key,row[key]])),selected:item.selected};});
+    }
     if(value.kind!==undefined && value.kind!==''){
       if(!['initial','regular','occasional','continuous'].includes(value.kind))throw new Error('위험성평가 종류를 확인해 주세요.');
       details.kind=value.kind;

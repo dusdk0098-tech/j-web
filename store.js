@@ -1331,6 +1331,7 @@ export class Store {
     if(current.type==='cost' && Array.isArray(JSON.parse(current.details).rows))throw new Error('월간 사용내역서는 보존된 내역을 변경할 수 없습니다. 새 문서를 작성해 주세요.');
     if (current.status !== 'draft' && current.status !== 'rejected') throw new Error('임시저장 또는 반려된 문서만 수정할 수 있습니다.');
     if(current.type==='risk'){const previous=JSON.parse(current.details),rows=Array.isArray(previous.items)?previous.items:[previous],keys=['improvedGrade','improvedLikelihood','improvedSeverity'];if(rows.some(row=>keys.some(key=>row[key]))){const next=input.details,items=next&&Array.isArray(next.items)?next.items:next&&typeof next==='object'?[next]:null;if(!items||items.some(item=>!item||keys.some(key=>item[key]===undefined)))throw new Error('개선 후 위험성 정보를 보존하려면 화면을 새로고침해 주세요.');}}
+    if(current.type==='risk'&&JSON.parse(current.details).musculoskeletalItems?.length&&input.details?.musculoskeletalItems===undefined)throw new Error('근골격계 항목을 보존하려면 화면을 새로고침해 주세요.');
     if(current.type==='work_plan'&&(input.details===undefined||input.details&&typeof input.details==='object'&&!Array.isArray(input.details))){const previous=JSON.parse(current.details),details={...input.details};for(const key of ['heavyLoads','equipmentAssignments','safetyMeasures'])if(details[key]===undefined&&previous[key]!==undefined)details[key]=previous[key];input={...input,details};}
     if(current.type==='basic'&&JSON.parse(current.details).categoryId>0&&input.details?.categoryId===undefined)throw new Error('기본 서류 분류를 보존하려면 화면을 새로고침해 주세요.');
     const d = recordInput(input);
@@ -1369,7 +1370,7 @@ export class Store {
   validateRiskContractors(doc){
     if(doc.type!=='risk')return;
     const find=this.db.prepare('SELECT name FROM companies WHERE id=? AND site_id=?');
-    for(const row of Array.isArray(doc.details.items)?doc.details.items:[doc.details])if(row.contractorId){const company=find.get(row.contractorId,doc.siteId);if(!company)throw new Error('같은 현장의 협력사를 선택해 주세요.');row.contractor=company.name;}
+    for(const row of [...(Array.isArray(doc.details.items)?doc.details.items:[doc.details]),...(doc.details.musculoskeletalItems||[])])if(row.contractorId){const company=find.get(row.contractorId,doc.siteId);if(!company)throw new Error('같은 현장의 협력사를 선택해 주세요.');row.contractor=company.name;}
   }
   validatePlanEquipment(doc) {
     if(doc.type!=='work_plan')return;
