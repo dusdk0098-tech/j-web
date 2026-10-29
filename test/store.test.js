@@ -600,6 +600,20 @@ test('노사협의체 회의 안건과 출역자를 현장별로 저장한다',(
   }finally{s.close();}
 });
 
+test('회의 작성자 시험 서명은 문서 변경 시 초기화하고 결재 요청 때 보존한다',()=>{
+  const s=new Store(':memory:');try{
+    const site=s.createSite({name:'가상 현장'}),png=new PNG({width:1,height:1});png.data[3]=255;const bytes=PNG.sync.write(png),signature=`data:image/png;base64,${bytes.toString('base64')}`;
+    for(const type of ['work_council','safety_meeting']){
+      const input={siteId:site.id,type,title:'가상 회의',date:'2026-10-29',details:type==='work_council'?{kind:'정기 회의'}:{}},doc=s.createDocument(input);assert.throws(()=>s.saveMeetingSignature(doc.id,'invalid'),/서명/);
+      s.saveMeetingSignature(doc.id,signature);assert.deepEqual(Buffer.from(s.meetingSignature(doc.id).signature),bytes);const file=s.addAttachment(doc.id,'가상.txt',Buffer.from('가상'));assert.equal(s.meetingSignature(doc.id),null);
+      s.saveMeetingSignature(doc.id,signature);s.deleteAttachment(file);assert.equal(s.meetingSignature(doc.id),null);s.saveMeetingSignature(doc.id,signature);s.updateDocument(doc.id,input);assert.equal(s.meetingSignature(doc.id),null);
+      s.saveMeetingSignature(doc.id,signature);s.transition(doc.id,'submit');const frozen=s.document(doc.id),cycle=frozen.approval_cycle_id;assert.equal(s.reviewerPayload(frozen).linked.authorSignature,true);assert.deepEqual(Buffer.from(s.reviewerLinkedSignature(frozen,'author',0)),bytes);assert.throws(()=>s.saveMeetingSignature(doc.id,signature),/수정/);
+      s.transition(doc.id,'withdraw');s.updateDocument(doc.id,input);assert.equal(s.meetingSignature(doc.id),null);assert.deepEqual(Buffer.from(s.approvalCycleFile(doc.id,cycle,'author-signature',0,0).data),bytes);s.transition(doc.id,'submit');assert.equal(s.reviewerPayload(s.document(doc.id)).linked.authorSignature,false);
+    }
+    const other=s.createDocument({siteId:site.id,type:'tbm',title:'가상 교육',date:'2026-10-29'});assert.throws(()=>s.saveMeetingSignature(other.id,signature),/회의/);
+  }finally{s.close();}
+});
+
 test('회의 사용자 측 관리자 선택은 현장과 당시 명부를 보존한다',()=>{
   const s=new Store(':memory:');try{
     const site=s.createSite({name:'가상 현장'}),other=s.createSite({name:'다른 현장'}),make=(siteId,name,category='현장관리자')=>s.createWorker({siteId,name,category,company:'가상 업체',occupation:'가상 직종'}),manager=make(site.id,'가상 관리자'),foreign=make(other.id,'다른 현장 관리자'),worker=make(site.id,'가상 근로자','직영');
