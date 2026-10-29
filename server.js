@@ -27,9 +27,10 @@ const reviewerSessions=new Map(),reviewerAccountFailures=new Map();let reviewerF
 let workerFailures=[];
 const workerAccountFailures=new Map();
 const workerKey=raw=>typeof raw==='string' && /^[\w-]{43}$/.test(raw)?createHash('sha256').update(raw).digest('hex'):'';
+function workerSessionError(raw,expected){const now=new Date(),session=workerSessions.get(workerKey(raw));if(session!==expected||!session||session.expires<=now.getTime())return {status:401,error:'근로자 로그인이 필요합니다.'};const date=new Date(now.getTime()-now.getTimezoneOffset()*60000).toISOString().slice(0,10);return store.workerAccessBlocked(session.worker.site_id,date)?{status:403,error:'해당 현장은 오늘 근로자 접속이 차단되었습니다.'}:null;}
 delete process.env.JWEB_ADMIN_PASSWORD;
 const mime = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg':'image/svg+xml', '.png':'image/png' };
-const assets = new Set(['/','/app.js','/batch-print.js','/risk-scale.js','/worker-link.js','/site-qr.js','/tbm-sources.js','/training-groups.js','/restaurant-price.js','/salary-summary.js','/style.css','/jweb-icon.svg','/jweb-icon-192.png','/jweb-icon-512.png','/join','/join.js','/login','/login.js','/review','/review.js']);
+const assets = new Set(['/','/app.js','/batch-print.js','/risk-scale.js','/worker-link.js','/worker-documents.js','/site-qr.js','/tbm-sources.js','/training-groups.js','/restaurant-price.js','/salary-summary.js','/style.css','/jweb-icon.svg','/jweb-icon-192.png','/jweb-icon-512.png','/join','/join.js','/login','/login.js','/review','/review.js']);
 const json = (res, code, value) => { res.writeHead(code, {'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}); res.end(JSON.stringify(value)); };
 async function body(req,max=65536) {
   const chunks=[];let size=0;
@@ -119,6 +120,21 @@ const server = http.createServer(async (req, res) => {
     }
     if(url.pathname==='/api/worker/permissions'&&req.method==='GET'){
       const session=workerSessions.get(workerKey(workerToken));if(!session||session.expires<=Date.now())return json(res,401,{error:'근로자 로그인이 필요합니다.'});return json(res,200,store.workerPermissions(session.worker.site_id,session.worker.id));
+    }
+    if(url.pathname==='/api/worker/document-options'&&req.method==='GET'){
+      const session=workerSessions.get(workerKey(workerToken));if(!session||session.expires<=Date.now())return json(res,401,{error:'근로자 로그인이 필요합니다.'});return json(res,200,store.workerDocumentOptions(session.worker.site_id,session.worker.id,url.searchParams.get('type')));
+    }
+    if(url.pathname==='/api/worker/documents'&&['GET','POST'].includes(req.method)){
+      const session=workerSessions.get(workerKey(workerToken));if(!session||session.expires<=Date.now())return json(res,401,{error:'근로자 로그인이 필요합니다.'});if(req.method==='GET')return json(res,200,store.workerDocuments(session.worker.site_id,session.worker.id));const input=await body(req,120000),failure=workerSessionError(workerToken,session);if(failure)return json(res,failure.status,{error:failure.error});return json(res,201,store.createWorkerDocument(session.worker.site_id,session.worker.id,input));
+    }
+    const workerDocument=url.pathname.match(/^\/api\/worker\/documents\/(\d+)(?:\/(transition|attachments)(?:\/(\d+))?)?$/);
+    if(workerDocument){
+      const session=workerSessions.get(workerKey(workerToken));if(!session||session.expires<=Date.now())return json(res,401,{error:'근로자 로그인이 필요합니다.'});const [,id,part,fileId]=workerDocument,siteId=session.worker.site_id,workerId=session.worker.id,doc=store.workerDocument(siteId,workerId,id);
+      if(!part&&req.method==='GET')return json(res,200,doc);if(!part&&req.method==='PUT'){const input=await body(req,120000),failure=workerSessionError(workerToken,session);if(failure)return json(res,failure.status,{error:failure.error});return json(res,200,store.updateWorkerDocument(siteId,workerId,id,input));}
+      if(part==='transition'&&req.method==='POST'&&!fileId){const input=await body(req),failure=workerSessionError(workerToken,session);if(failure)return json(res,failure.status,{error:failure.error});return json(res,200,store.transitionWorkerDocument(siteId,workerId,id,input.action));}
+      if(part==='attachments'&&!fileId&&req.method==='GET')return json(res,200,store.attachments(id));
+      if(part==='attachments'&&!fileId&&req.method==='POST'){const chunks=[];let size=0;for await(const chunk of req){size+=chunk.length;if(size>2*1024*1024)throw new Error('파일은 2MB 이하여야 합니다.');chunks.push(chunk);}let name;try{name=decodeURIComponent(req.headers['x-file-name']||'');}catch{throw new Error('파일 이름을 확인해 주세요.');}const failure=workerSessionError(workerToken,session);if(failure)return json(res,failure.status,{error:failure.error});store.workerDocument(siteId,workerId,id);return json(res,201,{id:store.addAttachment(id,name,Buffer.concat(chunks),url.searchParams.get('category')||'general')});}
+      if(part==='attachments'&&fileId&&['GET','DELETE'].includes(req.method)){const file=store.attachment(fileId);if(!file||file.document_id!==doc.id)return json(res,404,{error:'첨부파일을 찾을 수 없습니다.'});if(req.method==='DELETE'){store.deleteAttachment(fileId);return json(res,200,{ok:true});}const name=encodeURIComponent(file.name).replace(/[!'()*]/g,c=>`%${c.charCodeAt(0).toString(16).toUpperCase()}`);res.writeHead(200,{'Content-Type':'application/octet-stream','Content-Disposition':`attachment; filename="file"; filename*=UTF-8''${name}`,'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(file.data);}
     }
     if(url.pathname==='/api/worker/managed-attendance'&&['GET','PUT'].includes(req.method)){
       const session=workerSessions.get(workerKey(workerToken));if(!session||session.expires<=Date.now())return json(res,401,{error:'근로자 로그인이 필요합니다.'});const {site_id:siteId,id:workerId}=session.worker;

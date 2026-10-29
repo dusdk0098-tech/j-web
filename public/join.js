@@ -1,4 +1,5 @@
 import { workerSitePath,replaceWorkerSiteAddress } from './worker-link.js';
+import { mountWorkerDocuments } from './worker-documents.js';
 const params=new URLSearchParams(location.search),token=params.get('token');let siteKey=params.get('site');
 const site=document.querySelector('#join-site'), message=document.querySelector('#join-message'), form=document.querySelector('#join-form');
 form.querySelector('p').textContent='이 시험 화면은 가상 인적사항·아이디·보호구 선택·서명 이미지와 암호의 해시를 이 컴퓨터의 시험 데이터베이스에 저장합니다. 실제 개인정보와 실제 암호 대신 가상 정보를 입력하세요.';
@@ -46,6 +47,7 @@ async function showWorker(worker){
     month.onchange=load;await load();
     try{
       const response=await fetch('/api/worker/permissions'),permissions=await response.json();if(!response.ok)throw Error(permissions.error);
+      if(permissions.some(permission=>['risk','work_plan'].includes(permission)))await mountWorkerDocuments(panel,permissions);
       if(permissions.includes('attendance')){
         const section=document.createElement('section');section.innerHTML='<h2>현장 출역 관리 시험 권한</h2><p>가상 출역만 변경하세요. 변경한 담당자는 기록됩니다.</p><label>날짜 <input type="date" required></label><button type="button">조회</button><div aria-live="polite"></div>';panel.append(section);
         const date=section.querySelector('input'),list=section.querySelector('[aria-live]');date.value=new Date(Date.now()-new Date().getTimezoneOffset()*60000).toISOString().slice(0,10);

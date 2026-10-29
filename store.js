@@ -75,6 +75,7 @@ export class Store {
       CREATE TABLE IF NOT EXISTS workers (id INTEGER PRIMARY KEY, site_id INTEGER NOT NULL REFERENCES sites(id), name TEXT NOT NULL, category TEXT NOT NULL, company TEXT NOT NULL, occupation TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS worker_accounts (worker_id INTEGER PRIMARY KEY REFERENCES workers(id),site_id INTEGER NOT NULL REFERENCES sites(id),login_id TEXT NOT NULL,salt BLOB NOT NULL,password_hash BLOB NOT NULL,UNIQUE(site_id,login_id));
       CREATE TABLE IF NOT EXISTS worker_permissions (worker_id INTEGER NOT NULL REFERENCES workers(id),permission TEXT NOT NULL,PRIMARY KEY(worker_id,permission));
+      CREATE TABLE IF NOT EXISTS worker_authored_documents (document_id INTEGER PRIMARY KEY REFERENCES documents(id),worker_id INTEGER NOT NULL REFERENCES workers(id));
       CREATE TABLE IF NOT EXISTS delegated_attendance_events (id INTEGER PRIMARY KEY,site_id INTEGER NOT NULL REFERENCES sites(id),actor_id INTEGER NOT NULL REFERENCES workers(id),actor_name TEXT NOT NULL,worker_id INTEGER NOT NULL REFERENCES workers(id),worker_name TEXT NOT NULL,date TEXT NOT NULL,present INTEGER NOT NULL CHECK(present IN (0,1)),created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
       CREATE TABLE IF NOT EXISTS worker_files (id INTEGER PRIMARY KEY,worker_id INTEGER NOT NULL REFERENCES workers(id),category TEXT NOT NULL,name TEXT NOT NULL,data BLOB NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
       CREATE TABLE IF NOT EXISTS attendance (worker_id INTEGER NOT NULL REFERENCES workers(id), date TEXT NOT NULL, present INTEGER NOT NULL CHECK(present IN (0,1)), updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY(worker_id,date));
@@ -717,7 +718,7 @@ export class Store {
     return this.db.prepare('SELECT permission FROM worker_permissions WHERE worker_id=? ORDER BY permission').all(Number(workerId)).map(row=>row.permission);
   }
   setWorkerPermissions(siteId,workerId,permissions){
-    this.workerPermissions(siteId,workerId);if(!Array.isArray(permissions)||permissions.some(value=>value!=='attendance')||new Set(permissions).size!==permissions.length)throw new Error('시험 권한을 확인해 주세요.');
+    this.workerPermissions(siteId,workerId);if(!Array.isArray(permissions)||permissions.some(value=>!['attendance','risk','work_plan'].includes(value))||new Set(permissions).size!==permissions.length)throw new Error('시험 권한을 확인해 주세요.');
     if(permissions.length&&!this.db.prepare('SELECT 1 FROM worker_accounts WHERE site_id=? AND worker_id=?').get(Number(siteId),Number(workerId)))throw new Error('시험 계정이 있는 출입자를 선택해 주세요.');
     this.db.exec('SAVEPOINT permission_update');try{this.db.prepare('DELETE FROM worker_permissions WHERE worker_id=?').run(Number(workerId));for(const permission of permissions)this.db.prepare('INSERT INTO worker_permissions(worker_id,permission) VALUES(?,?)').run(Number(workerId),permission);this.db.exec('RELEASE permission_update');}catch(error){this.db.exec('ROLLBACK TO permission_update');this.db.exec('RELEASE permission_update');throw error;}
     return this.workerPermissions(siteId,workerId);
@@ -732,6 +733,22 @@ export class Store {
     this.db.exec('BEGIN IMMEDIATE');try{this.setAttendance({siteId,workerId:input.workerId,date,present:input.present});this.db.prepare("UPDATE attendance SET source='delegated' WHERE worker_id=? AND date=?").run(Number(input.workerId),date);this.db.prepare('INSERT INTO delegated_attendance_events(site_id,actor_id,actor_name,worker_id,worker_name,date,present) VALUES(?,?,?,?,?,?,?)').run(Number(siteId),Number(actorId),actor.name,Number(input.workerId),target.name,date,input.present?1:0);this.db.exec('COMMIT');}catch(error){this.db.exec('ROLLBACK');throw error;}
   }
   delegatedAttendanceEvents(siteId,date){date=dateValue(date);return this.db.prepare('SELECT id,actor_name,worker_name,present,created_at FROM delegated_attendance_events WHERE site_id=? AND date=? ORDER BY id DESC').all(Number(siteId),date);}
+  workerDocuments(siteId,workerId){
+    const permissions=this.workerPermissions(siteId,workerId).filter(value=>['risk','work_plan'].includes(value));
+    return this.db.prepare('SELECT d.* FROM documents d JOIN worker_authored_documents a ON a.document_id=d.id WHERE d.site_id=? AND a.worker_id=? ORDER BY d.date DESC,d.id DESC').all(Number(siteId),Number(workerId)).filter(doc=>permissions.includes(doc.type));
+  }
+  workerDocument(siteId,workerId,id){const doc=this.workerDocuments(siteId,workerId).find(item=>item.id===Number(id));if(!doc)throw new Error('권한이 있는 본인 작성 문서를 확인해 주세요.');return doc;}
+  createWorkerDocument(siteId,workerId,input){
+    if(!['risk','work_plan'].includes(input.type)||!this.workerPermissions(siteId,workerId).includes(input.type))throw new Error('문서 작성 시험 권한이 필요합니다.');
+    this.db.exec('BEGIN IMMEDIATE');try{const doc=this.createDocument({...input,siteId:Number(siteId)});this.db.prepare('INSERT INTO worker_authored_documents(document_id,worker_id) VALUES(?,?)').run(doc.id,Number(workerId));this.db.exec('COMMIT');return doc;}catch(error){this.db.exec('ROLLBACK');throw error;}
+  }
+  updateWorkerDocument(siteId,workerId,id,input){const doc=this.workerDocument(siteId,workerId,id);return this.updateDocument(doc.id,{...input,siteId:Number(siteId),type:doc.type});}
+  transitionWorkerDocument(siteId,workerId,id,action){const doc=this.workerDocument(siteId,workerId,id);if(!['submit','withdraw','revise'].includes(action))throw new Error('허용된 문서 상태 변경을 확인해 주세요.');return this.transition(doc.id,action);}
+  workerDocumentOptions(siteId,workerId,type){
+    if(!['risk','work_plan'].includes(type)||!this.workerPermissions(siteId,workerId).includes(type))throw new Error('문서 작성 시험 권한이 필요합니다.');
+    const companies=this.companies(siteId).map(({id,name,trade})=>({id,name,trade}));if(type==='risk')return {companies};
+    return {companies,equipment:this.equipment(siteId).map(({id,kind,model,registration})=>({id,kind,model,registration})),places:this.workPlaces(siteId).map(({id,name})=>({id,name})),rigging:this.rigging(siteId).map(({id,category,kind,name})=>({id,category,kind,name})),workers:this.workers(siteId).map(({id,name,company})=>({id,name,company}))};
+  }
   setAttendance(input) {
     const date = dateValue(input.date);
     if (typeof input.present !== 'boolean') throw new Error('출역 상태를 확인해 주세요.');

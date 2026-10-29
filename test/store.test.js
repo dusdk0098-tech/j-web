@@ -727,6 +727,17 @@ test('현장과 출입자를 분리하고 문서 결재 이력을 보존한다',
   } finally {s.close();}
 });
 
+test('문서 작성 시험 권한은 현장과 작성자를 제한하며 취소 후 권한을 재검사한다',()=>{
+  const s=new Store(':memory:');try{
+    const a=s.createSite({name:'가상 A'}),b=s.createSite({name:'가상 B'}),invite=s.createInvitation(a.id),make=id=>s.join(invite.token,{name:id,category:'직영',company:'가상 업체',occupation:'가상 직종',loginId:id,password:'virtual-password-123',acknowledged:true}),one=make('author_one'),two=make('author_two'),company=s.createCompany({siteId:a.id,name:'가상 업체',trade:'가상 공종'}),other=s.createCompany({siteId:b.id,name:'다른 업체',trade:'가상 공종'}),input={siteId:b.id,type:'risk',title:'가상 평가',date:'2026-10-29',details:{items:[{task:'가상 작업',contractorId:company.id}]}};
+    assert.throws(()=>s.createWorkerDocument(a.id,one.id,input),/권한/);s.setWorkerPermissions(a.id,one.id,['risk','work_plan']);s.setWorkerPermissions(a.id,two.id,['risk']);assert.deepEqual(s.workerDocumentOptions(a.id,one.id,'risk').companies.map(c=>c.id),[company.id]);assert.throws(()=>s.createWorkerDocument(a.id,one.id,{...input,details:{items:[{contractorId:other.id}]}}),/현장/);
+    const doc=s.createWorkerDocument(a.id,one.id,input);assert.equal(doc.site_id,a.id);assert.equal(JSON.parse(doc.details).items[0].contractor,'가상 업체');assert.deepEqual(s.workerDocuments(a.id,two.id),[]);assert.throws(()=>s.workerDocument(a.id,two.id,doc.id),/본인/);assert.throws(()=>s.updateWorkerDocument(a.id,two.id,doc.id,input),/본인/);assert.throws(()=>s.workerDocument(b.id,one.id,doc.id),/현장/);
+    const plan=s.createWorkerDocument(a.id,one.id,{type:'work_plan',title:'가상 계획',date:'2026-10-29'});assert.equal(plan.type,'work_plan');s.updateWorkerDocument(a.id,one.id,doc.id,{...input,type:'work_plan',title:'수정 평가'});assert.equal(s.document(doc.id).type,'risk');s.transitionWorkerDocument(a.id,one.id,doc.id,'submit');assert.throws(()=>s.updateWorkerDocument(a.id,one.id,doc.id,input),/수정/);assert.throws(()=>s.transitionWorkerDocument(a.id,one.id,doc.id,'approve'),/허용/);s.transitionWorkerDocument(a.id,one.id,doc.id,'withdraw');
+    s.setWorkerPermissions(a.id,one.id,['work_plan']);assert.throws(()=>s.workerDocument(a.id,one.id,doc.id),/권한/);assert.equal(s.workerDocuments(a.id,one.id).length,1);assert.throws(()=>s.createWorkerDocument(a.id,one.id,input),/권한/);
+    s.db.exec("CREATE TRIGGER fail_author BEFORE INSERT ON worker_authored_documents BEGIN SELECT RAISE(ABORT,'작성자 기록 오류'); END");const before=s.documents(a.id,'work_plan').length;assert.throws(()=>s.createWorkerDocument(a.id,one.id,{type:'work_plan',title:'오류',date:'2026-10-29'}),/작성자 기록 오류/);assert.equal(s.documents(a.id,'work_plan').length,before);
+  }finally{s.close();}
+});
+
 test('출역 관리 시험 권한은 현장과 계정에 한정되고 변경 이력을 원자적으로 남긴다',()=>{
   const dir=mkdtempSync(join(tmpdir(),'jweb-delegated-')),file=join(dir,'data.sqlite');let s=new Store(file);
   try{
