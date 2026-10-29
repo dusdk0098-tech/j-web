@@ -111,6 +111,8 @@ export class Store {
     if(!this.db.prepare('PRAGMA table_info(risk_activities)').all().some(c=>c.name==='worker_snapshot'))this.db.exec("ALTER TABLE risk_activities ADD COLUMN worker_snapshot TEXT NOT NULL DEFAULT '[]'");
     if(!this.db.prepare('PRAGMA table_info(risk_activity_photos)').all().some(c=>c.name==='purpose'))this.db.exec("ALTER TABLE risk_activity_photos ADD COLUMN purpose TEXT NOT NULL DEFAULT 'photo'");
     if(!this.db.prepare('PRAGMA table_info(hazard_reports)').all().some(c=>c.name==='worker_id'))this.db.exec('ALTER TABLE hazard_reports ADD COLUMN worker_id INTEGER REFERENCES workers(id)');
+    if(!this.db.prepare('PRAGMA table_info(hazard_reports)').all().some(c=>c.name==='status'))this.db.exec("ALTER TABLE hazard_reports ADD COLUMN status TEXT NOT NULL DEFAULT 'received'");
+    if(!this.db.prepare('PRAGMA table_info(hazard_reports)').all().some(c=>c.name==='response'))this.db.exec("ALTER TABLE hazard_reports ADD COLUMN response TEXT NOT NULL DEFAULT ''");
     if (!this.db.prepare('PRAGMA table_info(worker_notice_reads)').all().some(c=>c.name==='signature')) this.db.exec('ALTER TABLE worker_notice_reads ADD COLUMN signature BLOB');
     if (!this.db.prepare('PRAGMA table_info(worker_training_checks)').all().some(c=>c.name==='rights_ack')) this.db.exec('ALTER TABLE worker_training_checks ADD COLUMN rights_ack TEXT');
     if (!this.db.prepare('PRAGMA table_info(equipment)').all().some(c=>c.name==='details')) this.db.exec("ALTER TABLE equipment ADD COLUMN details TEXT NOT NULL DEFAULT '{}'");
@@ -650,8 +652,12 @@ export class Store {
     return this.db.prepare('INSERT INTO hazard_reports(site_id,title,body,reporter,photo,worker_id) VALUES(?,?,?,?,?,?)').run(Number(siteId),title,body,reporter,photo,workerId).lastInsertRowid;
   }
   createWorkerHazardReport(workerId,input){const worker=this.db.prepare('SELECT id,site_id,name FROM workers WHERE id=?').get(Number(workerId));if(!worker)throw new Error('근로자를 확인해 주세요.');return this.createHazardReport(worker.site_id,{...input,reporter:worker.name},worker.id);}
-  workerHazardReports(workerId){return this.db.prepare('SELECT id,title,body,created_at,photo IS NOT NULL AS has_photo FROM hazard_reports WHERE worker_id=? ORDER BY id DESC').all(Number(workerId));}
-  hazardReports(siteId,query=''){if(typeof query!=='string'||query.length>200)throw new Error('검색어를 확인해 주세요.');return this.db.prepare('SELECT id,title,body,reporter,created_at,photo IS NOT NULL AS has_photo FROM hazard_reports WHERE site_id=? AND (instr(title,?)>0 OR instr(body,?)>0) ORDER BY id DESC').all(Number(siteId),query,query);}
+  workerHazardReports(workerId){return this.db.prepare('SELECT id,title,body,status,response,created_at,photo IS NOT NULL AS has_photo FROM hazard_reports WHERE worker_id=? ORDER BY id DESC').all(Number(workerId));}
+  hazardReports(siteId,query=''){if(typeof query!=='string'||query.length>200)throw new Error('검색어를 확인해 주세요.');return this.db.prepare('SELECT id,title,body,reporter,status,response,created_at,photo IS NOT NULL AS has_photo FROM hazard_reports WHERE site_id=? AND (instr(title,?)>0 OR instr(body,?)>0) ORDER BY id DESC').all(Number(siteId),query,query);}
+  updateHazardReport(siteId,id,input){
+    if(!['received','reviewing','resolved'].includes(input.status)||typeof input.response!=='string'||input.response.length>2000||input.status==='resolved'&&!input.response.trim())throw new Error('시험 처리 상태와 조치 내용을 확인해 주세요.');
+    if(!this.db.prepare('UPDATE hazard_reports SET status=?,response=? WHERE site_id=? AND id=?').run(input.status,input.response.trim(),Number(siteId),Number(id)).changes)throw new Error('선택한 현장의 신고를 확인해 주세요.');
+  }
   hazardReportPhoto(siteId,id){return this.db.prepare('SELECT photo FROM hazard_reports WHERE site_id=? AND id=? AND photo IS NOT NULL').get(Number(siteId),Number(id))?.photo||null;}
   createWorkerSelfCheck(workerId,date,answers,signature) {
     date=dateValue(date);

@@ -213,6 +213,8 @@ const server = http.createServer(async (req, res) => {
       res.writeHead(200,{'Content-Type':'application/octet-stream','Content-Disposition':'attachment; filename="test-signature.png"','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(signature);
     }
     const siteStops=url.pathname.match(/^\/api\/sites\/(\d+)\/work-stops$/);
+    const hazardStatus=url.pathname.match(/^\/api\/sites\/(\d+)\/hazard-reports\/(\d+)$/);
+    if(hazardStatus&&req.method==='PUT'){store.updateHazardReport(hazardStatus[1],hazardStatus[2],await body(req));return json(res,200,{ok:true});}
     const hazardReports=url.pathname.match(/^\/api\/sites\/(\d+)\/hazard-reports(?:\/(\d+)\/photo)?$/);
     if(hazardReports){const [,siteId,id]=hazardReports;
       if(!id&&req.method==='GET')return json(res,200,store.hazardReports(siteId,url.searchParams.get('q')||''));

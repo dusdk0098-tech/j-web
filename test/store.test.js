@@ -126,6 +126,14 @@ test('보호구 시험 지급은 현장·월별로 집계하고 기록 당시 �
   }finally{s.close();}
 });
 
+test('이전 가상 신고에 접수 상태를 추가하고 조치 이력을 임의로 만들지 않는다',()=>{
+  const dir=mkdtempSync(join(tmpdir(),'j-web-hazards-')),path=join(dir,'test.sqlite');
+  try{
+    const old=new DatabaseSync(path);old.exec("CREATE TABLE hazard_reports(id INTEGER PRIMARY KEY,site_id INTEGER NOT NULL,title TEXT NOT NULL,body TEXT NOT NULL,reporter TEXT NOT NULL,photo BLOB,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP); INSERT INTO hazard_reports(id,site_id,title,body,reporter) VALUES(1,1,'가상 신고','가상 내용','가상 신고자')");old.close();
+    for(let i=0;i<2;i++){const s=new Store(path);try{const row=s.db.prepare('SELECT status,response FROM hazard_reports WHERE id=1').get();assert.equal(row.status,'received');assert.equal(row.response,'');}finally{s.close();}}
+  }finally{rmSync(dir,{recursive:true,force:true});}
+});
+
 test('보호구 지급 수정과 삭제는 현장을 제한하고 당시 근로자 정보를 보존한다',()=>{
   const s=new Store(':memory:');try{
     const site=s.createSite({name:'가상 현장'}),other=s.createSite({name:'다른 현장'}),worker=s.createWorker({siteId:site.id,name:'가상 근로자',category:'직영',company:'가상 회사',occupation:'목공'}),input={siteId:site.id,workerId:worker.id,date:'2024-02-29',item:'가상 안전모',quantity:'2'},id=s.addPpeIssue(input);
