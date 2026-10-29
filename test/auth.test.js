@@ -404,6 +404,7 @@ test('관리자 인증 모드가 문서 API를 보호하고 로그아웃을 적�
     assert.equal((await stopSearch(site.id,'가상 근로자',workerCookie)).status,401);assert.equal((await stopSearch(site.id,'x'.repeat(201))).status,400);
     assert.deepEqual((await (await stopSearch(site.id,'가상 근로자')).json()).map(row=>row.requester),['가상 근로자']);
     assert.equal((await (await stopSearch(site.id,'가상 위험')).json()).length,2);assert.deepEqual(await (await stopSearch(other.id,'가상 위험')).json(),[]);
+    assert.deepEqual(await (await stopSearch(site.id,'JWEB_TEST_NO_MATCH_719402')).json(),[]);
     assert.equal(stops[1].has_photo,1);
     assert.equal((await fetch(`${base}/api/sites/${site.id}/work-stops/${stops[1].id}/photo`,{headers:{cookie:workerCookie}})).status,401);
     assert.equal((await fetch(`${base}/api/sites/${other.id}/work-stops/${stops[1].id}/photo`,{headers:{cookie}})).status,404);
