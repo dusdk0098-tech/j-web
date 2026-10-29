@@ -761,7 +761,8 @@ export class Store {
   documents(siteId, type = '', query = '', from = '', to = '') {
     if(from)from=dateValue(from);if(to)to=dateValue(to);
     if(from && to && from>to)throw new Error('조회 시작일은 종료일보다 늦을 수 없습니다.');
-    return this.db.prepare("SELECT * FROM documents WHERE site_id=? AND (?='' OR type=?) AND (title LIKE ? OR body LIKE ? OR details LIKE ?) AND (?='' OR date>=?) AND (?='' OR date<=?) ORDER BY date DESC,id DESC").all(Number(siteId),type,type,...Array(3).fill(`%${query}%`),from,from,to,to);
+    siteId=Number(siteId);if(!this.db.prepare('SELECT 1 FROM sites WHERE id=?').get(siteId))throw new Error('현장을 선택해 주세요.');
+    return this.db.prepare("SELECT * FROM documents WHERE (site_id=? OR (type='basic' AND status='approved' AND json_extract(details,'$.shared')=1)) AND (?='' OR type=?) AND (title LIKE ? OR body LIKE ? OR details LIKE ?) AND (?='' OR date>=?) AND (?='' OR date<=?) ORDER BY date DESC,id DESC").all(siteId,type,type,...Array(3).fill(`%${query}%`),from,from,to,to);
   }
   previousDailyReport(siteId, before) {
     before=dateValue(before);

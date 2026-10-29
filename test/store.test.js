@@ -272,6 +272,14 @@ test('반기 시험 점검은 기본 정보와 일곱 판정 및 개선 내용�
   }finally{s.close();}
 });
 
+test('공유 기본 서류는 승인 뒤에만 다른 현장 목록에 표시한다',()=>{
+  const s=new Store(':memory:');try{
+    const a=s.createSite({name:'가상 A'}),b=s.createSite({name:'가상 B'}),input={siteId:a.id,type:'basic',title:'공유 시험 서류',date:'2026-10-28',details:{category:'가상 분류',shared:true}},doc=s.createDocument(input),file=s.addAttachment(doc.id,'시험.txt',Buffer.from('가상 자료'));
+    const found=()=>s.documents(b.id,'basic','시험');assert.equal(found().length,0);assert.equal(s.documents(a.id,'basic').length,1);s.transition(doc.id,'submit');assert.equal(found().length,0);s.transition(doc.id,'approve');assert.deepEqual(found().map(row=>row.id),[doc.id]);assert.equal(s.documents(b.id,'basic','','2026-10-29','2026-10-30').length,0);assert.equal(s.documents(b.id,'tbm').length,0);assert.throws(()=>s.documents(999,'basic'),/현장/);assert.deepEqual(Buffer.from(s.attachment(file).data),Buffer.from('가상 자료'));
+    const local=s.createDocument({...input,title:'현장 전용',details:{category:'가상 분류',shared:false}});s.transition(local.id,'submit');s.transition(local.id,'approve');assert.deepEqual(s.documents(b.id,'basic').map(row=>row.id),[doc.id]);assert.throws(()=>s.createDocument({...input,details:{shared:'true'}}),/공유/);
+  }finally{s.close();}
+});
+
 test('기본 서류 분류를 현장별로 저장하고 검색한다',()=>{
   const s=new Store(':memory:');try{const a=s.createSite({name:'가상 현장 A'}),b=s.createSite({name:'가상 현장 B'}),input={siteId:a.id,type:'basic',title:'가상 서류',date:'2026-10-29',details:{category:'안전·보건 조직도'}};const doc=s.createDocument(input);assert.equal(JSON.parse(doc.details).category,'안전·보건 조직도');assert.equal(s.documents(a.id,'basic','조직도').length,1);assert.equal(s.documents(b.id,'basic','조직도').length,0);assert.throws(()=>s.updateDocument(doc.id,{...input,details:{category:'가'.repeat(201)}}),/분류/);assert.equal(JSON.parse(s.document(doc.id).details).category,'안전·보건 조직도');}finally{s.close();}
 });

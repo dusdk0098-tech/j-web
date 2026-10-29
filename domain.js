@@ -43,7 +43,7 @@ export function recordInput(input) {
     if(['afternoon','evening'].includes(kind)){const answers=value.answers,length=kind==='afternoon'?7:10,textIndices=kind==='afternoon'?[0,6]:[9],naIndices=kind==='afternoon'?[4]:[4,5,6,7];if(!Array.isArray(answers)||answers.length!==length)throw new Error('체크리스트 문항을 확인해 주세요.');details.answers=answers.map((item,i)=>{if(!item||typeof item.answer!=='string'||item.answer.length>2000||typeof item.note!=='string'||item.note.length>1000||!textIndices.includes(i)&&!['','O','X',...(naIndices.includes(i)?['해당없음']:[])].includes(item.answer))throw new Error('체크리스트 답변을 확인해 주세요.');return {answer:item.answer.trim(),note:item.note.trim()};});}
   }
   if(type==='basic'){
-    const value=input.details??{};if(!value||typeof value!=='object'||Array.isArray(value)||typeof (value.category??'')!=='string'||(value.category??'').length>200)throw new Error('기본 서류 분류를 확인해 주세요.');details.category=(value.category??'').trim();
+    const value=input.details??{};if(!value||typeof value!=='object'||Array.isArray(value)||typeof (value.category??'')!=='string'||(value.category??'').length>200||value.shared!==undefined&&typeof value.shared!=='boolean')throw new Error('기본 서류 분류와 공유 범위를 확인해 주세요.');details.category=(value.category??'').trim();details.shared=value.shared??false;
   }
   if(type==='safety_log'){
     const value=input.details??{};if(!value||typeof value!=='object'||Array.isArray(value))throw new Error('안전 업무 일지 항목을 확인해 주세요.');
