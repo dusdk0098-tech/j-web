@@ -885,7 +885,7 @@ test('기존 출역 기록에 구분이 없어도 보존되고 다시 열 수 �
     const old=new DatabaseSync(path);
     old.exec("CREATE TABLE sites (id INTEGER PRIMARY KEY,name TEXT NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP); INSERT INTO sites(id,name) VALUES(1,'가상 현장'); CREATE TABLE workers (id INTEGER PRIMARY KEY,site_id INTEGER NOT NULL,name TEXT NOT NULL,category TEXT NOT NULL,company TEXT NOT NULL,occupation TEXT NOT NULL); INSERT INTO workers VALUES(1,1,'가상 근로자','직영','가상 회사','목공'); CREATE TABLE attendance (worker_id INTEGER NOT NULL,date TEXT NOT NULL,present INTEGER NOT NULL,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,company_snapshot TEXT,occupation_snapshot TEXT,source TEXT,PRIMARY KEY(worker_id,date)); INSERT INTO attendance(worker_id,date,present,company_snapshot,occupation_snapshot,source) VALUES(1,'2026-10-28',1,'가상 회사','목공','manual')");
     old.close();
-    for(let i=0;i<2;i++){const s=new Store(path);try{const row=s.attendanceReport(1,'2026-10-28','2026-10-28','category')[0];assert.equal(row.label,'기록 없음');assert.equal(row.days,1);assert.equal(s.attendanceReport(1,'2026-10-28','2026-10-28','company')[0].label,'가상 회사');}finally{s.close();}}
+    for(let i=0;i<2;i++){const s=new Store(path);try{const row=s.attendanceReport(1,'2026-10-28','2026-10-28','category')[0];assert.equal(row.label,'기록 없음');assert.equal(row.days,1);assert.equal(s.attendance(1,'2026-10-28')[0].units_hundredths,null);assert.equal(s.attendanceReport(1,'2026-10-28','2026-10-28','company')[0].label,'가상 회사');}finally{s.close();}}
   }finally{rmSync(dir,{recursive:true,force:true});}
 });
 
@@ -954,6 +954,17 @@ test('현장과 날짜별 출역을 기록하고 다른 현장의 근로자 변�
     s.setAttendance({siteId:a.id,workerId:worker.id,date:'2026-10-28',present:false});
     assert.equal(s.attendance(a.id,'2026-10-28')[0].present,0);
   } finally {s.close();}
+});
+
+test('시험 공수는 현장과 출역일별로 수동 기록하고 미기록을 구분한다',()=>{
+  const s=new Store(':memory:');try{
+    const site=s.createSite({name:'가상 현장'}),other=s.createSite({name:'다른 현장'}),worker=s.createWorker({siteId:site.id,name:'가상 근로자',category:'직영',company:'가상 업체',occupation:'가상 직종'}),date='2024-02-29',base={siteId:site.id,workerId:worker.id,date};
+    assert.throws(()=>s.setAttendanceUnits({...base,units:'1'}),/출역/);s.recordWorkerLogin(worker.id,date);assert.equal(s.attendance(site.id,date)[0].units_hundredths,null);
+    s.setAttendanceUnits({...base,units:'0.25'});assert.equal(s.attendance(site.id,date)[0].units_hundredths,25);assert.deepEqual(s.workerAttendanceUnits(worker.id,'2024-02').map(row=>[row.date,row.units_hundredths]),[[date,25]]);
+    for(const units of ['10','-1','1.001','1e0','9.999',null,1])assert.throws(()=>s.setAttendanceUnits({...base,units}),/공수/);assert.throws(()=>s.setAttendanceUnits({...base,siteId:other.id,units:'1'}),/현장/);assert.equal(s.attendance(site.id,date)[0].units_hundredths,25);
+    s.setAttendance({...base,present:false});assert.deepEqual(s.workerAttendanceUnits(worker.id,'2024-02'),[]);s.recordWorkerLogin(worker.id,date);assert.equal(s.attendance(site.id,date)[0].present,0);s.setAttendance({...base,present:true});assert.equal(s.attendance(site.id,date)[0].units_hundredths,25);
+    s.setAttendanceUnits({...base,units:'9.99'});assert.equal(s.attendance(site.id,date)[0].units_hundredths,999);s.setAttendanceUnits({...base,units:'0'});assert.equal(s.attendance(site.id,date)[0].units_hundredths,0);s.setAttendanceUnits({...base,units:''});assert.equal(s.attendance(site.id,date)[0].units_hundredths,null);
+  }finally{s.close();}
 });
 
 test('월별 출역은 해당 현장과 월의 기존 일별 기록을 표시한다',()=>{

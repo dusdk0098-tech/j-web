@@ -485,6 +485,7 @@ test('관리자 인증 모드가 문서 API를 보호하고 로그아웃을 적�
     assert.equal((await fetch(`${base}/api/worker/attendance?month=2024-02`)).status,401);
     const ownDays=await (await fetch(`${base}/api/worker/attendance?month=2024-02&workerId=${stranger.id}`,{headers:{cookie:workerCookie}})).json();
     assert.deepEqual(ownDays.days,['2024-02-29']);
+    assert.equal(ownDays.units[0].units_hundredths,null);const unitsInput={siteId:site.id,workerId:own.id,date:'2024-02-29',units:'1.25'},unitsUrl=`${base}/api/attendance/units`;assert.equal((await fetch(unitsUrl,{method:'PUT',headers:{cookie:workerCookie,'content-type':'application/json'},body:JSON.stringify(unitsInput)})).status,401);assert.equal((await fetch(unitsUrl,{method:'PUT',headers:{cookie,'content-type':'application/json'},body:JSON.stringify(unitsInput)})).status,200);assert.equal((await (await fetch(`${base}/api/worker/attendance?month=2024-02&workerId=${stranger.id}`,{headers:{cookie:workerCookie}})).json()).units[0].units_hundredths,125);
     assert.equal((await fetch(`${base}/api/worker/attendance?month=2024-13`,{headers:{cookie:workerCookie}})).status,400);
     assert.equal((await fetch(`${base}/api/worker/session`,{headers:{cookie:workerCookie}})).status,200);
     assert.equal((await fetch(`${base}/api/sites`,{headers:{cookie:workerCookie}})).status,401);

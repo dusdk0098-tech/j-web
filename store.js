@@ -116,6 +116,7 @@ export class Store {
     if(!attendanceColumns.includes('occupation_snapshot'))this.db.exec('ALTER TABLE attendance ADD COLUMN occupation_snapshot TEXT');
     if(!attendanceColumns.includes('category_snapshot'))this.db.exec('ALTER TABLE attendance ADD COLUMN category_snapshot TEXT');
     if(!attendanceColumns.includes('source'))this.db.exec('ALTER TABLE attendance ADD COLUMN source TEXT');
+    if(!attendanceColumns.includes('units_hundredths'))this.db.exec('ALTER TABLE attendance ADD COLUMN units_hundredths INTEGER CHECK(units_hundredths IS NULL OR units_hundredths BETWEEN 0 AND 999)');
   }
   close() { this.db.close(); }
   managerChecks(siteId) {
@@ -497,7 +498,7 @@ export class Store {
   }
   attendance(siteId, date) {
     date = dateValue(date);
-    return this.db.prepare('SELECT workers.id,workers.name,workers.category,workers.company,workers.occupation,COALESCE(attendance.present,0) AS present,attendance.source FROM workers LEFT JOIN attendance ON attendance.worker_id=workers.id AND attendance.date=? WHERE workers.site_id=? ORDER BY workers.name,workers.id').all(date,Number(siteId));
+    return this.db.prepare('SELECT workers.id,workers.name,workers.category,workers.company,workers.occupation,COALESCE(attendance.present,0) AS present,attendance.source,attendance.units_hundredths FROM workers LEFT JOIN attendance ON attendance.worker_id=workers.id AND attendance.date=? WHERE workers.site_id=? ORDER BY workers.name,workers.id').all(date,Number(siteId));
   }
   monthlyAttendance(siteId,month) {
     month=monthValue(month);
@@ -511,6 +512,7 @@ export class Store {
     month=monthValue(month);
     return this.db.prepare('SELECT date FROM attendance WHERE worker_id=? AND present=1 AND date BETWEEN ? AND ? ORDER BY date').all(Number(workerId),`${month}-01`,`${month}-31`).map(row=>row.date);
   }
+  workerAttendanceUnits(workerId,month){month=monthValue(month);return this.db.prepare('SELECT date,units_hundredths FROM attendance WHERE worker_id=? AND present=1 AND date BETWEEN ? AND ? ORDER BY date').all(Number(workerId),`${month}-01`,`${month}-31`);}
   workerNotices(workerId,date) {
     date=dateValue(date);
     return this.db.prepare("SELECT d.id,d.title,d.body,d.date,r.read_at FROM workers w JOIN documents d ON d.site_id=w.site_id LEFT JOIN worker_notice_reads r ON r.document_id=d.id AND r.worker_id=w.id WHERE w.id=? AND d.type='notice' AND d.status='approved' AND d.date=? ORDER BY d.id DESC").all(Number(workerId),date);
@@ -644,6 +646,12 @@ export class Store {
     const previous=this.db.prepare('SELECT present FROM attendance WHERE worker_id=? AND date=?').get(worker.id,date);
     this.db.prepare("INSERT INTO attendance(worker_id,date,present,company_snapshot,occupation_snapshot,category_snapshot,source) VALUES(?,?,?,?,?,?,'manual') ON CONFLICT(worker_id,date) DO UPDATE SET company_snapshot=CASE WHEN attendance.present=0 AND excluded.present=1 THEN excluded.company_snapshot ELSE attendance.company_snapshot END,occupation_snapshot=CASE WHEN attendance.present=0 AND excluded.present=1 THEN excluded.occupation_snapshot ELSE attendance.occupation_snapshot END,category_snapshot=CASE WHEN attendance.present=0 AND excluded.present=1 THEN excluded.category_snapshot ELSE attendance.category_snapshot END,present=excluded.present,source='manual',updated_at=CURRENT_TIMESTAMP").run(worker.id,date,input.present?1:0,input.present?worker.company:null,input.present?worker.occupation:null,input.present?worker.category:null);
     if(input.present&&!previous?.present)this.applyMealDefaults(worker.id,date);this.db.exec('COMMIT');}catch(error){this.db.exec('ROLLBACK');throw error;}
+  }
+  setAttendanceUnits(input){
+    const date=dateValue(input.date),value=input.units;if(typeof value!=='string'||!/^$|^\d(?:\.\d{1,2})?$/.test(value))throw new Error('시험 공수는 0부터 9.99까지 입력해 주세요.');
+    const [whole,fraction='']=value.split('.'),units=value===''?null:Number(whole)*100+Number(fraction.padEnd(2,'0'));
+    const result=this.db.prepare('UPDATE attendance SET units_hundredths=?,updated_at=CURRENT_TIMESTAMP WHERE worker_id=? AND date=? AND present=1 AND EXISTS(SELECT 1 FROM workers WHERE workers.id=attendance.worker_id AND workers.site_id=?)').run(units,Number(input.workerId),date,Number(input.siteId));
+    if(!result.changes)throw new Error('같은 현장의 출역 기록을 확인해 주세요.');
   }
   recordWorkerLogin(workerId,date) {
     date=dateValue(date);

@@ -75,7 +75,7 @@ const server = http.createServer(async (req, res) => {
     if(url.pathname==='/api/worker/attendance' && req.method==='GET'){
       const key=workerKey(workerToken),session=workerSessions.get(key);
       if(!session || session.expires<=Date.now()){workerSessions.delete(key);return json(res,401,{error:'근로자 로그인이 필요합니다.'});}
-      return json(res,200,{days:store.workerAttendance(session.worker.id,url.searchParams.get('month'))});
+      return json(res,200,{days:store.workerAttendance(session.worker.id,url.searchParams.get('month')),units:store.workerAttendanceUnits(session.worker.id,url.searchParams.get('month'))});
     }
     if(url.pathname==='/api/worker/ppe-issues'&&req.method==='GET'){
       const key=workerKey(workerToken),session=workerSessions.get(key);if(!session||session.expires<=Date.now()){workerSessions.delete(key);return json(res,401,{error:'근로자 로그인이 필요합니다.'});}
@@ -408,6 +408,7 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === '/api/attendance/month' && req.method === 'GET') return json(res,200,store.monthlyAttendance(url.searchParams.get('siteId'),url.searchParams.get('month')));
     if (url.pathname === '/api/education/report' && req.method === 'GET') return json(res,200,store.educationReport(url.searchParams.get('siteId'),url.searchParams.get('from'),url.searchParams.get('to')));
     if (url.pathname === '/api/weekly-activity' && req.method === 'GET') return json(res,200,store.weeklyActivity(url.searchParams.get('siteId'),url.searchParams.get('start')));
+    if(url.pathname==='/api/attendance/units'&&req.method==='PUT'){store.setAttendanceUnits(await body(req));return json(res,200,{ok:true});}
     if (url.pathname === '/api/attendance') {
       if (req.method === 'GET') return json(res,200,store.attendance(url.searchParams.get('siteId'),url.searchParams.get('date')));
       if (req.method === 'POST') {store.setAttendance(await body(req));return json(res,200,{ok:true});}
