@@ -163,11 +163,12 @@ test('관리자 인증 모드가 문서 API를 보호하고 로그아웃을 적�
     const accessPng=PNG.sync.read(Buffer.from(siteAccess.image.split(',')[1],'base64'));assert.equal(jsQR(new Uint8ClampedArray(accessPng.data),accessPng.width,accessPng.height)?.data,siteAccess.link);
     assert.equal((await (await fetch(`${base}/api/worker/site?key=${siteKey}`)).json()).id,site.id);assert.equal((await fetch(`${base}/api/worker/site?key=invalid`)).status,404);
     const joinImage=new PNG({width:1,height:1});joinImage.data[3]=255;const joinBytes=PNG.sync.write(joinImage),joinSignature=`data:image/png;base64,${joinBytes.toString('base64')}`;
-    const profile={birthDate:'2000-02-29',phone:'010-0000-0000',emergencyName:'가상 보호자',emergencyPhone:'010-0000-1111',address:'가상 주소',nationality:'가상 국적'};
+    const profile={birthDate:'2000-02-29',phone:'010-0000-0000',emergencyName:'가상 보호자',emergencyPhone:'010-0000-1111',address:'가상 주소',nationality:'가상 국적',bloodType:'AB',healthStatus:'확인 필요',pledge:'확인'};
     const signup=async (acknowledged,equipment=['안전모','안전화'],signature=joinSignature,profileInput=profile)=>fetch(`${base}/api/join`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({token:inviteToken,name:'가상 근로자',category:'직영',company:'가상 업체',occupation:'목공',loginId:'worker1',password:'virtual-password-123',acknowledged,equipment,signature,profile:profileInput})});
     assert.equal((await signup(false)).status,400);
     assert.equal((await signup(true,['잘못된 항목'])).status,400);assert.equal((await signup(true,['안전모'],'invalid')).status,400);
     assert.equal((await signup(true,undefined,undefined,{...profile,birthDate:'2001-02-29'})).status,400);assert.equal((await signup(true,undefined,undefined,{...profile,phone:'문자'})).status,400);
+    assert.equal((await signup(true,undefined,undefined,{...profile,bloodType:'잘못된 값'})).status,400);assert.equal((await signup(true,undefined,undefined,{...profile,healthStatus:'임의 입력'})).status,400);assert.equal((await signup(true,undefined,undefined,{...profile,pledge:'임의 입력'})).status,400);
     assert.equal((await signup(true)).status,201);
     const badLogin=await fetch(`${base}/api/worker/login`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({token:inviteToken,loginId:'worker1',password:'wrong-password'})});
     assert.equal(badLogin.status,401);assert.equal(badLogin.headers.get('set-cookie'),null);

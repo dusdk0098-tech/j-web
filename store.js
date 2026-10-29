@@ -729,11 +729,12 @@ export class Store {
     if(!Array.isArray(equipment)||new Set(equipment).size!==equipment.length||equipment.some(item=>!['안전모','안전화','안전대','보안경','장갑'].includes(item)))throw new Error('시험 보호구를 확인해 주세요.');
     let profile=null;if(input.profile!==undefined){
       if(!input.profile||typeof input.profile!=='object'||Array.isArray(input.profile))throw new Error('시험 인적사항을 확인해 주세요.');
-      const keys=['birthDate','phone','emergencyName','emergencyPhone','address','nationality'];
+      const keys=['birthDate','phone','emergencyName','emergencyPhone','address','nationality','bloodType','healthStatus','pledge'];
       if(Object.keys(input.profile).some(key=>!keys.includes(key)))throw new Error('시험 인적사항을 확인해 주세요.');
       profile=Object.fromEntries(keys.map(key=>{const value=input.profile[key]??'';if(typeof value!=='string'||value.length>200||/[\x00-\x1f\x7f]/.test(value))throw new Error('시험 인적사항을 확인해 주세요.');return [key,value.trim()];}));
       if(profile.birthDate)profile.birthDate=dateValue(profile.birthDate);
       if([profile.phone,profile.emergencyPhone].some(value=>value&&!/^[0-9+() -]{3,30}$/.test(value)))throw new Error('시험 전화번호를 확인해 주세요.');
+      if(!['','A','B','AB','O'].includes(profile.bloodType)||!['','양호','확인 필요'].includes(profile.healthStatus)||!['','확인'].includes(profile.pledge))throw new Error('가상 건강 상태와 서약을 확인해 주세요.');
     }
     const signature=input.signature===undefined?null:signatureBytes(input.signature);
     if(typeof input.loginId!=='string' || !/^[a-zA-Z0-9_]{3,40}$/.test(input.loginId))throw new Error('아이디는 영문, 숫자, 밑줄 3~40자로 입력해 주세요.');
