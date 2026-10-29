@@ -1351,6 +1351,20 @@ test('문서 검색은 현장·기간·유형을 지키고 상세 항목도 찾�
   } finally {s.close();}
 });
 
+test('위험성평가 기타 자료의 구분과 파일은 재시작 및 결재 사본에 보존된다',()=>{
+  const directory=mkdtempSync(join(tmpdir(),'jweb-risk-material-')),file=join(directory,'test.sqlite');let s=new Store(file);try{
+    const site=s.createSite({name:'가상 현장'}),doc=s.createDocument({siteId:site.id,type:'risk',title:'가상 평가',date:'2026-10-29'}),other=s.createDocument({siteId:site.id,type:'risk',title:'다른 평가',date:'2026-10-29'}),input={kind:'other',date:'2026-10-30',place:'',host:'',participants:'',content:'',classification:'가상 자료'},bytes=Buffer.from('가상 문서');
+    assert.throws(()=>s.saveRiskActivity(doc.id,{...input,classification:''}),/구분/);const id=s.saveRiskActivity(doc.id,input),attachment=s.addRiskActivityPhoto(doc.id,id,'가상.txt',bytes,'material');assert.equal(s.riskActivities(doc.id)[0].classification,'가상 자료');assert.equal(s.riskActivityPhotos(doc.id,id)[0].purpose,'material');assert.throws(()=>s.saveRiskActivity(doc.id,{...input,classification:''},id),/구분/);assert.throws(()=>s.saveRiskActivity(doc.id,{...input,kind:'meeting'},id),/첨부/);assert.equal(s.riskActivityPhoto(other.id,id,attachment),null);
+    s.transition(doc.id,'submit');const cycle=s.document(doc.id).approval_cycle_id;s.deleteRiskActivityPhoto(doc.id,id,attachment);assert.deepEqual(Buffer.from(s.approvalCycleFile(doc.id,cycle,'risk',id,attachment).data),bytes);assert.equal(s.approvalCycle(doc.id,cycle).linked.activities[0].classification,'가상 자료');s.close();s=new Store(file);assert.equal(s.riskActivities(doc.id)[0].classification,'가상 자료');assert.deepEqual(Buffer.from(s.approvalCycleFile(doc.id,cycle,'risk',id,attachment).data),bytes);
+  }finally{s.close();rmSync(directory,{recursive:true,force:true});}
+});
+
+test('이전 기타 활동은 자료 구분 열 추가 후 미기록으로 보존된다',()=>{
+  const directory=mkdtempSync(join(tmpdir(),'jweb-risk-legacy-')),file=join(directory,'test.sqlite');let s=new Store(file);try{
+    const site=s.createSite({name:'가상 현장'}),doc=s.createDocument({siteId:site.id,type:'risk',title:'가상 평가',date:'2026-10-29'}),input={kind:'other',date:'2026-10-30',place:'',host:'',participants:'',content:'가상 내용',classification:'이전 자료'},id=s.saveRiskActivity(doc.id,input);s.close();const db=new DatabaseSync(file);db.exec('ALTER TABLE risk_activities DROP COLUMN classification');db.close();s=new Store(file);assert.equal(s.riskActivities(doc.id)[0].classification,'');s.saveRiskActivity(doc.id,{...input,classification:''},id);assert.equal(s.riskActivities(doc.id)[0].content,'가상 내용');
+  }finally{s.close();rmSync(directory,{recursive:true,force:true});}
+});
+
 test('위험성평가 시험 활동은 완료 후에도 문서별로 관리된다',()=>{
   const s=new Store(':memory:');try{
     const site=s.createSite({name:'가상 현장'}),doc=s.createDocument({siteId:site.id,type:'risk',title:'가상 평가',date:'2026-10-29'}),other=s.createDocument({siteId:site.id,type:'risk',title:'다른 평가',date:'2026-10-29'}),nonRisk=s.createDocument({siteId:site.id,type:'tbm',title:'가상 교육',date:'2026-10-29'});
