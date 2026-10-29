@@ -51,6 +51,7 @@ export class Store {
       CREATE TABLE IF NOT EXISTS restaurants (id INTEGER PRIMARY KEY,site_id INTEGER NOT NULL REFERENCES sites(id),name TEXT NOT NULL,meal_price INTEGER NOT NULL,snack_price INTEGER NOT NULL,tax INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS meal_defaults (site_id INTEGER NOT NULL REFERENCES sites(id),kind TEXT NOT NULL,restaurant_id INTEGER NOT NULL REFERENCES restaurants(id),PRIMARY KEY(site_id,kind));
       CREATE TABLE IF NOT EXISTS meal_checks (id INTEGER PRIMARY KEY,site_id INTEGER NOT NULL REFERENCES sites(id),worker_id INTEGER NOT NULL REFERENCES workers(id),date TEXT NOT NULL,kind TEXT NOT NULL,restaurant_id INTEGER NOT NULL REFERENCES restaurants(id),restaurant_name TEXT NOT NULL,price INTEGER NOT NULL,UNIQUE(worker_id,date,kind));
+      CREATE TABLE IF NOT EXISTS ppe_issues (id INTEGER PRIMARY KEY,site_id INTEGER NOT NULL REFERENCES sites(id),worker_id INTEGER NOT NULL REFERENCES workers(id),date TEXT NOT NULL,item TEXT NOT NULL,quantity INTEGER NOT NULL CHECK(quantity>0),worker_snapshot TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS wage_records (site_id INTEGER NOT NULL REFERENCES sites(id),worker_id INTEGER NOT NULL REFERENCES workers(id),month TEXT NOT NULL,gross INTEGER NOT NULL,deductions TEXT NOT NULL,PRIMARY KEY(worker_id,month));
       CREATE TABLE IF NOT EXISTS safety_costs (id INTEGER PRIMARY KEY,site_id INTEGER NOT NULL REFERENCES sites(id),category INTEGER NOT NULL,date TEXT NOT NULL,description TEXT NOT NULL,note TEXT NOT NULL,unit_price TEXT NOT NULL,quantity TEXT NOT NULL,unit TEXT NOT NULL,amount TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS safety_cost_photos (id INTEGER PRIMARY KEY,cost_id INTEGER NOT NULL REFERENCES safety_costs(id),name TEXT NOT NULL,data BLOB NOT NULL);
@@ -179,6 +180,17 @@ export class Store {
     return this.db.prepare('SELECT * FROM companies WHERE site_id=? ORDER BY name,id').all(Number(siteId));
   }
   siteOccupations(siteId){return this.db.prepare('SELECT id,name FROM site_occupations WHERE site_id=? ORDER BY name,id').all(Number(siteId));}
+  ppeIssues(siteId,month){
+    month=monthValue(month);siteId=Number(siteId);if(!this.db.prepare('SELECT 1 FROM sites WHERE id=?').get(siteId))throw new Error('현장을 선택해 주세요.');
+    const rows=this.db.prepare('SELECT id,date,item,quantity,worker_id,worker_snapshot FROM ppe_issues WHERE site_id=? AND date BETWEEN ? AND ? ORDER BY date DESC,id DESC').all(siteId,`${month}-01`,`${month}-31`).map(({worker_snapshot,...row})=>({...row,worker:JSON.parse(worker_snapshot)}));
+    const totals=this.db.prepare('SELECT item,SUM(quantity) AS quantity FROM ppe_issues WHERE site_id=? AND date BETWEEN ? AND ? GROUP BY item ORDER BY item').all(siteId,`${month}-01`,`${month}-31`);return {rows,totals};
+  }
+  addPpeIssue(input){
+    const siteId=Number(input.siteId),workerId=Number(input.workerId),date=dateValue(input.date),item=text(input.item,'보호구');
+    const worker=this.db.prepare('SELECT name,category,company,occupation FROM workers WHERE id=? AND site_id=?').get(workerId,siteId);if(!worker)throw new Error('선택한 현장의 출입자를 확인해 주세요.');
+    if(!['string','number'].includes(typeof input.quantity)||!/^\d{1,5}$/.test(String(input.quantity)))throw new Error('지급수량을 확인해 주세요.');const quantity=Number(input.quantity);if(quantity<1||quantity>10000)throw new Error('지급수량을 확인해 주세요.');
+    return this.db.prepare('INSERT INTO ppe_issues(site_id,worker_id,date,item,quantity,worker_snapshot) VALUES(?,?,?,?,?,?)').run(siteId,workerId,date,item,quantity,JSON.stringify(worker)).lastInsertRowid;
+  }
   addSiteOccupation(siteId,name){
     siteId=Number(siteId);if(!this.db.prepare('SELECT 1 FROM sites WHERE id=?').get(siteId))throw new Error('현장을 선택해 주세요.');
     name=text(name,'직종');const result=this.db.prepare('INSERT INTO site_occupations(site_id,name) VALUES(?,?) ON CONFLICT(site_id,name) DO NOTHING').run(siteId,name);if(!result.changes)throw new Error('이미 등록된 직종입니다.');return result.lastInsertRowid;

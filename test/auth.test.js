@@ -192,6 +192,9 @@ test('관리자 인증 모드가 문서 API를 보호하고 로그아웃을 적�
     assert.equal((await fetch(defaultsPath,{method:'PUT',headers:{cookie,'content-type':'application/json'},body:JSON.stringify({siteId:site.id,items:[]})})).status,200);
     const joinRecord=`${base}/api/workers/${own.id}/join-record?siteId=${site.id}`;assert.equal((await fetch(joinRecord,{headers:{cookie:workerCookie}})).status,401);
     const savedJoin=await (await fetch(joinRecord,{headers:{cookie}})).json();assert.deepEqual(savedJoin.equipment,['안전모','안전화']);assert.deepEqual(savedJoin.profile,profile);assert.equal(savedJoin.has_signature,1);
+    const ppePath=`${base}/api/ppe-issues`,ppeInput={siteId:site.id,workerId:own.id,date:'2024-02-29',item:'가상 안전모',quantity:'2'};
+    assert.equal((await fetch(`${ppePath}?siteId=${site.id}&month=2024-02`)).status,401);assert.equal((await fetch(ppePath,{method:'POST',headers:{cookie:workerCookie,'content-type':'application/json'},body:JSON.stringify(ppeInput)})).status,401);
+    assert.equal((await post('/api/ppe-issues',ppeInput)).status,201);const ppeReport=await (await fetch(`${ppePath}?siteId=${site.id}&month=2024-02`,{headers:{cookie}})).json();assert.equal(ppeReport.totals[0].quantity,2);assert.equal(ppeReport.rows[0].worker.name,'가상 근로자');
     assert.equal(await (await fetch(`${base}/api/workers/${own.id}/join-record?siteId=${other.id}`,{headers:{cookie}})).json(),null);
     assert.deepEqual(Buffer.from(await (await fetch(`${base}/api/workers/${own.id}/join-record/signature?siteId=${site.id}`,{headers:{cookie}})).arrayBuffer()),joinBytes);
     const recipientCompany=await (await post('/api/companies',{siteId:site.id,name:'가상 업체',trade:'시험'})).json();

@@ -10,6 +10,7 @@ labels['wages']='가상 노임';
 labels['site-articles']='현장 자료실';
 labels['site-photos']='현장사진';
 labels['site-occupations']='자주 쓰는 직종';
+labels['ppe-issues']='보호구 지급';
 document.querySelector('[data-page=stops]').insertAdjacentHTML('afterend','<button data-page="hazards">의견제안 및 위험신고</button>');
 document.querySelector('[data-page=attendance]').insertAdjacentHTML('afterend','<button data-page="restaurants">식대 기본설정</button>');
 document.querySelector('[data-page=restaurants]').insertAdjacentHTML('afterend','<button data-page="meal-checks">식대 체크</button>');
@@ -18,6 +19,7 @@ document.querySelector('[data-page=meal-checks]').insertAdjacentHTML('afterend',
 document.querySelector('[data-page=wages]').insertAdjacentHTML('afterend','<button data-page="site-articles">현장 자료실</button>');
 document.querySelector('[data-page=site-articles]').insertAdjacentHTML('beforebegin','<button data-page="site-photos">현장사진</button>');
 document.querySelector('[data-page=workers]').insertAdjacentHTML('afterend','<button data-page="site-occupations">자주 쓰는 직종</button>');
+document.querySelector('[data-page=site-occupations]').insertAdjacentHTML('afterend','<button data-page="ppe-issues">보호구 지급</button>');
 const statusLabels = {draft:'임시저장',pending:'결재 대기',approved:'승인',rejected:'반려'};
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const today = () => new Date(Date.now() - new Date().getTimezoneOffset()*60000).toISOString().slice(0,10);
@@ -502,6 +504,12 @@ async function render(){
     $('#wage-add').insertAdjacentHTML('beforebegin',`<a class="outline" href="/api/wages/export?siteId=${siteId}&amp;month=${encodeURIComponent(month)}" download="wages.xlsx">엑셀 내려받기</a>`);
     const edit=r=>showDialog('가상 노임 입력',`<div class="fields"><label>근로자 <select name="workerId" required>${workers.filter(w=>r?w.id===r.worker_id:!records.some(record=>record.worker_id===w.id)).map(w=>`<option value="${w.id}" ${r?.worker_id===w.id?'selected':''}>${esc(w.name)} · ${esc(w.company)}</option>`).join('')}</select></label>${field('gross','가상 노임 (원)',String(r?.gross??0))}${Object.entries(names).map(([key,label])=>field(key,label+' (원)',String(r?.deductions[key]??0))).join('')}</div>`,d=>api('/api/wages',{method:r?'PUT':'POST',body:JSON.stringify({siteId,month,workerId:d.workerId,gross:d.gross,deductions:Object.fromEntries(Object.keys(names).map(key=>[key,d[key]]))})}));
     $('#wage-month').onchange=e=>{if(e.target.value){state.wageMonth=e.target.value;render().catch(showError);}};$('#wage-add').onclick=()=>{if(!workers.some(w=>!records.some(record=>record.worker_id===w.id))){flash('추가할 가상 출입자가 없습니다.',true);return;}edit(null);};content.querySelectorAll('[data-wage]').forEach(b=>b.onclick=()=>edit(records.find(r=>r.worker_id===Number(b.dataset.wage))));return;
+  }
+  if(state.page==='ppe-issues'){
+    const siteId=state.siteId,month=state.ppeMonth||today().slice(0,7),[report,workers]=await Promise.all([api(`/api/ppe-issues?siteId=${siteId}&month=${encodeURIComponent(month)}`),api(`/api/workers?siteId=${siteId}`)]);
+    content.innerHTML=`<section class="panel"><div class="panel-head"><h2>가상 보호구 지급</h2><button class="primary" id="ppe-add">시험 지급 기록</button></div><p class="muted">가상 기록이며 실제 지급이나 수령 서명을 증명하지 않습니다. 가입 시 보호구 선택과는 별개입니다.</p><label>조회 월 <input type="month" id="ppe-month" value="${esc(month)}"></label><h3>종류별 합계</h3>${report.totals.length?`<div class="table-wrap"><table><thead><tr><th>보호구</th><th>수량</th></tr></thead><tbody>${report.totals.map(t=>`<tr><td>${esc(t.item)}</td><td>${t.quantity}</td></tr>`).join('')}</tbody></table></div>`:'<p>기록이 없습니다.</p>'}<h3>가상 지급 내역</h3>${report.rows.length?`<div class="table-wrap"><table><thead><tr><th>일자</th><th>이름</th><th>구분</th><th>소속</th><th>직종</th><th>보호구</th><th>수량</th></tr></thead><tbody>${report.rows.map(r=>`<tr><td>${esc(r.date)}</td><td>${esc(r.worker.name)}</td><td>${esc(r.worker.category)}</td><td>${esc(r.worker.company)}</td><td>${esc(r.worker.occupation)}</td><td>${esc(r.item)}</td><td>${r.quantity}</td></tr>`).join('')}</tbody></table></div>`:'<p>기록이 없습니다.</p>'}</section>`;
+    $('#ppe-month').onchange=e=>{if(e.target.value){state.ppeMonth=e.target.value;render().catch(showError);}};
+    $('#ppe-add').onclick=()=>{if(!workers.length){flash('먼저 가상 출입자를 등록해 주세요.',true);return;}const date=today().startsWith(month)?today():`${month}-01`;showDialog('가상 보호구 지급 기록',`<div class="fields"><label>출입자 <select name="workerId">${workers.map(w=>`<option value="${w.id}">${esc(w.name)} · ${esc(w.company)}</option>`).join('')}</select></label>${field('date','지급일',date,'date')}${field('item','가상 보호구 종류')}${field('quantity','가상 수량','1','number')}</div>`,d=>api('/api/ppe-issues',{method:'POST',body:JSON.stringify({...d,siteId})}));};return;
   }
   if(state.page==='meal-statement'){
     const month=state.mealStatementMonth||today().slice(0,7),data=await api(`/api/meal-checks/statement?siteId=${state.siteId}&month=${encodeURIComponent(month)}`),kinds={breakfast:'조식',lunch:'중식',dinner:'석식',snack:'간식'},short={breakfast:'조',lunch:'중',dinner:'석',snack:'간'};

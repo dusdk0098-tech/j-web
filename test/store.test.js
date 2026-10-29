@@ -96,6 +96,15 @@ test('자동 식대 설정과 기록은 데이터베이스를 다시 열어도 �
   }finally{rmSync(dir,{recursive:true,force:true});}
 });
 
+test('보호구 시험 지급은 현장·월별로 집계하고 기록 당시 출입자 정보를 보존한다',()=>{
+  const s=new Store(':memory:');try{
+    const site=s.createSite({name:'가상 현장'}),other=s.createSite({name:'다른 현장'}),worker=s.createWorker({siteId:site.id,name:'가상 근로자',category:'직영',company:'가상 회사',occupation:'목공'}),input={siteId:site.id,workerId:worker.id,date:'2024-02-29',item:'안전모',quantity:'2'};
+    s.addPpeIssue(input);s.addPpeIssue({...input,quantity:'1'});s.addPpeIssue({...input,date:'2024-03-01',item:'안전화'});s.updateWorker(worker.id,{siteId:site.id,name:'변경 이름',category:'외주',company:'변경 회사',occupation:'전기'});
+    const report=s.ppeIssues(site.id,'2024-02');assert.equal(report.rows.length,2);assert.deepEqual(report.totals.map(r=>[r.item,r.quantity]),[['안전모',3]]);assert.equal(report.rows[0].worker.name,'가상 근로자');assert.equal(report.rows[0].worker.company,'가상 회사');
+    assert.equal(s.ppeIssues(other.id,'2024-02').rows.length,0);assert.equal(s.ppeIssues(site.id,'2024-03').rows.length,1);assert.throws(()=>s.addPpeIssue({...input,siteId:other.id}),/현장/);for(const quantity of ['0','-1','1.2',true,'10001'])assert.throws(()=>s.addPpeIssue({...input,quantity}),/수량/);assert.throws(()=>s.ppeIssues(site.id,'2024-13'),/월/);
+  }finally{s.close();}
+});
+
 test('식당 시험 설정은 현장별로 저장하며 잘못된 수정을 거절한다',()=>{
   const s=new Store(':memory:');try{
     const a=s.createSite({name:'가상 A'}),b=s.createSite({name:'가상 B'}),input={siteId:a.id,name:'가상 식당',mealPrice:'5000',snackPrice:'1000',tax:'600'},restaurant=s.saveRestaurant(input);
