@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { Store } from './store.js';
 import { types } from './domain.js';
 import QRCode from 'qrcode';
+import { issueAccessQr,issueInvitationQr } from './qr-issue.js';
 import { workerSpreadsheet, wageSpreadsheet } from './exports.js';
 import { LocalAuth, sessionToken } from './auth.js';
 import { workerSitePath } from './public/worker-link.js';
@@ -314,11 +315,10 @@ const server = http.createServer(async (req, res) => {
     const registrationSite=url.pathname.match(/^\/api\/sites\/(\d+)\/access\/registration$/);
     const accessSite=url.pathname.match(/^\/api\/sites\/(\d+)\/access(?:\/(rotate))?$/);
     if(registrationSite&&req.method==='POST')return json(res,200,{expiresAt:store.openSiteRegistration(registrationSite[1])});
-    if(accessSite&&req.method==='POST'){const key=accessSite[2]?store.rotateSiteAccess(accessSite[1]):store.ensureSiteAccess(accessSite[1]),link=`${requestOrigin}/join?site=${encodeURIComponent(key)}`;return json(res,200,{link,registrationExpiresAt:store.siteRegistrationExpiry(accessSite[1]),image:await QRCode.toDataURL(link,{errorCorrectionLevel:'M',margin:2,width:256})});}
+    if(accessSite&&req.method==='POST'){const result=await issueAccessQr(store,accessSite[1],requestOrigin,!!accessSite[2],link=>QRCode.toDataURL(link,{errorCorrectionLevel:'M',margin:2,width:256}));checkRequestSession(req);return result?json(res,200,result):json(res,409,{error:'현장 주소가 변경되었습니다. QR을 다시 열어 주세요.'});}
     if (inviteSite && req.method === 'POST') {
-      const invite=store.createInvitation(inviteSite[1]);
-      const link=`${requestOrigin}/join?token=${encodeURIComponent(invite.token)}`;
-      return json(res,201,{link,expiresAt:invite.expiresAt,image:await QRCode.toDataURL(link,{errorCorrectionLevel:'M',margin:2,width:256})});
+      const result=await issueInvitationQr(store,inviteSite[1],requestOrigin,link=>QRCode.toDataURL(link,{errorCorrectionLevel:'M',margin:2,width:256}));checkRequestSession(req);
+      return result?json(res,201,result):json(res,409,{error:'가입 QR이 중지되었습니다. 다시 발급해 주세요.'});
     }
     if (inviteSite && req.method === 'DELETE') return json(res,200,{revoked:store.revokeInvitations(inviteSite[1])});
     if (url.pathname === '/api/join') {
