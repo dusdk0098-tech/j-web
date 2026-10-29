@@ -402,6 +402,7 @@ test('현장과 출입자를 분리하고 문서 결재 이력을 보존한다',
     assert.throws(()=>s.createDocument({siteId:a.id,type:'tbm',title:'x',date:'2026-02-30'}),/날짜/);
     const invite=s.createInvitation(a.id);
     assert.equal(s.invitation(invite.token).name,'가상 현장 A');
+    const oldAccess=s.siteAccessKey(a.id),newAccess=s.rotateSiteAccess(a.id);assert.notEqual(oldAccess,newAccess);assert.equal(s.siteFromAccess(oldAccess),null);assert.equal(s.invitation(invite.token).id,a.id);
     const input={name:'가상 근로자',category:'직영',company:'가상 회사',occupation:'기타',loginId:'worker1',password:'virtual-password-123'};
     assert.throws(()=>s.join(invite.token,input),/확인/);
     assert.throws(()=>s.join(invite.token,{...input,acknowledged:'true'}),/확인/);
@@ -442,6 +443,9 @@ test('저장한 현장과 가입 정보가 서버 재시작 후 유지되고 만
       assert.equal(s.siteAccessKey(site.id),access);assert.equal(s.siteFromAccess(access).id,site.id);
       assert.equal(s.authenticateWorker(null,'worker1','virtual-password-123',access).name,'가상 근로자');assert.equal(s.authenticateWorker(null,'worker1','wrong-password',access),null);
       assert.equal(s.authenticateWorker(null,'worker1','virtual-password-123','invalid'),null);
+      const other=s.createSite({name:'다른 시험 현장'}),otherKey=s.ensureSiteAccess(other.id),replacement=s.rotateSiteAccess(site.id);
+      assert.notEqual(replacement,access);assert.equal(s.siteFromAccess(access),null);assert.equal(s.siteFromAccess(replacement).id,site.id);assert.equal(s.siteFromAccess(otherKey).id,other.id);
+      assert.equal(s.authenticateWorker(null,'worker1','virtual-password-123',replacement).name,'가상 근로자');assert.equal(s.authenticateWorker(null,'worker1','virtual-password-123',access),null);
       assert.throws(()=>s.join(invite.token,{name:'늦은 가입'}),/만료/);
       assert.equal(s.workers(site.id).length,1);
     } finally {s.close();}

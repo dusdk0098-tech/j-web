@@ -470,6 +470,13 @@ test('관리자 인증 모드가 문서 API를 보호하고 로그아웃을 적�
     assert.equal((await fetch(`${base}/api/join?token=${inviteToken}`)).status,404);
     assert.equal((await signup(true)).status,400);
     const stableLogin=await fetch(`${base}/api/worker/login`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({siteKey,loginId:'worker1',password:'virtual-password-123'})});assert.equal(stableLogin.status,200);
+    assert.equal((await fetch(`${base}/api/sites/${site.id}/access/rotate`,{method:'POST'})).status,401);
+    const rotated=await (await post(`/api/sites/${site.id}/access/rotate`,{})).json(),newKey=new URL(rotated.link).searchParams.get('site');assert.notEqual(newKey,siteKey);
+    const rotatedPng=PNG.sync.read(Buffer.from(rotated.image.split(',')[1],'base64'));assert.equal(jsQR(new Uint8ClampedArray(rotatedPng.data),rotatedPng.width,rotatedPng.height)?.data,rotated.link);
+    assert.equal((await fetch(`${base}/api/worker/site?key=${siteKey}`)).status,404);assert.equal((await fetch(`${base}/api/worker/session`,{headers:{cookie:stableLogin.headers.get('set-cookie').split(';')[0]}})).status,200);
+    assert.equal((await fetch(`${base}/api/worker/login`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({siteKey,loginId:'worker1',password:'virtual-password-123'})})).status,401);
+    const rotatedLogin=await fetch(`${base}/api/worker/login`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({siteKey:newKey,loginId:'worker1',password:'virtual-password-123'})});assert.equal(rotatedLogin.status,200);
+    assert.equal((await fetch(`${base}/api/worker/logout`,{method:'POST',headers:{cookie:rotatedLogin.headers.get('set-cookie').split(';')[0]}})).status,200);
     assert.equal((await fetch(`${base}/api/worker/logout`,{method:'POST',headers:{cookie:stableLogin.headers.get('set-cookie').split(';')[0]}})).status,200);
     const worker=await (await post('/api/workers',{siteId:site.id,name:'가상 출입자',category:'직영',company:'가상 업체',occupation:'목공'})).json();
     assert.equal((await post('/api/attendance',{siteId:site.id,workerId:worker.id,date:'2024-02-29',present:true})).status,200);

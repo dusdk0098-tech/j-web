@@ -211,8 +211,8 @@ const server = http.createServer(async (req, res) => {
       res.writeHead(200,{'Content-Type':'application/octet-stream','Content-Disposition':'attachment; filename="work-stop-photo"','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(photo);
     }
     const inviteSite=url.pathname.match(/^\/api\/sites\/(\d+)\/invitation$/);
-    const accessSite=url.pathname.match(/^\/api\/sites\/(\d+)\/access$/);
-    if(accessSite&&req.method==='POST'){const key=store.ensureSiteAccess(accessSite[1]),link=`${requestOrigin}/join?site=${encodeURIComponent(key)}`;return json(res,200,{link,image:await QRCode.toDataURL(link,{errorCorrectionLevel:'M',margin:2,width:256})});}
+    const accessSite=url.pathname.match(/^\/api\/sites\/(\d+)\/access(?:\/(rotate))?$/);
+    if(accessSite&&req.method==='POST'){const key=accessSite[2]?store.rotateSiteAccess(accessSite[1]):store.ensureSiteAccess(accessSite[1]),link=`${requestOrigin}/join?site=${encodeURIComponent(key)}`;return json(res,200,{link,image:await QRCode.toDataURL(link,{errorCorrectionLevel:'M',margin:2,width:256})});}
     if (inviteSite && req.method === 'POST') {
       const invite=store.createInvitation(inviteSite[1]);
       const link=`${requestOrigin}/join?token=${encodeURIComponent(invite.token)}`;

@@ -677,6 +677,10 @@ export class Store {
     this.db.prepare('INSERT OR IGNORE INTO site_access(site_id,access_key) VALUES(?,?)').run(siteId,randomBytes(32).toString('base64url'));
     return this.db.prepare('SELECT access_key FROM site_access WHERE site_id=?').get(siteId).access_key;
   }
+  rotateSiteAccess(siteId){
+    siteId=Number(siteId);if(!this.db.prepare('SELECT 1 FROM sites WHERE id=?').get(siteId))throw new Error('현장을 선택해 주세요.');
+    const key=randomBytes(32).toString('base64url');this.db.prepare('INSERT INTO site_access(site_id,access_key) VALUES(?,?) ON CONFLICT(site_id) DO UPDATE SET access_key=excluded.access_key').run(siteId,key);return key;
+  }
   siteFromAccess(key){
     if(typeof key!=='string'||!/^[\w-]{43}$/.test(key))return null;
     return this.db.prepare('SELECT s.id,s.name FROM site_access a JOIN sites s ON s.id=a.site_id WHERE a.access_key=?').get(key)||null;
