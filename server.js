@@ -423,6 +423,7 @@ const server = http.createServer(async (req, res) => {
     }
     if (url.pathname === '/api/daily-report/previous' && req.method === 'GET') return json(res,200,store.previousDailyReport(url.searchParams.get('siteId'),url.searchParams.get('before')));
     if (url.pathname === '/api/joint-inspection/previous' && req.method === 'GET') return json(res,200,store.previousJointInspection(url.searchParams.get('siteId'),url.searchParams.get('before')));
+    if (url.pathname === '/api/inspection/previous' && req.method === 'GET') return json(res,200,store.previousInspections(url.searchParams.get('siteId'),url.searchParams.get('before'),url.searchParams.get('excludeId')));
     if (url.pathname === '/api/risk/previous' && req.method === 'GET') return json(res,200,store.previousRiskAssessments(url.searchParams.get('siteId'),url.searchParams.get('before'),url.searchParams.get('kind'),url.searchParams.get('scale'),url.searchParams.get('excludeId')));
     if (url.pathname === '/api/daily-report/sources' && req.method === 'GET') return json(res,200,store.dailySourceDocuments(url.searchParams.get('siteId'),url.searchParams.get('date')));
     if (url.pathname === '/api/safety-log/sources' && req.method === 'GET') return json(res,200,store.safetyLogSources(url.searchParams.get('siteId'),url.searchParams.get('date')));

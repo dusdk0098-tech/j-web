@@ -771,6 +771,10 @@ export class Store {
     before=dateValue(before);
     return this.db.prepare("SELECT date,json_extract(details,'$.items') AS items FROM documents WHERE site_id=? AND type='joint_inspection' AND date<? ORDER BY date DESC,id DESC LIMIT 1").get(Number(siteId),before) || null;
   }
+  previousInspections(siteId,before,excludeId) {
+    before=dateValue(before);
+    return this.db.prepare("SELECT id,title,date,details FROM documents WHERE site_id=? AND type='inspection' AND date<? AND id<>? ORDER BY date DESC,id DESC LIMIT 20").all(Number(siteId),before,Number(excludeId)||0);
+  }
   previousRiskAssessments(siteId,before,kind,scale,excludeId) {
     before=dateValue(before);
     if(!['initial','regular','occasional','continuous'].includes(kind) || !['three-level','3x3','5x4'].includes(scale))throw new Error('평가 종류와 척도를 선택해 주세요.');

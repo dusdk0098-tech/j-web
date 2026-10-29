@@ -292,6 +292,13 @@ test('안전 점검 일지는 복수 점검과 활동을 보존하고 잘못된 
   const s=new Store(':memory:');try{const site=s.createSite({name:'가상 현장'}),input={siteId:site.id,type:'inspection',title:'시험 점검',date:'2026-10-29',details:{meeting:'가상 회의',instruction:'가상 지시',rows:[{inspector:'가상 점검자',timeFrom:'09:00',timeTo:'09:30',hazard:'가상 상태',action:'가상 조치'},{inspector:'다른 점검자',hazard:'가상 상태 2'}]}};const doc=s.createDocument(input);assert.equal(JSON.parse(doc.details).rows.length,2);assert.throws(()=>s.updateDocument(doc.id,{...input,details:{...input.details,rows:[{...input.details.rows[0],timeTo:'09:03'}]}}),/점검시간/);assert.equal(JSON.parse(s.document(doc.id).details).instruction,'가상 지시');}finally{s.close();}
 });
 
+test('이전 안전 점검 조회는 현장과 작성일을 제한하고 현재 문서를 제외한다',()=>{
+  const s=new Store(':memory:');try{
+    const site=s.createSite({name:'가상 현장'}),other=s.createSite({name:'다른 현장'}),add=(siteId,date,type,title)=>s.createDocument({siteId,date,type,title,details:type==='inspection'?{meeting:'가상 회의',rows:[{inspector:'가상 점검자',hazard:'가상 상태'}]}:{}}),old=add(site.id,'2026-10-27','inspection','이전 점검'),recent=add(site.id,'2026-10-28','inspection','최근 점검');add(site.id,'2026-10-29','inspection','당일 점검');add(site.id,'2026-10-26','patrol','다른 문서');add(other.id,'2026-10-28','inspection','다른 현장');
+    const rows=s.previousInspections(site.id,'2026-10-29');assert.deepEqual(rows.map(row=>row.id),[recent.id,old.id]);assert.equal(JSON.parse(rows[0].details).meeting,'가상 회의');assert.deepEqual(s.previousInspections(site.id,'2026-10-29',recent.id).map(row=>row.id),[old.id]);assert.deepEqual(s.previousInspections(site.id,'2026-10-27'),[]);assert.throws(()=>s.previousInspections(site.id,'2026-02-30'),/날짜/);
+  }finally{s.close();}
+});
+
 test('합동 안전점검은 판정과 출역자를 검증하고 잘못된 수정을 보존한다',()=>{
   const s=new Store(':memory:');try{
     const site=s.createSite({name:'가상 현장'}),worker=s.createWorker({siteId:site.id,name:'가상 근로자',category:'직영',company:'가상 회사',occupation:'목공'});

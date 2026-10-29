@@ -137,6 +137,7 @@ test('관리자 인증 모드가 문서 API를 보호하고 로그아웃을 적�
     const sourceDate='2024-02-29',sourcePath=`${base}/api/safety-log/sources?siteId=${site.id}&date=${sourceDate}`;
     assert.equal((await fetch(sourcePath)).status,401);
     const sourceDoc=await (await post('/api/documents',{siteId:site.id,type:'inspection',title:'가상 점검',date:sourceDate,details:{instruction:'가상 지시',rows:[]}})).json();
+    const previousInspectionsUrl=`${base}/api/inspection/previous?siteId=${site.id}&before=2024-03-01`;assert.equal((await fetch(previousInspectionsUrl)).status,401);assert.deepEqual((await (await fetch(previousInspectionsUrl,{headers:{cookie}})).json()).map(row=>row.id),[sourceDoc.id]);assert.deepEqual(await (await fetch(`${previousInspectionsUrl}&excludeId=${sourceDoc.id}`,{headers:{cookie}})).json(),[]);assert.deepEqual(await (await fetch(`${base}/api/inspection/previous?siteId=${other.id}&before=2024-03-01`,{headers:{cookie}})).json(),[]);
     await post('/api/documents',{siteId:other.id,type:'notice',title:'다른 현장',date:sourceDate});
     const sourceData=await (await fetch(sourcePath,{headers:{cookie}})).json();assert.deepEqual(sourceData.documents.map(d=>d.id),[sourceDoc.id]);assert.equal(JSON.parse(sourceData.documents[0].details).instruction,'가상 지시');
     const checklist=await (await post('/api/documents',{siteId:site.id,type:'checklist',title:'가상 우천 점검',date:sourceDate,details:{kind:'rain',answers:Array.from({length:7},()=>({answer:'',note:''}))}})).json();
@@ -168,6 +169,7 @@ test('관리자 인증 모드가 문서 API를 보호하고 로그아웃을 적�
     const workerLogin=await fetch(`${base}/api/worker/login`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({token:inviteToken,loginId:'worker1',password:'virtual-password-123'})});
     assert.equal(workerLogin.status,200);assert.match(workerLogin.headers.get('set-cookie'),/HttpOnly; SameSite=Strict/);const workerCookie=workerLogin.headers.get('set-cookie').split(';')[0];
     const own=(await workerLogin.json()).worker;
+    assert.equal((await fetch(previousInspectionsUrl,{headers:{cookie:workerCookie}})).status,401);
     assert.equal(own.site_id,joinData.id);
     const articlePath=`${base}/api/worker/articles`,articleInput={siteId:site.id,category:'안전·보건',title:'가상 공개',body:'가상 내용',visible:true};
     assert.equal((await fetch(articlePath)).status,401);assert.equal((await fetch(`${base}/api/site-articles?siteId=${site.id}`,{headers:{cookie:workerCookie}})).status,401);
