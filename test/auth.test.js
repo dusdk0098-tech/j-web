@@ -278,6 +278,7 @@ test('관리자 인증 모드가 문서 API를 보호하고 로그아웃을 적�
     assert.equal((await post('/api/wages',{...wage,gross:'2000'})).status,400);assert.equal((await (await fetch(wagePath,{headers:{cookie}})).json())[0].gross,1000);
     assert.equal((await fetch(`${base}/api/wages`,{method:'PUT',headers:{cookie,'content-type':'application/json'},body:JSON.stringify({...wage,gross:'2000'})})).status,200);
     const mealPath=`${base}/api/meal-checks`,mealDate='2024-02-29';
+    assert.equal((await fetch(`${base}/attendance-meals.js`)).status,200);
     assert.equal((await fetch(`${mealPath}?siteId=${site.id}&date=${mealDate}`,{headers:{cookie:workerCookie}})).status,401);
     await post('/api/attendance',{siteId:site.id,workerId:own.id,date:mealDate,present:true});
     assert.equal((await post('/api/meal-checks',{siteId:site.id,workerId:own.id,date:mealDate,kind:'lunch',restaurantId})).status,200);

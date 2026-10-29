@@ -5,6 +5,7 @@ import { selectTbmSources, mergeTbmSource } from './tbm-sources.js';
 import { trainingGroups, trainingRoster, filterEducationReport } from './training-groups.js';
 import { restaurantPrice } from './restaurant-price.js';
 import { salarySummary, salaryDay, groupWageRecords } from './salary-summary.js';
+import { attendanceMealChange } from './attendance-meals.js';
 
 const $ = (s) => document.querySelector(s);
 const content = $('#content'), siteSelect = $('#site-select'), dialog = $('#dialog'), notice = $('#notice');
@@ -771,7 +772,7 @@ async function render(){
   }
   if(state.page==='attendance'){
     const date=state.attendanceDate||today();
-    const rows=await api(`/api/attendance?siteId=${state.siteId}&date=${encodeURIComponent(date)}`);
+    const siteId=state.siteId,[rows,mealRestaurants,mealChecks]=await Promise.all([api(`/api/attendance?siteId=${siteId}&date=${encodeURIComponent(date)}`),api(`/api/restaurants?siteId=${siteId}`),api(`/api/meal-checks?siteId=${siteId}&date=${encodeURIComponent(date)}`)]);
     const delegatedEvents=await api(`/api/attendance/delegated-events?siteId=${state.siteId}&date=${encodeURIComponent(date)}`);
     const present=rows.filter(w=>w.present).length;
     const from=state.reportFrom||`${today().slice(0,7)}-01`, to=state.reportTo||today();
@@ -784,6 +785,16 @@ async function render(){
     if(rows.length){
       const table=content.querySelector('section:first-child table'),heading=document.createElement('th');heading.textContent='시험 급여·계산액';table.tHead.rows[0].insertBefore(heading,table.tHead.rows[0].lastElementChild);
       [...table.tBodies[0].rows].forEach((tr,i)=>{const row=rows[i],cell=tr.insertCell(tr.cells.length-1);if(!row.present){cell.textContent='-';return;}const kind=document.createElement('select'),input=document.createElement('input'),button=document.createElement('button'),amount=document.createElement('div');for(const [value,label] of [['daily','일당'],['monthly','월급'],['yearly','연봉'],['other','기타']]){const option=document.createElement('option');option.value=value;option.textContent=label;kind.append(option);}kind.value=row.salary_kind||'daily';kind.setAttribute('aria-label',`${row.name} 시험 급여 종류`);input.type='number';input.min='0';input.max='999999999';input.step='1';input.value=row.salary_kind?row.salary_amount??'':row.daily_rate??'';input.setAttribute('aria-label',`${row.name} 시험 급여 금액`);kind.onchange=()=>{input.value=kind.value==='daily'?row.daily_rate??'':kind.value===row.salary_kind?row.salary_amount??'':'';};button.type='button';button.className='small';button.textContent='급여 저장';amount.textContent=row.salary_kind?'월별 시험 합계에서 확인':row.daily_rate===null||row.units_hundredths===null?'계산 불가: 일당 또는 공수 미기록':`시험 계산액 ${Math.floor((row.daily_rate*row.units_hundredths+50)/100)}원`;button.onclick=async()=>{try{if(!input.checkValidity())throw new Error('시험 급여는 0부터 999999999까지 정수로 입력해 주세요.');const base={siteId:state.siteId,workerId:row.id,date};await api(kind.value==='daily'?'/api/attendance/daily-rate':'/api/attendance/salary',{method:'PUT',body:JSON.stringify(kind.value==='daily'?{...base,dailyRate:input.value}:{...base,kind:kind.value,amount:input.value})});flash('시험 급여를 저장했습니다.');await render();}catch(error){showError(error);}};cell.append(kind,input,button,amount);});
+    }
+    if(rows.length){
+      const table=content.querySelector('section:first-child table'),heading=document.createElement('th');heading.textContent='가상 식대';table.tHead.rows[0].insertBefore(heading,table.tHead.rows[0].lastElementChild);
+      [...table.tBodies[0].rows].forEach((tr,i)=>{const worker=rows[i],cell=tr.insertCell(tr.cells.length-1);if(!worker.present){cell.textContent='출역 후 선택';return;}for(const [kind,name] of [['breakfast','조식'],['lunch','중식'],['dinner','석식'],['snack','간식']]){
+        const current=mealChecks.find(item=>item.worker_id===worker.id&&item.kind===kind),label=document.createElement('label'),select=document.createElement('select'),empty=document.createElement('option');empty.value='';empty.textContent='선택 안 함';select.append(empty);
+        if(current&&!mealRestaurants.some(item=>item.id===current.restaurant_id)){const option=document.createElement('option');option.value=String(current.restaurant_id);option.textContent='기존 식당 (목록에 없음)';select.append(option);}
+        for(const restaurant of mealRestaurants){const option=document.createElement('option');option.value=String(restaurant.id);option.textContent=restaurant.name;select.append(option);}select.value=current?String(current.restaurant_id):'';select.setAttribute('aria-label',`${worker.name} ${name} 가상 식당`);
+        label.append(document.createTextNode(`${name} `),select);if(current)label.append(document.createTextNode(` (기록: ${current.restaurant_name}, ${current.price}원) `));cell.append(label,document.createElement('br'));
+        select.onchange=async()=>{try{const change=attendanceMealChange(current,select.value);if(!change)return;select.disabled=true;if(change.action==='delete')await api(`/api/meal-checks?siteId=${siteId}&id=${change.id}`,{method:'DELETE'});else await api('/api/meal-checks',{method:'POST',body:JSON.stringify({siteId,workerId:worker.id,date,kind,restaurantId:change.restaurantId})});if(state.page==='attendance'&&state.siteId===siteId&&(state.attendanceDate||today())===date)await render();}catch(error){select.value=current?String(current.restaurant_id):'';select.disabled=false;showError(error);}};
+      }});
     }
     if(rows.length){
       const section=content.querySelector('section:first-child'),table=section.querySelector('table'),filters=document.createElement('div');
