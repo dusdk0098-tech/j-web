@@ -835,6 +835,16 @@ test('교육 서명 표시는 설정된 대상자와 같은 현장·날짜·종�
   }finally{s.close();}
 });
 
+test('교육 대상 묶음에는 해당 날짜 출역 당시의 직종과 소속이 제공된다',()=>{
+  const s=new Store(':memory:');try{
+    const site=s.createSite({name:'가상 현장'}),other=s.createSite({name:'다른 현장'}),input={siteId:site.id,name:'가상 근로자',category:'직영',company:'이전 소속',occupation:'목공'},worker=s.createWorker(input),absent=s.createWorker({...input,name:'미출역자'}),foreign=s.createWorker({...input,siteId:other.id,name:'다른 현장'});
+    s.setAttendance({siteId:site.id,workerId:worker.id,date:'2026-10-28',present:true});s.setAttendance({siteId:other.id,workerId:foreign.id,date:'2026-10-28',present:true});s.updateWorker(worker.id,{...input,company:'새 소속',occupation:'전기'});
+    const doc=s.createDocument({siteId:site.id,type:'tbm',title:'가상 교육',date:'2026-10-28'}),workers=s.trainingTargets(doc.id).workers,row=workers.find(w=>w.id===worker.id);
+    assert.equal(row.present,1);assert.equal(row.attendance_company,'이전 소속');assert.equal(row.attendance_occupation,'목공');assert.equal(workers.find(w=>w.id===absent.id).present,0);assert.equal(workers.some(w=>w.id===foreign.id),false);
+    const later=s.createDocument({siteId:site.id,type:'tbm',title:'다음날',date:'2026-10-29'});assert.equal(s.trainingTargets(later.id).workers.find(w=>w.id===worker.id).present,0);
+  }finally{s.close();}
+});
+
 test('교육 대상은 현장별로 제한되고 결재 요청 후 변경할 수 없다',()=>{
   const s=new Store(':memory:');
   try {
