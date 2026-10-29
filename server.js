@@ -431,6 +431,13 @@ const server = http.createServer(async (req, res) => {
       if(fileId&&req.method==='DELETE'){store.deleteArticleFile(siteId,articleId,fileId);return json(res,200,{ok:true});}
       if(fileId&&req.method==='GET'){const file=store.articleFile(siteId,articleId,fileId);if(!file)return json(res,404,{error:'첨부파일을 찾을 수 없습니다.'});const name=encodeURIComponent(file.name).replace(/[!'()*]/g,c=>`%${c.charCodeAt(0).toString(16).toUpperCase()}`);res.writeHead(200,{'Content-Type':'application/octet-stream','Content-Disposition':`attachment; filename="attachment"; filename*=UTF-8''${name}`,'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(file.data);}
     }
+    if(url.pathname==='/api/board-posts'){
+      if(req.method==='GET')return json(res,200,store.boardPosts(url.searchParams.get('kind'),url.searchParams.get('q')||''));
+      if(req.method==='POST')return json(res,201,store.saveBoardPost(await body(req)));
+    }
+    const boardPost=url.pathname.match(/^\/api\/board-posts\/(\d+)$/);
+    if(boardPost&&req.method==='PUT')return json(res,200,store.saveBoardPost(await body(req),boardPost[1]));
+    if(boardPost&&req.method==='DELETE'){const input=await body(req);store.deleteBoardPost(input.kind,boardPost[1]);return json(res,200,{ok:true});}
     if(url.pathname==='/api/schedules'){
       if(req.method==='GET')return json(res,200,store.schedules(url.searchParams.get('siteId'),url.searchParams.get('month'),url.searchParams.get('q')||''));
       if(req.method==='POST')return json(res,201,store.saveSchedule(await body(req)));

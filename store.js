@@ -53,6 +53,7 @@ export class Store {
       CREATE TABLE IF NOT EXISTS site_access (site_id INTEGER PRIMARY KEY REFERENCES sites(id),access_key TEXT NOT NULL UNIQUE);
       CREATE TABLE IF NOT EXISTS site_registration (site_id INTEGER PRIMARY KEY REFERENCES sites(id),expires_at INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS schedules (id INTEGER PRIMARY KEY,site_id INTEGER NOT NULL REFERENCES sites(id),kind TEXT NOT NULL,start_date TEXT NOT NULL,end_date TEXT NOT NULL,start_time TEXT NOT NULL,end_time TEXT NOT NULL,content TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS board_posts (id INTEGER PRIMARY KEY,kind TEXT NOT NULL,title TEXT NOT NULL,body TEXT NOT NULL,secret INTEGER NOT NULL CHECK(secret IN (0,1)),created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
       CREATE TABLE IF NOT EXISTS site_worker_blocks (site_id INTEGER NOT NULL REFERENCES sites(id),date TEXT NOT NULL,kind TEXT NOT NULL CHECK(kind IN ('holiday','ended')),PRIMARY KEY(site_id,date,kind));
       CREATE TABLE IF NOT EXISTS site_articles (id INTEGER PRIMARY KEY,site_id INTEGER NOT NULL REFERENCES sites(id),category TEXT NOT NULL,title TEXT NOT NULL,body TEXT NOT NULL,visible INTEGER NOT NULL CHECK(visible IN (0,1)),created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
       CREATE TABLE IF NOT EXISTS site_photos (id INTEGER PRIMARY KEY,site_id INTEGER NOT NULL REFERENCES sites(id),name TEXT NOT NULL,date TEXT NOT NULL,description TEXT NOT NULL DEFAULT '',data BLOB NOT NULL);
@@ -215,6 +216,18 @@ export class Store {
     if(!this.db.prepare('UPDATE site_photos SET date=?,description=? WHERE site_id=? AND id=?').run(date,input.description.trim(),Number(siteId),Number(id)).changes)throw new Error('사진을 찾을 수 없습니다.');
   }
   deleteSitePhoto(siteId,id){if(!this.db.prepare('DELETE FROM site_photos WHERE site_id=? AND id=?').run(Number(siteId),Number(id)).changes)throw new Error('사진을 찾을 수 없습니다.');}
+  boardPosts(kind,query=''){
+    if(!['notice','question','general'].includes(kind)||typeof query!=='string'||query.length>200)throw new Error('게시판 또는 검색어를 확인해 주세요.');
+    return this.db.prepare('SELECT * FROM board_posts WHERE kind=? AND (instr(title,?)>0 OR instr(body,?)>0) ORDER BY id DESC').all(kind,query,query);
+  }
+  saveBoardPost(input,id=null){
+    if(!['notice','question','general'].includes(input.kind)||typeof input.secret!=='boolean'||(input.secret&&input.kind!=='question'))throw new Error('게시판과 비밀글 설정을 확인해 주세요.');
+    const title=text(input.title,'제목'),body=text(input.body,'내용',10000),secret=input.secret?1:0;
+    if(id===null)id=this.db.prepare('INSERT INTO board_posts(kind,title,body,secret) VALUES(?,?,?,?)').run(input.kind,title,body,secret).lastInsertRowid;
+    else if(!this.db.prepare('UPDATE board_posts SET title=?,body=?,secret=? WHERE id=? AND kind=?').run(title,body,secret,Number(id),input.kind).changes)throw new Error('게시글을 찾을 수 없습니다.');
+    return this.db.prepare('SELECT * FROM board_posts WHERE id=?').get(Number(id));
+  }
+  deleteBoardPost(kind,id){if(!['notice','question','general'].includes(kind)||!this.db.prepare('DELETE FROM board_posts WHERE kind=? AND id=?').run(kind,Number(id)).changes)throw new Error('게시글을 찾을 수 없습니다.');}
   schedules(siteId,month,query='') {
     month=monthValue(month);if(typeof query!=='string'||query.length>200)throw new Error('검색어를 확인해 주세요.');
     return this.db.prepare('SELECT * FROM schedules WHERE site_id=? AND substr(start_date,1,7)<=? AND substr(end_date,1,7)>=? AND instr(content,?)>0 ORDER BY start_date,start_time,id').all(Number(siteId),month,month,query);

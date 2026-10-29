@@ -28,6 +28,7 @@ labels['ppe-issues']='보호구 지급';
 labels['reviewers']='시험 결재자';
 labels['worker-access-blocks']='출입자 접속 차단';
 labels['schedules']='일정 관리';
+labels['board']='게시판';
 document.querySelector('[data-page=stops]').insertAdjacentHTML('afterend','<button data-page="hazards">의견제안 및 위험신고</button>');
 document.querySelector('[data-page=attendance]').insertAdjacentHTML('afterend','<button data-page="restaurants">식대 기본설정</button>');
 document.querySelector('[data-page=restaurants]').insertAdjacentHTML('afterend','<button data-page="meal-checks">식대 체크</button>');
@@ -41,6 +42,7 @@ document.querySelector('[data-page=site-occupations]').insertAdjacentHTML('after
 document.querySelector('[data-page=documents]').insertAdjacentHTML('afterend','<button data-page="basic-categories">기본 서류 분류</button>');
 document.querySelector('[data-page=approval]').insertAdjacentHTML('afterend','<button data-page="reviewers">시험 결재자</button>');
 document.querySelector('[data-page=documents]').insertAdjacentHTML('beforebegin','<button data-page="schedules">일정 관리</button>');
+document.querySelector('[data-page=schedules]').insertAdjacentHTML('afterend','<button data-page="board">게시판</button>');
 const statusLabels = {draft:'임시저장',pending:'결재 대기',approved:'승인',rejected:'반려'};
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const today = () => new Date(Date.now() - new Date().getTimezoneOffset()*60000).toISOString().slice(0,10);
@@ -614,8 +616,15 @@ async function renderAllSiteStatistics(siteId,from,to,month,day){
 async function render(){
   await loadSites(); $('#heading').textContent=labels[state.page];$('#crumb').textContent=labels[state.page];
   document.querySelectorAll('[data-page]').forEach(b=>b.classList.toggle('selected',b.dataset.page===state.page));
-  if(!state.siteId){content.innerHTML='<section class="panel empty">먼저 현장을 추가해 주세요. 시험을 위해 가상의 현장명을 사용하세요.</section>';return;}
+  if(!state.siteId&&state.page!=='board'){content.innerHTML='<section class="panel empty">먼저 현장을 추가해 주세요. 시험을 위해 가상의 현장명을 사용하세요.</section>';return;}
   if(state.detail)return renderDetail();
+  if(state.page==='board'){
+    const kind=state.boardKind||'notice',query=state.query,names={notice:'공지사항',question:'문의 게시판',general:'자유 게시판'},rows=await api(`/api/board-posts?${new URLSearchParams({kind,q:query})}`);if(state.page!=='board'||(state.boardKind||'notice')!==kind||state.query!==query)return;
+    content.innerHTML=`<section class="panel"><div class="panel-head"><h2>가상 게시판</h2><button type="button" id="board-add">글쓰기</button></div><p class="muted">모든 현장에서 같은 시험 글을 관리자가 조회합니다. 일반 사용자 계정과 실제 공개·비밀 권한은 지원하지 않습니다.</p><div class="filters"><label>게시판 <select id="board-kind">${Object.entries(names).map(([value,label])=>`<option value="${value}" ${value===kind?'selected':''}>${label}</option>`).join('')}</select></label><label>검색어 <input id="board-query" maxlength="200" value="${esc(query)}"></label><button type="button" id="board-search">검색</button></div>${rows.length?rows.map(row=>`<article><h3>${esc(row.title)}${row.secret?' · 비밀 표시':''}</h3><p>${esc(row.created_at)} (UTC)</p><p class="detail-body">${esc(row.body)}</p><button type="button" data-board-edit="${row.id}">수정</button> <button type="button" data-board-delete="${row.id}">삭제</button></article>`).join(''):'<p>등록된 시험 글이 없습니다.</p>'}</section>`;
+    $('#board-kind').onchange=event=>{state.boardKind=event.target.value;state.query='';render().catch(showError);};$('#board-search').onclick=()=>{state.query=$('#board-query').value;render().catch(showError);};
+    const edit=row=>showDialog(row?'가상 게시글 수정':'가상 게시글 작성',`${field('title','제목',row?.title||'')}<label>내용<textarea name="body" maxlength="10000" required>${esc(row?.body||'')}</textarea></label>${kind==='question'?`<label><input type="checkbox" name="secret" ${row?.secret?'checked':''}> 비밀글 표시</label><p>현재는 관리자만 모든 시험 글에 접근할 수 있으며 별도 사용자 권한은 제공하지 않습니다.</p>`:''}`,data=>api(row?`/api/board-posts/${row.id}`:'/api/board-posts',{method:row?'PUT':'POST',body:JSON.stringify({...data,kind,secret:data.secret==='on'})}));
+    $('#board-add').onclick=()=>edit(null);content.querySelectorAll('[data-board-edit]').forEach(button=>button.onclick=()=>edit(rows.find(row=>row.id===Number(button.dataset.boardEdit))));content.querySelectorAll('[data-board-delete]').forEach(button=>button.onclick=async()=>{if(!confirm('가상 게시글을 삭제할까요?'))return;try{await api(`/api/board-posts/${button.dataset.boardDelete}`,{method:'DELETE',body:JSON.stringify({kind})});await render();}catch(error){showError(error);}});return;
+  }
   if(state.page==='schedules'){
     const siteId=state.siteId,month=state.scheduleMonth||today().slice(0,7),query=state.query,view=state.scheduleView||'calendar',rows=await api(`/api/schedules?${new URLSearchParams({siteId:String(siteId),month,q:query})}`);
     if(state.siteId!==siteId||state.page!=='schedules'||(state.scheduleMonth||today().slice(0,7))!==month||state.query!==query)return;
