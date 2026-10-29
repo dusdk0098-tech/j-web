@@ -558,6 +558,17 @@ test('합동 점검은 가상 관리자를 근로자와 구분하고 선택 당�
   }finally{s.close();}
 });
 
+test('합동 점검 시험 서명은 변경 시 삭제되고 결재 요청 당시 사본이 보존된다',()=>{
+  const s=new Store(':memory:');try{
+    const site=s.createSite({name:'가상 현장'}),input={siteId:site.id,type:'joint_inspection',title:'가상 점검',date:'2026-10-29',details:{items:[]}},doc=s.createDocument(input),other=s.createDocument(input),png=new PNG({width:1,height:1});png.data[3]=255;const bytes=PNG.sync.write(png),signature=`data:image/png;base64,${bytes.toString('base64')}`;
+    assert.throws(()=>s.saveJointSignature(doc.id,'invalid'),/서명/);s.saveJointSignature(doc.id,signature);s.saveJointSignature(other.id,signature);
+    const file=s.addAttachment(doc.id,'가상.txt',Buffer.from('가상'));assert.equal(s.jointSignature(doc.id),null);assert.ok(s.jointSignature(other.id));s.saveJointSignature(doc.id,signature);s.deleteAttachment(file);assert.equal(s.jointSignature(doc.id),null);
+    s.saveJointSignature(doc.id,signature);s.updateDocument(doc.id,{...input,title:'수정된 점검'});assert.equal(s.jointSignature(doc.id),null);s.saveJointSignature(doc.id,signature);s.transition(doc.id,'submit');
+    const submitted=s.document(doc.id),cycle=submitted.approval_cycle_id;assert.equal(s.reviewerPayload(submitted).linked.authorSignature,true);assert.deepEqual(Buffer.from(s.reviewerLinkedSignature(submitted,'author',0)),bytes);assert.throws(()=>s.saveJointSignature(doc.id,signature),/수정/);
+    s.transition(doc.id,'withdraw');s.updateDocument(doc.id,input);assert.equal(s.jointSignature(doc.id),null);assert.deepEqual(Buffer.from(s.approvalCycleFile(doc.id,cycle,'author-signature',0,0).data),bytes);s.transition(doc.id,'submit');assert.equal(s.reviewerPayload(s.document(doc.id)).linked.authorSignature,false);
+  }finally{s.close();}
+});
+
 test('합동 점검 가상 예시 64개를 문서에 저장하고 판정을 수정한다',()=>{
   const s=new Store(':memory:');try{
     const site=s.createSite({name:'가상 현장'}),items=jointExamples('civil',0),input={siteId:site.id,type:'joint_inspection',title:'가상 점검',date:'2026-10-29',details:{items}};
