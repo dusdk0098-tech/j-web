@@ -340,6 +340,20 @@ test('노사협의체 회의 안건과 출역자를 현장별로 저장한다',(
   }finally{s.close();}
 });
 
+test('회의별 사용자 측 가상 참석자는 입력을 검증하고 저장한다',()=>{
+  const s=new Store(':memory:');try{
+    const site=s.createSite({name:'가상 현장'});
+    for(const type of ['work_council','safety_meeting']){
+      const input={siteId:site.id,type,title:'가상 회의',date:'2026-10-29',details:{...(type==='work_council'?{kind:'정기 회의'}:{}),employerParticipants:['  가상 담당자  ','가상 관리자']}};
+      const doc=s.createDocument(input);assert.deepEqual(JSON.parse(doc.details).employerParticipants,['가상 담당자','가상 관리자']);
+      assert.throws(()=>s.updateDocument(doc.id,{...input,details:{...input.details,employerParticipants:['가'.repeat(201)]}}),/참석자/);
+      assert.throws(()=>s.updateDocument(doc.id,{...input,details:{...input.details,employerParticipants:'가상 담당자'}}),/참석자/);
+      assert.throws(()=>s.updateDocument(doc.id,{...input,details:{...input.details,employerParticipants:Array(101).fill('가상')}}),/참석자/);
+      assert.deepEqual(JSON.parse(s.document(doc.id).details).employerParticipants,['가상 담당자','가상 관리자']);
+    }
+  }finally{s.close();}
+});
+
 test('안전간담회는 해당 날짜의 출역자를 선택하고 기존 참석자 정보를 보존한다',()=>{
   const s=new Store(':memory:');try{
     const site=s.createSite({name:'가상 현장'}),other=s.createSite({name:'다른 현장'}),input={siteId:site.id,name:'가상 근로자',category:'직영',company:'가상 회사',occupation:'목공'};

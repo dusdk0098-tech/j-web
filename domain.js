@@ -67,6 +67,7 @@ export function recordInput(input) {
     for(const key of ['timeFrom','timeTo']){const time=value[key]??'';if(typeof time!=='string'||time&&!/^(?:[01]\d|2[0-3]):(?:00|05|10|15|20|25|30|35|40|45|50|55)$|^24:00$/.test(time))throw new Error('회의시간을 확인해 주세요.');details[key]=time;}
     if((details.timeFrom||details.timeTo)&&(!details.timeFrom||!details.timeTo||details.timeFrom>=details.timeTo))throw new Error('회의시간을 확인해 주세요.');
     const ids=value.workerIds??[];if(!Array.isArray(ids)||ids.length>100||ids.some(id=>!Number.isSafeInteger(id)||id<1)||new Set(ids).size!==ids.length)throw new Error('참석자를 확인해 주세요.');details.workerIds=ids;
+    if(type!=='joint_inspection'){const names=value.employerParticipants??[];if(!Array.isArray(names)||names.length>100||names.some(name=>typeof name!=='string'||!name.trim()||name.trim().length>200||/[\x00-\x1f\x7f]/.test(name)))throw new Error('사용자 측 참석자를 확인해 주세요.');details.employerParticipants=names.map(name=>name.trim());}
     if(type==='work_council'){
       if(!['임시 회의','정기 회의'].includes(value.kind))throw new Error('회의 종류를 확인해 주세요.');details.kind=value.kind;
       for(const key of ['host','decisions','discussion']){if(typeof (value[key]??'')!=='string'||(value[key]??'').length>2000)throw new Error('노사협의체 항목을 확인해 주세요.');details[key]=(value[key]??'').trim();}
