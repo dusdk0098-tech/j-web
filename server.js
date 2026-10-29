@@ -145,7 +145,7 @@ const server = http.createServer(async (req, res) => {
       const session=workerSessions.get(workerKey(workerToken));if(!session||session.expires<=Date.now())return json(res,401,{error:'근로자 로그인이 필요합니다.'});const {site_id:siteId,id:workerId}=session.worker;
       if(!store.workerPermissions(siteId,workerId).includes('attendance'))return json(res,403,{error:'출역 관리 시험 권한이 필요합니다.'});
       if(req.method==='GET')return json(res,200,store.delegatedAttendance(siteId,workerId,url.searchParams.get('date')));
-      const input=await body(req);if(!store.workerPermissions(siteId,workerId).includes('attendance'))return json(res,403,{error:'출역 관리 시험 권한이 필요합니다.'});store.setDelegatedAttendance(siteId,workerId,input);return json(res,200,{ok:true});
+      const input=await body(req);if(!store.workerPermissions(siteId,workerId).includes('attendance'))return json(res,403,{error:'출역 관리 시험 권한이 필요합니다.'});store.setDelegatedAttendance(siteId,workerId,input,()=>checkRequestSession(req));return json(res,200,{ok:true});
     }
     if(url.pathname==='/api/worker/attendance' && req.method==='GET'){
       const key=workerKey(workerToken),session=workerSessions.get(key);

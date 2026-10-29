@@ -772,10 +772,9 @@ export class Store {
     if(!this.workerPermissions(siteId,actorId).includes('attendance'))throw new Error('출역 관리 시험 권한이 필요합니다.');
     return this.attendance(siteId,date).map(({id,name,category,company,occupation,present})=>({id,name,category,company,occupation,present}));
   }
-  setDelegatedAttendance(siteId,actorId,input){
-    if(!this.workerPermissions(siteId,actorId).includes('attendance'))throw new Error('출역 관리 시험 권한이 필요합니다.');
-    const date=dateValue(input.date),actor=this.db.prepare('SELECT name FROM workers WHERE id=? AND site_id=?').get(Number(actorId),Number(siteId)),target=this.db.prepare('SELECT name FROM workers WHERE id=? AND site_id=?').get(Number(input.workerId),Number(siteId));if(!target)throw new Error('같은 현장의 출입자를 확인해 주세요.');
-    this.db.exec('BEGIN IMMEDIATE');try{this.setAttendance({siteId,workerId:input.workerId,date,present:input.present});this.db.prepare("UPDATE attendance SET source='delegated' WHERE worker_id=? AND date=?").run(Number(input.workerId),date);this.db.prepare('INSERT INTO delegated_attendance_events(site_id,actor_id,actor_name,worker_id,worker_name,date,present) VALUES(?,?,?,?,?,?,?)').run(Number(siteId),Number(actorId),actor.name,Number(input.workerId),target.name,date,input.present?1:0);this.db.exec('COMMIT');}catch(error){this.db.exec('ROLLBACK');throw error;}
+  setDelegatedAttendance(siteId,actorId,input,onAuthorize=null){
+    const date=dateValue(input.date);
+    this.db.exec('BEGIN IMMEDIATE');try{if(onAuthorize)onAuthorize();if(!this.workerPermissions(siteId,actorId).includes('attendance'))throw Object.assign(new Error('출역 관리 시험 권한이 필요합니다.'),{sessionStatus:403});const actor=this.db.prepare('SELECT name FROM workers WHERE id=? AND site_id=?').get(Number(actorId),Number(siteId)),target=this.db.prepare('SELECT name FROM workers WHERE id=? AND site_id=?').get(Number(input.workerId),Number(siteId));if(!target)throw new Error('같은 현장의 출입자를 확인해 주세요.');this.setAttendance({siteId,workerId:input.workerId,date,present:input.present});this.db.prepare("UPDATE attendance SET source='delegated' WHERE worker_id=? AND date=?").run(Number(input.workerId),date);this.db.prepare('INSERT INTO delegated_attendance_events(site_id,actor_id,actor_name,worker_id,worker_name,date,present) VALUES(?,?,?,?,?,?,?)').run(Number(siteId),Number(actorId),actor.name,Number(input.workerId),target.name,date,input.present?1:0);this.db.exec('COMMIT');}catch(error){this.db.exec('ROLLBACK');throw error;}
   }
   delegatedAttendanceEvents(siteId,date){date=dateValue(date);return this.db.prepare('SELECT id,actor_name,worker_name,present,created_at FROM delegated_attendance_events WHERE site_id=? AND date=? ORDER BY id DESC').all(Number(siteId),date);}
   workerDocuments(siteId,workerId){
