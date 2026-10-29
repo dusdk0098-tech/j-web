@@ -1,0 +1,23 @@
+{
+  "name": "j-web",
+  "version": "0.1.0",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=22.13"
+  },
+  "dependencies": {
+    "pngjs": "^7.0.0",
+    "qrcode": "^1.5.4",
+    "write-excel-file": "^4.1.1"
+  },
+  "devDependencies": {
+    "jsqr": "^1.4.0",
+    "read-excel-file": "^9.3.13"
+  }
+}

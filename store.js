@@ -1,0 +1,839 @@
+import { DatabaseSync } from 'node:sqlite';
+import { createHash, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
+import { dateValue, recordInput, text, transitions } from './domain.js';
+import { PNG } from 'pngjs';
+
+function monthValue(month) {
+  if(typeof month!=='string' || !/^\d{4}-(0[1-9]|1[0-2])$/.test(month) || Number(month.slice(0,4))<1000)throw new Error('조회할 월을 확인해 주세요.');
+  return month;
+}
+function equipmentDetails(input){
+  const details={};
+  for(const key of ['owner','businessNumber','insurer']){
+    if(input[key]!==undefined && (typeof input[key]!=='string' || input[key].length>200))throw new Error('장비 정보를 확인해 주세요.');
+    details[key]=(input[key]||'').trim();
+  }
+  for(const key of ['registeredAt','insuranceFrom','insuranceTo','inspectedAt','inspectionFrom','inspectionTo']){
+    if(input[key]!==undefined && typeof input[key]!=='string')throw new Error('장비 날짜를 확인해 주세요.');
+    details[key]=input[key]?dateValue(input[key]):'';
+  }
+  if((details.insuranceFrom && details.insuranceTo && details.insuranceFrom>details.insuranceTo) || (details.inspectionFrom && details.inspectionTo && details.inspectionFrom>details.inspectionTo))throw new Error('보험 또는 검사 기간을 확인해 주세요.');
+  return details;
+}
+function signatureBytes(signature) {
+  if(typeof signature!=='string' || signature.length>56000)throw new Error('시험 서명을 확인해 주세요.');
+  const match=signature.match(/^data:image\/png;base64,([A-Za-z0-9+/]+={0,2})$/);
+  if(!match)throw new Error('시험 서명을 입력해 주세요.');
+  const bytes=Buffer.from(match[1],'base64');
+  if(bytes.length<67 || bytes.length>40000 || bytes.toString('base64')!==match[1] || !bytes.subarray(0,8).equals(Buffer.from('89504e470d0a1a0a','hex')))throw new Error('시험 서명 형식을 확인해 주세요.');
+  if(bytes.readUInt32BE(8)!==13 || bytes.subarray(12,16).toString('ascii')!=='IHDR' || bytes.readUInt32BE(16)>320 || bytes.readUInt32BE(20)>120 || !bytes.readUInt32BE(16) || !bytes.readUInt32BE(20))throw new Error('시험 서명 크기를 확인해 주세요.');
+  let image;try{image=PNG.sync.read(bytes);}catch{throw new Error('시험 서명 이미지를 확인해 주세요.');}
+  let marked=false;for(let i=0;i<image.data.length;i+=4)if(image.data[i+3]>0 && (image.data[i]<250 || image.data[i+1]<250 || image.data[i+2]<250)){marked=true;break;}
+  if(!marked)throw new Error('시험 서명을 입력해 주세요.');
+  return bytes;
+}
+function photoBytes(photo){
+  if(!photo)return null;if(typeof photo!=='string'||photo.length>2800000)throw new Error('사진은 2MB 이하여야 합니다.');
+  const match=photo.match(/^data:image\/(png|jpeg);base64,([A-Za-z0-9+/]+={0,2})$/);if(!match)throw new Error('PNG 또는 JPEG 사진을 선택해 주세요.');
+  const bytes=Buffer.from(match[2],'base64');if(bytes.length>2*1024*1024||bytes.toString('base64')!==match[2]||(match[1]==='png'&&!bytes.subarray(0,8).equals(Buffer.from('89504e470d0a1a0a','hex')))||(match[1]==='jpeg'&&!bytes.subarray(0,3).equals(Buffer.from('ffd8ff','hex'))))throw new Error('사진 형식 또는 크기를 확인해 주세요.');return bytes;
+}
+
+export class Store {
+  constructor(path) {
+    this.db = new DatabaseSync(path);
+    this.db.exec(`PRAGMA foreign_keys=ON;
+      CREATE TABLE IF NOT EXISTS sites (id INTEGER PRIMARY KEY, name TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+      CREATE TABLE IF NOT EXISTS site_articles (id INTEGER PRIMARY KEY,site_id INTEGER NOT NULL REFERENCES sites(id),category TEXT NOT NULL,title TEXT NOT NULL,body TEXT NOT NULL,visible INTEGER NOT NULL CHECK(visible IN (0,1)),created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+      CREATE TABLE IF NOT EXISTS site_photos (id INTEGER PRIMARY KEY,site_id INTEGER NOT NULL REFERENCES sites(id),name TEXT NOT NULL,date TEXT NOT NULL,description TEXT NOT NULL DEFAULT '',data BLOB NOT NULL);
+      CREATE TABLE IF NOT EXISTS site_article_files (id INTEGER PRIMARY KEY,article_id INTEGER NOT NULL REFERENCES site_articles(id),name TEXT NOT NULL,data BLOB NOT NULL);
+      CREATE TABLE IF NOT EXISTS companies (id INTEGER PRIMARY KEY, site_id INTEGER NOT NULL REFERENCES sites(id), name TEXT NOT NULL, trade TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS site_occupations (id INTEGER PRIMARY KEY,site_id INTEGER NOT NULL REFERENCES sites(id),name TEXT NOT NULL,UNIQUE(site_id,name));
+      CREATE TABLE IF NOT EXISTS restaurants (id INTEGER PRIMARY KEY,site_id INTEGER NOT NULL REFERENCES sites(id),name TEXT NOT NULL,meal_price INTEGER NOT NULL,snack_price INTEGER NOT NULL,tax INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS meal_checks (id INTEGER PRIMARY KEY,site_id INTEGER NOT NULL REFERENCES sites(id),worker_id INTEGER NOT NULL REFERENCES workers(id),date TEXT NOT NULL,kind TEXT NOT NULL,restaurant_id INTEGER NOT NULL REFERENCES restaurants(id),restaurant_name TEXT NOT NULL,price INTEGER NOT NULL,UNIQUE(worker_id,date,kind));
+      CREATE TABLE IF NOT EXISTS wage_records (site_id INTEGER NOT NULL REFERENCES sites(id),worker_id INTEGER NOT NULL REFERENCES workers(id),month TEXT NOT NULL,gross INTEGER NOT NULL,deductions TEXT NOT NULL,PRIMARY KEY(worker_id,month));
+      CREATE TABLE IF NOT EXISTS safety_costs (id INTEGER PRIMARY KEY,site_id INTEGER NOT NULL REFERENCES sites(id),category INTEGER NOT NULL,date TEXT NOT NULL,description TEXT NOT NULL,note TEXT NOT NULL,unit_price TEXT NOT NULL,quantity TEXT NOT NULL,unit TEXT NOT NULL,amount TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS safety_cost_photos (id INTEGER PRIMARY KEY,cost_id INTEGER NOT NULL REFERENCES safety_costs(id),name TEXT NOT NULL,data BLOB NOT NULL);
+      CREATE TABLE IF NOT EXISTS safety_cost_report_photos (id INTEGER PRIMARY KEY,document_id INTEGER NOT NULL REFERENCES documents(id),cost_id INTEGER NOT NULL,name TEXT NOT NULL,data BLOB NOT NULL);
+      CREATE TABLE IF NOT EXISTS equipment (id INTEGER PRIMARY KEY,site_id INTEGER NOT NULL REFERENCES sites(id),kind TEXT NOT NULL,model TEXT NOT NULL,capacity TEXT NOT NULL,manufacturer TEXT NOT NULL,registration TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS work_places (id INTEGER PRIMARY KEY,site_id INTEGER NOT NULL REFERENCES sites(id),name TEXT NOT NULL,details TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS rigging (id INTEGER PRIMARY KEY,site_id INTEGER NOT NULL REFERENCES sites(id),category TEXT NOT NULL,kind TEXT NOT NULL,name TEXT NOT NULL,details TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS rigging_photos (id INTEGER PRIMARY KEY,rigging_id INTEGER NOT NULL REFERENCES rigging(id),name TEXT NOT NULL,data BLOB NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+      CREATE TABLE IF NOT EXISTS work_place_photos (id INTEGER PRIMARY KEY,place_id INTEGER NOT NULL REFERENCES work_places(id),name TEXT NOT NULL,data BLOB NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+      CREATE TABLE IF NOT EXISTS equipment_attachments (id INTEGER PRIMARY KEY,equipment_id INTEGER NOT NULL REFERENCES equipment(id),category TEXT NOT NULL,name TEXT NOT NULL,data BLOB NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+      CREATE TABLE IF NOT EXISTS equipment_checks (id INTEGER PRIMARY KEY,document_id INTEGER NOT NULL REFERENCES documents(id),equipment_id INTEGER NOT NULL REFERENCES equipment(id),date TEXT NOT NULL,items TEXT NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,UNIQUE(document_id,equipment_id,date));
+      CREATE TABLE IF NOT EXISTS workers (id INTEGER PRIMARY KEY, site_id INTEGER NOT NULL REFERENCES sites(id), name TEXT NOT NULL, category TEXT NOT NULL, company TEXT NOT NULL, occupation TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS worker_accounts (worker_id INTEGER PRIMARY KEY REFERENCES workers(id),site_id INTEGER NOT NULL REFERENCES sites(id),login_id TEXT NOT NULL,salt BLOB NOT NULL,password_hash BLOB NOT NULL,UNIQUE(site_id,login_id));
+      CREATE TABLE IF NOT EXISTS attendance (worker_id INTEGER NOT NULL REFERENCES workers(id), date TEXT NOT NULL, present INTEGER NOT NULL CHECK(present IN (0,1)), updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY(worker_id,date));
+      CREATE TABLE IF NOT EXISTS documents (id INTEGER PRIMARY KEY, site_id INTEGER NOT NULL REFERENCES sites(id), type TEXT NOT NULL, title TEXT NOT NULL, date TEXT NOT NULL, body TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'draft', updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+      CREATE TABLE IF NOT EXISTS checklist_signatures (document_id INTEGER PRIMARY KEY REFERENCES documents(id),signature BLOB NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+      CREATE TABLE IF NOT EXISTS worker_notice_reads (worker_id INTEGER NOT NULL REFERENCES workers(id),document_id INTEGER NOT NULL REFERENCES documents(id),read_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(worker_id,document_id));
+      CREATE TABLE IF NOT EXISTS worker_self_checks (worker_id INTEGER NOT NULL REFERENCES workers(id),date TEXT NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(worker_id,date));
+      CREATE TABLE IF NOT EXISTS manager_self_checks (site_id INTEGER NOT NULL REFERENCES sites(id),date TEXT NOT NULL,answers TEXT NOT NULL,signature BLOB NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(site_id,date));
+      CREATE TABLE IF NOT EXISTS worker_training_checks (worker_id INTEGER NOT NULL REFERENCES workers(id),document_id INTEGER NOT NULL REFERENCES documents(id),created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(worker_id,document_id));
+      CREATE TABLE IF NOT EXISTS worker_daily_training (worker_id INTEGER NOT NULL REFERENCES workers(id),date TEXT NOT NULL,kind TEXT NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(worker_id,date,kind));
+      CREATE TABLE IF NOT EXISTS training_target_config (document_id INTEGER PRIMARY KEY REFERENCES documents(id));
+      CREATE TABLE IF NOT EXISTS training_targets (document_id INTEGER NOT NULL REFERENCES documents(id),worker_id INTEGER NOT NULL REFERENCES workers(id),PRIMARY KEY(document_id,worker_id));
+      CREATE TABLE IF NOT EXISTS work_stops (id INTEGER PRIMARY KEY,site_id INTEGER NOT NULL REFERENCES sites(id),worker_id INTEGER REFERENCES workers(id),place TEXT NOT NULL,reason TEXT NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+      CREATE TABLE IF NOT EXISTS attachments (id INTEGER PRIMARY KEY,document_id INTEGER NOT NULL REFERENCES documents(id),name TEXT NOT NULL,data BLOB NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+      CREATE TABLE IF NOT EXISTS instruction_results (document_id INTEGER PRIMARY KEY REFERENCES documents(id),date TEXT NOT NULL,actor TEXT NOT NULL,content TEXT NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+      CREATE TABLE IF NOT EXISTS instruction_photos (id INTEGER PRIMARY KEY,document_id INTEGER NOT NULL REFERENCES instruction_results(document_id),phase TEXT NOT NULL,name TEXT NOT NULL,data BLOB NOT NULL);
+      CREATE TABLE IF NOT EXISTS invitations (token_hash TEXT PRIMARY KEY, site_id INTEGER NOT NULL REFERENCES sites(id), expires_at INTEGER NOT NULL, revoked INTEGER NOT NULL DEFAULT 0);
+      CREATE TABLE IF NOT EXISTS join_acknowledgements (worker_id INTEGER PRIMARY KEY REFERENCES workers(id),notice_version TEXT NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+      CREATE TABLE IF NOT EXISTS events (id INTEGER PRIMARY KEY, document_id INTEGER NOT NULL REFERENCES documents(id), action TEXT NOT NULL, from_status TEXT NOT NULL, to_status TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+      CREATE TABLE IF NOT EXISTS risk_activities (id INTEGER PRIMARY KEY, document_id INTEGER NOT NULL REFERENCES documents(id), kind TEXT NOT NULL,date TEXT NOT NULL,place TEXT NOT NULL,host TEXT NOT NULL,participants TEXT NOT NULL,content TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS risk_activity_photos (id INTEGER PRIMARY KEY, activity_id INTEGER NOT NULL REFERENCES risk_activities(id) ON DELETE CASCADE, name TEXT NOT NULL,data BLOB NOT NULL);
+      CREATE TABLE IF NOT EXISTS hazard_reports (id INTEGER PRIMARY KEY,site_id INTEGER NOT NULL REFERENCES sites(id),title TEXT NOT NULL,body TEXT NOT NULL,reporter TEXT NOT NULL,photo BLOB,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);`);
+    if (!this.db.prepare('PRAGMA table_info(documents)').all().some(c=>c.name==='details')) this.db.exec("ALTER TABLE documents ADD COLUMN details TEXT NOT NULL DEFAULT '{}'");
+    if (!this.db.prepare('PRAGMA table_info(workers)').all().some(c=>c.name==='created_date')) this.db.exec('ALTER TABLE workers ADD COLUMN created_date TEXT');
+    if (!this.db.prepare('PRAGMA table_info(events)').all().some(c=>c.name==='opinion')) this.db.exec("ALTER TABLE events ADD COLUMN opinion TEXT NOT NULL DEFAULT ''");
+    if (!this.db.prepare('PRAGMA table_info(work_stops)').all().some(c=>c.name==='photo')) this.db.exec('ALTER TABLE work_stops ADD COLUMN photo BLOB');
+    if (!this.db.prepare('PRAGMA table_info(worker_self_checks)').all().some(c=>c.name==='signature')) this.db.exec('ALTER TABLE worker_self_checks ADD COLUMN signature BLOB');
+    if (!this.db.prepare('PRAGMA table_info(attachments)').all().some(c=>c.name==='category')) this.db.exec("ALTER TABLE attachments ADD COLUMN category TEXT NOT NULL DEFAULT 'general'");
+    if (!this.db.prepare('PRAGMA table_info(worker_daily_training)').all().some(c=>c.name==='signature')) this.db.exec('ALTER TABLE worker_daily_training ADD COLUMN signature BLOB');
+    if (!this.db.prepare('PRAGMA table_info(join_acknowledgements)').all().some(c=>c.name==='signature')) this.db.exec('ALTER TABLE join_acknowledgements ADD COLUMN signature BLOB');
+    if (!this.db.prepare('PRAGMA table_info(join_acknowledgements)').all().some(c=>c.name==='equipment')) this.db.exec("ALTER TABLE join_acknowledgements ADD COLUMN equipment TEXT NOT NULL DEFAULT '[]'");
+    for(const [key,definition] of [['period_from',"TEXT NOT NULL DEFAULT ''"],['period_to',"TEXT NOT NULL DEFAULT ''"],['entry_mode',"TEXT NOT NULL DEFAULT 'manual'"]])if(!this.db.prepare('PRAGMA table_info(risk_activities)').all().some(c=>c.name===key))this.db.exec(`ALTER TABLE risk_activities ADD COLUMN ${key} ${definition}`);
+    if(!this.db.prepare('PRAGMA table_info(risk_activities)').all().some(c=>c.name==='worker_snapshot'))this.db.exec("ALTER TABLE risk_activities ADD COLUMN worker_snapshot TEXT NOT NULL DEFAULT '[]'");
+    if(!this.db.prepare('PRAGMA table_info(risk_activity_photos)').all().some(c=>c.name==='purpose'))this.db.exec("ALTER TABLE risk_activity_photos ADD COLUMN purpose TEXT NOT NULL DEFAULT 'photo'");
+    if(!this.db.prepare('PRAGMA table_info(hazard_reports)').all().some(c=>c.name==='worker_id'))this.db.exec('ALTER TABLE hazard_reports ADD COLUMN worker_id INTEGER REFERENCES workers(id)');
+    if (!this.db.prepare('PRAGMA table_info(worker_notice_reads)').all().some(c=>c.name==='signature')) this.db.exec('ALTER TABLE worker_notice_reads ADD COLUMN signature BLOB');
+    if (!this.db.prepare('PRAGMA table_info(worker_training_checks)').all().some(c=>c.name==='rights_ack')) this.db.exec('ALTER TABLE worker_training_checks ADD COLUMN rights_ack TEXT');
+    if (!this.db.prepare('PRAGMA table_info(equipment)').all().some(c=>c.name==='details')) this.db.exec("ALTER TABLE equipment ADD COLUMN details TEXT NOT NULL DEFAULT '{}'");
+    if (!this.db.prepare('PRAGMA table_info(equipment_checks)').all().some(c=>c.name==='equipment_snapshot')) this.db.exec('ALTER TABLE equipment_checks ADD COLUMN equipment_snapshot TEXT');
+    if (!this.db.prepare('PRAGMA table_info(instruction_results)').all().some(c=>c.name==='source')) this.db.exec("ALTER TABLE instruction_results ADD COLUMN source TEXT NOT NULL DEFAULT 'manager'");
+    if (!this.db.prepare('PRAGMA table_info(instruction_results)').all().some(c=>c.name==='signature')) this.db.exec('ALTER TABLE instruction_results ADD COLUMN signature BLOB');
+    const attendanceColumns=this.db.prepare('PRAGMA table_info(attendance)').all().map(c=>c.name);
+    const wageColumns=this.db.prepare('PRAGMA table_info(wage_records)').all().map(c=>c.name);
+    for(const column of ['name_snapshot','company_snapshot','occupation_snapshot'])if(!wageColumns.includes(column))this.db.exec(`ALTER TABLE wage_records ADD COLUMN ${column} TEXT`);
+    if(!attendanceColumns.includes('company_snapshot'))this.db.exec('ALTER TABLE attendance ADD COLUMN company_snapshot TEXT');
+    if(!attendanceColumns.includes('occupation_snapshot'))this.db.exec('ALTER TABLE attendance ADD COLUMN occupation_snapshot TEXT');
+    if(!attendanceColumns.includes('category_snapshot'))this.db.exec('ALTER TABLE attendance ADD COLUMN category_snapshot TEXT');
+    if(!attendanceColumns.includes('source'))this.db.exec('ALTER TABLE attendance ADD COLUMN source TEXT');
+  }
+  close() { this.db.close(); }
+  managerChecks(siteId) {
+    return this.db.prepare('SELECT date,answers,created_at FROM manager_self_checks WHERE site_id=? ORDER BY date DESC LIMIT 30').all(Number(siteId));
+  }
+  saveManagerCheck(siteId,date,answers,signature) {
+    date=dateValue(date);
+    if(!this.db.prepare('SELECT 1 FROM sites WHERE id=?').get(Number(siteId)))throw new Error('현장을 선택해 주세요.');
+    if(!Array.isArray(answers) || answers.length!==3 || answers.some(a=>!a || !['O','X'].includes(a.answer) || typeof a.note!=='string' || a.note.length>500))throw new Error('세 항목의 O/X와 비고를 확인해 주세요.');
+    const bytes=signatureBytes(signature);
+    if(this.db.prepare('SELECT 1 FROM manager_self_checks WHERE site_id=? AND date=?').get(Number(siteId),date))throw new Error('오늘의 시험 점검은 이미 저장되었습니다.');
+    this.db.prepare('INSERT INTO manager_self_checks(site_id,date,answers,signature) VALUES(?,?,?,?)').run(Number(siteId),date,JSON.stringify(answers),bytes);
+  }
+  sites() { return this.db.prepare('SELECT * FROM sites ORDER BY name').all(); }
+  sitePhotos(siteId,from='',to='',query=''){
+    if(from)from=dateValue(from);if(to)to=dateValue(to);if(from&&to&&from>to)throw new Error('조회 기간을 확인해 주세요.');if(typeof query!=='string'||query.length>200)throw new Error('검색어를 확인해 주세요.');
+    return this.db.prepare("SELECT id,name,date,description FROM site_photos WHERE site_id=? AND (?='' OR date>=?) AND (?='' OR date<=?) AND (instr(name,?)>0 OR instr(description,?)>0) ORDER BY date DESC,id DESC").all(Number(siteId),from,from,to,to,query,query);
+  }
+  addSitePhoto(siteId,name,data){
+    siteId=Number(siteId);if(!this.db.prepare('SELECT 1 FROM sites WHERE id=?').get(siteId))throw new Error('현장을 선택해 주세요.');
+    if(typeof name!=='string'||!name.trim()||name.length>200||/[\\/\x00-\x1f\x7f]/.test(name))throw new Error('사진 이름을 확인해 주세요.');
+    if(!(data instanceof Uint8Array)||!data.length||data.length>2*1024*1024)throw new Error('사진은 1바이트 이상 2MB 이하여야 합니다.');
+    const bytes=Buffer.from(data);if(!bytes.subarray(0,8).equals(Buffer.from('89504e470d0a1a0a','hex'))&&!bytes.subarray(0,3).equals(Buffer.from('ffd8ff','hex')))throw new Error('PNG 또는 JPEG 사진을 선택해 주세요.');
+    const now=new Date(),date=new Date(now.getTime()-now.getTimezoneOffset()*60000).toISOString().slice(0,10);
+    return this.db.prepare('INSERT INTO site_photos(site_id,name,date,data) VALUES(?,?,?,?)').run(siteId,name,date,bytes).lastInsertRowid;
+  }
+  sitePhoto(siteId,id){return this.db.prepare('SELECT * FROM site_photos WHERE site_id=? AND id=?').get(Number(siteId),Number(id))||null;}
+  updateSitePhoto(siteId,id,input){
+    const date=dateValue(input.date);if(typeof input.description!=='string'||input.description.length>2000)throw new Error('사진 설명을 확인해 주세요.');
+    if(!this.db.prepare('UPDATE site_photos SET date=?,description=? WHERE site_id=? AND id=?').run(date,input.description.trim(),Number(siteId),Number(id)).changes)throw new Error('사진을 찾을 수 없습니다.');
+  }
+  deleteSitePhoto(siteId,id){if(!this.db.prepare('DELETE FROM site_photos WHERE site_id=? AND id=?').run(Number(siteId),Number(id)).changes)throw new Error('사진을 찾을 수 없습니다.');}
+  siteArticles(siteId,category='',query='') {
+    if(!['','안전·보건','기타'].includes(category)||typeof query!=='string'||query.length>200)throw new Error('검색 조건을 확인해 주세요.');
+    return this.db.prepare("SELECT id,category,title,body,visible,created_at FROM site_articles WHERE site_id=? AND (?='' OR category=?) AND (instr(title,?)>0 OR instr(body,?)>0) ORDER BY id DESC").all(Number(siteId),category,category,query,query).map(a=>({...a,files:this.articleFiles(a.id)}));
+  }
+  workerArticles(workerId) {
+    return this.db.prepare('SELECT a.id,a.category,a.title,a.body,a.created_at FROM site_articles a JOIN workers w ON w.site_id=a.site_id WHERE w.id=? AND a.visible=1 ORDER BY a.id DESC').all(Number(workerId)).map(a=>({...a,files:this.articleFiles(a.id)}));
+  }
+  articleFiles(articleId){return this.db.prepare('SELECT id,name,length(data) AS size FROM site_article_files WHERE article_id=? ORDER BY id').all(Number(articleId));}
+  addArticleFile(siteId,articleId,name,data){
+    if(!this.db.prepare('SELECT 1 FROM site_articles WHERE id=? AND site_id=?').get(Number(articleId),Number(siteId)))throw new Error('선택한 현장의 게시글을 확인해 주세요.');
+    if(typeof name!=='string'||!name.trim()||name.length>200||/[\\/\x00-\x1f\x7f]/.test(name))throw new Error('파일 이름을 확인해 주세요.');
+    if(!(data instanceof Uint8Array)||!data.length||data.length>2*1024*1024)throw new Error('파일은 1바이트 이상 2MB 이하여야 합니다.');
+    if(this.articleFiles(articleId).length>=20)throw new Error('첨부파일은 게시글당 20개까지 가능합니다.');
+    return this.db.prepare('INSERT INTO site_article_files(article_id,name,data) VALUES(?,?,?)').run(Number(articleId),name,data).lastInsertRowid;
+  }
+  articleFile(siteId,articleId,fileId){return this.db.prepare('SELECT f.* FROM site_article_files f JOIN site_articles a ON a.id=f.article_id WHERE a.site_id=? AND a.id=? AND f.id=?').get(Number(siteId),Number(articleId),Number(fileId))||null;}
+  workerArticleFile(workerId,articleId,fileId){return this.db.prepare('SELECT f.* FROM site_article_files f JOIN site_articles a ON a.id=f.article_id JOIN workers w ON w.site_id=a.site_id WHERE w.id=? AND a.visible=1 AND a.id=? AND f.id=?').get(Number(workerId),Number(articleId),Number(fileId))||null;}
+  deleteArticleFile(siteId,articleId,fileId){if(!this.articleFile(siteId,articleId,fileId))throw new Error('첨부파일을 찾을 수 없습니다.');this.db.prepare('DELETE FROM site_article_files WHERE id=?').run(Number(fileId));}
+  saveSiteArticle(input,id=null) {
+    const siteId=Number(input.siteId);
+    if(!this.db.prepare('SELECT 1 FROM sites WHERE id=?').get(siteId))throw new Error('현장을 선택해 주세요.');
+    if(!['안전·보건','기타'].includes(input.category)||typeof input.visible!=='boolean')throw new Error('분류와 공개 설정을 확인해 주세요.');
+    const title=text(input.title,'제목'),body=text(input.body,'내용',10000),visible=input.visible?1:0;
+    if(id===null)id=this.db.prepare('INSERT INTO site_articles(site_id,category,title,body,visible) VALUES(?,?,?,?,?)').run(siteId,input.category,title,body,visible).lastInsertRowid;
+    else if(!this.db.prepare('UPDATE site_articles SET category=?,title=?,body=?,visible=? WHERE id=? AND site_id=?').run(input.category,title,body,visible,Number(id),siteId).changes)throw new Error('선택한 현장의 게시글을 확인해 주세요.');
+    return this.db.prepare('SELECT id,category,title,body,visible,created_at FROM site_articles WHERE id=? AND site_id=?').get(Number(id),siteId);
+  }
+  createSite(input) {
+    const name = text(input.name, '현장명');
+    const id = this.db.prepare('INSERT INTO sites(name) VALUES (?)').run(name).lastInsertRowid;
+    return this.db.prepare('SELECT * FROM sites WHERE id=?').get(id);
+  }
+  companies(siteId) {
+    return this.db.prepare('SELECT * FROM companies WHERE site_id=? ORDER BY name,id').all(Number(siteId));
+  }
+  siteOccupations(siteId){return this.db.prepare('SELECT id,name FROM site_occupations WHERE site_id=? ORDER BY name,id').all(Number(siteId));}
+  addSiteOccupation(siteId,name){
+    siteId=Number(siteId);if(!this.db.prepare('SELECT 1 FROM sites WHERE id=?').get(siteId))throw new Error('현장을 선택해 주세요.');
+    name=text(name,'직종');const result=this.db.prepare('INSERT INTO site_occupations(site_id,name) VALUES(?,?) ON CONFLICT(site_id,name) DO NOTHING').run(siteId,name);if(!result.changes)throw new Error('이미 등록된 직종입니다.');return result.lastInsertRowid;
+  }
+  deleteSiteOccupation(siteId,id){if(!this.db.prepare('DELETE FROM site_occupations WHERE site_id=? AND id=?').run(Number(siteId),Number(id)).changes)throw new Error('직종을 찾을 수 없습니다.');}
+  restaurants(siteId) {
+    return this.db.prepare('SELECT * FROM restaurants WHERE site_id=? ORDER BY name,id').all(Number(siteId));
+  }
+  wageRecords(siteId,month) {
+    month=monthValue(month);
+    return this.db.prepare("SELECT r.worker_id,r.month,r.gross,r.deductions,COALESCE(r.name_snapshot,'기록 없음') AS name,COALESCE(r.company_snapshot,'기록 없음') AS company,COALESCE(r.occupation_snapshot,'기록 없음') AS occupation FROM wage_records r JOIN workers w ON w.id=r.worker_id AND w.site_id=r.site_id WHERE r.site_id=? AND r.month=? ORDER BY name,w.id").all(Number(siteId),month).map(row=>{const deductions=JSON.parse(row.deductions),total=Object.values(deductions).reduce((a,b)=>a+b,0);return {...row,deductions,total,net:row.gross-total};});
+  }
+  wageSummary(siteId,month) {
+    const groups=new Map();
+    for(const row of this.wageRecords(siteId,month)){let group=groups.get(row.occupation);if(!group){group={occupation:row.occupation,count:0,gross:0,deductions:0,net:0};groups.set(row.occupation,group);}group.count++;group.gross+=row.gross;group.deductions+=row.total;group.net+=row.net;}
+    return [...groups.values()].sort((a,b)=>a.occupation.localeCompare(b.occupation,'ko'));
+  }
+  saveWageRecord(input,update=false) {
+    const siteId=Number(input.siteId),workerId=Number(input.workerId),month=monthValue(input.month);
+    const worker=this.db.prepare('SELECT name,company,occupation FROM workers WHERE id=? AND site_id=?').get(workerId,siteId);if(!worker)throw new Error('선택한 현장의 출입자를 확인해 주세요.');
+    const amount=(value)=>{if(typeof value!=='string'||!/^\d{1,9}$/.test(value))throw new Error('금액은 0 이상의 정수로 입력해 주세요.');return Number(value);},gross=amount(input.gross);
+    if(!input.deductions||typeof input.deductions!=='object'||Array.isArray(input.deductions))throw new Error('공제 항목을 확인해 주세요.');
+    const deductions=Object.fromEntries(['income','local','health','care','pension','employment'].map(key=>[key,amount(input.deductions[key])]));
+    if(Object.values(deductions).reduce((a,b)=>a+b,0)>gross)throw new Error('공제액 합계가 노임보다 큽니다.');
+    if(update){
+      if(!this.db.prepare('UPDATE wage_records SET gross=?,deductions=? WHERE site_id=? AND worker_id=? AND month=?').run(gross,JSON.stringify(deductions),siteId,workerId,month).changes)throw new Error('수정할 노임 기록을 찾을 수 없습니다.');
+    }else if(!this.db.prepare('INSERT INTO wage_records(site_id,worker_id,month,gross,deductions,name_snapshot,company_snapshot,occupation_snapshot) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(worker_id,month) DO NOTHING').run(siteId,workerId,month,gross,JSON.stringify(deductions),worker.name,worker.company,worker.occupation).changes)throw new Error('이미 등록된 노임 기록입니다. 수정을 이용해 주세요.');
+  }
+  mealChecks(siteId,date) {
+    date=dateValue(date);
+    return this.db.prepare('SELECT m.*,w.name AS worker_name FROM meal_checks m JOIN workers w ON w.id=m.worker_id WHERE m.site_id=? AND m.date=? ORDER BY w.name,m.kind,m.id').all(Number(siteId),date);
+  }
+  monthlyMealChecks(siteId,month) {
+    month=monthValue(month);
+    return this.db.prepare("SELECT w.id,w.name,COUNT(*) AS count,SUM(m.price) AS total FROM meal_checks m JOIN workers w ON w.id=m.worker_id AND w.site_id=m.site_id WHERE m.site_id=? AND m.date BETWEEN ? AND ? GROUP BY w.id,w.name ORDER BY w.name,w.id").all(Number(siteId),`${month}-01`,`${month}-31`);
+  }
+  saveMealCheck(input) {
+    const siteId=Number(input.siteId),workerId=Number(input.workerId),date=dateValue(input.date),kind=input.kind;
+    if(!['lunch','dinner','snack'].includes(kind))throw new Error('식사 종류를 확인해 주세요.');
+    const worker=this.db.prepare('SELECT w.id FROM workers w JOIN attendance a ON a.worker_id=w.id WHERE w.id=? AND w.site_id=? AND a.date=? AND a.present=1').get(workerId,siteId,date);
+    if(!worker)throw new Error('선택한 날짜의 출역자를 확인해 주세요.');
+    const restaurant=this.db.prepare('SELECT * FROM restaurants WHERE id=? AND site_id=?').get(Number(input.restaurantId),siteId);
+    if(!restaurant)throw new Error('선택한 현장의 식당을 확인해 주세요.');
+    this.db.prepare('INSERT INTO meal_checks(site_id,worker_id,date,kind,restaurant_id,restaurant_name,price) VALUES(?,?,?,?,?,?,?) ON CONFLICT(worker_id,date,kind) DO UPDATE SET restaurant_id=excluded.restaurant_id,restaurant_name=excluded.restaurant_name,price=excluded.price').run(siteId,workerId,date,kind,restaurant.id,restaurant.name,kind==='snack'?restaurant.snack_price:restaurant.meal_price);
+  }
+  deleteMealCheck(siteId,id) {
+    if(!this.db.prepare('DELETE FROM meal_checks WHERE site_id=? AND id=?').run(Number(siteId),Number(id)).changes)throw new Error('선택한 현장의 식대 기록을 확인해 주세요.');
+  }
+  saveRestaurant(input,id=null) {
+    const siteId=Number(input.siteId);
+    if(!this.db.prepare('SELECT 1 FROM sites WHERE id=?').get(siteId))throw new Error('현장을 선택해 주세요.');
+    if(id!==null&&!this.db.prepare('SELECT 1 FROM restaurants WHERE id=? AND site_id=?').get(Number(id),siteId))throw new Error('선택한 현장의 식당을 확인해 주세요.');
+    const name=text(input.name,'식당명'),amount=(value,label)=>{if(typeof value!=='string'||!/^\d{1,9}$/.test(value))throw new Error(label+'을 확인해 주세요.');return Number(value);};
+    const meal=amount(input.mealPrice,'식비'),snack=amount(input.snackPrice,'간식비'),tax=amount(input.tax,'부가세');
+    if(id===null)id=this.db.prepare('INSERT INTO restaurants(site_id,name,meal_price,snack_price,tax) VALUES(?,?,?,?,?)').run(siteId,name,meal,snack,tax).lastInsertRowid;
+    else this.db.prepare('UPDATE restaurants SET name=?,meal_price=?,snack_price=?,tax=? WHERE id=? AND site_id=?').run(name,meal,snack,tax,Number(id),siteId);
+    return this.db.prepare('SELECT * FROM restaurants WHERE id=? AND site_id=?').get(Number(id),siteId);
+  }
+  safetyCosts(siteId,month){
+    if(typeof month!=='string'||!/^\d{4}-(0[1-9]|1[0-2])$/.test(month))throw new Error('조회 월을 확인해 주세요.');
+    const rows=this.db.prepare('SELECT * FROM safety_costs WHERE site_id=? AND date>=? AND date<? ORDER BY date,id').all(Number(siteId),`${month}-01`,`${month}-32`);
+    return {rows,total:rows.reduce((sum,row)=>sum+BigInt(row.amount),0n).toString()};
+  }
+  safetyCostPhotos(siteId,costId){if(!this.db.prepare('SELECT 1 FROM safety_costs WHERE id=? AND site_id=?').get(Number(costId),Number(siteId)))throw new Error('선택한 현장의 사용내역을 확인해 주세요.');return this.db.prepare('SELECT id,name,length(data) AS size FROM safety_cost_photos WHERE cost_id=? ORDER BY id').all(Number(costId));}
+  addSafetyCostPhoto(siteId,costId,name,data){
+    const existing=this.safetyCostPhotos(siteId,costId);
+    if(typeof name!=='string'||!name.trim()||name.length>200||/[\\/\x00-\x1f\x7f]/.test(name))throw new Error('사진 이름을 확인해 주세요.');
+    if(!(data instanceof Uint8Array)||!data.length||data.length>2*1024*1024)throw new Error('사진은 1바이트 이상 2MB 이하여야 합니다.');
+    const bytes=Buffer.from(data);if(!bytes.subarray(0,8).equals(Buffer.from('89504e470d0a1a0a','hex'))&&!bytes.subarray(0,3).equals(Buffer.from('ffd8ff','hex')))throw new Error('PNG 또는 JPEG 사진을 선택해 주세요.');
+    if(existing.length>=20)throw new Error('사용내역당 사진은 20개까지 가능합니다.');
+    return this.db.prepare('INSERT INTO safety_cost_photos(cost_id,name,data) VALUES(?,?,?)').run(Number(costId),name,bytes).lastInsertRowid;
+  }
+  safetyCostPhoto(siteId,costId,id){return this.db.prepare('SELECT p.* FROM safety_cost_photos p JOIN safety_costs c ON c.id=p.cost_id WHERE c.site_id=? AND c.id=? AND p.id=?').get(Number(siteId),Number(costId),Number(id))||null;}
+  deleteSafetyCostPhoto(siteId,costId,id){if(!this.safetyCostPhoto(siteId,costId,id))throw new Error('사진을 찾을 수 없습니다.');this.db.prepare('DELETE FROM safety_cost_photos WHERE cost_id=? AND id=?').run(Number(costId),Number(id));}
+  safetyCostReportPhotos(id){const doc=this.document(id);if(!doc||doc.type!=='cost'||!Array.isArray(JSON.parse(doc.details).rows))throw new Error('월간 사용내역서를 확인해 주세요.');return this.db.prepare('SELECT id,cost_id,name,length(data) AS size FROM safety_cost_report_photos WHERE document_id=? ORDER BY id').all(Number(id));}
+  safetyCostReportPhoto(id,photoId){return this.db.prepare('SELECT * FROM safety_cost_report_photos WHERE document_id=? AND id=?').get(Number(id),Number(photoId))||null;}
+  createSafetyCost(input){
+    const siteId=Number(input.siteId);if(!this.db.prepare('SELECT 1 FROM sites WHERE id=?').get(siteId))throw new Error('현장을 선택해 주세요.');
+    const category=Number(input.category);if(!Number.isInteger(category)||category<1||category>9)throw new Error('사용 항목을 확인해 주세요.');
+    const date=dateValue(input.date),description=text(input.description,'사용내역'),unit=text(input.unit,'단위');
+    if(typeof input.note!=='string'||input.note.length>2000)throw new Error('비고를 확인해 주세요.');
+    const price=input.unitPrice,quantity=input.quantity;
+    if(typeof price!=='string'||!/^\d{1,12}$/.test(price)||typeof quantity!=='string'||!/^\d{1,8}(?:\.\d{1,3})?$/.test(quantity))throw new Error('단가와 수량을 확인해 주세요.');
+    const [whole,fraction='']=quantity.split('.'),scale=10n**BigInt(fraction.length),numerator=BigInt(price)*(BigInt(whole)*scale+BigInt(fraction||'0'));
+    if(numerator%scale!==0n)throw new Error('금액은 원 단위로 계산되어야 합니다.');
+    const amount=(numerator/scale).toString();
+    const id=this.db.prepare('INSERT INTO safety_costs(site_id,category,date,description,note,unit_price,quantity,unit,amount) VALUES(?,?,?,?,?,?,?,?,?)').run(siteId,category,date,description,input.note.trim(),price,quantity,unit,amount).lastInsertRowid;
+    return this.db.prepare('SELECT * FROM safety_costs WHERE id=?').get(id);
+  }
+  createSafetyCostReport(input){
+    const siteId=Number(input.siteId);if(!this.db.prepare('SELECT 1 FROM sites WHERE id=?').get(siteId))throw new Error('현장을 선택해 주세요.');
+    const month=input.month,report=this.safetyCosts(siteId,month);if(!report.rows.length)throw new Error('해당 월의 사용내역을 먼저 등록해 주세요.');
+    const periodFrom=dateValue(input.periodFrom),periodTo=dateValue(input.periodTo);if(periodFrom>periodTo)throw new Error('공사기간을 확인해 주세요.');
+    const amounts={};for(const key of ['contractAmount','budget','progressAmount']){const value=input[key];if(typeof value!=='string'||!/^\d{1,20}$/.test(value))throw new Error('금액을 확인해 주세요.');amounts[key]=value;}
+    const progress=input.progress;if(typeof progress!=='string'||!/^\d{1,3}(?:\.\d{1,2})?$/.test(progress)||Number(progress)>100)throw new Error('공정률을 확인해 주세요.');
+    const categoryTotals=Array.from({length:9},(_,index)=>report.rows.filter(row=>row.category===index+1).reduce((sum,row)=>sum+BigInt(row.amount),0n).toString());
+    const details={month,periodFrom,periodTo,...amounts,progress,categoryTotals,total:report.total,rows:report.rows};
+    const date=dateValue(input.date);this.db.exec('BEGIN IMMEDIATE');
+    try{const id=this.db.prepare('INSERT INTO documents(site_id,type,title,date,body,details) VALUES(?,?,?,?,?,?)').run(siteId,'cost',`${month} 가상 월간 사용내역서`,date,'시험용 문서입니다.',JSON.stringify(details)).lastInsertRowid;
+      const copy=this.db.prepare('INSERT INTO safety_cost_report_photos(document_id,cost_id,name,data) SELECT ?,cost_id,name,data FROM safety_cost_photos WHERE cost_id=?');for(const row of report.rows)copy.run(id,row.id);
+      this.db.exec('COMMIT');return this.document(id);
+    }catch(error){this.db.exec('ROLLBACK');throw error;}
+  }
+  equipment(siteId) {return this.db.prepare('SELECT * FROM equipment WHERE site_id=? ORDER BY kind,model,id').all(Number(siteId));}
+  workPlaces(siteId){return this.db.prepare('SELECT * FROM work_places WHERE site_id=? ORDER BY name,id').all(Number(siteId));}
+  rigging(siteId){return this.db.prepare('SELECT * FROM rigging WHERE site_id=? ORDER BY name,id').all(Number(siteId));}
+  riggingPhotos(siteId,id){if(!this.db.prepare('SELECT 1 FROM rigging WHERE id=? AND site_id=?').get(Number(id),Number(siteId)))throw new Error('선택한 현장의 장구를 확인해 주세요.');return this.db.prepare('SELECT id,name,length(data) AS size FROM rigging_photos WHERE rigging_id=? ORDER BY id').all(Number(id));}
+  addRiggingPhoto(siteId,id,name,data){
+    const existing=this.riggingPhotos(siteId,id);
+    if(typeof name!=='string'||!name.trim()||name.length>200||/[\\/\x00-\x1f\x7f]/.test(name))throw new Error('사진 이름을 확인해 주세요.');
+    if(!(data instanceof Uint8Array)||!data.length||data.length>2*1024*1024)throw new Error('사진은 1바이트 이상 2MB 이하여야 합니다.');
+    const bytes=Buffer.from(data);if(!bytes.subarray(0,8).equals(Buffer.from('89504e470d0a1a0a','hex'))&&!bytes.subarray(0,3).equals(Buffer.from('ffd8ff','hex')))throw new Error('PNG 또는 JPEG 사진을 선택해 주세요.');
+    if(existing.length>=20)throw new Error('사진은 장구당 20개까지 가능합니다.');
+    return this.db.prepare('INSERT INTO rigging_photos(rigging_id,name,data) VALUES(?,?,?)').run(Number(id),name,bytes).lastInsertRowid;
+  }
+  riggingPhoto(siteId,id,photoId){return this.db.prepare('SELECT p.* FROM rigging_photos p JOIN rigging r ON r.id=p.rigging_id WHERE r.site_id=? AND r.id=? AND p.id=?').get(Number(siteId),Number(id),Number(photoId))||null;}
+  deleteRiggingPhoto(siteId,id,photoId){if(!this.riggingPhoto(siteId,id,photoId))throw new Error('사진을 찾을 수 없습니다.');this.db.prepare('DELETE FROM rigging_photos WHERE id=?').run(Number(photoId));}
+  createRigging(input,id=null){
+    const siteId=Number(input.siteId);if(!this.db.prepare('SELECT 1 FROM sites WHERE id=?').get(siteId))throw new Error('현장을 선택해 주세요.');
+    if(id!==null){
+      if(!this.db.prepare('SELECT 1 FROM rigging WHERE id=? AND site_id=?').get(Number(id),siteId))throw new Error('선택한 현장의 장구를 확인해 주세요.');
+      const plans=this.db.prepare("SELECT details FROM documents WHERE site_id=? AND type='work_plan'").all(siteId);
+      if(plans.some(plan=>(JSON.parse(plan.details).riggingIds||[]).includes(Number(id))))throw new Error('계획서에 연결된 장구는 수정할 수 없습니다.');
+    }
+    if(!['줄걸이','체결장구'].includes(input.category))throw new Error('장구 구분을 확인해 주세요.');
+    const standards=input.standards??[],additional=input.additional??[];
+    if(!Array.isArray(standards)||standards.length>20||standards.some(value=>typeof value!=='string'||!value.trim()||value.length>200))throw new Error('규격을 확인해 주세요.');
+    if(!Array.isArray(additional)||additional.length>20||additional.some(row=>!row||typeof row!=='object'||Array.isArray(row)||typeof row.label!=='string'||typeof row.value!=='string'||!row.label.trim()||!row.value.trim()||row.label.length>200||row.value.length>2000))throw new Error('추가정보를 확인해 주세요.');
+    const spec=input.spec??'';if(typeof spec!=='string'||spec.length>5000)throw new Error('제원을 확인해 주세요.');
+    const details={standards:standards.map(value=>value.trim()),additional:additional.map(row=>({label:row.label.trim(),value:row.value.trim()})),spec:spec.trim()};
+    const kind=text(input.kind,'종류'),name=text(input.name,'별칭');
+    if(id===null)id=this.db.prepare('INSERT INTO rigging(site_id,category,kind,name,details) VALUES(?,?,?,?,?)').run(siteId,input.category,kind,name,JSON.stringify(details)).lastInsertRowid;
+    else this.db.prepare('UPDATE rigging SET category=?,kind=?,name=?,details=? WHERE id=? AND site_id=?').run(input.category,kind,name,JSON.stringify(details),Number(id),siteId);
+    return this.db.prepare('SELECT * FROM rigging WHERE id=?').get(id);
+  }
+  createWorkPlace(input){
+    const siteId=Number(input.siteId);if(!this.db.prepare('SELECT 1 FROM sites WHERE id=?').get(siteId))throw new Error('현장을 선택해 주세요.');
+    const details={};for(const area of ['work','route']){
+      const source=input[area];if(!source || typeof source!=='object' || Array.isArray(source))throw new Error('작업장과 운행경로 정보를 확인해 주세요.');
+      if(!['평지','경사지'].includes(source.terrain) || !['견고','보통','연약'].includes(source.ground) || !['해당없음','양호','불량'].includes(source.drainage))throw new Error('지형과 상태를 확인해 주세요.');
+      const result={terrain:source.terrain,ground:source.ground,drainage:source.drainage};
+      for(const key of ['reinforcement','obstacles','protection']){if(typeof source[key]!=='string' || source[key].length>2000)throw new Error('작업장 정보를 확인해 주세요.');result[key]=source[key].trim();}
+      const allowed={reinforcementChoices:['철판설치','지반개량','양질토사 성토','콘크리트 포장'],obstacleChoices:['도시가스','통신선','전기','상하수도'],equipmentProtection:['신호수 배치','유도자 배치','안전 표지판','접근방지 로프','안전 펜스','라바콘'],obstacleProtection:['신호수 배치','유도자 배치','안전 표지판','접근방지 로프','안전 펜스','라바콘'],workerProtection:['신호수 배치','유도자 배치','안전 표지판','접근방지 로프','안전 펜스','라바콘']};
+      for(const [key,options] of Object.entries(allowed)){const values=source[key]??[];if(!Array.isArray(values)||values.length>options.length||new Set(values).size!==values.length||values.some(value=>!options.includes(value))||(area==='route'&&key.endsWith('Protection')&&values.includes('신호수 배치')))throw new Error('작업장 선택 항목을 확인해 주세요.');result[key]=values;}
+      for(const key of ['groundExtra','equipmentProtectionExtra','obstacleProtectionExtra','workerProtectionExtra']){const value=source[key]??'';if(typeof value!=='string'||value.length>2000)throw new Error('작업장 정보를 확인해 주세요.');result[key]=value.trim();}
+      details[area]=result;
+    }
+    const additional=input.additional??[];
+    if(!Array.isArray(additional)||additional.length>20||additional.some(row=>!row||typeof row!=='object'||Array.isArray(row)||typeof row.label!=='string'||typeof row.value!=='string'||row.label.length>200||row.value.length>2000||!row.label.trim()||!row.value.trim()))throw new Error('추가정보의 항목과 내용을 확인해 주세요.');
+    details.additional=additional.map(row=>({label:row.label.trim(),value:row.value.trim()}));
+    const id=this.db.prepare('INSERT INTO work_places(site_id,name,details) VALUES(?,?,?)').run(siteId,text(input.name,'장소 별칭'),JSON.stringify(details)).lastInsertRowid;
+    return this.db.prepare('SELECT * FROM work_places WHERE id=?').get(id);
+  }
+  workPlacePhotos(siteId,placeId){
+    if(!this.db.prepare('SELECT 1 FROM work_places WHERE id=? AND site_id=?').get(Number(placeId),Number(siteId)))throw new Error('선택한 현장의 작업장소를 확인해 주세요.');
+    return this.db.prepare('SELECT id,name,length(data) AS size FROM work_place_photos WHERE place_id=? ORDER BY id').all(Number(placeId));
+  }
+  addWorkPlacePhoto(siteId,placeId,name,data){
+    const existing=this.workPlacePhotos(siteId,placeId);
+    if(typeof name!=='string'||!name.trim()||name.length>200||/[\\/\x00-\x1f\x7f]/.test(name))throw new Error('사진 이름을 확인해 주세요.');
+    if(!(data instanceof Uint8Array)||!data.length||data.length>2*1024*1024)throw new Error('사진은 1바이트 이상 2MB 이하여야 합니다.');
+    const bytes=Buffer.from(data),png=bytes.subarray(0,8).equals(Buffer.from('89504e470d0a1a0a','hex')),jpeg=bytes.subarray(0,3).equals(Buffer.from('ffd8ff','hex'));
+    if(!png&&!jpeg)throw new Error('PNG 또는 JPEG 사진을 선택해 주세요.');
+    if(existing.length>=20)throw new Error('사진은 장소당 20개까지 가능합니다.');
+    return this.db.prepare('INSERT INTO work_place_photos(place_id,name,data) VALUES(?,?,?)').run(Number(placeId),name,bytes).lastInsertRowid;
+  }
+  workPlacePhoto(siteId,placeId,id){return this.db.prepare('SELECT p.* FROM work_place_photos p JOIN work_places w ON w.id=p.place_id WHERE w.site_id=? AND w.id=? AND p.id=?').get(Number(siteId),Number(placeId),Number(id))||null;}
+  deleteWorkPlacePhoto(siteId,placeId,id){if(!this.workPlacePhoto(siteId,placeId,id))throw new Error('사진을 찾을 수 없습니다.');this.db.prepare('DELETE FROM work_place_photos WHERE id=?').run(Number(id));}
+  equipmentAttachments(siteId,id){
+    if(!this.db.prepare('SELECT 1 FROM equipment WHERE id=? AND site_id=?').get(Number(id),Number(siteId)))throw new Error('선택한 현장의 장비를 확인해 주세요.');
+    return this.db.prepare('SELECT id,category,name,length(data) AS size FROM equipment_attachments WHERE equipment_id=? ORDER BY id').all(Number(id));
+  }
+  addEquipmentAttachment(siteId,id,category,name,data){
+    const existing=this.equipmentAttachments(siteId,id);
+    if(!['lease','business','registration','inspection','insurance','specification','safety','stability','other'].includes(category))throw new Error('첨부 종류를 확인해 주세요.');
+    if(typeof name!=='string' || !name.trim() || name.length>200 || /[\\/\x00-\x1f\x7f]/.test(name))throw new Error('파일 이름을 확인해 주세요.');
+    if(!(data instanceof Uint8Array) || !data.length || data.length>2*1024*1024)throw new Error('파일은 1바이트 이상 2MB 이하여야 합니다.');
+    if(existing.length>=20)throw new Error('첨부파일은 장비당 20개까지 가능합니다.');
+    return this.db.prepare('INSERT INTO equipment_attachments(equipment_id,category,name,data) VALUES(?,?,?,?)').run(Number(id),category,name,data).lastInsertRowid;
+  }
+  equipmentAttachment(siteId,equipmentId,id){return this.db.prepare('SELECT a.* FROM equipment_attachments a JOIN equipment e ON e.id=a.equipment_id WHERE e.site_id=? AND e.id=? AND a.id=?').get(Number(siteId),Number(equipmentId),Number(id)) || null;}
+  equipmentChecks(documentId){
+    const doc=this.document(documentId);if(!doc || doc.type!=='work_plan')throw new Error('작업계획서를 확인해 주세요.');
+    return this.db.prepare('SELECT id,equipment_id,date,items,created_at,equipment_snapshot FROM equipment_checks WHERE document_id=? ORDER BY date DESC,id DESC').all(Number(documentId));
+  }
+  addEquipmentCheck(documentId,input){
+    const doc=this.document(documentId);if(!doc || doc.type!=='work_plan')throw new Error('작업계획서를 확인해 주세요.');
+    const details=JSON.parse(doc.details),equipmentId=Number(input.equipmentId),date=dateValue(input.date);
+    const equipment=this.db.prepare('SELECT id,kind,model,registration FROM equipment WHERE id=? AND site_id=?').get(equipmentId,doc.site_id);
+    if(!Number.isSafeInteger(equipmentId) || !(details.equipmentIds||[]).includes(equipmentId) || !equipment)throw new Error('계획서에 연결된 현장 장비를 확인해 주세요.');
+    if((details.periodFrom && date<details.periodFrom) || (details.periodTo && date>details.periodTo))throw new Error('점검일이 작업기간을 벗어났습니다.');
+    if(!Array.isArray(input.items) || !input.items.length || input.items.length>100)throw new Error('점검 항목을 확인해 주세요.');
+    const items=input.items.map(item=>{if(!item || typeof item!=='object' || Array.isArray(item) || !['적정','부적정','해당없음'].includes(item.result))throw new Error('점검 판정을 확인해 주세요.');return {name:text(item.name,'점검 항목',500),result:item.result};});
+    if(this.db.prepare('SELECT 1 FROM equipment_checks WHERE document_id=? AND equipment_id=? AND date=?').get(Number(documentId),equipmentId,date))throw new Error('해당 날짜의 시험 점검이 이미 있습니다.');
+    return this.db.prepare('INSERT INTO equipment_checks(document_id,equipment_id,date,items,equipment_snapshot) VALUES(?,?,?,?,?)').run(Number(documentId),equipmentId,date,JSON.stringify(items),JSON.stringify(equipment)).lastInsertRowid;
+  }
+  deleteEquipmentAttachment(siteId,equipmentId,id){
+    if(!this.equipmentAttachment(siteId,equipmentId,id))throw new Error('첨부파일을 찾을 수 없습니다.');
+    this.db.prepare('DELETE FROM equipment_attachments WHERE equipment_id=? AND id=?').run(Number(equipmentId),Number(id));
+  }
+  createEquipment(input) {
+    const siteId=Number(input.siteId);
+    if(!this.db.prepare('SELECT 1 FROM sites WHERE id=?').get(siteId))throw new Error('현장을 선택해 주세요.');
+    const kind=text(input.kind,'장비 종류'),model=text(input.model,'형식');
+    for(const key of ['capacity','manufacturer','registration'])if(typeof input[key]!=='string' || input[key].length>200)throw new Error('장비 항목을 확인해 주세요.');
+    const id=this.db.prepare('INSERT INTO equipment(site_id,kind,model,capacity,manufacturer,registration,details) VALUES(?,?,?,?,?,?,?)').run(siteId,kind,model,input.capacity.trim(),input.manufacturer.trim(),input.registration.trim(),JSON.stringify(equipmentDetails(input))).lastInsertRowid;
+    return this.db.prepare('SELECT * FROM equipment WHERE id=?').get(id);
+  }
+  updateEquipment(id,input) {
+    const siteId=Number(input.siteId);
+    if(!this.db.prepare('SELECT 1 FROM equipment WHERE id=? AND site_id=?').get(Number(id),siteId))throw new Error('선택한 현장의 장비를 확인해 주세요.');
+    const kind=text(input.kind,'장비 종류'),model=text(input.model,'형식');
+    for(const key of ['capacity','manufacturer','registration'])if(typeof input[key]!=='string' || input[key].length>200)throw new Error('장비 항목을 확인해 주세요.');
+    this.db.prepare('UPDATE equipment SET kind=?,model=?,capacity=?,manufacturer=?,registration=?,details=? WHERE id=? AND site_id=?').run(kind,model,input.capacity.trim(),input.manufacturer.trim(),input.registration.trim(),JSON.stringify(equipmentDetails(input)),Number(id),siteId);
+    return this.db.prepare('SELECT * FROM equipment WHERE id=? AND site_id=?').get(Number(id),siteId);
+  }
+  createCompany(input) {
+    const siteId=Number(input.siteId);
+    if(!this.db.prepare('SELECT id FROM sites WHERE id=?').get(siteId))throw new Error('현장을 선택해 주세요.');
+    const id=this.db.prepare('INSERT INTO companies(site_id,name,trade) VALUES(?,?,?)').run(siteId,text(input.name,'회사명'),text(input.trade,'공종')).lastInsertRowid;
+    return this.db.prepare('SELECT * FROM companies WHERE id=?').get(id);
+  }
+  updateCompany(id,input) {
+    const siteId=Number(input.siteId);
+    if(!this.db.prepare('SELECT id FROM companies WHERE id=? AND site_id=?').get(Number(id),siteId))throw new Error('선택한 현장의 협력사를 확인해 주세요.');
+    this.db.prepare('UPDATE companies SET name=?,trade=? WHERE id=? AND site_id=?').run(text(input.name,'회사명'),text(input.trade,'공종'),Number(id),siteId);
+    return this.db.prepare('SELECT * FROM companies WHERE id=? AND site_id=?').get(Number(id),siteId);
+  }
+  createWorker(input) {
+    const siteId = Number(input.siteId);
+    if (!this.db.prepare('SELECT id FROM sites WHERE id=?').get(siteId)) throw new Error('현장을 선택해 주세요.');
+    const now=new Date(),date=new Date(now.getTime()-now.getTimezoneOffset()*60000).toISOString().slice(0,10);
+    const id = this.db.prepare('INSERT INTO workers(site_id,name,category,company,occupation,created_date) VALUES(?,?,?,?,?,?)').run(siteId, text(input.name, '이름'), text(input.category, '구분'), text(input.company, '소속'), text(input.occupation, '직종'),date).lastInsertRowid;
+    return this.db.prepare('SELECT * FROM workers WHERE id=?').get(id);
+  }
+  updateWorker(id,input) {
+    const siteId=Number(input.siteId);
+    if(!this.db.prepare('SELECT id FROM workers WHERE id=? AND site_id=?').get(Number(id),siteId))throw new Error('선택한 현장의 출입자를 확인해 주세요.');
+    this.db.prepare('UPDATE workers SET name=?,category=?,company=?,occupation=? WHERE id=? AND site_id=?').run(text(input.name,'이름'),text(input.category,'구분'),text(input.company,'소속'),text(input.occupation,'직종'),Number(id),siteId);
+    return this.db.prepare('SELECT * FROM workers WHERE id=? AND site_id=?').get(Number(id),siteId);
+  }
+  workers(siteId, query = '', filters = {}) {
+    const category=filters.category || '',company=filters.company || '',occupation=filters.occupation || '';
+    const from=filters.from?dateValue(filters.from):'',to=filters.to?dateValue(filters.to):'';
+    if(from && to && from>to)throw new Error('조회 시작일은 종료일보다 늦을 수 없습니다.');
+    return this.db.prepare("SELECT * FROM workers WHERE site_id=? AND (name LIKE ? OR company LIKE ? OR occupation LIKE ?) AND (?='' OR category=?) AND (?='' OR company=?) AND (?='' OR occupation=?) AND (?='' OR created_date>=?) AND (?='' OR created_date<=?) ORDER BY id DESC").all(Number(siteId),...Array(3).fill(`%${query}%`),category,category,company,company,occupation,occupation,from,from,to,to);
+  }
+  attendance(siteId, date) {
+    date = dateValue(date);
+    return this.db.prepare('SELECT workers.id,workers.name,workers.category,workers.company,workers.occupation,COALESCE(attendance.present,0) AS present,attendance.source FROM workers LEFT JOIN attendance ON attendance.worker_id=workers.id AND attendance.date=? WHERE workers.site_id=? ORDER BY workers.name,workers.id').all(date,Number(siteId));
+  }
+  monthlyAttendance(siteId,month) {
+    month=monthValue(month);
+    const workers=this.db.prepare('SELECT id,name,company,occupation FROM workers WHERE site_id=? ORDER BY name,id').all(Number(siteId));
+    const records=this.db.prepare('SELECT attendance.worker_id,attendance.date FROM attendance JOIN workers ON workers.id=attendance.worker_id WHERE workers.site_id=? AND attendance.present=1 AND attendance.date BETWEEN ? AND ?').all(Number(siteId),`${month}-01`,`${month}-31`);
+    const days=new Map(workers.map(w=>[w.id,[]]));
+    for(const record of records)days.get(record.worker_id).push(record.date);
+    return workers.map(w=>({...w,days:days.get(w.id)}));
+  }
+  workerAttendance(workerId,month) {
+    month=monthValue(month);
+    return this.db.prepare('SELECT date FROM attendance WHERE worker_id=? AND present=1 AND date BETWEEN ? AND ? ORDER BY date').all(Number(workerId),`${month}-01`,`${month}-31`).map(row=>row.date);
+  }
+  workerNotices(workerId,date) {
+    date=dateValue(date);
+    return this.db.prepare("SELECT d.id,d.title,d.body,d.date,r.read_at FROM workers w JOIN documents d ON d.site_id=w.site_id LEFT JOIN worker_notice_reads r ON r.document_id=d.id AND r.worker_id=w.id WHERE w.id=? AND d.type='notice' AND d.status='approved' AND d.date=? ORDER BY d.id DESC").all(Number(workerId),date);
+  }
+  workerTraining(workerId,date) {
+    date=dateValue(date);
+    return this.db.prepare("SELECT d.id,d.type,d.title,c.created_at FROM workers w JOIN documents d ON d.site_id=w.site_id LEFT JOIN worker_training_checks c ON c.worker_id=w.id AND c.document_id=d.id WHERE w.id=? AND d.type IN ('tbm','education') AND d.status='approved' AND d.date=? AND (NOT EXISTS (SELECT 1 FROM training_target_config t WHERE t.document_id=d.id) OR EXISTS (SELECT 1 FROM training_targets t WHERE t.document_id=d.id AND t.worker_id=w.id)) ORDER BY d.id DESC").all(Number(workerId),date);
+  }
+  dailyTraining(workerId,date) {
+    return this.db.prepare('SELECT kind,created_at,signature IS NOT NULL AS has_signature FROM worker_daily_training WHERE worker_id=? AND date=? ORDER BY kind').all(Number(workerId),dateValue(date));
+  }
+  confirmDailyTraining(workerId,date,kinds,rightsConfirmed,signature) {
+    date=dateValue(date);
+    if(rightsConfirmed!==true)throw new Error('권리와 의무를 확인해 주세요.');
+    if(!Array.isArray(kinds) || !kinds.length || kinds.length>3 || new Set(kinds).size!==kinds.length || kinds.some(k=>!['tbm','education','meeting'].includes(k)))throw new Error('교육 종류를 선택해 주세요.');
+    if(!this.db.prepare('SELECT 1 FROM workers WHERE id=?').get(Number(workerId)))throw new Error('근로자를 확인해 주세요.');
+    const bytes=signature===undefined ? null : signatureBytes(signature);
+    this.db.exec('BEGIN IMMEDIATE');
+    try{const insert=this.db.prepare('INSERT OR IGNORE INTO worker_daily_training(worker_id,date,kind,signature) VALUES(?,?,?,?)');for(const kind of kinds)insert.run(Number(workerId),date,kind,bytes);this.db.exec('COMMIT');}catch(error){this.db.exec('ROLLBACK');throw error;}
+    return this.dailyTraining(workerId,date);
+  }
+  dailyTrainingSignature(siteId,workerId,date,kind){
+    if(!['tbm','education','meeting'].includes(kind))throw new Error('교육 종류를 확인해 주세요.');
+    return this.db.prepare('SELECT c.signature FROM worker_daily_training c JOIN workers w ON w.id=c.worker_id WHERE w.site_id=? AND w.id=? AND c.date=? AND c.kind=? AND c.signature IS NOT NULL').get(Number(siteId),Number(workerId),dateValue(date),kind)?.signature || null;
+  }
+  confirmWorkerTraining(workerId,documentId,date,rightsConfirmed) {
+    date=dateValue(date);
+    const doc=this.db.prepare("SELECT d.id FROM workers w JOIN documents d ON d.site_id=w.site_id WHERE w.id=? AND d.id=? AND d.type IN ('tbm','education') AND d.status='approved' AND d.date=? AND (NOT EXISTS (SELECT 1 FROM training_target_config t WHERE t.document_id=d.id) OR EXISTS (SELECT 1 FROM training_targets t WHERE t.document_id=d.id AND t.worker_id=w.id))").get(Number(workerId),Number(documentId),date);
+    if(!doc)throw new Error('오늘 참여할 교육 문서를 확인해 주세요.');
+    if(rightsConfirmed!==true)throw new Error('권리와 의무를 확인해 주세요.');
+    this.db.prepare("INSERT OR IGNORE INTO worker_training_checks(worker_id,document_id,rights_ack) VALUES(?,?,'demo-v1')").run(Number(workerId),doc.id);
+  }
+  confirmWorkerNotice(workerId,documentId,signature) {
+    const doc=this.db.prepare("SELECT d.id FROM workers w JOIN documents d ON d.site_id=w.site_id WHERE w.id=? AND d.id=? AND d.type='notice' AND d.status='approved'").get(Number(workerId),Number(documentId));
+    if(!doc)throw new Error('확인할 공지를 찾을 수 없습니다.');
+    const bytes=signatureBytes(signature);
+    this.db.prepare('INSERT OR IGNORE INTO worker_notice_reads(worker_id,document_id,signature) VALUES(?,?,?)').run(Number(workerId),doc.id,bytes);
+  }
+  noticeReads(documentId) {
+    const doc=this.document(documentId);
+    if(!doc || doc.type!=='notice')throw new Error('유해·위험 공지를 확인해 주세요.');
+    return this.db.prepare('SELECT w.id,w.name,w.company,r.read_at,r.signature IS NOT NULL AS has_signature FROM worker_notice_reads r JOIN workers w ON w.id=r.worker_id WHERE r.document_id=? AND w.site_id=? ORDER BY r.read_at,w.id').all(Number(documentId),doc.site_id);
+  }
+  noticeSignature(documentId,workerId) {
+    return this.db.prepare("SELECT r.signature FROM worker_notice_reads r JOIN documents d ON d.id=r.document_id JOIN workers w ON w.id=r.worker_id AND w.site_id=d.site_id WHERE d.id=? AND d.type='notice' AND w.id=? AND r.signature IS NOT NULL").get(Number(documentId),Number(workerId))?.signature || null;
+  }
+  trainingChecks(documentId) {
+    const doc=this.document(documentId);
+    if(!doc || !['tbm','education'].includes(doc.type))throw new Error('교육 문서를 확인해 주세요.');
+    return this.db.prepare('SELECT w.name,w.company,c.created_at,c.rights_ack FROM worker_training_checks c JOIN workers w ON w.id=c.worker_id WHERE c.document_id=? AND w.site_id=? ORDER BY c.created_at,w.id').all(Number(documentId),doc.site_id);
+  }
+  educationReport(siteId,from,to){
+    from=dateValue(from);to=dateValue(to);if(from>to)throw new Error('조회 시작일은 종료일보다 늦을 수 없습니다.');
+    return this.db.prepare("SELECT w.id,w.name,w.company,w.category,d.type,COALESCE(NULLIF(json_extract(d.details,'$.kind'),''),'unspecified') AS kind,COUNT(*) AS count,json_group_array(json_object('id',d.id,'date',d.date,'title',d.title)) AS documents FROM worker_training_checks c JOIN workers w ON w.id=c.worker_id JOIN documents d ON d.id=c.document_id AND d.site_id=w.site_id WHERE w.site_id=? AND d.date BETWEEN ? AND ? AND d.type IN ('tbm','education') AND d.status='approved' GROUP BY w.id,d.type,kind ORDER BY w.name,w.id,d.type,kind").all(Number(siteId),from,to).map(row=>({...row,documents:JSON.parse(row.documents)}));
+  }
+  trainingTargets(documentId) {
+    const doc=this.document(documentId);
+    if(!doc || !['tbm','education'].includes(doc.type))throw new Error('교육 문서를 확인해 주세요.');
+    const configured=!!this.db.prepare('SELECT 1 FROM training_target_config WHERE document_id=?').get(Number(documentId));
+    const workers=this.db.prepare('SELECT w.id,w.name,w.company,EXISTS(SELECT 1 FROM training_targets t WHERE t.document_id=? AND t.worker_id=w.id) AS selected,EXISTS(SELECT 1 FROM worker_daily_training c WHERE c.worker_id=w.id AND c.date=? AND c.kind=?) AS daily_confirmed,EXISTS(SELECT 1 FROM worker_daily_training c WHERE c.worker_id=w.id AND c.date=? AND c.kind=? AND c.signature IS NOT NULL) AS daily_has_signature FROM workers w WHERE w.site_id=? ORDER BY w.name,w.id').all(Number(documentId),doc.date,doc.type,doc.date,doc.type,doc.site_id);
+    return {configured,workers};
+  }
+  setTrainingTargets(documentId,workerIds) {
+    const doc=this.document(documentId);
+    if(!doc || !['tbm','education'].includes(doc.type) || !['draft','rejected'].includes(doc.status))throw new Error('수정 가능한 교육 문서를 확인해 주세요.');
+    if(!Array.isArray(workerIds) || workerIds.length>1000 || workerIds.some(id=>!Number.isSafeInteger(id) || id<1) || new Set(workerIds).size!==workerIds.length)throw new Error('교육 대상자를 확인해 주세요.');
+    const exists=this.db.prepare('SELECT 1 FROM workers WHERE id=? AND site_id=?');
+    if(workerIds.some(id=>!exists.get(id,doc.site_id)))throw new Error('같은 현장의 교육 대상자를 선택해 주세요.');
+    this.db.exec('BEGIN IMMEDIATE');
+    try{
+      this.db.prepare('INSERT OR IGNORE INTO training_target_config(document_id) VALUES(?)').run(Number(documentId));
+      this.db.prepare('DELETE FROM training_targets WHERE document_id=?').run(Number(documentId));
+      const insert=this.db.prepare('INSERT INTO training_targets(document_id,worker_id) VALUES(?,?)');
+      for(const id of workerIds)insert.run(Number(documentId),id);
+      this.db.exec('COMMIT');
+    }catch(error){this.db.exec('ROLLBACK');throw error;}
+  }
+  workerSelfCheck(workerId,date) {
+    return this.db.prepare('SELECT date,created_at,signature IS NOT NULL AS has_signature FROM worker_self_checks WHERE worker_id=? AND date=?').get(Number(workerId),dateValue(date)) || null;
+  }
+  siteSelfChecks(siteId,date) {
+    date=dateValue(date);
+    return this.db.prepare('SELECT w.id,w.name,w.company,c.created_at,c.signature IS NOT NULL AS has_signature FROM workers w LEFT JOIN worker_self_checks c ON c.worker_id=w.id AND c.date=? WHERE w.site_id=? ORDER BY w.name,w.id').all(date,Number(siteId));
+  }
+  selfCheckSignature(siteId,workerId,date) {
+    date=dateValue(date);
+    return this.db.prepare('SELECT c.signature FROM worker_self_checks c JOIN workers w ON w.id=c.worker_id WHERE w.site_id=? AND w.id=? AND c.date=? AND c.signature IS NOT NULL').get(Number(siteId),Number(workerId),date)?.signature || null;
+  }
+  createWorkStop(workerId,input) {
+    if(typeof input.anonymous!=='boolean')throw new Error('실명 또는 익명을 선택해 주세요.');
+    const worker=this.db.prepare('SELECT id,site_id FROM workers WHERE id=?').get(Number(workerId));
+    if(!worker)throw new Error('근로자를 확인해 주세요.');
+    const place=text(input.place,'장소'),reason=text(input.reason,'사유',2000);
+    let photo=null;
+    if(input.photo){
+      if(typeof input.photo!=='string' || input.photo.length>2800000)throw new Error('사진은 2MB 이하여야 합니다.');
+      const match=input.photo.match(/^data:image\/(png|jpeg);base64,([A-Za-z0-9+/]+={0,2})$/);
+      if(!match)throw new Error('PNG 또는 JPEG 사진을 선택해 주세요.');
+      photo=Buffer.from(match[2],'base64');
+      if(photo.length>2*1024*1024 || photo.toString('base64')!==match[2])throw new Error('사진 형식 또는 크기를 확인해 주세요.');
+      if(match[1]==='png' && !photo.subarray(0,8).equals(Buffer.from('89504e470d0a1a0a','hex')) || match[1]==='jpeg' && !photo.subarray(0,3).equals(Buffer.from('ffd8ff','hex')))throw new Error('사진 형식을 확인해 주세요.');
+    }
+    this.db.prepare('INSERT INTO work_stops(site_id,worker_id,place,reason,photo) VALUES(?,?,?,?,?)').run(worker.site_id,input.anonymous?null:worker.id,place,reason,photo);
+  }
+  workStops(siteId) {
+    return this.db.prepare("SELECT s.id,s.place,s.reason,s.created_at,s.photo IS NOT NULL AS has_photo,CASE WHEN s.worker_id IS NULL THEN '익명' ELSE w.name END AS requester FROM work_stops s LEFT JOIN workers w ON w.id=s.worker_id WHERE s.site_id=? ORDER BY s.id DESC").all(Number(siteId));
+  }
+  workStopPhoto(siteId,id) {return this.db.prepare('SELECT photo FROM work_stops WHERE site_id=? AND id=? AND photo IS NOT NULL').get(Number(siteId),Number(id))?.photo || null;}
+  createHazardReport(siteId,input,workerId=null){
+    if(!this.db.prepare('SELECT 1 FROM sites WHERE id=?').get(Number(siteId)))throw new Error('현장을 확인해 주세요.');
+    const title=text(input.title,'제목'),body=text(input.body,'내용',2000),reporter=text(input.reporter,'가상 신고자'),photo=photoBytes(input.photo);
+    return this.db.prepare('INSERT INTO hazard_reports(site_id,title,body,reporter,photo,worker_id) VALUES(?,?,?,?,?,?)').run(Number(siteId),title,body,reporter,photo,workerId).lastInsertRowid;
+  }
+  createWorkerHazardReport(workerId,input){const worker=this.db.prepare('SELECT id,site_id,name FROM workers WHERE id=?').get(Number(workerId));if(!worker)throw new Error('근로자를 확인해 주세요.');return this.createHazardReport(worker.site_id,{...input,reporter:worker.name},worker.id);}
+  workerHazardReports(workerId){return this.db.prepare('SELECT id,title,body,created_at,photo IS NOT NULL AS has_photo FROM hazard_reports WHERE worker_id=? ORDER BY id DESC').all(Number(workerId));}
+  hazardReports(siteId,query=''){if(typeof query!=='string'||query.length>200)throw new Error('검색어를 확인해 주세요.');return this.db.prepare('SELECT id,title,body,reporter,created_at,photo IS NOT NULL AS has_photo FROM hazard_reports WHERE site_id=? AND (instr(title,?)>0 OR instr(body,?)>0) ORDER BY id DESC').all(Number(siteId),query,query);}
+  hazardReportPhoto(siteId,id){return this.db.prepare('SELECT photo FROM hazard_reports WHERE site_id=? AND id=? AND photo IS NOT NULL').get(Number(siteId),Number(id))?.photo||null;}
+  createWorkerSelfCheck(workerId,date,answers,signature) {
+    date=dateValue(date);
+    if(!answers || typeof answers!=='object' || Array.isArray(answers) || !['equipment','sober','exercise','briefing'].every(key=>answers[key]===true))throw new Error('자가점검 네 항목을 모두 확인해 주세요.');
+    const bytes=signatureBytes(signature);
+    this.db.prepare('INSERT OR IGNORE INTO worker_self_checks(worker_id,date,signature) VALUES(?,?,?)').run(Number(workerId),date,bytes);
+    return this.workerSelfCheck(workerId,date);
+  }
+  setAttendance(input) {
+    const date = dateValue(input.date);
+    if (typeof input.present !== 'boolean') throw new Error('출역 상태를 확인해 주세요.');
+    const worker = this.db.prepare('SELECT id,company,occupation,category FROM workers WHERE id=? AND site_id=?').get(Number(input.workerId),Number(input.siteId));
+    if (!worker) throw new Error('선택한 현장의 출입자를 확인해 주세요.');
+    this.db.prepare("INSERT INTO attendance(worker_id,date,present,company_snapshot,occupation_snapshot,category_snapshot,source) VALUES(?,?,?,?,?,?,'manual') ON CONFLICT(worker_id,date) DO UPDATE SET company_snapshot=CASE WHEN attendance.present=0 AND excluded.present=1 THEN excluded.company_snapshot ELSE attendance.company_snapshot END,occupation_snapshot=CASE WHEN attendance.present=0 AND excluded.present=1 THEN excluded.occupation_snapshot ELSE attendance.occupation_snapshot END,category_snapshot=CASE WHEN attendance.present=0 AND excluded.present=1 THEN excluded.category_snapshot ELSE attendance.category_snapshot END,present=excluded.present,source='manual',updated_at=CURRENT_TIMESTAMP").run(worker.id,date,input.present?1:0,input.present?worker.company:null,input.present?worker.occupation:null,input.present?worker.category:null);
+  }
+  recordWorkerLogin(workerId,date) {
+    date=dateValue(date);
+    this.db.prepare("INSERT OR IGNORE INTO attendance(worker_id,date,present,company_snapshot,occupation_snapshot,category_snapshot,source) SELECT id,?,1,company,occupation,category,'login' FROM workers WHERE id=?").run(date,Number(workerId));
+  }
+  attendanceReport(siteId, from, to, group) {
+    from=dateValue(from); to=dateValue(to);
+    if (from>to) throw new Error('조회 시작일은 종료일보다 늦을 수 없습니다.');
+    const groups={worker:['workers.id','workers.name','workers.company'],occupation:["COALESCE(attendance.occupation_snapshot,'기록 없음')","COALESCE(attendance.occupation_snapshot,'기록 없음')","''"],company:["COALESCE(attendance.company_snapshot,'기록 없음')","COALESCE(attendance.company_snapshot,'기록 없음')","''"],category:["COALESCE(attendance.category_snapshot,'기록 없음')","COALESCE(attendance.category_snapshot,'기록 없음')","''"]};
+    if (!Object.hasOwn(groups,group)) throw new Error('집계 기준을 확인해 주세요.');
+    const [key,label,detail]=groups[group];
+    return this.db.prepare(`SELECT ${label} AS label, ${detail} AS detail, COUNT(*) AS days FROM attendance JOIN workers ON workers.id=attendance.worker_id WHERE workers.site_id=? AND attendance.present=1 AND attendance.date BETWEEN ? AND ? GROUP BY ${key} ORDER BY label, detail`).all(Number(siteId),from,to);
+  }
+  createInvitation(siteId) {
+    if (!this.db.prepare('SELECT id FROM sites WHERE id=?').get(Number(siteId))) throw new Error('현장을 선택해 주세요.');
+    const token = randomBytes(32).toString('base64url');
+    const hash = createHash('sha256').update(token).digest('hex');
+    const expiresAt = Date.now() + 30 * 24 * 60 * 60 * 1000;
+    this.db.prepare('INSERT INTO invitations(token_hash,site_id,expires_at) VALUES(?,?,?)').run(hash,Number(siteId),expiresAt);
+    return { token, expiresAt };
+  }
+  revokeInvitations(siteId) {
+    return this.db.prepare('UPDATE invitations SET revoked=1 WHERE site_id=? AND revoked=0').run(Number(siteId)).changes;
+  }
+  invitation(token) {
+    if (typeof token !== 'string' || !/^[\w-]{43}$/.test(token)) return null;
+    const hash=createHash('sha256').update(token).digest('hex');
+    return this.db.prepare('SELECT sites.id,sites.name,invitations.expires_at FROM invitations JOIN sites ON sites.id=invitations.site_id WHERE token_hash=? AND revoked=0 AND expires_at>?').get(hash,Date.now()) || null;
+  }
+  join(token,input) {
+    const invite=this.invitation(token);
+    if (!invite) throw new Error('유효하지 않거나 만료된 가입 링크입니다.');
+    if(input.acknowledged!==true)throw new Error('시험 안내를 확인해 주세요.');
+    const equipment=input.equipment??[];
+    if(!Array.isArray(equipment)||new Set(equipment).size!==equipment.length||equipment.some(item=>!['안전모','안전화','안전대','보안경','장갑'].includes(item)))throw new Error('시험 보호구를 확인해 주세요.');
+    const signature=input.signature===undefined?null:signatureBytes(input.signature);
+    if(typeof input.loginId!=='string' || !/^[a-zA-Z0-9_]{3,40}$/.test(input.loginId))throw new Error('아이디는 영문, 숫자, 밑줄 3~40자로 입력해 주세요.');
+    if(typeof input.password!=='string' || input.password.length<12 || input.password.length>256)throw new Error('암호는 12자 이상 256자 이하여야 합니다.');
+    if(this.db.prepare('SELECT 1 FROM worker_accounts WHERE site_id=? AND login_id=?').get(invite.id,input.loginId))throw new Error('이 현장에 이미 사용 중인 아이디입니다.');
+    const salt=randomBytes(16),passwordHash=scryptSync(input.password,salt,32);
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      const worker=this.createWorker({...input,siteId:invite.id});
+      this.db.prepare('INSERT INTO worker_accounts(worker_id,site_id,login_id,salt,password_hash) VALUES(?,?,?,?,?)').run(worker.id,invite.id,input.loginId,salt,passwordHash);
+      this.db.prepare('INSERT INTO join_acknowledgements(worker_id,notice_version,equipment,signature) VALUES(?,?,?,?)').run(worker.id,'demo-v1',JSON.stringify(equipment),signature);
+      this.db.exec('COMMIT');return worker;
+    } catch(error) {this.db.exec('ROLLBACK');throw error;}
+  }
+  joinAcknowledgement(siteId,workerId){
+    const row=this.db.prepare('SELECT a.notice_version,a.created_at,a.equipment,a.signature IS NOT NULL AS has_signature FROM join_acknowledgements a JOIN workers w ON w.id=a.worker_id WHERE w.site_id=? AND w.id=?').get(Number(siteId),Number(workerId));
+    return row?{...row,equipment:JSON.parse(row.equipment)}:null;
+  }
+  joinSignature(siteId,workerId){return this.db.prepare('SELECT a.signature FROM join_acknowledgements a JOIN workers w ON w.id=a.worker_id WHERE w.site_id=? AND w.id=? AND a.signature IS NOT NULL').get(Number(siteId),Number(workerId))?.signature||null;}
+  authenticateWorker(token,loginId,password) {
+    const invite=this.invitation(token);
+    if(!invite || typeof loginId!=='string' || !/^[a-zA-Z0-9_]{3,40}$/.test(loginId) || typeof password!=='string' || password.length>256)return null;
+    const account=this.db.prepare('SELECT worker_id,salt,password_hash FROM worker_accounts WHERE site_id=? AND login_id=?').get(invite.id,loginId);
+    if(!account)return null;
+    const hash=scryptSync(password,account.salt,32);
+    if(!timingSafeEqual(hash,account.password_hash))return null;
+    return this.db.prepare('SELECT workers.id,workers.name,workers.site_id,sites.name AS site_name FROM workers JOIN sites ON sites.id=workers.site_id WHERE workers.id=?').get(account.worker_id);
+  }
+  documents(siteId, type = '', query = '', from = '', to = '') {
+    if(from)from=dateValue(from);if(to)to=dateValue(to);
+    if(from && to && from>to)throw new Error('조회 시작일은 종료일보다 늦을 수 없습니다.');
+    return this.db.prepare("SELECT * FROM documents WHERE site_id=? AND (?='' OR type=?) AND (title LIKE ? OR body LIKE ? OR details LIKE ?) AND (?='' OR date>=?) AND (?='' OR date<=?) ORDER BY date DESC,id DESC").all(Number(siteId),type,type,...Array(3).fill(`%${query}%`),from,from,to,to);
+  }
+  previousDailyReport(siteId, before) {
+    before=dateValue(before);
+    return this.db.prepare("SELECT date,body,details FROM documents WHERE site_id=? AND type='daily_report' AND date<? ORDER BY date DESC,id DESC LIMIT 1").get(Number(siteId),before) || null;
+  }
+  previousJointInspection(siteId,before) {
+    before=dateValue(before);
+    return this.db.prepare("SELECT date,json_extract(details,'$.items') AS items FROM documents WHERE site_id=? AND type='joint_inspection' AND date<? ORDER BY date DESC,id DESC LIMIT 1").get(Number(siteId),before) || null;
+  }
+  previousRiskAssessments(siteId,before,kind,scale,excludeId) {
+    before=dateValue(before);
+    if(!['initial','regular','occasional','continuous'].includes(kind) || !['three-level','3x3','5x4'].includes(scale))throw new Error('평가 종류와 척도를 선택해 주세요.');
+    return this.db.prepare("SELECT id,title,date,details FROM documents WHERE site_id=? AND type='risk' AND status IN ('pending','approved') AND date<=? AND id<>? AND json_extract(details,'$.kind')=? AND json_extract(details,'$.scale')=? ORDER BY date DESC,id DESC LIMIT 20").all(Number(siteId),before,Number(excludeId)||0,kind,scale);
+  }
+  dailySourceDocuments(siteId, date) {
+    date=dateValue(date);
+    return this.db.prepare("SELECT id,type,title,date,body,status FROM documents WHERE site_id=? AND date=? AND type IN ('tbm','education') ORDER BY id DESC").all(Number(siteId),date);
+  }
+  safetyLogSources(siteId,date) {
+    date=dateValue(date);
+    const documents=this.db.prepare("SELECT id,type,title,body,details FROM documents WHERE site_id=? AND date=? AND type IN ('notice','tbm','education','inspection','patrol','daily_report') ORDER BY id DESC").all(Number(siteId),date);
+    return {present:this.attendance(siteId,date).filter(row=>row.present).length,documents};
+  }
+  weeklyActivity(siteId,start){
+    start=dateValue(start);siteId=Number(siteId);if(!this.db.prepare('SELECT 1 FROM sites WHERE id=?').get(siteId))throw new Error('현장을 선택해 주세요.');
+    const day=new Date(`${start}T00:00:00Z`),dates=Array.from({length:7},(_,i)=>{const value=new Date(day.getTime()+i*86400000).toISOString().slice(0,10);return dateValue(value);}),end=dates[6],rows=dates.map(date=>({date,attendance:0,attendanceCategories:[],attendanceOccupations:[],documents:{},noticeReads:0,trainingChecks:0,trainingByType:{tbm:0,education:0},workerChecks:0,managerChecks:0,hazardReports:0})),byDate=new Map(rows.map(row=>[row.date,row]));
+    for(const row of this.db.prepare('SELECT a.date,COUNT(*) AS n FROM attendance a JOIN workers w ON w.id=a.worker_id WHERE w.site_id=? AND a.present=1 AND a.date BETWEEN ? AND ? GROUP BY a.date').all(siteId,start,end))byDate.get(row.date).attendance=row.n;
+    for(const row of this.db.prepare("SELECT a.date,COALESCE(a.category_snapshot,'기록 없음') AS category,COALESCE(a.occupation_snapshot,'기록 없음') AS occupation,COUNT(*) AS n FROM attendance a JOIN workers w ON w.id=a.worker_id WHERE w.site_id=? AND a.present=1 AND a.date BETWEEN ? AND ? GROUP BY a.date,category,occupation").all(siteId,start,end)){
+      const day=byDate.get(row.date);
+      for(const [list,label] of [[day.attendanceCategories,row.category],[day.attendanceOccupations,row.occupation]]){let item=list.find(entry=>entry.label===label);if(!item)list.push(item={label,days:0});item.days+=row.n;}
+    }
+    for(const row of this.db.prepare('SELECT c.date,COUNT(*) AS n FROM worker_self_checks c JOIN workers w ON w.id=c.worker_id WHERE w.site_id=? AND c.date BETWEEN ? AND ? GROUP BY c.date').all(siteId,start,end))byDate.get(row.date).workerChecks=row.n;
+    for(const row of this.db.prepare('SELECT date,COUNT(*) AS n FROM manager_self_checks WHERE site_id=? AND date BETWEEN ? AND ? GROUP BY date').all(siteId,start,end))byDate.get(row.date).managerChecks=row.n;
+    for(const row of this.db.prepare("SELECT date(created_at,'localtime') AS day,COUNT(*) AS n FROM hazard_reports WHERE site_id=? AND date(created_at,'localtime') BETWEEN ? AND ? GROUP BY day").all(siteId,start,end))byDate.get(row.day).hazardReports=row.n;
+    for(const row of this.db.prepare('SELECT date,type,COUNT(*) AS n FROM documents WHERE site_id=? AND date BETWEEN ? AND ? GROUP BY date,type').all(siteId,start,end))byDate.get(row.date).documents[row.type]=row.n;
+    for(const row of this.db.prepare("SELECT d.date,COUNT(*) AS n FROM worker_notice_reads c JOIN documents d ON d.id=c.document_id JOIN workers w ON w.id=c.worker_id AND w.site_id=d.site_id WHERE d.site_id=? AND d.date BETWEEN ? AND ? AND d.type='notice' AND d.status='approved' GROUP BY d.date").all(siteId,start,end))byDate.get(row.date).noticeReads=row.n;
+    for(const row of this.db.prepare("SELECT d.date,d.type,COUNT(*) AS n FROM worker_training_checks c JOIN documents d ON d.id=c.document_id JOIN workers w ON w.id=c.worker_id AND w.site_id=d.site_id WHERE d.site_id=? AND d.date BETWEEN ? AND ? AND d.type IN ('tbm','education') AND d.status='approved' GROUP BY d.date,d.type").all(siteId,start,end)){const day=byDate.get(row.date);day.trainingByType[row.type]=row.n;day.trainingChecks+=row.n;}
+    return rows;
+  }
+  createDocument(input) {
+    const d = recordInput(input);
+    if (!this.db.prepare('SELECT id FROM sites WHERE id=?').get(d.siteId)) throw new Error('현장을 선택해 주세요.');
+    this.validatePlanEquipment(d);
+    this.validateSafetyMeeting(d);
+    this.validateInstructionRecipient(d);
+    if(d.type==='safety_log')d.details.attendanceSnapshot={present:this.attendance(d.siteId,d.date).filter(row=>row.present).length,capturedAt:new Date().toISOString()};
+    const id = this.db.prepare('INSERT INTO documents(site_id,type,title,date,body,details) VALUES(?,?,?,?,?,?)').run(d.siteId,d.type,d.title,d.date,d.body,JSON.stringify(d.details)).lastInsertRowid;
+    return this.document(id);
+  }
+  document(id) { return this.db.prepare('SELECT * FROM documents WHERE id=?').get(Number(id)); }
+  riskActivities(documentId){const doc=this.document(documentId);if(!doc||doc.type!=='risk')throw new Error('위험성평가를 확인해 주세요.');return this.db.prepare('SELECT * FROM risk_activities WHERE document_id=? ORDER BY date DESC,id DESC').all(Number(documentId));}
+  saveRiskActivity(documentId,input,id=null){
+    this.riskActivities(documentId);
+    if(!['meeting','weekly','education','other'].includes(input.kind))throw new Error('시험 활동 종류를 확인해 주세요.');
+    const date=dateValue(input.date),fields={};for(const key of ['place','host','participants','content']){if(typeof input[key]!=='string'||input[key].length>2000)throw new Error('시험 활동 내용을 확인해 주세요.');fields[key]=input[key].trim();}
+    const from=input.periodFrom||'',to=input.periodTo||'',mode=input.entryMode||'manual';if(!['manual','scan'].includes(mode)||mode==='scan'&&input.kind!=='weekly')throw new Error('회의록 작성 방식을 확인해 주세요.');
+    if((from||to)&&(!from||!to||dateValue(from)>dateValue(to)))throw new Error('관리기간을 확인해 주세요.');
+    const current=id===null?null:this.db.prepare('SELECT worker_snapshot FROM risk_activities WHERE id=? AND document_id=?').get(Number(id),Number(documentId));if(id!==null&&!current)throw new Error('시험 활동을 찾을 수 없습니다.');
+    let workers=current?.worker_snapshot||'[]';
+    if(input.workerIds!==undefined){if(!Array.isArray(input.workerIds)||input.workerIds.length>100||input.workerIds.some(value=>!Number.isSafeInteger(value)||value<1)||new Set(input.workerIds).size!==input.workerIds.length)throw new Error('참석자를 확인해 주세요.');
+      const doc=this.document(documentId),lookup=this.db.prepare('SELECT id,name,company FROM workers WHERE id=? AND site_id=?'),previous=JSON.parse(workers);workers=JSON.stringify(input.workerIds.map(workerId=>{const worker=lookup.get(workerId,doc.site_id);if(!worker)throw new Error('같은 현장의 참석자를 선택해 주세요.');return previous.find(item=>item.id===workerId)||worker;}));}
+    if(id!==null){this.db.prepare('UPDATE risk_activities SET kind=?,date=?,place=?,host=?,participants=?,content=?,period_from=?,period_to=?,entry_mode=?,worker_snapshot=? WHERE id=? AND document_id=?').run(input.kind,date,fields.place,fields.host,fields.participants,fields.content,from,to,mode,workers,Number(id),Number(documentId));return Number(id);}
+    return this.db.prepare('INSERT INTO risk_activities(document_id,kind,date,place,host,participants,content,period_from,period_to,entry_mode,worker_snapshot) VALUES(?,?,?,?,?,?,?,?,?,?,?)').run(Number(documentId),input.kind,date,fields.place,fields.host,fields.participants,fields.content,from,to,mode,workers).lastInsertRowid;
+  }
+  deleteRiskActivity(documentId,id){this.riskActivities(documentId);if(!this.db.prepare('DELETE FROM risk_activities WHERE id=? AND document_id=?').run(Number(id),Number(documentId)).changes)throw new Error('시험 활동을 찾을 수 없습니다.');}
+  riskActivityPhotos(documentId,id){if(!this.db.prepare('SELECT 1 FROM risk_activities WHERE id=? AND document_id=?').get(Number(id),Number(documentId)))throw new Error('시험 활동을 찾을 수 없습니다.');return this.db.prepare('SELECT id,name,purpose,length(data) AS size FROM risk_activity_photos WHERE activity_id=? ORDER BY id').all(Number(id));}
+  addRiskActivityPhoto(documentId,id,name,data,purpose='photo'){
+    const photos=this.riskActivityPhotos(documentId,id);if(photos.length>=20)throw new Error('시험 사진은 20개까지 가능합니다.');
+    if(typeof name!=='string'||!name.trim()||name.length>200||/[\\/\x00-\x1f\x7f]/.test(name))throw new Error('사진 이름을 확인해 주세요.');
+    if(!(data instanceof Uint8Array)||!data.length||data.length>2*1024*1024)throw new Error('사진은 1바이트 이상 2MB 이하여야 합니다.');
+    const activity=this.db.prepare('SELECT kind,entry_mode FROM risk_activities WHERE id=? AND document_id=?').get(Number(id),Number(documentId));if(!['photo','minutes'].includes(purpose)||purpose==='minutes'&&(activity.kind!=='weekly'||activity.entry_mode!=='scan'))throw new Error('첨부 구분을 확인해 주세요.');
+    const bytes=Buffer.from(data),image=bytes.subarray(0,8).equals(Buffer.from('89504e470d0a1a0a','hex'))||bytes.subarray(0,3).equals(Buffer.from('ffd8ff','hex'));if(!image&&!(purpose==='minutes'&&bytes.subarray(0,5).toString()==='%PDF-'))throw new Error('PNG 또는 JPEG 사진이나 허용된 PDF 회의록을 선택해 주세요.');
+    return this.db.prepare('INSERT INTO risk_activity_photos(activity_id,name,data,purpose) VALUES(?,?,?,?)').run(Number(id),name,bytes,purpose).lastInsertRowid;
+  }
+  riskActivityPhoto(documentId,id,photoId){return this.db.prepare('SELECT p.* FROM risk_activity_photos p JOIN risk_activities a ON a.id=p.activity_id WHERE a.document_id=? AND a.id=? AND p.id=?').get(Number(documentId),Number(id),Number(photoId))||null;}
+  deleteRiskActivityPhoto(documentId,id,photoId){if(!this.riskActivityPhoto(documentId,id,photoId))throw new Error('시험 사진을 찾을 수 없습니다.');this.db.prepare('DELETE FROM risk_activity_photos WHERE id=?').run(Number(photoId));}
+  instructionResult(id){const doc=this.document(id);if(!doc||doc.type!=='instruction')throw new Error('작업지시서를 확인해 주세요.');return this.db.prepare('SELECT date,actor,content,created_at,source,signature IS NOT NULL AS has_signature FROM instruction_results WHERE document_id=?').get(Number(id))||null;}
+  instructionSignature(id){return this.db.prepare('SELECT signature FROM instruction_results WHERE document_id=? AND signature IS NOT NULL').get(Number(id))?.signature || null;}
+  addInstructionResult(id,input,source='manager'){
+    const existing=this.instructionResult(id),doc=this.document(id);if(existing)throw new Error('시험 조치 기록이 이미 있습니다.');
+    if(doc.status!=='approved')throw new Error('승인된 시험 지시서에만 조치 기록을 추가할 수 있습니다.');
+    const date=dateValue(input.date),actor=text(input.actor,'가상 담당자'),content=text(input.content,'시험 조치 내용',2000);
+    if(!['manager','worker'].includes(source))throw new Error('시험 기록 출처를 확인해 주세요.');
+    const signature=source==='worker'&&input.signature ? signatureBytes(input.signature) : null;
+    this.db.prepare('INSERT INTO instruction_results(document_id,date,actor,content,source,signature) VALUES(?,?,?,?,?,?)').run(Number(id),date,actor,content,source,signature);return this.instructionResult(id);
+  }
+  workerInstructions(workerId){
+    const worker=this.db.prepare('SELECT id,site_id FROM workers WHERE id=?').get(Number(workerId));if(!worker)throw new Error('근로자를 확인해 주세요.');
+    return this.db.prepare("SELECT d.id,d.title,d.date,d.body,r.date AS result_date,r.content AS result_content,r.source AS result_source FROM documents d LEFT JOIN instruction_results r ON r.document_id=d.id WHERE d.site_id=? AND d.type='instruction' AND d.status='approved' AND json_extract(d.details,'$.recipientId')=? ORDER BY d.id DESC").all(worker.site_id,worker.id);
+  }
+  workerInstructionAttachments(workerId,id){
+    const doc=this.document(id),worker=this.db.prepare('SELECT site_id FROM workers WHERE id=?').get(Number(workerId));
+    if(!doc||!worker||doc.site_id!==worker.site_id||doc.type!=='instruction'||doc.status!=='approved'||JSON.parse(doc.details).recipientId!==Number(workerId))throw new Error('지정된 시험 지시서를 확인해 주세요.');
+    return this.attachments(id);
+  }
+  respondInstruction(workerId,id,input){
+    const worker=this.db.prepare('SELECT id,name,site_id FROM workers WHERE id=?').get(Number(workerId)),doc=this.document(id);
+    if(!worker||!doc||doc.site_id!==worker.site_id||doc.type!=='instruction'||doc.status!=='approved'||JSON.parse(doc.details).recipientId!==worker.id)throw new Error('지정된 시험 지시서를 확인해 주세요.');
+    return this.addInstructionResult(id,{date:input.date,actor:worker.name,content:input.content,signature:input.signature},'worker');
+  }
+  workerInstructionPhotos(workerId,id){
+    const doc=this.document(id),worker=this.db.prepare('SELECT site_id FROM workers WHERE id=?').get(Number(workerId));
+    if(!doc||!worker||doc.site_id!==worker.site_id||doc.type!=='instruction'||doc.status!=='approved'||JSON.parse(doc.details).recipientId!==Number(workerId)||this.instructionResult(id)?.source!=='worker')throw new Error('본인의 시험 조치 기록을 확인해 주세요.');
+    return this.instructionPhotos(id);
+  }
+  addWorkerInstructionPhoto(workerId,id,phase,name,data){this.workerInstructionPhotos(workerId,id);return this.addInstructionPhoto(id,phase,name,data);}
+  instructionPhotos(id){if(!this.instructionResult(id))throw new Error('시험 조치 기록을 먼저 저장해 주세요.');return this.db.prepare('SELECT id,phase,name,length(data) AS size FROM instruction_photos WHERE document_id=? ORDER BY id').all(Number(id));}
+  addInstructionPhoto(id,phase,name,data){
+    const existing=this.instructionPhotos(id);if(!['before','after'].includes(phase))throw new Error('사진 구분을 확인해 주세요.');
+    if(typeof name!=='string'||!name.trim()||name.length>200||/[\\/\x00-\x1f\x7f]/.test(name))throw new Error('사진 이름을 확인해 주세요.');
+    if(!(data instanceof Uint8Array)||!data.length||data.length>2*1024*1024)throw new Error('사진은 1바이트 이상 2MB 이하여야 합니다.');
+    const bytes=Buffer.from(data);if(!bytes.subarray(0,8).equals(Buffer.from('89504e470d0a1a0a','hex'))&&!bytes.subarray(0,3).equals(Buffer.from('ffd8ff','hex')))throw new Error('PNG 또는 JPEG 사진을 선택해 주세요.');
+    if(existing.length>=20)throw new Error('시험 사진은 20개까지 가능합니다.');
+    return this.db.prepare('INSERT INTO instruction_photos(document_id,phase,name,data) VALUES(?,?,?,?)').run(Number(id),phase,name,bytes).lastInsertRowid;
+  }
+  instructionPhoto(id,photoId){return this.db.prepare('SELECT * FROM instruction_photos WHERE document_id=? AND id=?').get(Number(id),Number(photoId))||null;}
+  deleteInstructionPhoto(id,photoId){if(!this.instructionPhoto(id,photoId))throw new Error('시험 사진을 찾을 수 없습니다.');this.db.prepare('DELETE FROM instruction_photos WHERE document_id=? AND id=?').run(Number(id),Number(photoId));}
+  attachments(id) {return this.db.prepare('SELECT id,name,category,length(data) AS size,created_at FROM attachments WHERE document_id=? ORDER BY id').all(Number(id));}
+  checklistSignature(id){const doc=this.document(id);if(!doc||doc.type!=='checklist')throw new Error('체크리스트를 확인해 주세요.');return this.db.prepare('SELECT signature,created_at FROM checklist_signatures WHERE document_id=?').get(Number(id))||null;}
+  saveChecklistSignature(id,signature){const doc=this.document(id);if(!doc||doc.type!=='checklist'||!['draft','rejected'].includes(doc.status))throw new Error('수정 가능한 체크리스트를 확인해 주세요.');const bytes=signatureBytes(signature);this.db.prepare('INSERT INTO checklist_signatures(document_id,signature) VALUES(?,?) ON CONFLICT(document_id) DO UPDATE SET signature=excluded.signature,created_at=CURRENT_TIMESTAMP').run(Number(id),bytes);}
+  attachment(id) {return this.db.prepare('SELECT * FROM attachments WHERE id=?').get(Number(id));}
+  addAttachment(id,name,data,category='general') {
+    const doc=this.document(id);
+    if (!doc || !['draft','rejected'].includes(doc.status)) throw new Error('임시저장 또는 반려된 문서에만 첨부할 수 있습니다.');
+    if (typeof name!=='string' || !name.trim() || name.length>200 || /[\\/\x00-\x1f\x7f]/.test(name)) throw new Error('파일 이름을 확인해 주세요.');
+    if (!(data instanceof Uint8Array) || data.length===0 || data.length>2*1024*1024) throw new Error('파일은 1바이트 이상 2MB 이하여야 합니다.');
+    if(!['general','plan_diagram'].includes(category)||category==='plan_diagram'&&doc.type!=='work_plan')throw new Error('첨부 구분을 확인해 주세요.');
+    if(category==='plan_diagram'){const bytes=Buffer.from(data);if(!bytes.subarray(0,8).equals(Buffer.from('89504e470d0a1a0a','hex'))&&!bytes.subarray(0,3).equals(Buffer.from('ffd8ff','hex')))throw new Error('계획도는 PNG 또는 JPEG를 선택해 주세요.');}
+    if (this.attachments(id).length>=20) throw new Error('첨부파일은 문서당 20개까지 가능합니다.');
+    this.db.exec('BEGIN IMMEDIATE');try{const attachmentId=this.db.prepare('INSERT INTO attachments(document_id,name,data,category) VALUES(?,?,?,?)').run(Number(id),name,data,category).lastInsertRowid;if(doc.type==='checklist')this.db.prepare('DELETE FROM checklist_signatures WHERE document_id=?').run(Number(id));this.db.exec('COMMIT');return attachmentId;}catch(error){this.db.exec('ROLLBACK');throw error;}
+  }
+  deleteAttachment(id) {
+    const attachment=this.attachment(id);
+    if(!attachment) throw new Error('첨부파일을 찾을 수 없습니다.');
+    const doc=this.document(attachment.document_id);
+    if(!doc || !['draft','rejected'].includes(doc.status)) throw new Error('임시저장 또는 반려된 문서의 첨부파일만 삭제할 수 있습니다.');
+    this.db.exec('BEGIN IMMEDIATE');try{this.db.prepare('DELETE FROM attachments WHERE id=?').run(Number(id));if(doc.type==='checklist')this.db.prepare('DELETE FROM checklist_signatures WHERE document_id=?').run(doc.id);this.db.exec('COMMIT');}catch(error){this.db.exec('ROLLBACK');throw error;}
+  }
+  updateDocument(id, input) {
+    const current = this.document(id);
+    if (!current) throw new Error('문서를 찾을 수 없습니다.');
+    if(current.type==='cost' && Array.isArray(JSON.parse(current.details).rows))throw new Error('월간 사용내역서는 보존된 내역을 변경할 수 없습니다. 새 문서를 작성해 주세요.');
+    if (current.status !== 'draft' && current.status !== 'rejected') throw new Error('임시저장 또는 반려된 문서만 수정할 수 있습니다.');
+    const d = recordInput(input);
+    if (d.siteId !== current.site_id || d.type !== current.type) throw new Error('문서의 현장과 유형은 변경할 수 없습니다.');
+    this.validatePlanEquipment(d);
+    this.validateSafetyMeeting(d,current);
+    this.validateInstructionRecipient(d);
+    if(d.type==='safety_log'){
+      const previous=JSON.parse(current.details).attendanceSnapshot;
+      if(current.date===d.date){if(previous)d.details.attendanceSnapshot=previous;}
+      else d.details.attendanceSnapshot={present:this.attendance(d.siteId,d.date).filter(row=>row.present).length,capturedAt:new Date().toISOString()};
+    }
+    this.db.exec('BEGIN IMMEDIATE');try{this.db.prepare('UPDATE documents SET title=?,date=?,body=?,details=?,updated_at=CURRENT_TIMESTAMP WHERE id=?').run(d.title,d.date,d.body,JSON.stringify(d.details),Number(id));if(d.type==='checklist')this.db.prepare('DELETE FROM checklist_signatures WHERE document_id=?').run(Number(id));this.db.exec('COMMIT');}catch(error){this.db.exec('ROLLBACK');throw error;}
+    return this.document(id);
+  }
+  validatePlanEquipment(doc) {
+    if(doc.type!=='work_plan')return;
+    if(doc.details.workers){const get=this.db.prepare('SELECT name,company FROM workers WHERE id=? AND site_id=?');doc.details.workers=doc.details.workers.map(row=>{const worker=get.get(row.workerId,doc.siteId);if(!worker)throw new Error('같은 현장의 작업자를 선택해 주세요.');return {...row,name:worker.name,company:worker.company};});}
+    const exists=this.db.prepare('SELECT 1 FROM equipment WHERE id=? AND site_id=?');
+    if((doc.details.equipmentIds||[]).some(id=>!exists.get(id,doc.siteId)))throw new Error('같은 현장의 장비를 선택해 주세요.');
+    if(doc.details.workPlaceId && !this.db.prepare('SELECT 1 FROM work_places WHERE id=? AND site_id=?').get(doc.details.workPlaceId,doc.siteId))throw new Error('같은 현장의 작업장소를 선택해 주세요.');
+    const rigging=this.db.prepare('SELECT 1 FROM rigging WHERE id=? AND site_id=?');
+    if((doc.details.riggingIds||[]).some(id=>!rigging.get(id,doc.siteId)))throw new Error('같은 현장의 장구를 선택해 주세요.');
+  }
+  validateSafetyMeeting(doc,current=null){
+    if(!['safety_meeting','work_council','joint_inspection'].includes(doc.type))return;
+    const previous=current&&current.date===doc.date?JSON.parse(current.details).workerSnapshot||[]:[],attendance=this.attendance(doc.siteId,doc.date);
+    doc.details.workerSnapshot=doc.details.workerIds.map(id=>{const old=previous.find(row=>row.id===id),worker=attendance.find(row=>row.id===id&&row.present);if(old)return old;if(!worker)throw new Error('같은 현장의 해당 날짜 출역자를 선택해 주세요.');return {id:worker.id,name:worker.name,company:worker.company,occupation:worker.occupation};});
+  }
+  validateInstructionRecipient(doc){
+    if(doc.type!=='instruction')return;
+    if(!doc.details.companyId){if(doc.details.recipientId)throw new Error('수신 협력사를 먼저 선택해 주세요.');return;}
+    const company=this.db.prepare('SELECT name,trade FROM companies WHERE id=? AND site_id=?').get(doc.details.companyId,doc.siteId);
+    if(!company)throw new Error('같은 현장의 협력사를 선택해 주세요.');
+    doc.details.companyName=company.name;doc.details.companyTrade=company.trade;
+    if(doc.details.recipientId){const worker=this.db.prepare('SELECT name FROM workers WHERE id=? AND site_id=? AND company=?').get(doc.details.recipientId,doc.siteId,company.name);if(!worker)throw new Error('선택한 현장과 협력사의 담당자를 확인해 주세요.');doc.details.recipient=worker.name;}
+  }
+  transition(id, action, opinion='') {
+    const doc = this.document(id);
+    if (!doc) throw new Error('문서를 찾을 수 없습니다.');
+    const next = transitions[doc.status]?.[action];
+    if (!next) throw new Error('현재 상태에서 수행할 수 없는 작업입니다.');
+    if(doc.type==='checklist'&&action==='submit'){const details=JSON.parse(doc.details),required={rain:[0,1,2,3,4,5,6],morning:[0,1,2,3,4,6],afternoon:[0,1,2,3,4,5],evening:[0,1,2,3,4,5,6,7,8]}[details.kind]||[];if(required.some(i=>!details.answers[i].answer))throw new Error('필수 체크리스트 답변을 모두 선택해 주세요.');}
+    if(typeof opinion!=='string' || opinion.length>2000)throw new Error('검토 의견을 확인해 주세요.');
+    opinion=opinion.trim();
+    if(doc.type==='risk' && action==='reject' && !opinion)throw new Error('반려 의견을 입력해 주세요.');
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      if(doc.type==='work_plan'&&action==='submit'){
+        const details=JSON.parse(doc.details),get=this.db.prepare('SELECT id,kind,model,capacity,manufacturer,registration,details FROM equipment WHERE id=? AND site_id=?');
+        if(details.equipmentIds!==undefined){details.equipmentSnapshot=details.equipmentIds.map(equipmentId=>{const item=get.get(equipmentId,doc.site_id);if(!item)throw new Error('같은 현장의 장비를 확인해 주세요.');return item;});this.db.prepare('UPDATE documents SET details=? WHERE id=?').run(JSON.stringify(details),Number(id));}
+      }
+      this.db.prepare('UPDATE documents SET status=?,updated_at=CURRENT_TIMESTAMP WHERE id=?').run(next, Number(id));
+      this.db.prepare('INSERT INTO events(document_id,action,from_status,to_status,opinion) VALUES(?,?,?,?,?)').run(Number(id),action,doc.status,next,opinion);
+      this.db.exec('COMMIT');
+    } catch (err) { this.db.exec('ROLLBACK'); throw err; }
+    return this.document(id);
+  }
+  events(id) { return this.db.prepare('SELECT * FROM events WHERE document_id=? ORDER BY id').all(Number(id)); }
+}
