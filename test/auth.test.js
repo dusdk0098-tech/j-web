@@ -648,8 +648,11 @@ test('관리자 인증 모드가 문서 API를 보호하고 로그아웃을 적�
     const dailyWages=`${base}/api/wages/daily?siteId=${site.id}&month=2024-02`;assert.equal((await fetch(dailyWages,{headers:{cookie:workerCookie}})).status,401);const dailyRows=await (await fetch(dailyWages,{headers:{cookie}})).json();assert.equal(dailyRows[0].days[0].estimated_pay,126);assert.deepEqual(await (await fetch(dailyWages+excluded,{headers:{cookie}})).json(),[]);
     assert.equal((await fetch(`${base}/api/worker/attendance?month=2024-13`,{headers:{cookie:workerCookie}})).status,400);
     assert.equal((await fetch(`${base}/api/worker/session`,{headers:{cookie:workerCookie}})).status,200);
-    const access=(session,siteId)=>fetch(`${base}/api/worker/access`,{method:'POST',headers:{cookie:session,'content-type':'application/json'},body:JSON.stringify({siteId})});
-    assert.equal((await access('',site.id)).status,401);assert.equal((await access(workerCookie,other.id)).status,400);assert.equal((await access(workerCookie,String(site.id))).status,400);assert.equal((await access(workerCookie,site.id)).status,200);
+    const access=(session,siteId,key=siteKey)=>fetch(`${base}/api/worker/access`,{method:'POST',headers:{cookie:session,'content-type':'application/json'},body:JSON.stringify({siteId,siteKey:key})});
+    assert.equal((await access('',site.id)).status,401);assert.equal((await access(workerCookie,other.id)).status,400);assert.equal((await access(workerCookie,String(site.id))).status,400);assert.equal((await access(workerCookie,site.id,'')).status,400);assert.equal((await access(workerCookie,site.id)).status,200);
+    const tokenAccess=token=>fetch(`${base}/api/worker/access`,{method:'POST',headers:{cookie:workerCookie,'content-type':'application/json'},body:JSON.stringify({siteId:site.id,token})});assert.equal((await tokenAccess('invalid')).status,400);assert.equal((await tokenAccess(inviteToken)).status,200);
+    const otherAccess=await (await post(`/api/sites/${other.id}/access`,{})).json(),otherKey=new URL(otherAccess.link).searchParams.get('site');assert.equal((await access(workerCookie,site.id,otherKey)).status,400);
+    assert.equal((await fetch(`${base}/api/worker/access`,{method:'POST',headers:{cookie:workerCookie,'content-type':'application/json'},body:JSON.stringify({siteId:site.id,siteKey:'invalid',token:inviteToken})})).status,400);
     assert.equal((await fetch(`${base}/api/sites`,{headers:{cookie:workerCookie}})).status,401);
     assert.equal((await fetch(`${base}/api/worker/logout`,{method:'POST',headers:{cookie:workerCookie}})).status,200);
     assert.equal((await fetch(`${base}/api/worker/session`,{headers:{cookie:workerCookie}})).status,401);
@@ -686,6 +689,7 @@ test('관리자 인증 모드가 문서 API를 보호하고 로그아웃을 적�
     const stableLogin=await fetch(`${base}/api/worker/login`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({siteKey,loginId:'worker1',password:'virtual-password-123'})});assert.equal(stableLogin.status,200);
     assert.equal((await fetch(`${base}/api/sites/${site.id}/access/rotate`,{method:'POST'})).status,401);
     const rotated=await (await post(`/api/sites/${site.id}/access/rotate`,{})).json(),newKey=new URL(rotated.link).searchParams.get('site');assert.notEqual(newKey,siteKey);
+    const stableCookie=stableLogin.headers.get('set-cookie').split(';')[0];assert.equal((await access(stableCookie,site.id,siteKey)).status,400);assert.equal((await access(stableCookie,site.id,newKey)).status,200);
     assert.equal((await fetch(manifestUrl)).status,404);assert.equal((await fetch(`${base}/worker.webmanifest?site=${encodeURIComponent(newKey)}`)).status,200);
     const rotatedPng=PNG.sync.read(Buffer.from(rotated.image.split(',')[1],'base64'));assert.equal(jsQR(new Uint8ClampedArray(rotatedPng.data),rotatedPng.width,rotatedPng.height)?.data,rotated.link);
     assert.equal((await fetch(`${base}/api/worker/site?key=${siteKey}`)).status,404);assert.equal((await fetch(`${base}/api/worker/session`,{headers:{cookie:stableLogin.headers.get('set-cookie').split(';')[0]}})).status,200);
