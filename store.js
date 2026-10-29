@@ -914,7 +914,7 @@ export class Store {
     if (!doc) throw new Error('문서를 찾을 수 없습니다.');
     const next = transitions[doc.status]?.[action];
     if (!next) throw new Error('현재 상태에서 수행할 수 없는 작업입니다.');
-    if(doc.type==='checklist'&&action==='submit'){const details=JSON.parse(doc.details),required={rain:[0,1,2,3,4,5,6],wind:[0,1,2,3,4,5,6,7,8],morning:[0,1,2,3,4,6],afternoon:[0,1,2,3,4,5],evening:[0,1,2,3,4,5,6,7,8]}[details.kind]||[];if(required.some(i=>!details.answers[i].answer))throw new Error('필수 체크리스트 답변을 모두 선택해 주세요.');}
+    if(doc.type==='checklist'&&action==='submit'){const details=JSON.parse(doc.details),required={rain:[0,1,2,3,4,5,6],wind:[0,1,2,3,4,5,6,7,8],thaw:Array.from({length:15},(_,i)=>i),heat:Array.from({length:8},(_,i)=>i),cold:Array.from({length:10},(_,i)=>i),morning:[0,1,2,3,4,6],afternoon:[0,1,2,3,4,5],evening:[0,1,2,3,4,5,6,7,8]}[details.kind]||[];if(required.some(i=>!details.answers[i].answer))throw new Error('필수 체크리스트 답변을 모두 선택해 주세요.');}
     if(typeof opinion!=='string' || opinion.length>2000)throw new Error('검토 의견을 확인해 주세요.');
     opinion=opinion.trim();
     if(doc.type==='risk' && action==='reject' && !opinion)throw new Error('반려 의견을 입력해 주세요.');

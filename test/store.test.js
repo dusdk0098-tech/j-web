@@ -206,6 +206,20 @@ test('강풍 대비 시험 점검은 아홉 판정과 첨부를 저장하고 제
   }finally{s.close();}
 });
 
+test('계절별 시험 점검은 문항과 선택지를 검증하고 모든 답변을 요구한다',()=>{
+  const s=new Store(':memory:');try{
+    const site=s.createSite({name:'가상 현장'});
+    for(const [kind,length] of [['thaw',15],['heat',8],['cold',10]]){
+      const answers=Array.from({length},()=>({answer:'O',note:''})),input={siteId:site.id,type:'checklist',title:'가상 계절 점검',date:'2041-01-01',details:{kind,answers}};
+      answers[length-1].answer='';const doc=s.createDocument(input);assert.throws(()=>s.transition(doc.id,'submit'),/필수/);
+      assert.throws(()=>s.updateDocument(doc.id,{...input,details:{kind,answers:answers.slice(1)}}),/문항/);
+      if(kind==='heat')for(const i of [0,1,3,4])assert.throws(()=>s.updateDocument(doc.id,{...input,details:{kind,answers:answers.map((a,j)=>j===i?{...a,answer:'해당없음'}:a)}}),/답변/);
+      for(const i of kind==='heat'?[2,5,6,7]:[0,length-1])answers[i].answer='해당없음';
+      s.updateDocument(doc.id,input);assert.equal(s.transition(doc.id,'submit').status,'pending');assert.deepEqual(JSON.parse(s.document(doc.id).details).answers,answers);
+    }
+  }finally{s.close();}
+});
+
 test('기본 서류 분류를 현장별로 저장하고 검색한다',()=>{
   const s=new Store(':memory:');try{const a=s.createSite({name:'가상 현장 A'}),b=s.createSite({name:'가상 현장 B'}),input={siteId:a.id,type:'basic',title:'가상 서류',date:'2026-10-29',details:{category:'안전·보건 조직도'}};const doc=s.createDocument(input);assert.equal(JSON.parse(doc.details).category,'안전·보건 조직도');assert.equal(s.documents(a.id,'basic','조직도').length,1);assert.equal(s.documents(b.id,'basic','조직도').length,0);assert.throws(()=>s.updateDocument(doc.id,{...input,details:{category:'가'.repeat(201)}}),/분류/);assert.equal(JSON.parse(s.document(doc.id).details).category,'안전·보건 조직도');}finally{s.close();}
 });
