@@ -1135,6 +1135,16 @@ test('교육 참가 확인은 현장과 날짜 및 교육 종류에 맞는 대�
   } finally {s.close();}
 });
 
+test('장비 점검자 시험 서명은 점검별로 저장하고 결재 당시 보존한다',()=>{
+  const s=new Store(':memory:');try{
+    const site=s.createSite({name:'가상 현장'}),asset=s.createEquipment({siteId:site.id,kind:'가상 장비',model:'가상 모델',capacity:'',manufacturer:'',registration:''}),doc=s.createDocument({siteId:site.id,type:'work_plan',title:'가상 계획',date:'2026-10-29',details:{equipmentIds:[asset.id]}}),png=new PNG({width:1,height:1});png.data[3]=255;const bytes=PNG.sync.write(png),signature=`data:image/png;base64,${bytes.toString('base64')}`,check={equipmentId:asset.id,date:'2026-10-29',items:[{name:'가상 항목',result:'적정'}]};
+    assert.throws(()=>s.addEquipmentCheck(doc.id,{...check,inspector:'가상 점검자'}),/함께/);assert.throws(()=>s.addEquipmentCheck(doc.id,{...check,signature}),/함께/);assert.throws(()=>s.addEquipmentCheck(doc.id,{...check,inspector:'가상 점검자',signature:'invalid'}),/서명/);assert.equal(s.equipmentChecks(doc.id).length,0);
+    const unsigned=s.addEquipmentCheck(doc.id,check),signed=s.addEquipmentCheck(doc.id,{...check,date:'2026-10-30',inspector:' 가상 점검자 ',signature});assert.equal(s.equipmentChecks(doc.id).find(row=>row.id===unsigned).has_signature,0);assert.equal(s.equipmentChecks(doc.id).find(row=>row.id===signed).inspector,'가상 점검자');assert.deepEqual(Buffer.from(s.equipmentCheckSignature(doc.id,signed)),bytes);assert.equal(s.equipmentCheckSignature(doc.id,unsigned),null);assert.equal(s.equipmentCheckSignature(99999,signed),null);
+    s.transition(doc.id,'submit');const frozen=s.document(doc.id),cycle=frozen.approval_cycle_id;assert.deepEqual(Buffer.from(s.reviewerLinkedSignature(frozen,'equipment-check',signed)),bytes);assert.deepEqual(Buffer.from(s.approvalCycleFile(doc.id,cycle,'equipment-check-signature',signed,0).data),bytes);assert.equal(s.reviewerLinkedSignature(frozen,'equipment-check',unsigned),null);
+    const later=s.addEquipmentCheck(doc.id,{...check,date:'2026-10-31',inspector:'다른 점검자',signature});assert.equal(s.reviewerLinkedSignature(frozen,'equipment-check',later),null);assert.equal(s.reviewerPayload(frozen).linked.checks.some(row=>row.id===later),false);
+  }finally{s.close();}
+});
+
 test('작업계획서의 기본 항목을 저장하고 잘못된 작업기간은 기존 값을 보존한다',()=>{
   const s=new Store(':memory:');
   try {

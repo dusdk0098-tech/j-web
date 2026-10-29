@@ -137,6 +137,8 @@ export class Store {
     if (!this.db.prepare('PRAGMA table_info(worker_training_checks)').all().some(c=>c.name==='rights_ack')) this.db.exec('ALTER TABLE worker_training_checks ADD COLUMN rights_ack TEXT');
     if (!this.db.prepare('PRAGMA table_info(equipment)').all().some(c=>c.name==='details')) this.db.exec("ALTER TABLE equipment ADD COLUMN details TEXT NOT NULL DEFAULT '{}'");
     if (!this.db.prepare('PRAGMA table_info(equipment_checks)').all().some(c=>c.name==='equipment_snapshot')) this.db.exec('ALTER TABLE equipment_checks ADD COLUMN equipment_snapshot TEXT');
+    if (!this.db.prepare('PRAGMA table_info(equipment_checks)').all().some(c=>c.name==='inspector')) this.db.exec('ALTER TABLE equipment_checks ADD COLUMN inspector TEXT');
+    if (!this.db.prepare('PRAGMA table_info(equipment_checks)').all().some(c=>c.name==='signature')) this.db.exec('ALTER TABLE equipment_checks ADD COLUMN signature BLOB');
     if (!this.db.prepare('PRAGMA table_info(instruction_results)').all().some(c=>c.name==='source')) this.db.exec("ALTER TABLE instruction_results ADD COLUMN source TEXT NOT NULL DEFAULT 'manager'");
     if (!this.db.prepare('PRAGMA table_info(instruction_results)').all().some(c=>c.name==='signature')) this.db.exec('ALTER TABLE instruction_results ADD COLUMN signature BLOB');
     const attendanceColumns=this.db.prepare('PRAGMA table_info(attendance)').all().map(c=>c.name);
@@ -485,8 +487,9 @@ export class Store {
   equipmentAttachment(siteId,equipmentId,id){return this.db.prepare('SELECT a.* FROM equipment_attachments a JOIN equipment e ON e.id=a.equipment_id WHERE e.site_id=? AND e.id=? AND a.id=?').get(Number(siteId),Number(equipmentId),Number(id)) || null;}
   equipmentChecks(documentId){
     const doc=this.document(documentId);if(!doc || doc.type!=='work_plan')throw new Error('작업계획서를 확인해 주세요.');
-    return this.db.prepare('SELECT id,equipment_id,date,items,created_at,equipment_snapshot FROM equipment_checks WHERE document_id=? ORDER BY date DESC,id DESC').all(Number(documentId));
+    return this.db.prepare('SELECT id,equipment_id,date,items,created_at,equipment_snapshot,inspector,signature IS NOT NULL AS has_signature FROM equipment_checks WHERE document_id=? ORDER BY date DESC,id DESC').all(Number(documentId));
   }
+  equipmentCheckSignature(documentId,checkId){return this.db.prepare('SELECT signature FROM equipment_checks WHERE document_id=? AND id=? AND signature IS NOT NULL').get(Number(documentId),Number(checkId))?.signature||null;}
   addEquipmentCheck(documentId,input){
     const doc=this.document(documentId);if(!doc || doc.type!=='work_plan')throw new Error('작업계획서를 확인해 주세요.');
     const details=JSON.parse(doc.details),equipmentId=Number(input.equipmentId),date=dateValue(input.date);
@@ -495,8 +498,9 @@ export class Store {
     if((details.periodFrom && date<details.periodFrom) || (details.periodTo && date>details.periodTo))throw new Error('점검일이 작업기간을 벗어났습니다.');
     if(!Array.isArray(input.items) || !input.items.length || input.items.length>100)throw new Error('점검 항목을 확인해 주세요.');
     const items=input.items.map(item=>{if(!item || typeof item!=='object' || Array.isArray(item) || !['적정','부적정','해당없음'].includes(item.result))throw new Error('점검 판정을 확인해 주세요.');return {name:text(item.name,'점검 항목',500),result:item.result};});
+    const inspector=input.inspector===undefined?null:text(input.inspector,'점검자',200),signature=input.signature===undefined?null:signatureBytes(input.signature);if((inspector===null)!==(signature===null))throw new Error('점검자와 시험 서명을 함께 입력해 주세요.');
     if(this.db.prepare('SELECT 1 FROM equipment_checks WHERE document_id=? AND equipment_id=? AND date=?').get(Number(documentId),equipmentId,date))throw new Error('해당 날짜의 시험 점검이 이미 있습니다.');
-    return this.db.prepare('INSERT INTO equipment_checks(document_id,equipment_id,date,items,equipment_snapshot) VALUES(?,?,?,?,?)').run(Number(documentId),equipmentId,date,JSON.stringify(items),JSON.stringify(equipment)).lastInsertRowid;
+    return this.db.prepare('INSERT INTO equipment_checks(document_id,equipment_id,date,items,equipment_snapshot,inspector,signature) VALUES(?,?,?,?,?,?,?)').run(Number(documentId),equipmentId,date,JSON.stringify(items),JSON.stringify(equipment),inspector,signature).lastInsertRowid;
   }
   deleteEquipmentAttachment(siteId,equipmentId,id){
     if(!this.equipmentAttachment(siteId,equipmentId,id))throw new Error('첨부파일을 찾을 수 없습니다.');
@@ -1047,6 +1051,7 @@ export class Store {
     if(kind==='author'&&doc.type==='tbm'&&Number(id)===0)return this.tbmSignature(doc.id)?.signature||null;
     if(kind==='author'&&doc.type==='joint_inspection'&&Number(id)===0)return this.jointSignature(doc.id)?.signature||null;
     if(kind==='author'&&['work_council','safety_meeting'].includes(doc.type)&&Number(id)===0)return this.meetingSignature(doc.id)?.signature||null;
+    if(kind==='equipment-check'&&doc.type==='work_plan')return this.equipmentCheckSignature(doc.id,id);
     return null;
   }
   captureApprovalCycle(doc){
@@ -1058,6 +1063,7 @@ export class Store {
       for(const item of linked.equipment)for(const file of item.files)save('equipment',item.info.id,file.id,this.liveReviewerLinkedFile(doc,'equipment',item.info.id,file.id));
       for(const item of linked.rigging)for(const file of item.files)save('rigging',item.info.id,file.id,this.liveReviewerLinkedFile(doc,'rigging',item.info.id,file.id));
       if(linked.place)for(const file of linked.place.files)save('place',linked.place.info.id,file.id,this.liveReviewerLinkedFile(doc,'place',linked.place.info.id,file.id));
+      for(const check of linked.checks)if(check.has_signature)save('equipment-check-signature',check.id,0,{data:this.liveReviewerLinkedSignature(doc,'equipment-check',check.id)});
     }
     if(linked?.type==='risk')for(const activity of linked.activities)for(const file of activity.files)save('risk',activity.id,file.id,this.liveReviewerLinkedFile(doc,'risk',activity.id,file.id));
     if(linked?.type==='permit')for(const extension of linked.extensions)save('permit-signature',extension.id,0,{data:this.liveReviewerLinkedSignature(doc,'permit',extension.id)});
