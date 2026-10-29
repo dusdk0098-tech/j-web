@@ -1,4 +1,5 @@
 import { riskScaleOptions, riskScore } from './risk-scale.js';
+import { selectBatchDocuments } from './batch-print.js';
 
 const $ = (s) => document.querySelector(s);
 const content = $('#content'), siteSelect = $('#site-select'), dialog = $('#dialog'), notice = $('#notice');
@@ -432,6 +433,17 @@ async function renderDetail(){
   $('#back').onclick=()=>{state.detail=null;render().catch(showError);};if($('#edit'))$('#edit').onclick=()=>editDocument(doc);$('#print').onclick=()=>window.print();
   document.querySelectorAll('[data-action]').forEach(b=>b.onclick=async()=>{const action=b.dataset.action;if(['approve','reject'].includes(action)){showDialog(action==='approve'?'승인 검토 의견':'반려 의견',`<label>의견<textarea name="opinion" maxlength="2000" ${doc.type==='risk'&&action==='reject'?'required':''}></textarea></label>`,d=>api(`/api/documents/${doc.id}/transition`,{method:'POST',body:JSON.stringify({action,opinion:d.opinion})}));return;}try{await api(`/api/documents/${doc.id}/transition`,{method:'POST',body:JSON.stringify({action})});flash('상태를 변경했습니다.');await render();}catch(e){showError(e);}});
 }
+async function showBatchPreview(ids){
+  const fragment=document.createDocumentFragment(),wasInert=document.body.inert;document.body.inert=true;content.style.visibility='hidden';
+  try{
+    for(const [index,id] of ids.entries()){
+      flash(`문서 미리보기를 준비 중입니다. ${index+1}/${ids.length}`);state.detail=id;await renderDetail();
+      const group=document.createElement('article');group.className='batch-document';for(const child of [...content.children])group.append(child.cloneNode(true));
+      group.querySelectorAll('button,canvas,input:not([type=checkbox]),select,textarea').forEach(node=>node.remove());group.querySelectorAll('input[type=checkbox]').forEach(input=>{input.disabled=true;});group.querySelectorAll('details').forEach(detail=>{detail.open=true;});group.querySelectorAll('[id]').forEach(node=>node.removeAttribute('id'));fragment.append(group);
+    }
+    state.detail=null;content.innerHTML='<section class="panel batch-controls"><h2>선택 문서 미리보기</h2><p>문서 상세 화면의 내용을 모았습니다. 첨부파일은 목록으로 표시되며 파일 내용은 별도로 확인하세요.</p><button type="button" id="batch-back">목록으로</button> <button type="button" id="batch-print">인쇄</button></section>';content.append(fragment);$('#batch-back').onclick=()=>render().catch(showError);$('#batch-print').onclick=()=>{if([...content.querySelectorAll('.batch-document img')].some(img=>!img.complete||!img.naturalWidth)){flash('이미지가 아직 준비되지 않았거나 불러오지 못했습니다. 확인 후 다시 시도해 주세요.',true);return;}window.print();};flash('선택 문서 미리보기가 준비되었습니다.');
+  }catch(error){state.detail=null;await render();throw error;}finally{content.style.visibility='';document.body.inert=wasInert;}
+}
 async function render(){
   await loadSites(); $('#heading').textContent=labels[state.page];$('#crumb').textContent=labels[state.page];
   document.querySelectorAll('[data-page]').forEach(b=>b.classList.toggle('selected',b.dataset.page===state.page));
@@ -686,6 +698,7 @@ async function render(){
   }
   const filtered=state.page==='approval'?docs.filter(d=>d.status==='pending'):docs;
   content.innerHTML=`<section class="panel"><div class="panel-head"><div><h2>${state.page==='approval'?'결재 대기 목록':'현장 안전 문서'}</h2><p class="muted">문서를 조회하고 처리 상태를 확인합니다.</p></div>${state.page==='documents'?'<button class="primary" id="new-doc">문서 작성</button>':''}</div>${searchBar(true)}${documentTable(filtered)}</section>`;
+  if(state.page==='documents'&&filtered.length){const table=content.querySelector('table'),head=document.createElement('th');head.textContent='선택';table.tHead.rows[0].insertBefore(head,table.tHead.rows[0].firstElementChild);[...table.tBodies[0].rows].forEach((row,i)=>{const input=document.createElement('input');input.type='checkbox';input.dataset.batchDocument=String(filtered[i].id);input.setAttribute('aria-label',`${filtered[i].title} 선택`);row.insertCell(0).append(input);});table.parentElement.before(Object.assign(document.createElement('div'),{className:'batch-controls',innerHTML:'<button type="button" id="batch-select-all">전체 선택</button> <button type="button" id="batch-preview">선택 문서 미리보기</button><p>한 번에 최대 20개까지 미리 볼 수 있습니다.</p>'}));$('#batch-select-all').onclick=()=>content.querySelectorAll('[data-batch-document]').forEach(input=>{input.checked=true;});$('#batch-preview').onclick=async()=>{try{const ids=selectBatchDocuments(filtered,[...content.querySelectorAll('[data-batch-document]:checked')].map(input=>input.dataset.batchDocument));await showBatchPreview(ids);}catch(error){showError(error);}};}
   if($('#new-doc'))$('#new-doc').onclick=()=>editDocument();wireSearch();wireDocLinks();
 }
 try {const session=await api('/api/session');if(session.enabled){const logout=document.createElement('button');logout.className='outline';logout.textContent='로그아웃';logout.onclick=async()=>{await api('/api/logout',{method:'POST',body:'{}'});location.assign('/login');};document.querySelector('.top').append(logout);}state.types=await api('/api/types'); await render();} catch(e) {showError(e);}

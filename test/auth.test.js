@@ -88,6 +88,7 @@ test('관리자 인증 모드가 문서 API를 보호하고 로그아웃을 적�
     const base=`http://127.0.0.1:${port}`;
     assert.equal((await fetch(`${base}/api/sites`)).status,401);
     const scaleModule=await fetch(`${base}/risk-scale.js`);assert.equal(scaleModule.status,200);assert.match(scaleModule.headers.get('content-type'),/text\/javascript/);assert.match(await scaleModule.text(),/export function riskScaleOptions/);
+    const batchModule=await fetch(`${base}/batch-print.js`);assert.equal(batchModule.status,200);assert.match(batchModule.headers.get('content-type'),/text\/javascript/);assert.match(await batchModule.text(),/export function selectBatchDocuments/);
     assert.equal((await fetch(`${base}/api/join?token=invalid`)).status,404);
     const login=await fetch(`${base}/api/login`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({password:'test-password-12345'})});
     assert.equal(login.status,200);const cookie=login.headers.get('set-cookie').split(';')[0];
