@@ -594,6 +594,7 @@ test('관리자 인증 모드가 문서 API를 보호하고 로그아웃을 적�
     assert.equal((await dailyTraining(['tbm','meeting'],true)).status,200);
     assert.equal((await dailyTraining(['tbm'],true)).status,200);
     assert.deepEqual((await (await fetch(`${base}/api/worker/daily-training`,{headers:{cookie:workerCookie}})).json()).map(row=>row.kind),['meeting','tbm']);
+    const dailyReport=`${base}/api/education/daily-report?siteId=${site.id}&from=${today}&to=${today}`;assert.equal((await fetch(dailyReport)).status,401);assert.equal((await fetch(dailyReport,{headers:{cookie:workerCookie}})).status,401);const dailyStatsRows=await (await fetch(dailyReport,{headers:{cookie}})).json();assert.deepEqual(dailyStatsRows.map(row=>[row.kind,row.count,row.signed_count]),[['meeting',1,1],['tbm',1,1]]);assert.equal((await fetch(`${base}/api/education/daily-report?siteId=${site.id}&from=2024-02-30&to=${today}`,{headers:{cookie}})).status,400);
     const dailySignature=`${base}/api/sites/${site.id}/daily-training/${own.id}/signature?date=${today}&kind=tbm`;
     assert.equal((await fetch(dailySignature,{headers:{cookie:workerCookie}})).status,401);
     assert.deepEqual(Buffer.from(await (await fetch(dailySignature,{headers:{cookie}})).arrayBuffer()),photo);

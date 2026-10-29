@@ -670,6 +670,10 @@ export class Store {
     const rows=this.db.prepare(query).all(siteId,workerId,...kinds,offset),hasMore=rows.length>100;
     return {items:rows.slice(0,100),nextOffset:hasMore?offset+100:null};
   }
+  dailyTrainingReport(siteId,from,to){
+    from=dateValue(from);to=dateValue(to);if(from>to)throw new Error('조회 시작일은 종료일보다 늦을 수 없습니다.');siteId=Number(siteId);if(!this.db.prepare('SELECT 1 FROM sites WHERE id=?').get(siteId))throw new Error('현장을 선택해 주세요.');
+    return this.db.prepare("SELECT w.id,w.name,w.company,w.category,NULLIF(json_extract(j.profile,'$.birthDate'),'') AS birth_date,c.kind,COUNT(*) AS count,SUM(c.signature IS NOT NULL) AS signed_count,json_group_array(c.date) AS dates FROM worker_daily_training c JOIN workers w ON w.id=c.worker_id LEFT JOIN join_acknowledgements j ON j.worker_id=w.id WHERE w.site_id=? AND c.date BETWEEN ? AND ? GROUP BY w.id,c.kind ORDER BY w.name,w.id,c.kind").all(siteId,from,to).map(row=>({...row,dates:JSON.parse(row.dates).sort()}));
+  }
   educationReport(siteId,from,to){
     from=dateValue(from);to=dateValue(to);if(from>to)throw new Error('조회 시작일은 종료일보다 늦을 수 없습니다.');
     return this.db.prepare("SELECT w.id,w.name,w.company,w.category,NULLIF(json_extract(j.profile,'$.birthDate'),'') AS birth_date,d.type,COALESCE(NULLIF(json_extract(d.details,'$.kind'),''),'unspecified') AS kind,COUNT(*) AS count,json_group_array(json_object('id',d.id,'date',d.date,'title',d.title)) AS documents FROM worker_training_checks c JOIN workers w ON w.id=c.worker_id LEFT JOIN join_acknowledgements j ON j.worker_id=w.id JOIN documents d ON d.id=c.document_id AND d.site_id=w.site_id WHERE w.site_id=? AND d.date BETWEEN ? AND ? AND d.type IN ('tbm','education') AND d.status='approved' GROUP BY w.id,d.type,kind ORDER BY w.name,w.id,d.type,kind").all(Number(siteId),from,to).map(row=>({...row,documents:JSON.parse(row.documents)}));
