@@ -1365,6 +1365,17 @@ test('이전 기타 활동은 자료 구분 열 추가 후 미기록으로 보�
   }finally{s.close();rmSync(directory,{recursive:true,force:true});}
 });
 
+test('주간 점검 시험 서명은 변경 시 초기화되고 결재 요청 당시 사본은 보존된다',()=>{
+  const s=new Store(':memory:');try{
+    const site=s.createSite({name:'가상 현장'}),doc=s.createDocument({siteId:site.id,type:'risk',title:'가상 평가',date:'2026-10-29'}),other=s.createDocument({siteId:site.id,type:'risk',title:'다른 평가',date:'2026-10-29'}),worker=s.createWorker({siteId:site.id,name:'가상 근로자',category:'직영',company:'가상 업체',occupation:'가상 직종'}),input={kind:'weekly',date:'2026-10-30',periodFrom:'2026-10-01',periodTo:'2026-10-31',place:'가상 장소',host:'가상 주관',participants:'',content:'가상 내용',workerIds:[worker.id]},id=s.saveRiskActivity(doc.id,input),png=new PNG({width:1,height:1});png.data[3]=255;const bytes=PNG.sync.write(png),signature=`data:image/png;base64,${bytes.toString('base64')}`;
+    assert.throws(()=>s.saveRiskActivitySignature(other.id,id,signature),/주간 점검/);assert.throws(()=>s.saveRiskActivitySignature(doc.id,id,'invalid'),/서명/);s.db.prepare("UPDATE risk_activities SET place='' WHERE id=?").run(id);assert.throws(()=>s.saveRiskActivitySignature(doc.id,id,signature),/필수 내용/);s.db.prepare('UPDATE risk_activities SET place=? WHERE id=?').run(input.place,id);s.saveRiskActivitySignature(doc.id,id,signature);assert.deepEqual(Buffer.from(s.riskActivitySignature(doc.id,id).signature),bytes);
+    assert.throws(()=>s.saveRiskActivity(doc.id,{...input,place:''},id),/장소/);assert.ok(s.riskActivitySignature(doc.id,id));s.saveRiskActivity(doc.id,{...input,content:'수정'},id);assert.equal(s.riskActivitySignature(doc.id,id),null);
+    s.saveRiskActivitySignature(doc.id,id,signature);const photo=s.addRiskActivityPhoto(doc.id,id,'가상.png',bytes);assert.equal(s.riskActivitySignature(doc.id,id),null);s.saveRiskActivitySignature(doc.id,id,signature);s.deleteRiskActivityPhoto(doc.id,id,photo);assert.equal(s.riskActivitySignature(doc.id,id),null);
+    s.saveRiskActivitySignature(doc.id,id,signature);s.db.exec("CREATE TRIGGER block_risk_signature_delete BEFORE DELETE ON risk_activity_signatures BEGIN SELECT RAISE(ABORT,'서명 초기화 실패'); END");assert.throws(()=>s.saveRiskActivity(doc.id,{...input,content:'실패'},id),/서명 초기화 실패/);assert.equal(s.riskActivities(doc.id)[0].content,'수정');assert.throws(()=>s.addRiskActivityPhoto(doc.id,id,'가상.png',bytes),/서명 초기화 실패/);assert.deepEqual(s.riskActivityPhotos(doc.id,id),[]);assert.ok(s.riskActivitySignature(doc.id,id));s.db.exec('DROP TRIGGER block_risk_signature_delete');
+    s.transition(doc.id,'submit');const frozen=s.document(doc.id),cycle=frozen.approval_cycle_id;assert.equal(s.reviewerPayload(frozen).linked.activities[0].has_signature,1);assert.deepEqual(Buffer.from(s.reviewerLinkedSignature(frozen,'risk-activity',id)),bytes);s.saveRiskActivity(doc.id,input,id);assert.equal(s.riskActivitySignature(doc.id,id),null);assert.deepEqual(Buffer.from(s.approvalCycleFile(doc.id,cycle,'risk-activity-signature',id,0).data),bytes);
+  }finally{s.close();}
+});
+
 test('주간 점검은 작성 방식별 필수 항목과 날짜 변경 시 참석자를 확인한다',()=>{
   const s=new Store(':memory:');try{
     const site=s.createSite({name:'가상 현장'}),doc=s.createDocument({siteId:site.id,type:'risk',title:'가상 평가',date:'2026-10-29'}),worker=s.createWorker({siteId:site.id,name:'가상 근로자',category:'직영',company:'가상 업체',occupation:'가상 직종'}),input={kind:'weekly',date:'2026-10-30',periodFrom:'2026-10-01',periodTo:'2026-10-31',place:'가상 장소',host:'가상 주관',participants:'',content:'가상 내용',workerIds:[worker.id]};

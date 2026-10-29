@@ -111,6 +111,7 @@ export class Store {
       CREATE TABLE IF NOT EXISTS permit_checks (id INTEGER PRIMARY KEY,document_id INTEGER NOT NULL REFERENCES documents(id),date TEXT NOT NULL,items TEXT NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
       CREATE TABLE IF NOT EXISTS permit_extensions (id INTEGER PRIMARY KEY,document_id INTEGER NOT NULL REFERENCES documents(id),date_from TEXT NOT NULL,date_to TEXT NOT NULL,time_from TEXT NOT NULL,time_to TEXT NOT NULL,signature BLOB NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
       CREATE TABLE IF NOT EXISTS risk_activity_photos (id INTEGER PRIMARY KEY, activity_id INTEGER NOT NULL REFERENCES risk_activities(id) ON DELETE CASCADE, name TEXT NOT NULL,data BLOB NOT NULL);
+      CREATE TABLE IF NOT EXISTS risk_activity_signatures (activity_id INTEGER PRIMARY KEY REFERENCES risk_activities(id) ON DELETE CASCADE,signature BLOB NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
       CREATE TABLE IF NOT EXISTS hazard_reports (id INTEGER PRIMARY KEY,site_id INTEGER NOT NULL REFERENCES sites(id),title TEXT NOT NULL,body TEXT NOT NULL,reporter TEXT NOT NULL,photo BLOB,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);`);
     if (!this.db.prepare('PRAGMA table_info(documents)').all().some(c=>c.name==='details')) this.db.exec("ALTER TABLE documents ADD COLUMN details TEXT NOT NULL DEFAULT '{}'");
     if (!this.db.prepare('PRAGMA table_info(meal_checks)').all().some(c=>c.name==='tax_snapshot')) this.db.exec('ALTER TABLE meal_checks ADD COLUMN tax_snapshot INTEGER CHECK(tax_snapshot IS NULL OR tax_snapshot BETWEEN 0 AND 999999999)');
@@ -1058,6 +1059,7 @@ export class Store {
     return null;
   }
   liveReviewerLinkedSignature(doc,kind,id){
+    if(kind==='risk-activity'&&doc.type==='risk')return this.riskActivitySignature(doc.id,id)?.signature||null;
     if(kind==='permit'&&doc.type==='permit')return this.permitExtensionSignature(doc.id,id);
     if(kind==='training'&&['tbm','education'].includes(doc.type))return this.documentTrainingSignature(doc.id,id);
     if(kind==='author'&&doc.type==='tbm'&&Number(id)===0)return this.tbmSignature(doc.id)?.signature||null;
@@ -1077,7 +1079,7 @@ export class Store {
       if(linked.place)for(const file of linked.place.files)save('place',linked.place.info.id,file.id,this.liveReviewerLinkedFile(doc,'place',linked.place.info.id,file.id));
       for(const check of linked.checks)if(check.has_signature)save('equipment-check-signature',check.id,0,{data:this.liveReviewerLinkedSignature(doc,'equipment-check',check.id)});
     }
-    if(linked?.type==='risk')for(const activity of linked.activities)for(const file of activity.files)save('risk',activity.id,file.id,this.liveReviewerLinkedFile(doc,'risk',activity.id,file.id));
+    if(linked?.type==='risk')for(const activity of linked.activities){for(const file of activity.files)save('risk',activity.id,file.id,this.liveReviewerLinkedFile(doc,'risk',activity.id,file.id));if(activity.has_signature)save('risk-activity-signature',activity.id,0,{data:this.liveReviewerLinkedSignature(doc,'risk-activity',activity.id)});}
     if(linked?.type==='permit')for(const extension of linked.extensions)save('permit-signature',extension.id,0,{data:this.liveReviewerLinkedSignature(doc,'permit',extension.id)});
     if(linked?.type==='training')for(const worker of linked.signedWorkers)save('training-signature',worker.id,0,{data:this.liveReviewerLinkedSignature(doc,'training',worker.id)});
     if(['training','joint','meeting'].includes(linked?.type)&&linked.authorSignature)save('author-signature',0,0,{data:this.liveReviewerLinkedSignature(doc,'author',0)});
@@ -1123,7 +1125,9 @@ export class Store {
     return this.db.prepare('INSERT INTO permit_extensions(document_id,date_from,date_to,time_from,time_to,signature) VALUES(?,?,?,?,?,?)').run(Number(documentId),from,to,timeFrom,timeTo,signature).lastInsertRowid;
   }
   deletePermitExtension(documentId,id){this.permitExtensions(documentId);if(!this.db.prepare('DELETE FROM permit_extensions WHERE id=? AND document_id=?').run(Number(id),Number(documentId)).changes)throw new Error('시험 연장 기록을 찾을 수 없습니다.');}
-  riskActivities(documentId){const doc=this.document(documentId);if(!doc||doc.type!=='risk')throw new Error('위험성평가를 확인해 주세요.');return this.db.prepare('SELECT * FROM risk_activities WHERE document_id=? ORDER BY date DESC,id DESC').all(Number(documentId));}
+  riskActivities(documentId){const doc=this.document(documentId);if(!doc||doc.type!=='risk')throw new Error('위험성평가를 확인해 주세요.');return this.db.prepare('SELECT a.*,EXISTS(SELECT 1 FROM risk_activity_signatures s WHERE s.activity_id=a.id) AS has_signature FROM risk_activities a WHERE a.document_id=? ORDER BY a.date DESC,a.id DESC').all(Number(documentId));}
+  riskActivitySignature(documentId,id){return this.db.prepare('SELECT s.signature,s.created_at FROM risk_activity_signatures s JOIN risk_activities a ON a.id=s.activity_id JOIN documents d ON d.id=a.document_id WHERE d.id=? AND d.type=\'risk\' AND a.id=?').get(Number(documentId),Number(id))||null;}
+  saveRiskActivitySignature(documentId,id,signature){const activity=this.db.prepare("SELECT a.* FROM risk_activities a JOIN documents d ON d.id=a.document_id WHERE d.id=? AND d.type='risk' AND a.id=? AND a.kind='weekly' AND a.entry_mode='manual'").get(Number(documentId),Number(id));if(!activity||!activity.period_from||!activity.period_to||!activity.place||!activity.host||!activity.content||!JSON.parse(activity.worker_snapshot).length)throw new Error('직접 작성한 주간 점검의 필수 내용을 확인해 주세요.');const bytes=signatureBytes(signature);this.db.prepare('INSERT INTO risk_activity_signatures(activity_id,signature) VALUES(?,?) ON CONFLICT(activity_id) DO UPDATE SET signature=excluded.signature,created_at=CURRENT_TIMESTAMP').run(activity.id,bytes);}
   saveRiskActivity(documentId,input,id=null){
     this.riskActivities(documentId);
     if(!['meeting','weekly','education','other'].includes(input.kind))throw new Error('시험 활동 종류를 확인해 주세요.');
@@ -1140,7 +1144,7 @@ export class Store {
       const doc=this.document(documentId),lookup=this.db.prepare('SELECT id,name,company FROM workers WHERE id=? AND site_id=?'),previous=current&&current.date!==date?[]:JSON.parse(workers);workers=JSON.stringify(input.workerIds.map(workerId=>{const worker=lookup.get(workerId,doc.site_id);if(!worker)throw new Error('같은 현장의 참석자를 선택해 주세요.');return previous.find(item=>item.id===workerId)||worker;}));}
     if(input.kind==='weekly'&&(!from||!to))throw new Error('주간 점검의 관리기간을 입력해 주세요.');
     if(input.kind==='weekly'&&mode==='manual'&&(!fields.place||!fields.host||!fields.content||!JSON.parse(workers).length))throw new Error('주간 점검의 장소·주관·참석자·내용을 확인해 주세요.');
-    if(id!==null){this.db.prepare('UPDATE risk_activities SET kind=?,date=?,place=?,host=?,participants=?,content=?,period_from=?,period_to=?,entry_mode=?,worker_snapshot=?,classification=? WHERE id=? AND document_id=?').run(input.kind,date,fields.place,fields.host,fields.participants,fields.content,from,to,mode,workers,input.kind==='other'?classification.trim():'',Number(id),Number(documentId));return Number(id);}
+    if(id!==null){this.db.exec('SAVEPOINT update_risk_activity');try{this.db.prepare('UPDATE risk_activities SET kind=?,date=?,place=?,host=?,participants=?,content=?,period_from=?,period_to=?,entry_mode=?,worker_snapshot=?,classification=? WHERE id=? AND document_id=?').run(input.kind,date,fields.place,fields.host,fields.participants,fields.content,from,to,mode,workers,input.kind==='other'?classification.trim():'',Number(id),Number(documentId));this.db.prepare('DELETE FROM risk_activity_signatures WHERE activity_id=?').run(Number(id));this.db.exec('RELEASE update_risk_activity');return Number(id);}catch(error){this.db.exec('ROLLBACK TO update_risk_activity');this.db.exec('RELEASE update_risk_activity');throw error;}}
     return this.db.prepare('INSERT INTO risk_activities(document_id,kind,date,place,host,participants,content,period_from,period_to,entry_mode,worker_snapshot,classification) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)').run(Number(documentId),input.kind,date,fields.place,fields.host,fields.participants,fields.content,from,to,mode,workers,input.kind==='other'?classification.trim():'').lastInsertRowid;
   }
   deleteRiskActivity(documentId,id){this.riskActivities(documentId);if(!this.db.prepare('DELETE FROM risk_activities WHERE id=? AND document_id=?').run(Number(id),Number(documentId)).changes)throw new Error('시험 활동을 찾을 수 없습니다.');}
@@ -1151,10 +1155,10 @@ export class Store {
     if(!(data instanceof Uint8Array)||!data.length||data.length>2*1024*1024)throw new Error('사진은 1바이트 이상 2MB 이하여야 합니다.');
     const activity=this.db.prepare('SELECT kind,entry_mode FROM risk_activities WHERE id=? AND document_id=?').get(Number(id),Number(documentId));if(!['photo','minutes','material'].includes(purpose)||purpose==='minutes'&&(activity.kind!=='weekly'||activity.entry_mode!=='scan')||purpose==='material'&&activity.kind!=='other')throw new Error('첨부 구분을 확인해 주세요.');
     const bytes=Buffer.from(data),image=bytes.subarray(0,8).equals(Buffer.from('89504e470d0a1a0a','hex'))||bytes.subarray(0,3).equals(Buffer.from('ffd8ff','hex'));if(purpose!=='material'&&!image&&!(purpose==='minutes'&&bytes.subarray(0,5).toString()==='%PDF-'))throw new Error('PNG 또는 JPEG 사진이나 허용된 PDF 회의록을 선택해 주세요.');
-    return this.db.prepare('INSERT INTO risk_activity_photos(activity_id,name,data,purpose) VALUES(?,?,?,?)').run(Number(id),name,bytes,purpose).lastInsertRowid;
+    this.db.exec('SAVEPOINT add_risk_activity_file');try{const fileId=this.db.prepare('INSERT INTO risk_activity_photos(activity_id,name,data,purpose) VALUES(?,?,?,?)').run(Number(id),name,bytes,purpose).lastInsertRowid;this.db.prepare('DELETE FROM risk_activity_signatures WHERE activity_id=?').run(Number(id));this.db.exec('RELEASE add_risk_activity_file');return fileId;}catch(error){this.db.exec('ROLLBACK TO add_risk_activity_file');this.db.exec('RELEASE add_risk_activity_file');throw error;}
   }
   riskActivityPhoto(documentId,id,photoId){return this.db.prepare('SELECT p.* FROM risk_activity_photos p JOIN risk_activities a ON a.id=p.activity_id WHERE a.document_id=? AND a.id=? AND p.id=?').get(Number(documentId),Number(id),Number(photoId))||null;}
-  deleteRiskActivityPhoto(documentId,id,photoId){if(!this.riskActivityPhoto(documentId,id,photoId))throw new Error('시험 사진을 찾을 수 없습니다.');this.db.prepare('DELETE FROM risk_activity_photos WHERE id=?').run(Number(photoId));}
+  deleteRiskActivityPhoto(documentId,id,photoId){if(!this.riskActivityPhoto(documentId,id,photoId))throw new Error('시험 사진을 찾을 수 없습니다.');this.db.exec('SAVEPOINT delete_risk_activity_file');try{this.db.prepare('DELETE FROM risk_activity_photos WHERE id=?').run(Number(photoId));this.db.prepare('DELETE FROM risk_activity_signatures WHERE activity_id=?').run(Number(id));this.db.exec('RELEASE delete_risk_activity_file');}catch(error){this.db.exec('ROLLBACK TO delete_risk_activity_file');this.db.exec('RELEASE delete_risk_activity_file');throw error;}}
   instructionResult(id){const doc=this.document(id);if(!doc||doc.type!=='instruction')throw new Error('작업지시서를 확인해 주세요.');return this.db.prepare('SELECT date,actor,content,created_at,source,signature IS NOT NULL AS has_signature FROM instruction_results WHERE document_id=?').get(Number(id))||null;}
   instructionSignature(id){return this.db.prepare('SELECT signature FROM instruction_results WHERE document_id=? AND signature IS NOT NULL').get(Number(id))?.signature || null;}
   addInstructionResult(id,input,source='manager'){
