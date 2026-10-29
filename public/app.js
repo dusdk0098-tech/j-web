@@ -1,6 +1,7 @@
 import { riskScaleOptions, riskScore } from './risk-scale.js';
 import { selectBatchDocuments } from './batch-print.js';
 import { siteQrSession } from './site-qr.js';
+import { selectTbmSources, mergeTbmSource } from './tbm-sources.js';
 
 const $ = (s) => document.querySelector(s);
 const content = $('#content'), siteSelect = $('#site-select'), dialog = $('#dialog'), notice = $('#notice');
@@ -174,7 +175,30 @@ async function editDocument(doc=null) {
   const renderFields=()=>{
     const fields=select.value==='daily_report'?dailyFields:null;
     $('#daily-fields').innerHTML=fields?Object.entries(fields).map(([key,label])=>field(key,label,details[key]||'','text',false)).join(''):'';
-    if(select.value==='tbm'){$('#daily-fields').innerHTML=`<p class="muted">교육 내용은 위의 내용란에 입력합니다.</p>${Object.entries(tbmFields).map(([key,label])=>`<label>${esc(label)}<textarea name="tbm_${key}" maxlength="4000">${esc(details[key]||'')}</textarea></label>`).join('')}`;return;}
+    if(select.value==='tbm'){
+      const container=$('#daily-fields');
+      container.innerHTML=`<p class="muted">교육 내용은 위의 내용란에 입력합니다. 가상 자료의 빈 항목만 불러오며 첨부와 서명은 복사하지 않습니다.</p><div class="action-row"><button type="button" data-tbm-source="tbm">이전 TBM 조회</button><button type="button" data-tbm-source="risk">위험성평가 조회</button><button type="button" data-tbm-source="notice">공지 조회</button></div><div id="tbm-source-list" aria-live="polite"></div>${Object.entries(tbmFields).map(([key,label])=>`<label>${esc(label)}<textarea name="tbm_${key}" maxlength="4000">${esc(details[key]||'')}</textarea></label>`).join('')}`;
+      const list=container.querySelector('#tbm-source-list'),dateInput=$('#dialog-form input[name=date]');let request=0;
+      container.querySelectorAll('[data-tbm-source]').forEach(button=>button.onclick=async()=>{
+        const sequence=++request;
+        try{
+          const date=dateInput.value,type=button.dataset.tbmSource;if(!date)throw Error('작성일을 먼저 선택해 주세요.');
+          const params=new URLSearchParams({siteId:String(siteId),type,to:date});
+          const items=selectTbmSources(await api(`/api/documents?${params}`),type,siteId,date,doc?.id);
+          const valid=()=>sequence===request&&list.isConnected&&dialog.open&&state.siteId===siteId&&dateInput.value===date&&select.value==='tbm';
+          if(!valid())return;
+          list.innerHTML=items.length?items.map((item,i)=>`<p>${esc(item.date)} · ${esc(item.title)} · ${esc(statusLabels[item.status])} <button type="button" data-tbm-copy="${i}">빈 항목에 적용</button></p>`).join(''):'<p>조건에 맞는 가상 자료가 없습니다.</p>';
+          list.querySelectorAll('[data-tbm-copy]').forEach(copy=>copy.onclick=()=>{try{
+            if(!valid()){list.textContent='현장이나 날짜가 변경되었습니다. 다시 조회해 주세요.';return;}
+            const inputs={body:$('#dialog-form textarea[name=body]'),...Object.fromEntries(Object.keys(tbmFields).map(key=>[key,container.querySelector(`[name="tbm_${key}"]`)]))};
+            const result=mergeTbmSource(Object.fromEntries(Object.entries(inputs).map(([key,input])=>[key,input.value])),items[Number(copy.dataset.tbmCopy)]);
+            for(const key of result.copied)inputs[key].value=result.values[key];
+            $('#dialog-error').textContent=result.copied.length?'빈 항목을 불러왔습니다. 내용을 확인해 주세요.':'적용할 빈 항목이 없습니다.';
+          }catch(error){$('#dialog-error').textContent=error.message;}});
+        }catch(error){if(sequence===request&&list.isConnected)$('#dialog-error').textContent=error.message;}
+      });
+      return;
+    }
     if(select.value==='basic'){$('#daily-fields').innerHTML=`<label>서류 분류<input name="basicCategory" list="basic-categories" value="${esc(details.category||'')}" maxlength="200"></label><datalist id="basic-categories">${basicCategories.map(name=>`<option value="${esc(name)}"></option>`).join('')}</datalist><label><input type="checkbox" name="basicShared" ${details.shared?'checked':''}> 승인 후 모든 가상 현장에 공유</label><p class="muted">승인된 시험 문서와 첨부만 다른 현장에서 조회할 수 있습니다. 문서를 저장한 뒤 파일을 첨부할 수 있습니다.</p>`;return;}
     if(select.value==='checklist'){
       $('#daily-fields').innerHTML=`<label>체크리스트 종류<select name="checklistKind"><option value="">미선택</option>${[['rain','우천시 체크리스트'],['wind','강풍 대비 점검'],['thaw','해빙기 점검'],['heat','고온기 점검'],['cold','저온기 점검'],['wet_season','장마 대비 점검'],['heavy_rain','집중호우 대비 점검'],['electrical','전기 안전 점검'],['fire','화재 예방 점검'],['formwork','거푸집 지지 점검'],['falling','낙하물 예방 점검'],['confined','밀폐 공간 점검'],['excavation','굴착 안전 점검'],['semiannual','반기 안전 관리 점검'],['morning','일일 안전 점검 (07시)'],['afternoon','일일 안전 점검 (13시)'],['evening','일일 안전 점검 (18시)']].map(([value,label])=>`<option value="${value}" ${details.kind===value?'selected':''}>${label}</option>`).join('')}</select></label><div id="rain-checks"></div>`;
