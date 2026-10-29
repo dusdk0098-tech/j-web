@@ -74,6 +74,7 @@ export function recordInput(input) {
     }
     if(type==='joint_inspection'){
       for(const key of ['improvements','result','other']){if(typeof (value[key]??'')!=='string'||(value[key]??'').length>2000)throw new Error('합동 점검 항목을 확인해 주세요.');details[key]=(value[key]??'').trim();}
+      if(value.managerIds!==undefined){const managers=value.managerIds;if(!Array.isArray(managers)||managers.length>100||managers.some(id=>!Number.isSafeInteger(id)||id<1)||new Set(managers).size!==managers.length||managers.some(id=>ids.includes(id)))throw new Error('관리자 참석자를 확인해 주세요.');details.managerIds=managers;}
       const items=value.items??[];if(!Array.isArray(items)||items.length>100)throw new Error('점검 항목을 확인해 주세요.');
       details.items=items.map(item=>{if(!item||typeof item.name!=='string'||!item.name.trim()||item.name.length>500||!['양호','보완사항','N/A'].includes(item.result))throw new Error('점검 항목을 확인해 주세요.');return {name:item.name.trim(),result:item.result};});
     }

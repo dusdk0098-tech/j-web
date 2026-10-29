@@ -547,6 +547,17 @@ test('합동 안전점검은 판정과 출역자를 검증하고 잘못된 수�
   }finally{s.close();}
 });
 
+test('합동 점검은 가상 관리자를 근로자와 구분하고 선택 당시 정보를 보존한다',()=>{
+  const s=new Store(':memory:');try{
+    const site=s.createSite({name:'가상 현장'}),other=s.createSite({name:'다른 현장'}),make=(siteId,name,category)=>s.createWorker({siteId,name,category,company:'가상 업체',occupation:'가상 직종'}),manager=make(site.id,'가상 관리자','현장관리자'),worker=make(site.id,'가상 근로자','직영'),foreign=make(other.id,'다른 관리자','현장관리자'),date='2026-10-29';
+    s.setAttendance({siteId:site.id,workerId:worker.id,date,present:true});const input={siteId:site.id,type:'joint_inspection',title:'가상 점검',date,details:{managerIds:[manager.id],workerIds:[worker.id],items:[]}},doc=s.createDocument(input);let details=JSON.parse(doc.details);assert.equal(details.managerSnapshot[0].name,'가상 관리자');assert.equal(details.workerSnapshot[0].id,worker.id);
+    assert.throws(()=>s.createDocument({...input,details:{...input.details,managerIds:[foreign.id]}}),/현장/);assert.throws(()=>s.createDocument({...input,details:{...input.details,managerIds:[worker.id]}}),/관리자/);assert.throws(()=>s.createDocument({...input,details:{...input.details,managerIds:[manager.id,manager.id]}}),/관리자/);
+    s.updateWorker(manager.id,{siteId:site.id,name:'변경 이름',category:'직영',company:'변경 업체',occupation:'가상 직종'});s.updateDocument(doc.id,input);details=JSON.parse(s.document(doc.id).details);assert.equal(details.managerSnapshot[0].name,'가상 관리자');
+    const {managerIds,...withoutManagers}=input.details;s.updateDocument(doc.id,{...input,details:withoutManagers});assert.equal(JSON.parse(s.document(doc.id).details).managerSnapshot[0].name,'가상 관리자');
+    s.transition(doc.id,'submit');const submitted=s.document(doc.id),snapshot=s.approvalCycle(doc.id,submitted.approval_cycle_id);assert.equal(JSON.parse(snapshot.document.details).managerSnapshot[0].name,'가상 관리자');
+  }finally{s.close();}
+});
+
 test('합동 점검 가상 예시 64개를 문서에 저장하고 판정을 수정한다',()=>{
   const s=new Store(':memory:');try{
     const site=s.createSite({name:'가상 현장'}),items=jointExamples('civil',0),input={siteId:site.id,type:'joint_inspection',title:'가상 점검',date:'2026-10-29',details:{items}};

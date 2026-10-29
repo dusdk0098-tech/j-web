@@ -117,6 +117,17 @@ test('본문 수신 중 차단 또는 로그아웃된 근로자의 변경은 저
   }finally{child.kill();await once(child,'exit').catch(()=>{});rmSync(dir,{recursive:true,force:true});}
 });
 
+test('합동 점검 가상 관리자 선택은 인증과 현장 경계를 지킨다',async()=>{
+  const dir=mkdtempSync(join(tmpdir(),'jweb-joint-manager-')),reservation=createServer();await new Promise(resolve=>reservation.listen(0,'127.0.0.1',resolve));const port=reservation.address().port;await new Promise(resolve=>reservation.close(resolve));
+  const child=spawn(process.execPath,['server.js'],{cwd:process.cwd(),env:{...process.env,PORT:String(port),JWEB_DATA_DIR:dir,JWEB_ADMIN_PASSWORD:'test-password-12345'},stdio:['ignore','pipe','pipe']});
+  try{
+    await Promise.race([once(child.stdout,'data'),once(child,'exit').then(()=>{throw Error('시험 서버가 종료됐습니다.');})]);
+    const base=`http://127.0.0.1:${port}`,call=(path,method='GET',data,cookie)=>fetch(base+path,{method,headers:{...(data?{'content-type':'application/json'}:{}),...(cookie?{cookie}:{})},...(data?{body:JSON.stringify(data)}:{})}),admin=(await call('/api/login','POST',{password:'test-password-12345'})).headers.get('set-cookie').split(';')[0],site=await (await call('/api/sites','POST',{name:'가상 현장'},admin)).json(),other=await (await call('/api/sites','POST',{name:'다른 현장'},admin)).json(),make=async(siteId,name)=>await (await call('/api/workers','POST',{siteId,name,category:'현장관리자',company:'가상 업체',occupation:'가상 직종'},admin)).json(),manager=await make(site.id,'가상 관리자'),foreign=await make(other.id,'다른 관리자'),input={siteId:site.id,type:'joint_inspection',title:'가상 점검',date:'2026-10-29',details:{managerIds:[manager.id],items:[]}};
+    assert.equal((await call('/api/documents','POST',input)).status,401);assert.equal((await call('/api/documents','POST',{...input,details:{managerIds:[foreign.id],items:[]}},admin)).status,400);
+    const created=await call('/api/documents','POST',input,admin);assert.equal(created.status,201);const doc=await created.json(),loaded=await (await call(`/api/documents/${doc.id}`,'GET',null,admin)).json();assert.equal(JSON.parse(loaded.details).managerSnapshot[0].name,'가상 관리자');
+  }finally{child.kill();await once(child,'exit').catch(()=>{});rmSync(dir,{recursive:true,force:true});}
+});
+
 test('근로자 작성 문서는 권한·작성자·현장·첨부를 제한한다',async()=>{
   const dir=mkdtempSync(join(tmpdir(),'jweb-worker-author-')),reservation=createServer();await new Promise(resolve=>reservation.listen(0,'127.0.0.1',resolve));const port=reservation.address().port;await new Promise(resolve=>reservation.close(resolve));
   const child=spawn(process.execPath,['server.js'],{cwd:process.cwd(),env:{...process.env,PORT:String(port),JWEB_DATA_DIR:dir,JWEB_ADMIN_PASSWORD:'test-password-12345'},stdio:['ignore','pipe','pipe']});
