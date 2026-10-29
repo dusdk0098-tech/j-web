@@ -503,9 +503,9 @@ export class Store {
   monthlyAttendance(siteId,month) {
     month=monthValue(month);
     const workers=this.db.prepare('SELECT id,name,company,occupation FROM workers WHERE site_id=? ORDER BY name,id').all(Number(siteId));
-    const records=this.db.prepare('SELECT attendance.worker_id,attendance.date,attendance.units_hundredths FROM attendance JOIN workers ON workers.id=attendance.worker_id WHERE workers.site_id=? AND attendance.present=1 AND attendance.date BETWEEN ? AND ? ORDER BY attendance.date').all(Number(siteId),`${month}-01`,`${month}-31`);
+    const records=this.db.prepare('SELECT attendance.worker_id,attendance.date,attendance.units_hundredths,attendance.category_snapshot,attendance.company_snapshot,attendance.occupation_snapshot FROM attendance JOIN workers ON workers.id=attendance.worker_id WHERE workers.site_id=? AND attendance.present=1 AND attendance.date BETWEEN ? AND ? ORDER BY attendance.date').all(Number(siteId),`${month}-01`,`${month}-31`);
     const units=new Map(workers.map(w=>[w.id,[]]));
-    for(const record of records)units.get(record.worker_id).push({date:record.date,units_hundredths:record.units_hundredths});
+    for(const record of records)units.get(record.worker_id).push({date:record.date,units_hundredths:record.units_hundredths,category:record.category_snapshot,company:record.company_snapshot,occupation:record.occupation_snapshot});
     return workers.map(w=>({...w,days:units.get(w.id).map(record=>record.date),units:units.get(w.id)}));
   }
   workerAttendance(workerId,month) {

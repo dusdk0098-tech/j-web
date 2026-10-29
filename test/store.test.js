@@ -895,7 +895,7 @@ test('기존 출역 기록에 구분이 없어도 보존되고 다시 열 수 �
     const old=new DatabaseSync(path);
     old.exec("CREATE TABLE sites (id INTEGER PRIMARY KEY,name TEXT NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP); INSERT INTO sites(id,name) VALUES(1,'가상 현장'); CREATE TABLE workers (id INTEGER PRIMARY KEY,site_id INTEGER NOT NULL,name TEXT NOT NULL,category TEXT NOT NULL,company TEXT NOT NULL,occupation TEXT NOT NULL); INSERT INTO workers VALUES(1,1,'가상 근로자','직영','가상 회사','목공'); CREATE TABLE attendance (worker_id INTEGER NOT NULL,date TEXT NOT NULL,present INTEGER NOT NULL,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,company_snapshot TEXT,occupation_snapshot TEXT,source TEXT,PRIMARY KEY(worker_id,date)); INSERT INTO attendance(worker_id,date,present,company_snapshot,occupation_snapshot,source) VALUES(1,'2026-10-28',1,'가상 회사','목공','manual')");
     old.close();
-    for(let i=0;i<2;i++){const s=new Store(path);try{const row=s.attendanceReport(1,'2026-10-28','2026-10-28','category')[0];assert.equal(row.label,'기록 없음');assert.equal(row.days,1);assert.equal(s.attendance(1,'2026-10-28')[0].units_hundredths,null);assert.equal(s.attendanceReport(1,'2026-10-28','2026-10-28','company')[0].label,'가상 회사');}finally{s.close();}}
+    for(let i=0;i<2;i++){const s=new Store(path);try{const row=s.attendanceReport(1,'2026-10-28','2026-10-28','category')[0];assert.equal(row.label,'기록 없음');assert.equal(row.days,1);assert.equal(s.attendance(1,'2026-10-28')[0].units_hundredths,null);assert.equal(s.attendanceReport(1,'2026-10-28','2026-10-28','company')[0].label,'가상 회사');assert.equal(s.monthlyAttendance(1,'2026-10')[0].units[0].category,null);}finally{s.close();}}
   }finally{rmSync(dir,{recursive:true,force:true});}
 });
 
@@ -975,6 +975,7 @@ test('월별 출역 정보 변경은 선택한 현장과 근로자의 출역일�
     const input={siteId:site.id,workerId:worker.id,month:'2024-02',company:'변경 업체',occupation:'변경 직종'};
     assert.throws(()=>s.updateMonthlyAttendanceDetails({...input,siteId:other.id}),/현장/);assert.throws(()=>s.updateMonthlyAttendanceDetails({...input,month:'2024-13'}),/월/);assert.throws(()=>s.updateMonthlyAttendanceDetails({...input,occupation:' '}),/직종/);
     assert.equal(s.updateMonthlyAttendanceDetails(input),1);
+    const monthly=s.monthlyAttendance(site.id,'2024-02'),record=monthly.find(w=>w.id===worker.id).units[0];assert.deepEqual([record.date,record.category,record.company,record.occupation],['2024-02-01','직영','변경 업체','변경 직종']);assert.equal(monthly.find(w=>w.id===second.id).units[0].company,'기존 업체');
     assert.equal(s.attendanceReport(site.id,'2024-02-01','2024-02-29','company').find(r=>r.label==='변경 업체').days,1);
     assert.equal(s.attendanceReport(site.id,'2024-03-01','2024-03-31','occupation')[0].label,'기존 직종');
     assert.equal(s.workers(site.id).find(w=>w.id===worker.id).company,'기존 업체');
