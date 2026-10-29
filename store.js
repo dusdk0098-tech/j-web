@@ -936,7 +936,7 @@ export class Store {
   }
   safetyLogSources(siteId,date) {
     date=dateValue(date);
-    const documents=this.db.prepare("SELECT id,type,title,body,details FROM documents WHERE site_id=? AND date=? AND type IN ('notice','tbm','education','inspection','patrol','daily_report') ORDER BY id DESC").all(Number(siteId),date);
+    const documents=this.db.prepare("SELECT id,type,title,body,details,status FROM documents WHERE site_id=? AND date=? AND type IN ('notice','tbm','education','inspection','patrol','daily_report') ORDER BY id DESC").all(Number(siteId),date);
     return {present:this.attendance(siteId,date).filter(row=>row.present).length,documents};
   }
   weeklyActivity(siteId,start){
