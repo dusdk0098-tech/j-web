@@ -1,4 +1,4 @@
-import { riskScaleOptions, riskScore } from './risk-scale.js';
+import { riskScaleOptions, riskScore, copyMusculoskeletalItems } from './risk-scale.js';
 
 const esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const fields={processName:'가상 공정명',contractor:'가상 협력사',task:'작업 내용',hazard:'부담 요인',existingMeasures:'현재 조치',additionalMeasures:'추가 조치'};
@@ -24,5 +24,5 @@ export function mountMusculoskeletal(container,{rows,companies,scale}){
   list.addEventListener('change',event=>{if(event.target.matches('[data-mus-company]')){const company=companies.find(c=>c.id===Number(event.target.value));if(company)event.target.closest('fieldset').querySelector('[data-mus-field=contractor]').value=company.name;}refresh();});
   list.addEventListener('click',event=>{const row=event.target.closest('fieldset');if(!row||row.parentElement!==list)return;if(event.target.matches('[data-mus-remove]'))row.remove();if(event.target.matches('[data-mus-up]')&&row.previousElementSibling)list.insertBefore(row,row.previousElementSibling);if(event.target.matches('[data-mus-down]')&&row.nextElementSibling)list.insertBefore(row.nextElementSibling,row);if(event.target.matches('[data-mus-up],[data-mus-down]'))event.target.focus();});
   rows.forEach(add);
-  return {refresh,conflicts,read(){return [...list.children].map(row=>{const result=Object.fromEntries([...row.querySelectorAll('[data-mus-field]')].map(input=>[input.dataset.musField,input.value])),id=Number(row.querySelector('[data-mus-company]').value);if(id)result.contractorId=id;result.selected=row.querySelector('[data-mus-selected]').checked;return result;});}};
+  return {refresh,conflicts,append(items){const copied=copyMusculoskeletalItems(items,list.children.length,scale());copied.forEach(add);return copied.length;},read(){return [...list.children].map(row=>{const result=Object.fromEntries([...row.querySelectorAll('[data-mus-field]')].map(input=>[input.dataset.musField,input.value])),id=Number(row.querySelector('[data-mus-company]').value);if(id)result.contractorId=id;result.selected=row.querySelector('[data-mus-selected]').checked;return result;});}};
 }

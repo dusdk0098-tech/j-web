@@ -59,6 +59,21 @@ test('초대 화면을 연 뒤 현장 QR이 바뀌어도 가입과 로그인은 
   }finally{if(child.exitCode===null){const exited=once(child,'exit');child.kill();await exited;}rmSync(dir,{recursive:true,force:true});}
 });
 
+test('이전 근골격계 자료 API는 관리자와 같은 현장·평가 조건으로 제한한다',{timeout:30000},async()=>{
+  const dir=mkdtempSync(join(tmpdir(),'jweb-muscle-previous-')),reservation=createServer();await new Promise(resolve=>reservation.listen(0,'127.0.0.1',resolve));const port=reservation.address().port;await new Promise(resolve=>reservation.close(resolve));
+  const child=spawn(process.execPath,['server.js'],{cwd:process.cwd(),env:{...process.env,PORT:String(port),JWEB_DATA_DIR:dir,JWEB_ADMIN_PASSWORD:'test-password-12345'},stdio:['ignore','pipe','pipe']});
+  try{
+    await Promise.race([once(child.stdout,'data'),once(child,'exit').then(()=>{throw Error('시험 서버가 종료됐습니다.');})]);
+    const base=`http://127.0.0.1:${port}`,send=(path,method='GET',data,cookie)=>fetch(base+path,{method,headers:{...(data?{'content-type':'application/json'}:{}),...(cookie?{cookie}:{})},...(data?{body:JSON.stringify(data)}:{})});
+    const admin=(await send('/api/login','POST',{password:'test-password-12345'})).headers.get('set-cookie').split(';')[0],a=await (await send('/api/sites','POST',{name:'가상 A'},admin)).json(),b=await (await send('/api/sites','POST',{name:'가상 B'},admin)).json();
+    const make=async siteId=>(await (await send('/api/documents','POST',{siteId,type:'risk',title:'가상 평가',date:'2026-10-28',details:{kind:'regular',scale:'3x3',items:[],musculoskeletalItems:[{task:'가상 작업',hazard:'반복 작업',likelihood:'2',severity:'3',selected:true}]}},admin)).json());
+    const source=await make(a.id),outside=await make(b.id);for(const doc of [source,outside])assert.equal((await send(`/api/documents/${doc.id}/transition`,'POST',{action:'submit'},admin)).status,200);
+    const path=`/api/risk/previous?siteId=${a.id}&before=2026-10-29&kind=regular&scale=3x3`;assert.equal((await send(path)).status,401);
+    const rows=await (await send(path,'GET',undefined,admin)).json();assert.deepEqual(rows.map(row=>row.id),[source.id]);assert.equal(JSON.parse(rows[0].details).musculoskeletalItems[0].score,6);
+    assert.deepEqual(await (await send(path.replace('scale=3x3','scale=5x4'),'GET',undefined,admin)).json(),[]);
+  }finally{if(child.exitCode===null){const exited=once(child,'exit');child.kill();await exited;}rmSync(dir,{recursive:true,force:true});}
+});
+
 test('기본 서류 분류 API는 관리자 인증과 변경 확인을 적용한다',{timeout:30000},async()=>{
   const dir=mkdtempSync(join(tmpdir(),'jweb-basic-category-')),reservation=createServer();
   await new Promise(resolve=>reservation.listen(0,'127.0.0.1',resolve));const port=reservation.address().port;await new Promise(resolve=>reservation.close(resolve));

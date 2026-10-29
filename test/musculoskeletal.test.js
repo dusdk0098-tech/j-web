@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Store } from '../store.js';
+import { copyMusculoskeletalItems } from '../public/risk-scale.js';
 
 test('근골격계 시험 항목은 별도로 검증하고 현장과 결재 당시 값을 보존한다',()=>{
   const s=new Store(':memory:');try{
@@ -25,5 +26,18 @@ test('근로자 시험 권한도 근골격계 항목을 보존한다',()=>{
     const doc=s.createWorkerDocument(site.id,worker.id,input);assert.equal(JSON.parse(doc.details).musculoskeletalItems[0].score,20);
     assert.throws(()=>s.updateWorkerDocument(site.id,worker.id,doc.id,{...input,details:{scale:'5x4',items:[]}}),/근골격계/);
     s.updateWorkerDocument(site.id,worker.id,doc.id,{...input,details:{...input.details,musculoskeletalItems:[{...input.details.musculoskeletalItems[0],selected:false}]}});assert.equal(JSON.parse(s.workerDocument(site.id,worker.id,doc.id).details).musculoskeletalItems[0].selected,false);
+  }finally{s.close();}
+});
+
+test('이전 근골격계 항목 복사는 개수와 척도를 확인하고 기존 자료를 보존한다',()=>{
+  const source=[{processName:'가상 공정',contractor:'가상 업체',contractorId:1,task:'작업',hazard:'부담',likelihood:'2',severity:'3',selected:false,score:999},{task:'다른 작업',selected:true}];
+  const copied=copyMusculoskeletalItems(source,98,'3x3');assert.equal(copied[0].selected,false);assert.equal(copied[0].contractorId,1);assert.equal(Object.hasOwn(copied[0],'score'),false);copied[0].task='복사 수정';assert.equal(source[0].task,'작업');
+  assert.throws(()=>copyMusculoskeletalItems(source,99,'3x3'),/100개/);assert.throws(()=>copyMusculoskeletalItems([{...source[0],likelihood:'5'}],0,'3x3'),/확인/);assert.throws(()=>copyMusculoskeletalItems([{...source[0],selected:'true'}],0,'3x3'),/확인/);
+  const s=new Store(':memory:');try{
+    const a=s.createSite({name:'가상 A'}),b=s.createSite({name:'가상 B'}),company=s.createCompany({siteId:a.id,name:'가상 업체',trade:'가상 공종'}),items=source.map(row=>({...row,contractorId:company.id})),input={siteId:a.id,type:'risk',title:'가상 평가',date:'2026-10-28',details:{kind:'regular',scale:'3x3',items:[],musculoskeletalItems:items}},old=s.createDocument(input),outside=s.createDocument({...input,siteId:b.id,details:{...input.details,musculoskeletalItems:[]}});
+    s.transition(old.id,'submit');s.transition(outside.id,'submit');const found=s.previousRiskAssessments(a.id,'2026-10-29','regular','3x3',0);assert.deepEqual(found.map(row=>row.id),[old.id]);
+    const previous=JSON.parse(found[0].details).musculoskeletalItems,target=s.createDocument({...input,title:'새 평가',date:'2026-10-29',details:{...input.details,musculoskeletalItems:[{task:'기존 입력',selected:true}]}}),extra=copyMusculoskeletalItems(previous,1,'3x3');
+    s.updateDocument(target.id,{...input,title:'새 평가',date:'2026-10-29',details:{...input.details,musculoskeletalItems:[{task:'기존 입력',selected:true},...extra]}});
+    const saved=JSON.parse(s.document(target.id).details).musculoskeletalItems;assert.deepEqual(saved.map(row=>row.task),['기존 입력','작업','다른 작업']);assert.equal(saved[1].score,6);assert.equal(saved[1].selected,false);assert.equal(JSON.parse(s.document(old.id).details).musculoskeletalItems[0].task,'작업');
   }finally{s.close();}
 });
