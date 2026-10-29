@@ -29,10 +29,11 @@ test('가상 노임은 현장과 월별로 수동 공제액을 검증하고 기�
 test('시험 노임은 조회 시점의 해당 근로자 출역과 공수를 별도로 표시한다',()=>{
   const s=new Store(':memory:');try{
     const a=s.createSite({name:'가상 A'}),b=s.createSite({name:'가상 B'}),add=(siteId,name)=>s.createWorker({siteId,name,category:'직영',company:'가상 업체',occupation:'가상 직종'}),one=add(a.id,'가상 근로자'),other=add(b.id,'다른 근로자'),deductions={income:'0',local:'0',health:'0',care:'0',pension:'0',employment:'0'};s.saveWageRecord({siteId:a.id,workerId:one.id,month:'2024-02',gross:'1000',deductions});
-    const record=()=>s.wageRecords(a.id,'2024-02')[0];assert.equal(record().attendance_days,0);assert.equal(record().units_hundredths,null);assert.equal(record().units_missing,0);
+    const record=()=>s.wageRecords(a.id,'2024-02')[0];assert.equal(record().attendance_days,0);assert.equal(record().units_hundredths,null);assert.equal(record().units_missing,0);assert.equal(record().estimated_pay,null);assert.equal(record().pay_missing,0);
     for(const [siteId,worker,date] of [[a.id,one,'2024-02-01'],[a.id,one,'2024-02-02'],[a.id,one,'2024-03-01'],[b.id,other,'2024-02-01']])s.setAttendance({siteId,workerId:worker.id,date,present:true});s.setAttendanceUnits({siteId:a.id,workerId:one.id,date:'2024-02-01',units:'1.25'});s.setAttendanceUnits({siteId:b.id,workerId:other.id,date:'2024-02-01',units:'9'});
-    assert.equal(record().attendance_days,2);assert.equal(record().units_hundredths,125);assert.equal(record().units_missing,1);assert.equal(record().gross,1000);assert.equal(record().net,1000);
-    s.setAttendance({siteId:a.id,workerId:one.id,date:'2024-02-01',present:false});assert.equal(record().attendance_days,1);assert.equal(record().units_hundredths,null);assert.equal(record().units_missing,1);assert.equal(record().gross,1000);
+    const first={siteId:a.id,workerId:one.id,date:'2024-02-01'},second={...first,date:'2024-02-02'};s.setAttendanceDailyRate({...first,dailyRate:'101'});assert.equal(record().attendance_days,2);assert.equal(record().units_hundredths,125);assert.equal(record().units_missing,1);assert.equal(record().estimated_pay,126);assert.equal(record().pay_missing,1);assert.equal(record().gross,1000);assert.equal(record().net,1000);
+    s.setAttendanceUnits({...second,units:'0.5'});s.setAttendanceDailyRate({...second,dailyRate:'101'});assert.equal(record().estimated_pay,177);assert.equal(record().pay_missing,0);s.setAttendanceUnits({...first,units:'0.5'});assert.equal(record().estimated_pay,102);s.setAttendanceDailyRate({...first,dailyRate:'0'});assert.equal(record().estimated_pay,51);s.setAttendanceDailyRate({...second,dailyRate:'0'});assert.equal(record().estimated_pay,0);s.setAttendanceDailyRate({...second,dailyRate:''});assert.equal(record().pay_missing,1);
+    s.setAttendance({...first,present:false});assert.equal(record().attendance_days,1);assert.equal(record().estimated_pay,null);assert.equal(record().pay_missing,1);assert.equal(record().gross,1000);
   }finally{s.close();}
 });
 
