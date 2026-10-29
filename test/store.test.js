@@ -23,6 +23,16 @@ test('가상 결재자는 현장과 순서에 따라 문서를 승인하고 우�
   }finally{s.close();}
 });
 
+test('이전 시험 결재선은 같은 현장과 문서 유형의 앞선 기록에서만 조회한다',()=>{
+  const s=new Store(':memory:');try{
+    const site=s.createSite({name:'가상 현장'}),other=s.createSite({name:'다른 현장'}),makeReviewer=(siteId,id)=>s.createReviewer({siteId,loginId:id,name:id,password:'virtual-password-123'}),one=makeReviewer(site.id,'previous_one'),two=makeReviewer(site.id,'previous_two'),foreign=makeReviewer(other.id,'previous_other'),make=(siteId,type,title)=>s.createDocument({siteId,type,title,date:'2026-10-29'}),source=make(site.id,'tbm','가상 원본');
+    assert.equal(s.previousApprovalLine(source.id),null);s.setApprovalLine(source.id,[one.id,two.id]);const outside=make(other.id,'tbm','다른 현장');s.setApprovalLine(outside.id,[foreign.id]);const different=make(site.id,'education','다른 유형');s.setApprovalLine(different.id,[one.id]);make(site.id,'tbm','결재선 없는 문서');const target=make(site.id,'tbm','가상 대상'),future=make(site.id,'tbm','이후 문서');s.setApprovalLine(future.id,[two.id]);
+    const previous=s.previousApprovalLine(target.id);assert.equal(previous.document.id,source.id);assert.deepEqual(previous.reviewers.map(step=>step.reviewer_id),[one.id,two.id]);assert.deepEqual(s.approvalLine(target.id),[]);
+    s.updateReviewer(site.id,two.id,{active:false});assert.equal(s.previousApprovalLine(target.id).reviewers[1].active,0);assert.throws(()=>s.setApprovalLine(target.id,[one.id,two.id]),/활성/);assert.deepEqual(s.approvalLine(target.id),[]);
+    s.setApprovalLine(target.id,[one.id]);s.transition(target.id,'submit');assert.throws(()=>s.previousApprovalLine(target.id),/수정/);assert.throws(()=>s.previousApprovalLine(99999),/문서/);
+  }finally{s.close();}
+});
+
 test('시험 결재 계정과 진행 순서는 데이터베이스를 다시 열어도 유지된다',()=>{
   const dir=mkdtempSync(join(tmpdir(),'jweb-review-persist-')),file=join(dir,'data.sqlite');let s=new Store(file);
   try{

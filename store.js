@@ -981,6 +981,11 @@ export class Store {
     return row&&row.active&&timingSafeEqual(hash,expected)?{id:row.id,site_id:row.site_id,name:row.name}:null;
   }
   approvalLine(id){return this.db.prepare('SELECT s.position,s.reviewer_id,s.state,r.name,r.active FROM approval_steps s JOIN reviewers r ON r.id=s.reviewer_id WHERE s.document_id=? ORDER BY s.position').all(Number(id));}
+  previousApprovalLine(id){
+    const doc=this.document(id);if(!doc||!['draft','rejected'].includes(doc.status))throw new Error('수정 가능한 문서를 확인해 주세요.');
+    const previous=this.db.prepare('SELECT d.id,d.title,d.date FROM documents d WHERE d.site_id=? AND d.type=? AND d.id<? AND EXISTS (SELECT 1 FROM approval_steps s WHERE s.document_id=d.id) ORDER BY d.id DESC LIMIT 1').get(doc.site_id,doc.type,doc.id);
+    return previous?{document:previous,reviewers:this.approvalLine(previous.id)}:null;
+  }
   setApprovalLine(id,ids){
     const doc=this.document(id);if(!doc||!['draft','rejected'].includes(doc.status))throw new Error('수정 가능한 문서를 확인해 주세요.');
     if(!Array.isArray(ids)||ids.length>4||ids.some(x=>!Number.isSafeInteger(x)||x<1)||new Set(ids).size!==ids.length)throw new Error('결재자를 확인해 주세요.');

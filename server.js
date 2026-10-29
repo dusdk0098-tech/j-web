@@ -630,6 +630,8 @@ const server = http.createServer(async (req, res) => {
     const riskActivity=url.pathname.match(/^\/api\/documents\/(\d+)\/risk-activities(?:\/(\d+))?$/);
     if(riskActivity){const [,id,activityId]=riskActivity;if(!activityId&&req.method==='GET')return json(res,200,store.riskActivities(id));if(!activityId&&req.method==='POST')return json(res,201,{id:store.saveRiskActivity(id,await body(req))});if(activityId&&req.method==='PUT')return json(res,200,{id:store.saveRiskActivity(id,await body(req),activityId)});if(activityId&&req.method==='DELETE'){store.deleteRiskActivity(id,activityId);return json(res,200,{ok:true});}}
     if(url.pathname==='/api/documents/batch-approve'&&req.method==='POST'){const input=await body(req);return json(res,200,store.approveDocuments(input.siteId,input.ids,input.signature));}
+    const previousApproval=url.pathname.match(/^\/api\/documents\/(\d+)\/previous-approval-line$/);
+    if(previousApproval&&req.method==='GET')return json(res,200,store.previousApprovalLine(previousApproval[1]));
     const approvalLine=url.pathname.match(/^\/api\/documents\/(\d+)\/approval-line$/);
     if(approvalLine){if(req.method==='GET'){if(!store.document(approvalLine[1]))return json(res,404,{error:'문서를 찾을 수 없습니다.'});return json(res,200,store.approvalLine(approvalLine[1]));}if(req.method==='PUT'){const input=await body(req);return json(res,200,store.setApprovalLine(approvalLine[1],input.reviewerIds));}}
     const approvalCycle=url.pathname.match(/^\/api\/documents\/(\d+)\/approval-cycles\/(\d+)(?:\/files\/(document|equipment|rigging|place|risk|permit-signature|training-signature|author-signature)\/(\d+)\/(\d+))?$/);
