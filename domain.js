@@ -105,6 +105,10 @@ export function recordInput(input) {
       if(!Array.isArray(value.equipmentIds) || value.equipmentIds.length>100 || value.equipmentIds.some(id=>!Number.isSafeInteger(id) || id<1) || new Set(value.equipmentIds).size!==value.equipmentIds.length)throw new Error('장비 선택을 확인해 주세요.');
       details.equipmentIds=value.equipmentIds;
     }
+    if(value.equipmentAssignments!==undefined){
+      if(!Array.isArray(value.equipmentAssignments)||value.equipmentAssignments.length>100)throw new Error('장비와 운전원 연결을 확인해 주세요.');
+      const seen=new Set();details.equipmentAssignments=value.equipmentAssignments.map(row=>{if(!row||!Number.isSafeInteger(row.equipmentId)||row.equipmentId<1||!Number.isSafeInteger(row.workerId)||row.workerId<1)throw new Error('장비와 운전원 연결을 확인해 주세요.');const key=`${row.equipmentId}:${row.workerId}`;if(seen.has(key))throw new Error('장비와 운전원 연결이 중복되었습니다.');seen.add(key);return {equipmentId:row.equipmentId,workerId:row.workerId};});
+    }
     if(value.workPlaceId!==undefined){if(!Number.isSafeInteger(value.workPlaceId) || value.workPlaceId<0)throw new Error('작업장소를 확인해 주세요.');details.workPlaceId=value.workPlaceId;}
     if(value.riggingIds!==undefined){if(!Array.isArray(value.riggingIds)||value.riggingIds.length>100||value.riggingIds.some(id=>!Number.isSafeInteger(id)||id<1)||new Set(value.riggingIds).size!==value.riggingIds.length)throw new Error('장구 선택을 확인해 주세요.');details.riggingIds=value.riggingIds;}
     if(value.heavyLoads!==undefined){

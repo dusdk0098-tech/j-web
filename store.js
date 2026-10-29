@@ -667,7 +667,7 @@ export class Store {
       UNION ALL SELECT 'checklist',c.date,'자가점검','시험 자가점검',NULL FROM worker_self_checks c WHERE c.worker_id=(SELECT worker FROM ctx)
       UNION ALL SELECT 'hazard',date(h.created_at,'localtime'),h.title,'시험 신고',NULL FROM hazard_reports h WHERE h.worker_id=(SELECT worker FROM ctx) AND h.site_id=(SELECT site FROM ctx)
       UNION ALL SELECT 'risk',a.date,d.title,'시험 활동의 선택 명단',d.id FROM risk_activities a JOIN documents d ON d.id=a.document_id WHERE d.site_id=(SELECT site FROM ctx) AND d.type='risk' AND EXISTS(SELECT 1 FROM json_each(a.worker_snapshot) w WHERE json_extract(w.value,'$.id')=(SELECT worker FROM ctx))
-      UNION ALL SELECT 'work_plan',d.date,d.title,'계획서에 지정된 작업자',d.id FROM documents d WHERE d.site_id=(SELECT site FROM ctx) AND d.type='work_plan' AND d.status='approved' AND EXISTS(SELECT 1 FROM json_each(d.details,'$.workers') w WHERE json_extract(w.value,'$.workerId')=(SELECT worker FROM ctx))
+      UNION ALL SELECT 'work_plan',d.date,d.title,'계획서에 지정된 작업자',d.id FROM documents d WHERE d.site_id=(SELECT site FROM ctx) AND d.type='work_plan' AND d.status='approved' AND (EXISTS(SELECT 1 FROM json_each(d.details,'$.workers') w WHERE json_extract(w.value,'$.workerId')=(SELECT worker FROM ctx)) OR EXISTS(SELECT 1 FROM json_each(d.details,'$.equipmentAssignments') w WHERE json_extract(w.value,'$.workerId')=(SELECT worker FROM ctx)))
       UNION ALL SELECT 'instruction',d.date,d.title,'지정된 시험 수신자',d.id FROM documents d WHERE d.site_id=(SELECT site FROM ctx) AND d.type='instruction' AND d.status='approved' AND json_extract(d.details,'$.recipientId')=(SELECT worker FROM ctx)
     ) SELECT kind,date,title,detail,document_id,CASE WHEN kind='checklist' THEN EXISTS(SELECT 1 FROM worker_self_checks c WHERE c.worker_id=(SELECT worker FROM ctx) AND c.date=activity.date AND c.signature IS NOT NULL) ELSE 0 END AS has_signature FROM activity WHERE kind IN (${kinds.map(()=>'?').join(',')}) ORDER BY date DESC,kind,title,document_id DESC LIMIT 101 OFFSET ?`;
     const rows=this.db.prepare(query).all(siteId,workerId,...kinds,offset),hasMore=rows.length>100;
@@ -1243,6 +1243,7 @@ export class Store {
     if (!current) throw new Error('문서를 찾을 수 없습니다.');
     if(current.type==='cost' && Array.isArray(JSON.parse(current.details).rows))throw new Error('월간 사용내역서는 보존된 내역을 변경할 수 없습니다. 새 문서를 작성해 주세요.');
     if (current.status !== 'draft' && current.status !== 'rejected') throw new Error('임시저장 또는 반려된 문서만 수정할 수 있습니다.');
+    if(current.type==='work_plan'&&(input.details===undefined||input.details&&typeof input.details==='object'&&!Array.isArray(input.details))){const previous=JSON.parse(current.details),details={...input.details};for(const key of ['heavyLoads','equipmentAssignments'])if(details[key]===undefined&&previous[key]!==undefined)details[key]=previous[key];input={...input,details};}
     const d = recordInput(input);
     if (d.siteId !== current.site_id || d.type !== current.type) throw new Error('문서의 현장과 유형은 변경할 수 없습니다.');
     if(d.type==='checklist'&&d.details.kind!=='morning'&&this.db.prepare("SELECT 1 FROM attachments WHERE document_id=? AND category='morning_hazard_photo' LIMIT 1").get(Number(id)))throw new Error('점검 항목 사진을 삭제한 뒤 점검 종류를 변경해 주세요.');
@@ -1285,6 +1286,7 @@ export class Store {
     if(doc.details.workers){const get=this.db.prepare('SELECT name,company FROM workers WHERE id=? AND site_id=?');doc.details.workers=doc.details.workers.map(row=>{const worker=get.get(row.workerId,doc.siteId);if(!worker)throw new Error('같은 현장의 작업자를 선택해 주세요.');return {...row,name:worker.name,company:worker.company};});}
     const exists=this.db.prepare('SELECT 1 FROM equipment WHERE id=? AND site_id=?');
     if((doc.details.equipmentIds||[]).some(id=>!exists.get(id,doc.siteId)))throw new Error('같은 현장의 장비를 선택해 주세요.');
+    if(doc.details.equipmentAssignments){const equipment=this.db.prepare('SELECT kind,model,registration FROM equipment WHERE id=? AND site_id=?'),worker=this.db.prepare('SELECT name,company FROM workers WHERE id=? AND site_id=?');doc.details.equipmentAssignments=doc.details.equipmentAssignments.map(row=>{const item=equipment.get(row.equipmentId,doc.siteId),driver=worker.get(row.workerId,doc.siteId);if(!item||!driver||!(doc.details.equipmentIds||[]).includes(row.equipmentId))throw new Error('계획서에 선택된 같은 현장의 장비와 운전원을 확인해 주세요.');return {...row,equipmentLabel:[item.kind,item.model,item.registration].filter(Boolean).join(' · '),driverName:driver.name,driverCompany:driver.company};});}
     if(doc.details.workPlaceId && !this.db.prepare('SELECT 1 FROM work_places WHERE id=? AND site_id=?').get(doc.details.workPlaceId,doc.siteId))throw new Error('같은 현장의 작업장소를 선택해 주세요.');
     const rigging=this.db.prepare('SELECT 1 FROM rigging WHERE id=? AND site_id=?');
     if((doc.details.riggingIds||[]).some(id=>!rigging.get(id,doc.siteId)))throw new Error('같은 현장의 장구를 선택해 주세요.');
