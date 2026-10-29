@@ -1514,6 +1514,17 @@ test('월별 출역은 해당 현장과 월의 기존 일별 기록을 표시한
   } finally {s.close();}
 });
 
+test('전체 현장 출역 통계는 기간과 당시 근로 구분을 보존한다',()=>{
+  const s=new Store(':memory:');try{
+    const a=s.createSite({name:'가상 A'}),b=s.createSite({name:'가상 B'}),empty=s.createSite({name:'가상 C'}),one=s.createWorker({siteId:a.id,name:'가상 1',category:'직영',company:'가상 업체',occupation:'가상 직종'}),two=s.createWorker({siteId:b.id,name:'가상 2',category:'외주',company:'가상 업체',occupation:'가상 직종'});
+    for(const [site,worker,date] of [[a,one,'2026-10-01'],[a,one,'2026-10-02'],[b,two,'2026-10-01'],[b,two,'2026-11-01']])s.setAttendance({siteId:site.id,workerId:worker.id,date,present:true});
+    s.setAttendance({siteId:a.id,workerId:one.id,date:'2026-10-02',present:false});
+    s.updateWorker(one.id,{siteId:a.id,name:'가상 1',category:'외주',company:'가상 업체',occupation:'가상 직종'});
+    const rows=s.attendanceSitesReport('2026-10-01','2026-10-31');assert.deepEqual(rows.find(row=>row.id===a.id).categories,[{label:'직영',days:1}]);assert.deepEqual(rows.find(row=>row.id===b.id).categories,[{label:'외주',days:1}]);assert.deepEqual(rows.find(row=>row.id===empty.id).categories,[]);
+    assert.deepEqual(s.attendanceSitesReport('2026-10-02','2026-10-02').map(row=>row.categories),[[],[],[]]);assert.throws(()=>s.attendanceSitesReport('2026-10-02','2026-10-01'),/시작일/);assert.throws(()=>s.attendanceSitesReport('2026-02-30','2026-03-01'),/날짜/);
+  }finally{s.close();}
+});
+
 test('출역 인일을 기간과 현장에 따라 근로자·직종·소속별로 집계한다',()=>{
   const s=new Store(':memory:');
   try {

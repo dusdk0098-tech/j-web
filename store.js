@@ -822,6 +822,10 @@ export class Store {
     const [key,label,detail]=groups[group];
     return this.db.prepare(`SELECT ${label} AS label, ${detail} AS detail, COUNT(*) AS days, SUM(attendance.units_hundredths) AS units_hundredths, COUNT(*)-COUNT(attendance.units_hundredths) AS units_missing FROM attendance JOIN workers ON workers.id=attendance.worker_id WHERE workers.site_id=? AND attendance.present=1 AND attendance.date BETWEEN ? AND ? GROUP BY ${key} ORDER BY label, detail`).all(Number(siteId),from,to);
   }
+  attendanceSitesReport(from,to) {
+    from=dateValue(from);to=dateValue(to);if(from>to)throw new Error('조회 시작일은 종료일보다 늦을 수 없습니다.');
+    return this.sites().map(site=>({id:site.id,name:site.name,categories:this.attendanceReport(site.id,from,to,'category').map(({label,days})=>({label,days}))}));
+  }
   createInvitation(siteId) {
     if (!this.db.prepare('SELECT id FROM sites WHERE id=?').get(Number(siteId))) throw new Error('현장을 선택해 주세요.');
     this.ensureSiteAccess(siteId);
