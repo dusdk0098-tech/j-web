@@ -14,3 +14,9 @@ export function riskScore(scale, likelihood, severity) {
 export function copyRiskItem(item){
   return {...item,supervisorOpinion:'',safetyOpinion:'',healthOpinion:'',managerOpinion:''};
 }
+
+export function groupRiskItems(items){
+  const groups=new Map();
+  for(const item of items){const process=item.processName||'',contractor=item.contractor||'',key=JSON.stringify([process,contractor]);if(!groups.has(key))groups.set(key,{process,contractor,items:[]});groups.get(key).items.push(item);}
+  return [...groups.values()];
+}

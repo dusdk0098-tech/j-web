@@ -1021,6 +1021,14 @@ test('작업계획서의 역할별 작업자는 현장을 검증하고 당시 �
   }finally{s.close();}
 });
 
+test('위험요인의 가상 공정과 협력사는 저장과 결재 요청에서 보존된다',()=>{
+  const s=new Store(':memory:');try{
+    const site=s.createSite({name:'가상 현장'}),reviewer=s.createReviewer({siteId:site.id,loginId:'risk_process_review',name:'가상 결재자',password:'virtual-password-123'}),input={siteId:site.id,type:'risk',title:'가상 평가',date:'2026-10-29',details:{scale:'3x3',items:[{processName:'공정 A',contractor:'가상 업체 A',task:'가상 작업 A'},{processName:'공정 A',contractor:'가상 업체 B',task:'가상 작업 B'},{task:'이전 형태'}]}};
+    const doc=s.createDocument(input),items=JSON.parse(doc.details).items;assert.equal(items[0].processName,'공정 A');assert.equal(items[1].contractor,'가상 업체 B');assert.equal(items[2].processName,undefined);assert.throws(()=>s.updateDocument(doc.id,{...input,details:{...input.details,items:[{processName:'x'.repeat(2001)}]}}),/위험성평가/);assert.equal(JSON.parse(s.document(doc.id).details).items[0].contractor,'가상 업체 A');
+    s.setApprovalLine(doc.id,[reviewer.id]);s.transition(doc.id,'submit');const captured=s.reviewerPayload(s.document(doc.id));assert.equal(JSON.parse(captured.document.details).items[1].contractor,'가상 업체 B');
+  }finally{s.close();}
+});
+
 test('위험요인별 시험 검토 의견은 분리 저장되고 결재 요청 당시 보존된다',()=>{
   const s=new Store(':memory:');try{
     const site=s.createSite({name:'가상 현장'}),reviewer=s.createReviewer({siteId:site.id,loginId:'risk_opinion_review',name:'가상 결재자',password:'virtual-password-123'}),input={siteId:site.id,type:'risk',title:'가상 평가',date:'2026-10-29',details:{kind:'regular',scale:'3x3',items:[{task:'가상 작업 A',hazard:'위험 A',supervisorOpinion:'감독 의견',safetyOpinion:'안전 의견',healthOpinion:'보건 의견',managerOpinion:'소장 의견'},{task:'가상 작업 B',hazard:'위험 B',safetyOpinion:'다른 의견'}]}};

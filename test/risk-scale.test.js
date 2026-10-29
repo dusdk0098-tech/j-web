@@ -1,11 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { riskScaleOptions, riskScore, copyRiskItem } from '../public/risk-scale.js';
+import { riskScaleOptions, riskScore, copyRiskItem, groupRiskItems } from '../public/risk-scale.js';
 import { Store } from '../store.js';
 
 test('이전 위험요인을 가져올 때 검토 의견을 복사하지 않는다',()=>{
   const original={task:'가상 작업',hazard:'가상 위험',supervisorOpinion:'감독',safetyOpinion:'안전',healthOpinion:'보건',managerOpinion:'소장'},copy=copyRiskItem(original);
   assert.equal(copy.task,'가상 작업');assert.equal(copy.hazard,'가상 위험');for(const key of ['supervisorOpinion','safetyOpinion','healthOpinion','managerOpinion'])assert.equal(copy[key],'');assert.equal(original.safetyOpinion,'안전');
+});
+
+test('위험요인은 공정과 협력사 조합별로 묶고 기존 미기록도 보존한다',()=>{
+  const items=[{processName:'가상 공정',contractor:'가상 A',task:'첫 작업'},{processName:'가상 공정',contractor:'가상 B',task:'둘째 작업'},{processName:'가상 공정',contractor:'가상 A',task:'셋째 작업'},{task:'이전 기록'}],groups=groupRiskItems(items);
+  assert.equal(groups.length,3);assert.deepEqual(groups[0].items.map(item=>item.task),['첫 작업','셋째 작업']);assert.equal(groups[1].contractor,'가상 B');assert.equal(groups[2].process,'');assert.equal(groups[2].items[0].task,'이전 기록');assert.equal(copyRiskItem(items[0]).processName,'가상 공정');
 });
 
 test('평가 척도별 선택 범위는 서버 저장 규칙과 일치한다', () => {

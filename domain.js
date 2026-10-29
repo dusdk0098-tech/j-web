@@ -185,7 +185,7 @@ export function recordInput(input) {
         if(item[key]!=null && (typeof item[key]!=='string' || item[key].length>2000)) throw new Error('위험성평가 항목을 확인해 주세요.');
         row[key]=(item[key] ?? '').trim();
       }
-      for(const key of ['riskCategory','riskType','legalBasis','responsible','supervisorOpinion','safetyOpinion','healthOpinion','managerOpinion']){
+      for(const key of ['processName','contractor','riskCategory','riskType','legalBasis','responsible','supervisorOpinion','safetyOpinion','healthOpinion','managerOpinion']){
         if(item[key]!==undefined){if(typeof item[key]!=='string' || item[key].length>2000)throw new Error('위험성평가 항목을 확인해 주세요.');row[key]=item[key].trim();}
       }
       for(const key of ['grade','likelihood','severity'])if(item[key]!==undefined){
