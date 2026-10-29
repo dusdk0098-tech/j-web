@@ -967,6 +967,18 @@ test('시험 공수는 현장과 출역일별로 수동 기록하고 미기록�
   }finally{s.close();}
 });
 
+test('월별과 기간별 시험 공수 집계는 미기록과 0을 구분한다',()=>{
+  const s=new Store(':memory:');try{
+    const site=s.createSite({name:'가상 현장'}),other=s.createSite({name:'다른 현장'}),add=(siteId,name)=>s.createWorker({siteId,name,category:'직영',company:'가상 업체',occupation:'가상 직종'}),one=add(site.id,'가상 1'),two=add(site.id,'가상 2'),foreign=add(other.id,'다른 근로자');
+    for(const [siteId,worker,date] of [[site.id,one,'2024-02-01'],[site.id,one,'2024-02-02'],[site.id,two,'2024-02-02'],[other.id,foreign,'2024-02-02'],[site.id,one,'2024-03-01']])s.setAttendance({siteId,workerId:worker.id,date,present:true});
+    for(const [siteId,worker,date,units] of [[site.id,one,'2024-02-01','0.25'],[site.id,two,'2024-02-02','0'],[other.id,foreign,'2024-02-02','9.99'],[site.id,one,'2024-03-01','8']])s.setAttendanceUnits({siteId,workerId:worker.id,date,units});
+    const monthly=s.monthlyAttendance(site.id,'2024-02'),first=monthly.find(w=>w.id===one.id),second=monthly.find(w=>w.id===two.id);assert.deepEqual(first.units.map(row=>[row.date,row.units_hundredths]),[['2024-02-01',25],['2024-02-02',null]]);assert.equal(second.units[0].units_hundredths,0);
+    const report=s.attendanceReport(site.id,'2024-02-01','2024-02-29','occupation')[0];assert.equal(report.days,3);assert.equal(report.units_hundredths,25);assert.equal(report.units_missing,1);
+    const zero=s.attendanceReport(site.id,'2024-02-02','2024-02-02','worker').find(row=>row.label==='가상 2');assert.equal(zero.units_hundredths,0);assert.equal(zero.units_missing,0);const missing=s.attendanceReport(site.id,'2024-02-02','2024-02-02','worker').find(row=>row.label==='가상 1');assert.equal(missing.units_hundredths,null);assert.equal(missing.units_missing,1);
+    s.setAttendance({siteId:site.id,workerId:one.id,date:'2024-02-01',present:false});assert.equal(s.attendanceReport(site.id,'2024-02-01','2024-02-29','occupation')[0].units_hundredths,0);
+  }finally{s.close();}
+});
+
 test('월별 출역은 해당 현장과 월의 기존 일별 기록을 표시한다',()=>{
   const s=new Store(':memory:');
   try {

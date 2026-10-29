@@ -503,10 +503,10 @@ export class Store {
   monthlyAttendance(siteId,month) {
     month=monthValue(month);
     const workers=this.db.prepare('SELECT id,name,company,occupation FROM workers WHERE site_id=? ORDER BY name,id').all(Number(siteId));
-    const records=this.db.prepare('SELECT attendance.worker_id,attendance.date FROM attendance JOIN workers ON workers.id=attendance.worker_id WHERE workers.site_id=? AND attendance.present=1 AND attendance.date BETWEEN ? AND ?').all(Number(siteId),`${month}-01`,`${month}-31`);
-    const days=new Map(workers.map(w=>[w.id,[]]));
-    for(const record of records)days.get(record.worker_id).push(record.date);
-    return workers.map(w=>({...w,days:days.get(w.id)}));
+    const records=this.db.prepare('SELECT attendance.worker_id,attendance.date,attendance.units_hundredths FROM attendance JOIN workers ON workers.id=attendance.worker_id WHERE workers.site_id=? AND attendance.present=1 AND attendance.date BETWEEN ? AND ? ORDER BY attendance.date').all(Number(siteId),`${month}-01`,`${month}-31`);
+    const units=new Map(workers.map(w=>[w.id,[]]));
+    for(const record of records)units.get(record.worker_id).push({date:record.date,units_hundredths:record.units_hundredths});
+    return workers.map(w=>({...w,days:units.get(w.id).map(record=>record.date),units:units.get(w.id)}));
   }
   workerAttendance(workerId,month) {
     month=monthValue(month);
@@ -663,7 +663,7 @@ export class Store {
     const groups={worker:['workers.id','workers.name','workers.company'],occupation:["COALESCE(attendance.occupation_snapshot,'기록 없음')","COALESCE(attendance.occupation_snapshot,'기록 없음')","''"],company:["COALESCE(attendance.company_snapshot,'기록 없음')","COALESCE(attendance.company_snapshot,'기록 없음')","''"],category:["COALESCE(attendance.category_snapshot,'기록 없음')","COALESCE(attendance.category_snapshot,'기록 없음')","''"]};
     if (!Object.hasOwn(groups,group)) throw new Error('집계 기준을 확인해 주세요.');
     const [key,label,detail]=groups[group];
-    return this.db.prepare(`SELECT ${label} AS label, ${detail} AS detail, COUNT(*) AS days FROM attendance JOIN workers ON workers.id=attendance.worker_id WHERE workers.site_id=? AND attendance.present=1 AND attendance.date BETWEEN ? AND ? GROUP BY ${key} ORDER BY label, detail`).all(Number(siteId),from,to);
+    return this.db.prepare(`SELECT ${label} AS label, ${detail} AS detail, COUNT(*) AS days, SUM(attendance.units_hundredths) AS units_hundredths, COUNT(*)-COUNT(attendance.units_hundredths) AS units_missing FROM attendance JOIN workers ON workers.id=attendance.worker_id WHERE workers.site_id=? AND attendance.present=1 AND attendance.date BETWEEN ? AND ? GROUP BY ${key} ORDER BY label, detail`).all(Number(siteId),from,to);
   }
   createInvitation(siteId) {
     if (!this.db.prepare('SELECT id FROM sites WHERE id=?').get(Number(siteId))) throw new Error('현장을 선택해 주세요.');
