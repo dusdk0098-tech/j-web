@@ -18,3 +18,9 @@ export function salarySummary(records){
   }
   return {total:[...groups.values()].reduce((sum,item)=>sum+item.total,0),reason:null};
 }
+
+export function salaryDay(day){
+  if(!day)return {kind:'미출역',amount:'미출역'};
+  if(day.salary_kind){const labels={monthly:'월급',yearly:'연봉',other:'기타'};return {kind:labels[day.salary_kind]||'미기록',amount:day.salary_amount??'미기록'};}
+  return day.daily_rate===null||day.daily_rate===undefined?{kind:'미기록',amount:'미기록'}:{kind:'일당',amount:day.daily_rate};
+}
