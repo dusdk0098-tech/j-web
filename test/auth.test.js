@@ -174,6 +174,10 @@ test('관리자 인증 모드가 문서 API를 보호하고 로그아웃을 적�
     assert.equal((await fetch(mealWorker)).status,401);assert.equal((await fetch(mealWorker,{headers:{cookie:workerCookie}})).status,401);
     assert.deepEqual((await (await fetch(mealWorker,{headers:{cookie}})).json()).map(r=>r.kind),['breakfast','lunch']);
     assert.equal((await fetch(`${mealPath}/month/worker?siteId=${other.id}&workerId=${own.id}&month=2024-02`,{headers:{cookie}})).status,400);
+    const bulkMeal={siteId:site.id,workerId:own.id,month:'2024-02',kind:'snack',present:true,restaurantId};
+    assert.equal((await fetch(`${mealPath}/month/worker`,{method:'POST',headers:{cookie:workerCookie,'content-type':'application/json'},body:JSON.stringify(bulkMeal)})).status,401);
+    assert.equal((await (await post('/api/meal-checks/month/worker',bulkMeal)).json()).changed,1);
+    assert.equal((await (await post('/api/meal-checks/month/worker',{...bulkMeal,present:false})).json()).changed,1);
     const joinRecord=`${base}/api/workers/${own.id}/join-record?siteId=${site.id}`;assert.equal((await fetch(joinRecord,{headers:{cookie:workerCookie}})).status,401);
     const savedJoin=await (await fetch(joinRecord,{headers:{cookie}})).json();assert.deepEqual(savedJoin.equipment,['안전모','안전화']);assert.equal(savedJoin.has_signature,1);
     assert.equal(await (await fetch(`${base}/api/workers/${own.id}/join-record?siteId=${other.id}`,{headers:{cookie}})).json(),null);

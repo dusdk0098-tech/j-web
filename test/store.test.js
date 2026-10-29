@@ -56,6 +56,18 @@ test('근로자별 월간 식대는 현장과 월을 제한하고 과거 단가�
   }finally{s.close();}
 });
 
+test('월간 식대 일괄 변경은 출역일만 대상으로 기존 단가와 다른 기록을 보존한다',()=>{
+  const s=new Store(':memory:');try{
+    const site=s.createSite({name:'가상 현장'}),other=s.createSite({name:'다른 현장'}),worker=s.createWorker({siteId:site.id,name:'가상 근로자',category:'직영',company:'가상 회사',occupation:'목공'}),restaurant=s.saveRestaurant({siteId:site.id,name:'가상 식당',mealPrice:'5000',snackPrice:'1000',tax:'0'}),input={siteId:site.id,workerId:worker.id,month:'2024-02',kind:'lunch',present:true,restaurantId:restaurant.id};
+    for(const date of ['2024-02-01','2024-02-02','2024-03-01'])s.setAttendance({siteId:site.id,workerId:worker.id,date,present:true});
+    s.saveMealCheck({siteId:site.id,workerId:worker.id,date:'2024-02-01',kind:'lunch',restaurantId:restaurant.id});s.saveRestaurant({siteId:site.id,name:'변경 식당',mealPrice:'7000',snackPrice:'2000',tax:'0'},restaurant.id);
+    assert.equal(s.setWorkerMonthlyMeals(input),1);assert.equal(s.setWorkerMonthlyMeals(input),0);assert.deepEqual(s.workerMonthlyMealChecks(site.id,worker.id,'2024-02').map(x=>x.price),[5000,7000]);
+    assert.throws(()=>s.setWorkerMonthlyMeals({...input,siteId:other.id}),/현장/);assert.throws(()=>s.setWorkerMonthlyMeals({...input,restaurantId:999}),/식당/);assert.throws(()=>s.setWorkerMonthlyMeals({...input,present:'true'}),/선택/);
+    s.setAttendance({siteId:site.id,workerId:worker.id,date:'2024-02-01',present:false});assert.equal(s.setWorkerMonthlyMeals({...input,present:false}),1);assert.deepEqual(s.workerMonthlyMealChecks(site.id,worker.id,'2024-02').map(x=>x.date),['2024-02-01']);
+    assert.equal(s.workerMonthlyMealChecks(site.id,worker.id,'2024-03').length,0);
+  }finally{s.close();}
+});
+
 test('식당 시험 설정은 현장별로 저장하며 잘못된 수정을 거절한다',()=>{
   const s=new Store(':memory:');try{
     const a=s.createSite({name:'가상 A'}),b=s.createSite({name:'가상 B'}),input={siteId:a.id,name:'가상 식당',mealPrice:'5000',snackPrice:'1000',tax:'600'},restaurant=s.saveRestaurant(input);
