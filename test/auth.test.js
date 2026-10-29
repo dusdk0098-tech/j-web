@@ -96,6 +96,27 @@ test('현장별 휴일과 작업 종료는 근로자 세션과 새 로그인에 
   }finally{child.kill();await once(child,'exit').catch(()=>{});rmSync(dir,{recursive:true,force:true});}
 });
 
+test('본문 수신 중 차단 또는 로그아웃된 근로자의 변경은 저장되지 않는다',async()=>{
+  const dir=mkdtempSync(join(tmpdir(),'jweb-inflight-')),reservation=createServer();await new Promise(resolve=>reservation.listen(0,'127.0.0.1',resolve));const port=reservation.address().port;await new Promise(resolve=>reservation.close(resolve));
+  const child=spawn(process.execPath,['server.js'],{cwd:process.cwd(),env:{...process.env,PORT:String(port),JWEB_DATA_DIR:dir,JWEB_ADMIN_PASSWORD:'test-password-12345'},stdio:['ignore','pipe','pipe']});
+  try{
+    await Promise.race([once(child.stdout,'data'),once(child,'exit').then(()=>{throw Error('시험 서버가 종료됐습니다.');})]);const base=`http://127.0.0.1:${port}`,call=(path,method='GET',data=null,cookie='')=>fetch(base+path,{method,headers:{...(cookie?{cookie}:{}),...(data?{'content-type':'application/json'}:{})},...(data?{body:JSON.stringify(data)}:{})});
+    const admin=(await call('/api/login','POST',{password:'test-password-12345'})).headers.get('set-cookie').split(';')[0],site=await (await call('/api/sites','POST',{name:'가상 현장'},admin)).json(),token=new URL((await (await call(`/api/sites/${site.id}/invitation`,'POST',{},admin)).json()).link).searchParams.get('token');
+    for(const loginId of ['stream_one','stream_two'])assert.equal((await call('/api/join','POST',{token,name:loginId,category:'직영',company:'가상 업체',occupation:'가상 직종',loginId,password:'virtual-password-123',acknowledged:true})).status,201);
+    const login=await call('/api/worker/login','POST',{token,loginId:'stream_one',password:'virtual-password-123'}),cookie=login.headers.get('set-cookie').split(';')[0],actor=(await login.json()).worker,workers=await (await call(`/api/workers?siteId=${site.id}`,'GET',null,admin)).json(),target=workers.find(row=>row.id!==actor.id),now=new Date(),date=new Date(now.getTime()-now.getTimezoneOffset()*60000).toISOString().slice(0,10);
+    assert.equal((await call(`/api/workers/${actor.id}/permissions`,'PUT',{siteId:site.id,permissions:['attendance']},admin)).status,200);
+    const delayed=async(change,path='/api/worker/managed-attendance',method='PUT',data={date,workerId:target.id,present:true})=>{const req=request(base+path,{method,headers:{cookie,'content-type':'application/json'}}),response=new Promise((resolve,reject)=>{req.on('response',res=>{res.resume();res.on('end',()=>resolve(res.statusCode));});req.on('error',reject);}),serialized=JSON.stringify(data);req.write(serialized.slice(0,1));await new Promise(resolve=>setTimeout(resolve,100));await change();req.end(serialized.slice(1));return response;};
+    assert.equal(await delayed(async()=>assert.equal((await call(`/api/sites/${site.id}/worker-access-blocks`,'PUT',{date,kind:'holiday',blocked:true},admin)).status,200)),403);
+    assert.equal((await call(`/api/sites/${site.id}/worker-access-blocks`,'PUT',{date,kind:'holiday',blocked:false},admin)).status,200);
+    assert.equal(await delayed(async()=>assert.equal((await call(`/api/sites/${site.id}/worker-access-blocks`,'PUT',{date,kind:'holiday',blocked:true},admin)).status,200),'/api/worker/work-stops','POST',{}),403);
+    assert.equal((await call(`/api/sites/${site.id}/worker-access-blocks`,'PUT',{date,kind:'holiday',blocked:false},admin)).status,200);
+    assert.equal(await delayed(async()=>assert.equal((await call(`/api/workers/${actor.id}/permissions`,'PUT',{siteId:site.id,permissions:[]},admin)).status,200)),403);
+    assert.equal((await call(`/api/workers/${actor.id}/permissions`,'PUT',{siteId:site.id,permissions:['attendance']},admin)).status,200);
+    assert.equal(await delayed(async()=>assert.equal((await call('/api/worker/logout','POST',{},cookie)).status,200)),401);
+    const events=await (await call(`/api/attendance/delegated-events?siteId=${site.id}&date=${date}`,'GET',null,admin)).json();assert.deepEqual(events,[]);
+  }finally{child.kill();await once(child,'exit').catch(()=>{});rmSync(dir,{recursive:true,force:true});}
+});
+
 test('근로자 작성 문서는 권한·작성자·현장·첨부를 제한한다',async()=>{
   const dir=mkdtempSync(join(tmpdir(),'jweb-worker-author-')),reservation=createServer();await new Promise(resolve=>reservation.listen(0,'127.0.0.1',resolve));const port=reservation.address().port;await new Promise(resolve=>reservation.close(resolve));
   const child=spawn(process.execPath,['server.js'],{cwd:process.cwd(),env:{...process.env,PORT:String(port),JWEB_DATA_DIR:dir,JWEB_ADMIN_PASSWORD:'test-password-12345'},stdio:['ignore','pipe','pipe']});

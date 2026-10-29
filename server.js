@@ -35,6 +35,7 @@ const json = (res, code, value) => { res.writeHead(code, {'Content-Type':'applic
 async function body(req,max=65536) {
   const chunks=[];let size=0;
   for await (const chunk of req) { size+=chunk.length;if(size>max)throw new Error('입력 내용이 너무 깁니다.');chunks.push(chunk); }
+  const failure=req.checkWorkerSession?.();if(failure)throw Object.assign(new Error(failure.error),{workerStatus:failure.status});
   try { const raw=new TextDecoder('utf-8',{fatal:true}).decode(Buffer.concat(chunks));const value = JSON.parse(raw); if (!value || typeof value !== 'object' || Array.isArray(value)) throw Error(); return value; } catch { throw new Error('입력 형식이 올바르지 않습니다.'); }
 }
 const server = http.createServer(async (req, res) => {
@@ -87,6 +88,7 @@ const server = http.createServer(async (req, res) => {
     if(url.pathname.startsWith('/api/worker/')&&!['/api/worker/site','/api/worker/login','/api/worker/logout'].includes(url.pathname)){
       const session=workerSessions.get(workerKey(workerToken)),now=new Date(),date=new Date(now.getTime()-now.getTimezoneOffset()*60000).toISOString().slice(0,10);
       if(session&&session.expires>now.getTime()&&store.workerAccessBlocked(session.worker.site_id,date))return json(res,403,{error:'해당 현장은 오늘 근로자 접속이 차단되었습니다.'});
+      if(session&&session.expires>now.getTime())req.checkWorkerSession=()=>workerSessionError(workerToken,session);
     }
     if(url.pathname==='/worker.webmanifest'&&req.method==='GET'){
       const key=url.searchParams.get('site');if(!store.siteFromAccess(key))return json(res,404,{error:'현장 접속 주소를 확인해 주세요.'});
@@ -140,7 +142,7 @@ const server = http.createServer(async (req, res) => {
       const session=workerSessions.get(workerKey(workerToken));if(!session||session.expires<=Date.now())return json(res,401,{error:'근로자 로그인이 필요합니다.'});const {site_id:siteId,id:workerId}=session.worker;
       if(!store.workerPermissions(siteId,workerId).includes('attendance'))return json(res,403,{error:'출역 관리 시험 권한이 필요합니다.'});
       if(req.method==='GET')return json(res,200,store.delegatedAttendance(siteId,workerId,url.searchParams.get('date')));
-      const input=await body(req);store.setDelegatedAttendance(siteId,workerId,input);return json(res,200,{ok:true});
+      const input=await body(req);if(!store.workerPermissions(siteId,workerId).includes('attendance'))return json(res,403,{error:'출역 관리 시험 권한이 필요합니다.'});store.setDelegatedAttendance(siteId,workerId,input);return json(res,200,{ok:true});
     }
     if(url.pathname==='/api/worker/attendance' && req.method==='GET'){
       const key=workerKey(workerToken),session=workerSessions.get(key);
@@ -206,6 +208,7 @@ const server = http.createServer(async (req, res) => {
       if(photoId)return json(res,404,{error:'요청을 찾을 수 없습니다.'});
       store.workerInstructionPhotos(session.worker.id,id);
       const chunks=[];let size=0;for await(const chunk of req){size+=chunk.length;if(size>2*1024*1024)throw new Error('사진은 2MB 이하여야 합니다.');chunks.push(chunk);}
+      const failure=workerSessionError(workerToken,session);if(failure)return json(res,failure.status,{error:failure.error});
       let name;try{name=decodeURIComponent(req.headers['x-file-name']||'');}catch{throw new Error('사진 이름을 확인해 주세요.');}
       return json(res,201,{id:store.addWorkerInstructionPhoto(session.worker.id,id,url.searchParams.get('phase'),name,Buffer.concat(chunks))});
     }
@@ -650,7 +653,7 @@ const server = http.createServer(async (req, res) => {
       if (req.method === 'POST' && part === 'transition') {const input=await body(req);return json(res,200,input.action==='approve'?store.approveDocument(id,input.opinion,input.signature):store.transition(id,input.action,input.opinion));}
     }
     return json(res,404,{error:'요청한 경로가 없습니다.'});
-  } catch (e) { return json(res,400,{error:e.message || '요청을 처리하지 못했습니다.'}); }
+  } catch (e) { return json(res,[401,403].includes(e.workerStatus)?e.workerStatus:400,{error:e.message || '요청을 처리하지 못했습니다.'}); }
 });
 const port = Number(process.env.PORT || 4173);
 server.listen(port, '127.0.0.1', () => console.log(`J웹: http://127.0.0.1:${port} (관리자 로그인 활성)`));
