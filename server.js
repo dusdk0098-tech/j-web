@@ -274,6 +274,11 @@ const server = http.createServer(async (req, res) => {
       if(photoId&&req.method==='DELETE'){store.deleteRiggingPhoto(siteId,id,photoId);return json(res,200,{ok:true});}
       if(photoId&&req.method==='GET'){
         const photo=store.riggingPhoto(siteId,id,photoId);if(!photo)return json(res,404,{error:'사진을 찾을 수 없습니다.'});
+        if(url.searchParams.get('preview')==='1'){
+          const bytes=Buffer.from(photo.data),type=bytes.subarray(0,8).equals(Buffer.from('89504e470d0a1a0a','hex'))?'image/png':bytes.subarray(0,3).equals(Buffer.from('ffd8ff','hex'))?'image/jpeg':null;
+          if(!type)return json(res,415,{error:'미리 볼 수 없는 사진입니다.'});
+          res.writeHead(200,{'Content-Type':type,'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(bytes);
+        }
         const name=encodeURIComponent(photo.name).replace(/[!'()*]/g,c=>`%${c.charCodeAt(0).toString(16).toUpperCase()}`);
         res.writeHead(200,{'Content-Type':'application/octet-stream','Content-Disposition':`attachment; filename="photo"; filename*=UTF-8''${name}`,'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(photo.data);
       }

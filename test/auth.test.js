@@ -350,8 +350,12 @@ test('관리자 인증 모드가 문서 API를 보호하고 로그아웃을 적�
     const riggingPhotoId=(await riggingPhotoUpload.json()).id,riggingPhotoUrl=`${base}/api/rigging/${riggingId}/photos/${riggingPhotoId}?siteId=${site.id}`;
     assert.equal((await (await fetch(riggingPhotoBase,{headers:{cookie}})).json())[0].id,riggingPhotoId);
     assert.deepEqual(Buffer.from(await (await fetch(riggingPhotoUrl,{headers:{cookie}})).arrayBuffer()),photo);
+    const riggingPreview=await fetch(`${riggingPhotoUrl}&preview=1`,{headers:{cookie}});assert.equal(riggingPreview.status,200);assert.equal(riggingPreview.headers.get('content-type'),'image/png');assert.equal(riggingPreview.headers.get('x-content-type-options'),'nosniff');assert.deepEqual(Buffer.from(await riggingPreview.arrayBuffer()),photo);
+    assert.equal((await fetch(`${riggingPhotoUrl}&preview=1`,{headers:{cookie:workerCookie}})).status,401);assert.equal((await fetch(`${base}/api/rigging/${riggingId}/photos/${riggingPhotoId}?siteId=${other.id}&preview=1`,{headers:{cookie}})).status,404);
     assert.equal((await fetch(`${base}/api/rigging/${riggingId}/photos/${riggingPhotoId}?siteId=${other.id}`,{headers:{cookie}})).status,404);
     assert.equal((await fetch(riggingPhotoUrl,{method:'DELETE',headers:{cookie}})).status,200);
+    const riggingJpeg=Buffer.from('ffd8ff0000','hex'),riggingJpegUpload=await fetch(riggingPhotoBase,{method:'POST',headers:{cookie,'x-file-name':'test.jpg'},body:riggingJpeg}),riggingJpegId=(await riggingJpegUpload.json()).id;
+    const riggingJpegPreview=await fetch(`${base}/api/rigging/${riggingId}/photos/${riggingJpegId}?siteId=${site.id}&preview=1`,{headers:{cookie}});assert.equal(riggingJpegPreview.headers.get('content-type'),'image/jpeg');assert.deepEqual(Buffer.from(await riggingJpegPreview.arrayBuffer()),riggingJpeg);
     const area={terrain:'평지',ground:'보통',drainage:'양호',reinforcement:'',obstacles:'',protection:''};
     const place=await (await post('/api/work-places',{siteId:site.id,name:'가상 장소',work:area,route:area})).json();
     const placeUrl=`${base}/api/work-places/${place.id}/photos?siteId=${site.id}`;
