@@ -484,11 +484,14 @@ test('관리자 인증 모드가 문서 API를 보호하고 로그아웃을 적�
     const makeNotice=async siteId=>(await (await post('/api/documents',{siteId,type:'notice',title:'가상 공지',date:today,body:'가상 위험 안내'})).json());
     const notice=await makeNotice(site.id),draftNotice=await makeNotice(site.id),otherNotice=await makeNotice(other.id);
     for(const id of [notice.id,otherNotice.id]){await post(`/api/documents/${id}/transition`,{action:'submit'});await post(`/api/documents/${id}/transition`,{action:'approve'});}
+    const oldNotice=await (await post('/api/documents',{siteId:site.id,type:'notice',title:'가상 이전 공지',date:'2024-02-01',body:'가상 내용'})).json(),futureNotice=await (await post('/api/documents',{siteId:site.id,type:'notice',title:'가상 미래 공지',date:'2099-02-01',body:'가상 내용'})).json();
+    for(const item of [oldNotice,futureNotice]){await post(`/api/documents/${item.id}/transition`,{action:'submit'});await post(`/api/documents/${item.id}/transition`,{action:'approve'});}
     assert.equal((await fetch(`${base}/api/worker/notices`)).status,401);
     const notices=await (await fetch(`${base}/api/worker/notices`,{headers:{cookie:workerCookie}})).json();
     assert.deepEqual(notices.map(n=>n.id),[notice.id]);
     const confirmNotice=(id,signature=`data:image/png;base64,${photo.toString('base64')}`)=>fetch(`${base}/api/worker/notices/${id}/confirm`,{method:'POST',headers:{cookie:workerCookie,'content-type':'application/json'},body:JSON.stringify({signature})});
     assert.equal((await confirmNotice(otherNotice.id)).status,400);assert.equal((await confirmNotice(draftNotice.id)).status,400);
+    assert.equal((await confirmNotice(oldNotice.id)).status,400);assert.equal((await confirmNotice(futureNotice.id)).status,400);
     assert.equal((await confirmNotice(notice.id,'invalid')).status,400);
     assert.equal((await confirmNotice(notice.id)).status,200);assert.equal((await confirmNotice(notice.id)).status,200);
     assert.ok((await (await fetch(`${base}/api/worker/notices`,{headers:{cookie:workerCookie}})).json())[0].read_at);

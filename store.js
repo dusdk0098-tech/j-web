@@ -556,8 +556,9 @@ export class Store {
     if(rightsConfirmed!==true)throw new Error('권리와 의무를 확인해 주세요.');
     this.db.prepare("INSERT OR IGNORE INTO worker_training_checks(worker_id,document_id,rights_ack) VALUES(?,?,'demo-v1')").run(Number(workerId),doc.id);
   }
-  confirmWorkerNotice(workerId,documentId,signature) {
-    const doc=this.db.prepare("SELECT d.id FROM workers w JOIN documents d ON d.site_id=w.site_id WHERE w.id=? AND d.id=? AND d.type='notice' AND d.status='approved'").get(Number(workerId),Number(documentId));
+  confirmWorkerNotice(workerId,documentId,signature,date) {
+    date=dateValue(date);
+    const doc=this.db.prepare("SELECT d.id FROM workers w JOIN documents d ON d.site_id=w.site_id WHERE w.id=? AND d.id=? AND d.type='notice' AND d.status='approved' AND d.date=?").get(Number(workerId),Number(documentId),date);
     if(!doc)throw new Error('확인할 공지를 찾을 수 없습니다.');
     const bytes=signatureBytes(signature);
     this.db.prepare('INSERT OR IGNORE INTO worker_notice_reads(worker_id,document_id,signature) VALUES(?,?,?)').run(Number(workerId),doc.id,bytes);

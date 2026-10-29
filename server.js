@@ -178,7 +178,7 @@ const server = http.createServer(async (req, res) => {
     if(workerNotice && req.method==='POST'){
       const key=workerKey(workerToken),session=workerSessions.get(key);
       if(!session || session.expires<=Date.now()){workerSessions.delete(key);return json(res,401,{error:'근로자 로그인이 필요합니다.'});}
-      const input=await body(req);store.confirmWorkerNotice(session.worker.id,workerNotice[1],input.signature);return json(res,200,{ok:true});
+      const input=await body(req),now=new Date(),date=new Date(now.getTime()-now.getTimezoneOffset()*60000).toISOString().slice(0,10);store.confirmWorkerNotice(session.worker.id,workerNotice[1],input.signature,date);return json(res,200,{ok:true});
     }
     if(url.pathname==='/api/worker/logout' && req.method==='POST'){
       workerSessions.delete(workerKey(workerToken));res.setHeader('Set-Cookie',`jweb_worker=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0${secureCookie}`);return json(res,200,{ok:true});
