@@ -300,6 +300,11 @@ test('관리자 인증 모드가 문서 API를 보호하고 로그아웃을 적�
     assert.equal((await fetch(`${defaultsPath}?siteId=${site.id}`)).status,401);assert.equal((await fetch(defaultsPath,{method:'PUT',headers:{cookie:workerCookie,'content-type':'application/json'},body:JSON.stringify(defaultsInput)})).status,401);
     assert.equal((await fetch(defaultsPath,{method:'PUT',headers:{cookie,'content-type':'application/json'},body:JSON.stringify(defaultsInput)})).status,200);
     assert.equal((await (await fetch(`${defaultsPath}?siteId=${site.id}`,{headers:{cookie}})).json())[0].kind,'lunch');
+    assert.equal((await fetch(defaultsPath,{method:'PUT',headers:{cookie,'content-type':'application/json'},body:JSON.stringify({...defaultsInput,group:'manager'})})).status,200);
+    assert.equal((await (await fetch(`${defaultsPath}?siteId=${site.id}&group=manager`,{headers:{cookie}})).json())[0].kind,'lunch');
+    assert.equal((await fetch(defaultsPath,{method:'PUT',headers:{cookie,'content-type':'application/json'},body:JSON.stringify({siteId:site.id,group:'manager',items:[{kind:'snack',restaurantId}]})})).status,400);
+    assert.equal((await fetch(`${defaultsPath}?siteId=${site.id}&group=invalid`,{headers:{cookie}})).status,400);
+    assert.equal((await fetch(defaultsPath,{method:'PUT',headers:{cookie,'content-type':'application/json'},body:JSON.stringify({siteId:site.id,group:'manager',items:[]})})).status,200);
     assert.equal((await post('/api/attendance',{siteId:site.id,workerId:own.id,date:'2024-01-28',present:true})).status,200);
     assert.equal((await (await fetch(`${mealPath}?siteId=${site.id}&date=2024-01-28`,{headers:{cookie}})).json())[0].price,5000);
     assert.equal((await fetch(defaultsPath,{method:'PUT',headers:{cookie,'content-type':'application/json'},body:JSON.stringify({siteId:site.id,items:[]})})).status,200);

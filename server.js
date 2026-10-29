@@ -446,8 +446,8 @@ const server = http.createServer(async (req, res) => {
       if(req.method==='DELETE'){store.deleteMealCheck(url.searchParams.get('siteId'),url.searchParams.get('id'));return json(res,200,{ok:true});}
     }
     if(url.pathname==='/api/meal-defaults'){
-      if(req.method==='GET')return json(res,200,store.mealDefaults(url.searchParams.get('siteId')));
-      if(req.method==='PUT'){const input=await body(req);return json(res,200,store.saveMealDefaults(input.siteId,input.items));}
+      if(req.method==='GET')return json(res,200,store.mealDefaults(url.searchParams.get('siteId'),url.searchParams.get('group')??'direct'));
+      if(req.method==='PUT'){const input=await body(req);return json(res,200,store.saveMealDefaults(input.siteId,input.items,input.group??'direct'));}
     }
     if(url.pathname==='/api/restaurants'){
       if(req.method==='GET')return json(res,200,store.restaurants(url.searchParams.get('siteId')));

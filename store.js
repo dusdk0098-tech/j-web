@@ -59,6 +59,7 @@ export class Store {
       CREATE TABLE IF NOT EXISTS site_occupations (id INTEGER PRIMARY KEY,site_id INTEGER NOT NULL REFERENCES sites(id),name TEXT NOT NULL,UNIQUE(site_id,name));
       CREATE TABLE IF NOT EXISTS restaurants (id INTEGER PRIMARY KEY,site_id INTEGER NOT NULL REFERENCES sites(id),name TEXT NOT NULL,meal_price INTEGER NOT NULL,snack_price INTEGER NOT NULL,tax INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS meal_defaults (site_id INTEGER NOT NULL REFERENCES sites(id),kind TEXT NOT NULL,restaurant_id INTEGER NOT NULL REFERENCES restaurants(id),PRIMARY KEY(site_id,kind));
+      CREATE TABLE IF NOT EXISTS manager_meal_defaults (site_id INTEGER NOT NULL REFERENCES sites(id),kind TEXT NOT NULL,restaurant_id INTEGER NOT NULL REFERENCES restaurants(id),PRIMARY KEY(site_id,kind));
       CREATE TABLE IF NOT EXISTS meal_checks (id INTEGER PRIMARY KEY,site_id INTEGER NOT NULL REFERENCES sites(id),worker_id INTEGER NOT NULL REFERENCES workers(id),date TEXT NOT NULL,kind TEXT NOT NULL,restaurant_id INTEGER NOT NULL REFERENCES restaurants(id),restaurant_name TEXT NOT NULL,price INTEGER NOT NULL,UNIQUE(worker_id,date,kind));
       CREATE TABLE IF NOT EXISTS ppe_issues (id INTEGER PRIMARY KEY,site_id INTEGER NOT NULL REFERENCES sites(id),worker_id INTEGER NOT NULL REFERENCES workers(id),date TEXT NOT NULL,item TEXT NOT NULL,quantity INTEGER NOT NULL CHECK(quantity>0),worker_snapshot TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS wage_records (site_id INTEGER NOT NULL REFERENCES sites(id),worker_id INTEGER NOT NULL REFERENCES workers(id),month TEXT NOT NULL,gross INTEGER NOT NULL,deductions TEXT NOT NULL,PRIMARY KEY(worker_id,month));
@@ -259,18 +260,23 @@ export class Store {
   restaurants(siteId) {
     return this.db.prepare('SELECT * FROM restaurants WHERE site_id=? ORDER BY name,id').all(Number(siteId));
   }
-  mealDefaults(siteId) {
-    return this.db.prepare('SELECT kind,restaurant_id FROM meal_defaults WHERE site_id=? ORDER BY kind').all(Number(siteId));
+  mealDefaults(siteId,group='direct') {
+    if(!['direct','manager'].includes(group))throw new Error('자동 식대 대상 구분을 확인해 주세요.');
+    const table=group==='manager'?'manager_meal_defaults':'meal_defaults';
+    return this.db.prepare(`SELECT kind,restaurant_id FROM ${table} WHERE site_id=? ORDER BY kind`).all(Number(siteId));
   }
-  saveMealDefaults(siteId,items) {
+  saveMealDefaults(siteId,items,group='direct') {
     siteId=Number(siteId);if(!this.db.prepare('SELECT 1 FROM sites WHERE id=?').get(siteId))throw new Error('현장을 선택해 주세요.');
+    if(!['direct','manager'].includes(group))throw new Error('자동 식대 대상 구분을 확인해 주세요.');
+    const table=group==='manager'?'manager_meal_defaults':'meal_defaults',kinds=group==='manager'?['breakfast','lunch','dinner']:['breakfast','lunch','dinner','snack'];
     if(!Array.isArray(items)||items.length>4||new Set(items.map(x=>x?.kind)).size!==items.length)throw new Error('자동 식대 설정을 확인해 주세요.');
-    for(const item of items){if(!item||!['breakfast','lunch','dinner','snack'].includes(item.kind)||!this.db.prepare('SELECT 1 FROM restaurants WHERE id=? AND site_id=?').get(Number(item.restaurantId),siteId))throw new Error('식사 종류와 현장의 식당을 확인해 주세요.');}
-    this.db.exec('BEGIN IMMEDIATE');try{this.db.prepare('DELETE FROM meal_defaults WHERE site_id=?').run(siteId);const insert=this.db.prepare('INSERT INTO meal_defaults(site_id,kind,restaurant_id) VALUES(?,?,?)');for(const item of items)insert.run(siteId,item.kind,Number(item.restaurantId));this.db.exec('COMMIT');}catch(error){this.db.exec('ROLLBACK');throw error;}
-    return this.mealDefaults(siteId);
+    for(const item of items){if(!item||!kinds.includes(item.kind)||!this.db.prepare('SELECT 1 FROM restaurants WHERE id=? AND site_id=?').get(Number(item.restaurantId),siteId))throw new Error('식사 종류와 현장의 식당을 확인해 주세요.');}
+    this.db.exec('BEGIN IMMEDIATE');try{this.db.prepare(`DELETE FROM ${table} WHERE site_id=?`).run(siteId);const insert=this.db.prepare(`INSERT INTO ${table}(site_id,kind,restaurant_id) VALUES(?,?,?)`);for(const item of items)insert.run(siteId,item.kind,Number(item.restaurantId));this.db.exec('COMMIT');}catch(error){this.db.exec('ROLLBACK');throw error;}
+    return this.mealDefaults(siteId,group);
   }
   applyMealDefaults(workerId,date) {
-    this.db.prepare("INSERT OR IGNORE INTO meal_checks(site_id,worker_id,date,kind,restaurant_id,restaurant_name,price,tax_snapshot) SELECT w.site_id,w.id,?,d.kind,r.id,r.name,CASE WHEN d.kind='snack' THEN r.snack_price ELSE r.meal_price END,CASE WHEN d.kind='snack' THEN NULL ELSE r.tax END FROM workers w JOIN meal_defaults d ON d.site_id=w.site_id JOIN restaurants r ON r.id=d.restaurant_id AND r.site_id=w.site_id WHERE w.id=? AND w.category='직영'").run(date,Number(workerId));
+    const category=this.db.prepare('SELECT category FROM workers WHERE id=?').get(Number(workerId))?.category,table=category==='직영'?'meal_defaults':category==='현장관리자'?'manager_meal_defaults':null;if(!table)return;
+    this.db.prepare(`INSERT OR IGNORE INTO meal_checks(site_id,worker_id,date,kind,restaurant_id,restaurant_name,price,tax_snapshot) SELECT w.site_id,w.id,?,d.kind,r.id,r.name,CASE WHEN d.kind='snack' THEN r.snack_price ELSE r.meal_price END,CASE WHEN d.kind='snack' THEN NULL ELSE r.tax END FROM workers w JOIN ${table} d ON d.site_id=w.site_id JOIN restaurants r ON r.id=d.restaurant_id AND r.site_id=w.site_id WHERE w.id=?`).run(date,Number(workerId));
   }
   wageRecords(siteId,month,filters={}) {
     month=monthValue(month);
