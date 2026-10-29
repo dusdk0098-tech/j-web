@@ -137,6 +137,7 @@ export class Store {
     }catch(error){this.db.exec('ROLLBACK');throw error;}
     this.db.exec('BEGIN IMMEDIATE');try{
       if(!this.db.prepare('PRAGMA table_info(reviewers)').all().some(c=>c.name==='auth_version'))this.db.exec("ALTER TABLE reviewers ADD COLUMN auth_version TEXT NOT NULL DEFAULT ''");
+      if(!this.db.prepare('PRAGMA table_info(invitations)').all().some(c=>c.name==='pending'))this.db.exec('ALTER TABLE invitations ADD COLUMN pending INTEGER NOT NULL DEFAULT 0 CHECK(pending IN (0,1))');
       this.db.exec("UPDATE reviewers SET auth_version=lower(hex(randomblob(16))) WHERE auth_version=''");
       this.db.exec('COMMIT');
     }catch(error){this.db.exec('ROLLBACK');throw error;}
@@ -982,22 +983,26 @@ export class Store {
     from=dateValue(from);to=dateValue(to);if(from>to)throw new Error('조회 시작일은 종료일보다 늦을 수 없습니다.');
     return this.sites().map(site=>({id:site.id,name:site.name,categories:this.attendanceReport(site.id,from,to,'category').map(({label,days})=>({label,days}))}));
   }
-  createInvitation(siteId) {
+  createInvitation(siteId,pending=false) {
     if (!this.db.prepare('SELECT id FROM sites WHERE id=?').get(Number(siteId))) throw new Error('현장을 선택해 주세요.');
     this.ensureSiteAccess(siteId);
     const token = randomBytes(32).toString('base64url');
     const hash = createHash('sha256').update(token).digest('hex');
     const expiresAt = Date.now() + 30 * 24 * 60 * 60 * 1000;
-    this.db.prepare('INSERT INTO invitations(token_hash,site_id,expires_at) VALUES(?,?,?)').run(hash,Number(siteId),expiresAt);
+    this.db.prepare('INSERT INTO invitations(token_hash,site_id,expires_at,pending) VALUES(?,?,?,?)').run(hash,Number(siteId),expiresAt,pending?1:0);
     return { token, expiresAt };
   }
   revokeInvitations(siteId) {
-    this.db.exec('BEGIN IMMEDIATE');try{const count=this.db.prepare('UPDATE invitations SET revoked=1 WHERE site_id=? AND revoked=0').run(Number(siteId)).changes;this.db.prepare('DELETE FROM site_registration WHERE site_id=?').run(Number(siteId));this.db.exec('COMMIT');return count;}catch(error){this.db.exec('ROLLBACK');throw error;}
+    this.db.exec('BEGIN IMMEDIATE');try{const count=this.db.prepare('SELECT COUNT(*) AS n FROM invitations WHERE site_id=? AND revoked=0 AND pending=0').get(Number(siteId)).n;this.db.prepare('UPDATE invitations SET revoked=1 WHERE site_id=? AND revoked=0').run(Number(siteId));this.db.prepare('DELETE FROM site_registration WHERE site_id=?').run(Number(siteId));this.db.exec('COMMIT');return count;}catch(error){this.db.exec('ROLLBACK');throw error;}
   }
+  activateInvitation(token,authorize){
+    const hash=createHash('sha256').update(token).digest('hex');this.db.exec('BEGIN IMMEDIATE');try{authorize();const result=this.db.prepare('UPDATE invitations SET pending=0 WHERE token_hash=? AND pending=1 AND revoked=0 AND expires_at>?').run(hash,Date.now());this.db.exec('COMMIT');return result.changes===1;}catch(error){this.db.exec('ROLLBACK');throw error;}
+  }
+  discardPendingInvitation(token){this.db.prepare('DELETE FROM invitations WHERE token_hash=? AND pending=1').run(createHash('sha256').update(token).digest('hex'));}
   invitation(token) {
     if (typeof token !== 'string' || !/^[\w-]{43}$/.test(token)) return null;
     const hash=createHash('sha256').update(token).digest('hex');
-    return this.db.prepare('SELECT sites.id,sites.name,invitations.expires_at FROM invitations JOIN sites ON sites.id=invitations.site_id WHERE token_hash=? AND revoked=0 AND expires_at>?').get(hash,Date.now()) || null;
+    return this.db.prepare('SELECT sites.id,sites.name,invitations.expires_at FROM invitations JOIN sites ON sites.id=invitations.site_id WHERE token_hash=? AND revoked=0 AND pending=0 AND expires_at>?').get(hash,Date.now()) || null;
   }
   ensureSiteAccess(siteId){
     siteId=Number(siteId);if(!this.db.prepare('SELECT 1 FROM sites WHERE id=?').get(siteId))throw new Error('현장을 선택해 주세요.');
@@ -1007,6 +1012,9 @@ export class Store {
   rotateSiteAccess(siteId){
     siteId=Number(siteId);if(!this.db.prepare('SELECT 1 FROM sites WHERE id=?').get(siteId))throw new Error('현장을 선택해 주세요.');
     const key=randomBytes(32).toString('base64url');this.db.prepare('INSERT INTO site_access(site_id,access_key) VALUES(?,?) ON CONFLICT(site_id) DO UPDATE SET access_key=excluded.access_key').run(siteId,key);return key;
+  }
+  replaceSiteAccess(siteId,oldKey,newKey,authorize){
+    this.db.exec('BEGIN IMMEDIATE');try{authorize();const result=this.db.prepare('UPDATE site_access SET access_key=? WHERE site_id=? AND access_key=?').run(newKey,Number(siteId),oldKey);this.db.exec('COMMIT');return result.changes===1;}catch(error){this.db.exec('ROLLBACK');throw error;}
   }
   siteFromAccess(key){
     if(typeof key!=='string'||!/^[\w-]{43}$/.test(key))return null;
