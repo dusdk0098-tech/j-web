@@ -1194,6 +1194,15 @@ test('계획서의 장비와 운전원 연결은 같은 현장에 한정되고 �
   }finally{s.close();}
 });
 
+test('장비 점검 구분과 조치는 검증되고 결재 사본에 보존된다',()=>{
+  const s=new Store(':memory:');try{
+    const site=s.createSite({name:'가상 현장'}),equipment=s.createEquipment({siteId:site.id,kind:'가상 장비',model:'가상 모델',capacity:'',manufacturer:'',registration:''}),doc=s.createDocument({siteId:site.id,type:'work_plan',title:'가상 계획',date:'2026-10-30',details:{equipmentIds:[equipment.id]}}),item={name:'가상 항목',result:'부적정',section:' 가상 구분 ',action:' 가상 조치 '},check={equipmentId:equipment.id,date:'2026-10-30',items:[item]};
+    for(const bad of [{...item,section:123},{...item,section:'x'.repeat(201)},{...item,action:null},{...item,action:'x'.repeat(2001)}])assert.throws(()=>s.addEquipmentCheck(doc.id,{...check,items:[bad]}),/확인/);assert.equal(s.equipmentChecks(doc.id).length,0);
+    s.addEquipmentCheck(doc.id,check);assert.deepEqual(JSON.parse(s.equipmentChecks(doc.id)[0].items),[{...item,section:'가상 구분',action:'가상 조치'}]);s.transition(doc.id,'submit');const cycle=s.document(doc.id).approval_cycle_id,linked=s.approvalCycle(doc.id,cycle).linked;assert.equal(linked.checks[0].items[0].action,'가상 조치');assert.equal(linked.checks[0].items[0].section,'가상 구분');
+    s.addEquipmentCheck(doc.id,{...check,date:'2026-10-31',items:[{name:'이전 형식',result:'적정'}]});assert.deepEqual(JSON.parse(s.equipmentChecks(doc.id)[0].items),[{name:'이전 형식',result:'적정'}]);assert.equal(s.approvalCycle(doc.id,cycle).linked.checks.length,1);
+  }finally{s.close();}
+});
+
 test('장비 점검자 시험 서명은 점검별로 저장하고 결재 당시 보존한다',()=>{
   const s=new Store(':memory:');try{
     const site=s.createSite({name:'가상 현장'}),asset=s.createEquipment({siteId:site.id,kind:'가상 장비',model:'가상 모델',capacity:'',manufacturer:'',registration:''}),doc=s.createDocument({siteId:site.id,type:'work_plan',title:'가상 계획',date:'2026-10-29',details:{equipmentIds:[asset.id]}}),png=new PNG({width:1,height:1});png.data[3]=255;const bytes=PNG.sync.write(png),signature=`data:image/png;base64,${bytes.toString('base64')}`,check={equipmentId:asset.id,date:'2026-10-29',items:[{name:'가상 항목',result:'적정'}]};
