@@ -609,6 +609,25 @@ export class Store {
     if(!doc || !['tbm','education'].includes(doc.type))throw new Error('교육 문서를 확인해 주세요.');
     return this.db.prepare('SELECT w.name,w.company,c.created_at,c.rights_ack FROM worker_training_checks c JOIN workers w ON w.id=c.worker_id WHERE c.document_id=? AND w.site_id=? ORDER BY c.created_at,w.id').all(Number(documentId),doc.site_id);
   }
+  workerActivities(siteId,workerId,kinds=[],offset=0){
+    siteId=Number(siteId);workerId=Number(workerId);
+    if(!this.db.prepare('SELECT 1 FROM workers WHERE id=? AND site_id=?').get(workerId,siteId))throw new Error('같은 현장의 출입자를 확인해 주세요.');
+    const valid=['tbm','education','notice','checklist','hazard','risk','work_plan','instruction'];
+    if(!Array.isArray(kinds)||kinds.some(kind=>!valid.includes(kind))||new Set(kinds).size!==kinds.length||!Number.isSafeInteger(offset)||offset<0)throw new Error('활동 검색 조건을 확인해 주세요.');
+    if(!kinds.length)kinds=valid;
+    const query=`WITH ctx AS (SELECT ? AS site,? AS worker), activity AS (
+      SELECT d.type AS kind,d.date,d.title,'문서별 시험 참가 확인' AS detail,d.id AS document_id FROM worker_training_checks c JOIN documents d ON d.id=c.document_id WHERE c.worker_id=(SELECT worker FROM ctx) AND d.site_id=(SELECT site FROM ctx) AND d.type IN ('tbm','education') AND d.status='approved'
+      UNION ALL SELECT c.kind,c.date,'당일 종류별 확인','시험 확인 (문서별 확인과 별도)',NULL FROM worker_daily_training c WHERE c.worker_id=(SELECT worker FROM ctx) AND c.kind IN ('tbm','education')
+      UNION ALL SELECT 'notice',d.date,d.title,'시험 공지 확인',d.id FROM worker_notice_reads c JOIN documents d ON d.id=c.document_id WHERE c.worker_id=(SELECT worker FROM ctx) AND d.site_id=(SELECT site FROM ctx) AND d.type='notice' AND d.status='approved'
+      UNION ALL SELECT 'checklist',c.date,'자가점검','시험 자가점검',NULL FROM worker_self_checks c WHERE c.worker_id=(SELECT worker FROM ctx)
+      UNION ALL SELECT 'hazard',date(h.created_at,'localtime'),h.title,'시험 신고',NULL FROM hazard_reports h WHERE h.worker_id=(SELECT worker FROM ctx) AND h.site_id=(SELECT site FROM ctx)
+      UNION ALL SELECT 'risk',a.date,d.title,'시험 활동의 선택 명단',d.id FROM risk_activities a JOIN documents d ON d.id=a.document_id WHERE d.site_id=(SELECT site FROM ctx) AND d.type='risk' AND EXISTS(SELECT 1 FROM json_each(a.worker_snapshot) w WHERE json_extract(w.value,'$.id')=(SELECT worker FROM ctx))
+      UNION ALL SELECT 'work_plan',d.date,d.title,'계획서에 지정된 작업자',d.id FROM documents d WHERE d.site_id=(SELECT site FROM ctx) AND d.type='work_plan' AND d.status='approved' AND EXISTS(SELECT 1 FROM json_each(d.details,'$.workers') w WHERE json_extract(w.value,'$.workerId')=(SELECT worker FROM ctx))
+      UNION ALL SELECT 'instruction',d.date,d.title,'지정된 시험 수신자',d.id FROM documents d WHERE d.site_id=(SELECT site FROM ctx) AND d.type='instruction' AND d.status='approved' AND json_extract(d.details,'$.recipientId')=(SELECT worker FROM ctx)
+    ) SELECT kind,date,title,detail,document_id FROM activity WHERE kind IN (${kinds.map(()=>'?').join(',')}) ORDER BY date DESC,kind,title,document_id DESC LIMIT 101 OFFSET ?`;
+    const rows=this.db.prepare(query).all(siteId,workerId,...kinds,offset),hasMore=rows.length>100;
+    return {items:rows.slice(0,100),nextOffset:hasMore?offset+100:null};
+  }
   educationReport(siteId,from,to){
     from=dateValue(from);to=dateValue(to);if(from>to)throw new Error('조회 시작일은 종료일보다 늦을 수 없습니다.');
     return this.db.prepare("SELECT w.id,w.name,w.company,w.category,d.type,COALESCE(NULLIF(json_extract(d.details,'$.kind'),''),'unspecified') AS kind,COUNT(*) AS count,json_group_array(json_object('id',d.id,'date',d.date,'title',d.title)) AS documents FROM worker_training_checks c JOIN workers w ON w.id=c.worker_id JOIN documents d ON d.id=c.document_id AND d.site_id=w.site_id WHERE w.site_id=? AND d.date BETWEEN ? AND ? AND d.type IN ('tbm','education') AND d.status='approved' GROUP BY w.id,d.type,kind ORDER BY w.name,w.id,d.type,kind").all(Number(siteId),from,to).map(row=>({...row,documents:JSON.parse(row.documents)}));
