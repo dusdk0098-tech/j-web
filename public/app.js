@@ -50,11 +50,12 @@ $('#site-qr').onclick=async()=>{
   if(!state.siteId){flash('먼저 현장을 선택해 주세요.',true);return;}
   try {
     const invite=await api(`/api/sites/${state.siteId}/invitation`,{method:'POST',body:'{}'});
+    const access=await api(`/api/sites/${state.siteId}/access`,{method:'POST',body:'{}'});
     $('#dialog-title').textContent='현장 가입 QR';
     $('#dialog-error').textContent='';
     const siteName=siteSelect.selectedOptions[0].textContent;
     const expires=new Date(invite.expiresAt).toLocaleString('ko-KR');
-    $('#dialog-body').innerHTML=`<div class="qr"><h3>${esc(siteName)}</h3><img alt="현장 가입 QR 코드" src="${esc(invite.image)}"><p>가입 주소</p><p class="qr-address">${esc(invite.link)}</p><p>유효기간: ${esc(expires)}까지</p><p class="muted">현재 주소는 이 컴퓨터에서만 열리는 로컬 시험 주소입니다. 휴대전화 접속은 배포 후 확인해야 합니다.</p><button type="button" id="revoke-qr" class="outline">이 현장의 가입 QR 모두 중지</button></div>`;
+    $('#dialog-body').innerHTML=`<div class="qr"><h3>${esc(siteName)}</h3><h4>신규 가입</h4><img alt="현장 가입 QR 코드" src="${esc(invite.image)}"><p>가입 주소</p><p class="qr-address">${esc(invite.link)}</p><p>유효기간: ${esc(expires)}까지</p><h4>기존 가입자 로그인</h4><img alt="현장 로그인 QR 코드" src="${esc(access.image)}"><p>로그인 주소</p><p class="qr-address">${esc(access.link)}</p><p class="muted">가입 QR을 중지해도 로그인 주소는 유지됩니다. 휴대전화 접속에는 별도 HTTPS 연결이 필요합니다.</p><button type="button" id="revoke-qr" class="outline">이 현장의 가입 QR 모두 중지</button></div>`;
     $('#revoke-qr').onclick=async()=>{if(!confirm('이 현장에서 발급된 모든 가입 QR을 중지할까요?'))return;try{await api(`/api/sites/${state.siteId}/invitation`,{method:'DELETE'});dialog.close();flash('가입 QR을 중지했습니다.');}catch(e){showError(e);}};
     $('#dialog-form button[type=submit]').textContent='인쇄';
     $('#dialog-form').onsubmit=e=>{e.preventDefault();window.print();}; dialog.showModal();

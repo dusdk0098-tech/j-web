@@ -128,6 +128,10 @@ test('관리자 인증 모드가 문서 API를 보호하고 로그아웃을 적�
     const inviteToken=new URL(invitation.link).searchParams.get('token');
     const joinInfo=await fetch(`${base}/api/join?token=${inviteToken}`);
     assert.equal(joinInfo.status,200);const joinData=await joinInfo.json();assert.equal(joinData.id,site.id);assert.deepEqual(joinData.companies,['가상 협력사']);assert.deepEqual(joinData.occupations,['가상 목공']);
+    assert.equal((await fetch(`${base}/api/sites/${site.id}/access`,{method:'POST'})).status,401);
+    const siteAccess=await (await post(`/api/sites/${site.id}/access`,{})).json(),siteKey=new URL(siteAccess.link).searchParams.get('site');assert.equal(siteKey,joinData.siteKey);
+    const accessPng=PNG.sync.read(Buffer.from(siteAccess.image.split(',')[1],'base64'));assert.equal(jsQR(new Uint8ClampedArray(accessPng.data),accessPng.width,accessPng.height)?.data,siteAccess.link);
+    assert.equal((await (await fetch(`${base}/api/worker/site?key=${siteKey}`)).json()).id,site.id);assert.equal((await fetch(`${base}/api/worker/site?key=invalid`)).status,404);
     const joinImage=new PNG({width:1,height:1});joinImage.data[3]=255;const joinBytes=PNG.sync.write(joinImage),joinSignature=`data:image/png;base64,${joinBytes.toString('base64')}`;
     const profile={birthDate:'2000-02-29',phone:'010-0000-0000',emergencyName:'가상 보호자',emergencyPhone:'010-0000-1111',address:'가상 주소',nationality:'가상 국적'};
     const signup=async (acknowledged,equipment=['안전모','안전화'],signature=joinSignature,profileInput=profile)=>fetch(`${base}/api/join`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({token:inviteToken,name:'가상 근로자',category:'직영',company:'가상 업체',occupation:'목공',loginId:'worker1',password:'virtual-password-123',acknowledged,equipment,signature,profile:profileInput})});
@@ -464,6 +468,9 @@ test('관리자 인증 모드가 문서 API를 보호하고 로그아웃을 적�
     assert.equal((await (await fetch(`${base}/api/workers?siteId=${site.id}`,{headers:{cookie}})).json()).length,1);
     assert.equal((await fetch(`${base}/api/sites/${site.id}/invitation`,{method:'DELETE',headers:{cookie}})).status,200);
     assert.equal((await fetch(`${base}/api/join?token=${inviteToken}`)).status,404);
+    assert.equal((await signup(true)).status,400);
+    const stableLogin=await fetch(`${base}/api/worker/login`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({siteKey,loginId:'worker1',password:'virtual-password-123'})});assert.equal(stableLogin.status,200);
+    assert.equal((await fetch(`${base}/api/worker/logout`,{method:'POST',headers:{cookie:stableLogin.headers.get('set-cookie').split(';')[0]}})).status,200);
     const worker=await (await post('/api/workers',{siteId:site.id,name:'가상 출입자',category:'직영',company:'가상 업체',occupation:'목공'})).json();
     assert.equal((await post('/api/attendance',{siteId:site.id,workerId:worker.id,date:'2024-02-29',present:true})).status,200);
     const monthly=await (await fetch(`${base}/api/attendance/month?siteId=${site.id}&month=2024-02`,{headers:{cookie}})).json();

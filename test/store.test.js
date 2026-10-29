@@ -427,6 +427,7 @@ test('저장한 현장과 가입 정보가 서버 재시작 후 유지되고 만
     let s=new Store(path);
     const site=s.createSite({name:'지속성 시험 현장'});
     const invite=s.createInvitation(site.id);
+    const access=s.siteAccessKey(site.id);assert.equal(s.ensureSiteAccess(site.id),access);
     s.join(invite.token,{name:'가상 근로자',category:'직영',company:'가상 회사',occupation:'기타',loginId:'worker1',password:'virtual-password-123',acknowledged:true});
     s.close();
     s=new Store(path);
@@ -438,6 +439,9 @@ test('저장한 현장과 가입 정보가 서버 재시작 후 유지되고 만
       assert.equal(s.invitation(invite.token).id,site.id);
       s.db.prepare('UPDATE invitations SET expires_at=0').run();
       assert.equal(s.invitation(invite.token),null);
+      assert.equal(s.siteAccessKey(site.id),access);assert.equal(s.siteFromAccess(access).id,site.id);
+      assert.equal(s.authenticateWorker(null,'worker1','virtual-password-123',access).name,'가상 근로자');assert.equal(s.authenticateWorker(null,'worker1','wrong-password',access),null);
+      assert.equal(s.authenticateWorker(null,'worker1','virtual-password-123','invalid'),null);
       assert.throws(()=>s.join(invite.token,{name:'늦은 가입'}),/만료/);
       assert.equal(s.workers(site.id).length,1);
     } finally {s.close();}

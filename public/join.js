@@ -1,4 +1,4 @@
-const token=new URLSearchParams(location.search).get('token');
+const params=new URLSearchParams(location.search),token=params.get('token'),siteKey=params.get('site');
 const site=document.querySelector('#join-site'), message=document.querySelector('#join-message'), form=document.querySelector('#join-form');
 form.querySelector('p').textContent='이 시험 화면은 가상 인적사항·아이디·보호구 선택·서명 이미지와 암호의 해시를 이 컴퓨터의 시험 데이터베이스에 저장합니다. 실제 개인정보와 실제 암호 대신 가상 정보를 입력하세요.';
 form.setAttribute('autocomplete','off');
@@ -19,13 +19,14 @@ form.querySelector('.fields').insertAdjacentHTML('beforeend','<label>가상 생�
 form.querySelector('.action-row').insertAdjacentHTML('beforebegin','<fieldset><legend>가상 보호구 확인</legend><p>가상 항목만 선택하세요. 실제 지급이나 착용을 증명하지 않습니다.</p><label><input type="checkbox" name="equipment" value="안전모"> 안전모</label><label><input type="checkbox" name="equipment" value="안전화"> 안전화</label><label><input type="checkbox" name="equipment" value="안전대"> 안전대</label><label><input type="checkbox" name="equipment" value="보안경"> 보안경</label><label><input type="checkbox" name="equipment" value="장갑"> 장갑</label></fieldset><p>시험 서명 입력</p><canvas width="320" height="120" class="signature-pad" aria-label="가입 시험 서명 입력 영역"></canvas><button type="button" id="join-signature-clear">서명 지우기</button>');
 const joinPad=signaturePad(form.querySelector('canvas'));form.querySelector('#join-signature-clear').onclick=()=>joinPad.clear();
 try {
-  const response=await fetch(`/api/join?token=${encodeURIComponent(token || '')}`);
+  const response=await fetch(siteKey?`/api/worker/site?key=${encodeURIComponent(siteKey)}`:`/api/join?token=${encodeURIComponent(token || '')}`);
   const data=await response.json();if(!response.ok)throw Error(data.error);inviteInfo=data;
   const list=document.createElement('datalist');list.id='join-companies';
-  for(const name of data.companies){const option=document.createElement('option');option.value=name;list.append(option);}
+  for(const name of data.companies||[]){const option=document.createElement('option');option.value=name;list.append(option);}
   form.append(list);form.elements.company.setAttribute('list',list.id);
-  const occupations=document.createElement('datalist');occupations.id='join-occupations';for(const name of data.occupations){const option=document.createElement('option');option.value=name;occupations.append(option);}form.append(occupations);form.elements.occupation.setAttribute('list',occupations.id);
-  site.textContent=`현장: ${data.name}`; login.hidden=false;form.hidden=false;
+  const occupations=document.createElement('datalist');occupations.id='join-occupations';for(const name of data.occupations||[]){const option=document.createElement('option');option.value=name;occupations.append(option);}form.append(occupations);form.elements.occupation.setAttribute('list',occupations.id);
+  site.textContent=`현장: ${data.name}`;login.hidden=false;form.hidden=!!siteKey;
+  if(data.siteKey&&!siteKey){const link=document.createElement('a');link.href=`/join?site=${encodeURIComponent(data.siteKey)}`;link.textContent='기존 가입자 로그인 주소';site.after(link);}
 } catch(error) {site.textContent='';message.textContent=error.message;}
 form.onsubmit=async event=>{
   event.preventDefault();const submit=form.querySelector('button[type=submit], button:not([type])');submit.disabled=true;
@@ -99,7 +100,7 @@ async function showWorker(worker){
 login.onsubmit=async event=>{
   event.preventDefault();const button=login.querySelector('button');button.disabled=true;
   try{
-    const response=await fetch('/api/worker/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...Object.fromEntries(new FormData(login)),token})});
+    const response=await fetch('/api/worker/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...Object.fromEntries(new FormData(login)),token,siteKey})});
     const data=await response.json();if(!response.ok)throw Error(data.error);await showWorker(data.worker);
   }catch(error){message.textContent=error.message;button.disabled=false;}
 };

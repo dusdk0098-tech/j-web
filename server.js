@@ -52,10 +52,11 @@ const server = http.createServer(async (req, res) => {
       auth.logout(token);res.setHeader('Set-Cookie',`jweb_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0${secureCookie}`);return json(res,200,{ok:true});
     }
     const workerToken=(req.headers.cookie||'').split(';').map(x=>x.trim()).find(x=>x.startsWith('jweb_worker='))?.slice(12)||'';
+    if(url.pathname==='/api/worker/site'&&req.method==='GET'){const site=store.siteFromAccess(url.searchParams.get('key'));return site?json(res,200,site):json(res,404,{error:'현장 접속 주소를 확인해 주세요.'});}
     if(url.pathname==='/api/worker/login' && req.method==='POST'){
       const now=Date.now();workerFailures=workerFailures.filter(t=>t>now-5*60*1000);
       if(workerFailures.length>=10)return json(res,429,{error:'잠시 후 다시 로그인해 주세요.'});
-      const input=await body(req),worker=store.authenticateWorker(input.token,input.loginId,input.password);
+      const input=await body(req),worker=store.authenticateWorker(input.token,input.loginId,input.password,input.siteKey);
       if(!worker){workerFailures.push(now);return json(res,401,{error:'가입 링크 또는 로그인 정보를 확인해 주세요.'});}
       const current=new Date(now),date=new Date(now-current.getTimezoneOffset()*60000).toISOString().slice(0,10);
       store.recordWorkerLogin(worker.id,date);
@@ -210,6 +211,8 @@ const server = http.createServer(async (req, res) => {
       res.writeHead(200,{'Content-Type':'application/octet-stream','Content-Disposition':'attachment; filename="work-stop-photo"','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(photo);
     }
     const inviteSite=url.pathname.match(/^\/api\/sites\/(\d+)\/invitation$/);
+    const accessSite=url.pathname.match(/^\/api\/sites\/(\d+)\/access$/);
+    if(accessSite&&req.method==='POST'){const key=store.ensureSiteAccess(accessSite[1]),link=`${requestOrigin}/join?site=${encodeURIComponent(key)}`;return json(res,200,{link,image:await QRCode.toDataURL(link,{errorCorrectionLevel:'M',margin:2,width:256})});}
     if (inviteSite && req.method === 'POST') {
       const invite=store.createInvitation(inviteSite[1]);
       const link=`${requestOrigin}/join?token=${encodeURIComponent(invite.token)}`;
@@ -217,7 +220,7 @@ const server = http.createServer(async (req, res) => {
     }
     if (inviteSite && req.method === 'DELETE') return json(res,200,{revoked:store.revokeInvitations(inviteSite[1])});
     if (url.pathname === '/api/join') {
-      if (req.method === 'GET') {const invite=store.invitation(url.searchParams.get('token'));return invite?json(res,200,{id:invite.id,name:invite.name,companies:store.companies(invite.id).map(c=>c.name),occupations:store.siteOccupations(invite.id).map(o=>o.name)}):json(res,404,{error:'유효하지 않거나 만료된 가입 링크입니다.'});}
+      if (req.method === 'GET') {const invite=store.invitation(url.searchParams.get('token'));return invite?json(res,200,{id:invite.id,name:invite.name,siteKey:store.siteAccessKey(invite.id),companies:store.companies(invite.id).map(c=>c.name),occupations:store.siteOccupations(invite.id).map(o=>o.name)}):json(res,404,{error:'유효하지 않거나 만료된 가입 링크입니다.'});}
       if (req.method === 'POST') {const input=await body(req);store.join(input.token,input);return json(res,201,{ok:true});}
     }
     if (url.pathname === '/api/sites') {

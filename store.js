@@ -43,6 +43,7 @@ export class Store {
     this.db = new DatabaseSync(path);
     this.db.exec(`PRAGMA foreign_keys=ON;
       CREATE TABLE IF NOT EXISTS sites (id INTEGER PRIMARY KEY, name TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+      CREATE TABLE IF NOT EXISTS site_access (site_id INTEGER PRIMARY KEY REFERENCES sites(id),access_key TEXT NOT NULL UNIQUE);
       CREATE TABLE IF NOT EXISTS site_articles (id INTEGER PRIMARY KEY,site_id INTEGER NOT NULL REFERENCES sites(id),category TEXT NOT NULL,title TEXT NOT NULL,body TEXT NOT NULL,visible INTEGER NOT NULL CHECK(visible IN (0,1)),created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
       CREATE TABLE IF NOT EXISTS site_photos (id INTEGER PRIMARY KEY,site_id INTEGER NOT NULL REFERENCES sites(id),name TEXT NOT NULL,date TEXT NOT NULL,description TEXT NOT NULL DEFAULT '',data BLOB NOT NULL);
       CREATE TABLE IF NOT EXISTS site_article_files (id INTEGER PRIMARY KEY,article_id INTEGER NOT NULL REFERENCES site_articles(id),name TEXT NOT NULL,data BLOB NOT NULL);
@@ -656,6 +657,7 @@ export class Store {
   }
   createInvitation(siteId) {
     if (!this.db.prepare('SELECT id FROM sites WHERE id=?').get(Number(siteId))) throw new Error('현장을 선택해 주세요.');
+    this.ensureSiteAccess(siteId);
     const token = randomBytes(32).toString('base64url');
     const hash = createHash('sha256').update(token).digest('hex');
     const expiresAt = Date.now() + 30 * 24 * 60 * 60 * 1000;
@@ -670,6 +672,16 @@ export class Store {
     const hash=createHash('sha256').update(token).digest('hex');
     return this.db.prepare('SELECT sites.id,sites.name,invitations.expires_at FROM invitations JOIN sites ON sites.id=invitations.site_id WHERE token_hash=? AND revoked=0 AND expires_at>?').get(hash,Date.now()) || null;
   }
+  ensureSiteAccess(siteId){
+    siteId=Number(siteId);if(!this.db.prepare('SELECT 1 FROM sites WHERE id=?').get(siteId))throw new Error('현장을 선택해 주세요.');
+    this.db.prepare('INSERT OR IGNORE INTO site_access(site_id,access_key) VALUES(?,?)').run(siteId,randomBytes(32).toString('base64url'));
+    return this.db.prepare('SELECT access_key FROM site_access WHERE site_id=?').get(siteId).access_key;
+  }
+  siteFromAccess(key){
+    if(typeof key!=='string'||!/^[\w-]{43}$/.test(key))return null;
+    return this.db.prepare('SELECT s.id,s.name FROM site_access a JOIN sites s ON s.id=a.site_id WHERE a.access_key=?').get(key)||null;
+  }
+  siteAccessKey(siteId){return this.db.prepare('SELECT access_key FROM site_access WHERE site_id=?').get(Number(siteId))?.access_key||null;}
   join(token,input) {
     const invite=this.invitation(token);
     if (!invite) throw new Error('유효하지 않거나 만료된 가입 링크입니다.');
@@ -702,10 +714,10 @@ export class Store {
     return row?{...row,equipment:JSON.parse(row.equipment),profile:row.profile?JSON.parse(row.profile):null}:null;
   }
   joinSignature(siteId,workerId){return this.db.prepare('SELECT a.signature FROM join_acknowledgements a JOIN workers w ON w.id=a.worker_id WHERE w.site_id=? AND w.id=? AND a.signature IS NOT NULL').get(Number(siteId),Number(workerId))?.signature||null;}
-  authenticateWorker(token,loginId,password) {
-    const invite=this.invitation(token);
-    if(!invite || typeof loginId!=='string' || !/^[a-zA-Z0-9_]{3,40}$/.test(loginId) || typeof password!=='string' || password.length>256)return null;
-    const account=this.db.prepare('SELECT worker_id,salt,password_hash FROM worker_accounts WHERE site_id=? AND login_id=?').get(invite.id,loginId);
+  authenticateWorker(token,loginId,password,siteKey=null) {
+    const site=siteKey?this.siteFromAccess(siteKey):this.invitation(token);
+    if(!site || typeof loginId!=='string' || !/^[a-zA-Z0-9_]{3,40}$/.test(loginId) || typeof password!=='string' || password.length>256)return null;
+    const account=this.db.prepare('SELECT worker_id,salt,password_hash FROM worker_accounts WHERE site_id=? AND login_id=?').get(site.id,loginId);
     if(!account)return null;
     const hash=scryptSync(password,account.salt,32);
     if(!timingSafeEqual(hash,account.password_hash))return null;
