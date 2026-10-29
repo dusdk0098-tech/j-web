@@ -313,6 +313,7 @@ test('관리자 인증 모드가 문서 API를 보호하고 로그아웃을 적�
     const workerHazard=`${base}/api/worker/hazard-reports`;assert.equal((await fetch(workerHazard)).status,401);
     const workerHazardResponse=await fetch(workerHazard,{method:'POST',headers:{cookie:workerCookie,'content-type':'application/json'},body:JSON.stringify({...hazardInput,title:'근로자 가상 신고',reporter:'위조',siteId:other.id})});assert.equal(workerHazardResponse.status,201);const workerHazardId=(await workerHazardResponse.json()).id;
     const workerHazardRows=await (await fetch(workerHazard,{headers:{cookie:workerCookie}})).json();assert.equal(workerHazardRows.length,1);assert.equal(workerHazardRows[0].title,'근로자 가상 신고');
+    const ownHazardPhoto=`${workerHazard}/${workerHazardId}/photo`;assert.equal((await fetch(ownHazardPhoto)).status,401);const ownPhoto=await fetch(ownHazardPhoto,{headers:{cookie:workerCookie}});assert.equal(ownPhoto.status,200);assert.equal(ownPhoto.headers.get('content-type'),'image/png');assert.deepEqual(Buffer.from(await ownPhoto.arrayBuffer()),photo);assert.equal((await fetch(`${workerHazard}/${hazardId}/photo`,{headers:{cookie:workerCookie}})).status,404);
     const managerHazards=await (await fetch(hazardPath,{headers:{cookie}})).json();assert.equal(managerHazards[0].reporter,own.name);assert.equal((await (await fetch(`${base}/api/sites/${other.id}/hazard-reports`,{headers:{cookie}})).json()).length,0);
     const updateHazard=(session,siteId,input)=>fetch(`${base}/api/sites/${siteId}/hazard-reports/${workerHazardId}`,{method:'PUT',headers:{cookie:session,'content-type':'application/json'},body:JSON.stringify(input)}),action={status:'resolved',response:'가상 조치 완료'};
     assert.equal((await updateHazard(workerCookie,site.id,action)).status,401);assert.equal((await updateHazard(cookie,other.id,action)).status,400);
@@ -547,6 +548,7 @@ test('관리자 인증 모드가 문서 API를 보호하고 로그아웃을 적�
     const opened=await post(`/api/sites/${site.id}/access/registration`,{});assert.equal(opened.status,200);assert.ok((await opened.json()).expiresAt>Date.now());
     const openInfo=await (await fetch(`${base}/api/worker/site?key=${siteKey}`)).json();assert.equal(openInfo.canSignup,true);assert.ok(openInfo.companies.includes('가상 협력사'));assert.ok(openInfo.occupations.includes('가상 목공'));
     assert.equal((await siteSignup(siteKey)).status,201);
+    const anotherLogin=await fetch(`${base}/api/worker/login`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({siteKey,loginId:'worker_site',password:'virtual-password-123'})});assert.equal(anotherLogin.status,200);assert.equal((await fetch(ownHazardPhoto,{headers:{cookie:anotherLogin.headers.get('set-cookie').split(';')[0]}})).status,404);
     assert.equal((await fetch(`${base}/api/sites/${site.id}/invitation`,{method:'DELETE',headers:{cookie}})).status,200);
     assert.equal((await (await fetch(`${base}/api/worker/site?key=${siteKey}`)).json()).canSignup,false);assert.equal((await siteSignup(siteKey)).status,400);
     assert.equal((await fetch(`${base}/api/join?token=${inviteToken}`)).status,404);

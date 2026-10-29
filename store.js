@@ -653,6 +653,7 @@ export class Store {
   }
   createWorkerHazardReport(workerId,input){const worker=this.db.prepare('SELECT id,site_id,name FROM workers WHERE id=?').get(Number(workerId));if(!worker)throw new Error('근로자를 확인해 주세요.');return this.createHazardReport(worker.site_id,{...input,reporter:worker.name},worker.id);}
   workerHazardReports(workerId){return this.db.prepare('SELECT id,title,body,status,response,created_at,photo IS NOT NULL AS has_photo FROM hazard_reports WHERE worker_id=? ORDER BY id DESC').all(Number(workerId));}
+  workerHazardPhoto(workerId,id){return this.db.prepare('SELECT photo FROM hazard_reports WHERE worker_id=? AND id=? AND photo IS NOT NULL').get(Number(workerId),Number(id))?.photo||null;}
   hazardReports(siteId,query=''){if(typeof query!=='string'||query.length>200)throw new Error('검색어를 확인해 주세요.');return this.db.prepare('SELECT id,title,body,reporter,status,response,created_at,photo IS NOT NULL AS has_photo FROM hazard_reports WHERE site_id=? AND (instr(title,?)>0 OR instr(body,?)>0) ORDER BY id DESC').all(Number(siteId),query,query);}
   updateHazardReport(siteId,id,input){
     if(!['received','reviewing','resolved'].includes(input.status)||typeof input.response!=='string'||input.response.length>2000||input.status==='resolved'&&!input.response.trim())throw new Error('시험 처리 상태와 조치 내용을 확인해 주세요.');
