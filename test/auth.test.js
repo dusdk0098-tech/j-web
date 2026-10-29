@@ -51,6 +51,19 @@ test('근로자 세션은 재시작 후 복원되고 로그아웃·암호 변경
   }finally{await stop();rmSync(dir,{recursive:true,force:true});}
 });
 
+test('공유 DB를 쓰는 서버 사이에서 근로자 세션과 폐기를 확인한다',{timeout:30000},async()=>{
+  const dir=mkdtempSync(join(tmpdir(),'jweb-shared-session-')),reservations=[createServer(),createServer()];for(const socket of reservations)await new Promise(resolve=>socket.listen(0,'127.0.0.1',resolve));const ports=reservations.map(socket=>socket.address().port);for(const socket of reservations)await new Promise(resolve=>socket.close(resolve));const children=[];
+  try{
+    const clockCode="import http from 'node:http';const create=http.createServer;http.createServer=handler=>create((req,res)=>{if(req.url==='/api/worker/self-check'&&req.method==='POST')process.stdout.write('BODY_STARTED\\n');return handler(req,res)});";
+    for(const port of ports){const child=spawn(process.execPath,['--import',`data:text/javascript,${encodeURIComponent(clockCode)}`,'server.js'],{cwd:process.cwd(),env:{...process.env,PORT:String(port),JWEB_DATA_DIR:dir,JWEB_ADMIN_PASSWORD:'test-password-12345'},stdio:['ignore','pipe','pipe']});children.push(child);await Promise.race([once(child.stdout,'data'),once(child,'exit').then(()=>{throw Error('시험 서버가 종료됐습니다.');})]);}
+    const [a,b]=ports.map(port=>`http://127.0.0.1:${port}`),send=(base,path,data,cookie)=>fetch(base+path,{method:'POST',headers:{'content-type':'application/json',...(cookie?{cookie}:{})},body:JSON.stringify(data)}),admin=(await send(a,'/api/login',{password:'test-password-12345'})).headers.get('set-cookie').split(';')[0],site=await (await send(a,'/api/sites',{name:'가상 현장'},admin)).json(),invite=await (await send(a,`/api/sites/${site.id}/invitation`,{},admin)).json(),token=new URL(invite.link).searchParams.get('token');
+    assert.equal((await send(a,'/api/join',{token,name:'가상 근로자',category:'직영',company:'가상 업체',occupation:'가상 직종',loginId:'shared_worker',password:'virtual-password-123',acknowledged:true})).status,201);
+    const login=async base=>(await send(base,'/api/worker/login',{token,loginId:'shared_worker',password:'virtual-password-123'})).headers.get('set-cookie').split(';')[0],first=await login(a),valid=async(base,cookie)=>(await fetch(base+'/api/worker/session',{headers:{cookie}})).status;assert.equal(await valid(b,first),200);
+    const req=request(b+'/api/worker/self-check',{method:'POST',headers:{cookie:first,'content-type':'application/json'}}),response=new Promise((resolve,reject)=>{req.on('response',res=>{res.resume();res.on('end',()=>resolve(res.statusCode));});req.on('error',reject);}),started=once(children[1].stdout,'data');req.write('{');assert.match(String((await started)[0]),/BODY_STARTED/);assert.equal((await send(a,'/api/worker/logout',{},first)).status,200);req.end('}');assert.equal(await response,401);assert.equal(await valid(a,first),401);assert.equal(await valid(b,first),401);
+    const second=await login(b);assert.equal(await valid(a,second),200);const worker=(await (await fetch(b+'/api/worker/session',{headers:{cookie:second}})).json()).worker,reset=await fetch(`${a}/api/workers/${worker.id}/password`,{method:'PUT',headers:{cookie:admin,'content-type':'application/json'},body:JSON.stringify({siteId:site.id,password:'replacement-password-123'})});assert.equal(reset.status,200);assert.equal(await valid(b,second),401);assert.equal(await valid(a,second),401);
+  }finally{for(const child of children){if(child.exitCode===null){const exited=once(child,'exit');child.kill();await exited;}}rmSync(dir,{recursive:true,force:true});}
+});
+
 test('HTTPS 중계 주소는 QR과 보안 쿠키에 사용되고 다른 주소는 거절한다',async()=>{
   const dir=mkdtempSync(join(tmpdir(),'j-web-proxy-'));
   const reservation=createServer();await new Promise(resolve=>reservation.listen(0,'127.0.0.1',resolve));

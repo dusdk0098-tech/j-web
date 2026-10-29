@@ -31,19 +31,21 @@ export function sessionToken(cookie='') {
 
 export class WorkerSessions extends Map {
   constructor(db,now=Date.now()){
-    super();this.db=db;this.credentials=new Map();
+    super();this.db=db;
     db.prepare('DELETE FROM worker_sessions WHERE expires<=?').run(now);
     const rows=db.prepare('SELECT s.token_hash,s.worker_id,s.expires,s.credential_hash,a.password_hash,w.name,w.site_id,t.name AS site_name FROM worker_sessions s JOIN worker_accounts a ON a.worker_id=s.worker_id JOIN workers w ON w.id=a.worker_id AND w.site_id=a.site_id JOIN sites t ON t.id=w.site_id').all();
-    for(const row of rows){const version=createHash('sha256').update(row.password_hash).digest();if(row.credential_hash.length!==version.length||!timingSafeEqual(row.credential_hash,version)){db.prepare('DELETE FROM worker_sessions WHERE token_hash=?').run(row.token_hash);continue;}super.set(row.token_hash,{worker:{id:row.worker_id,name:row.name,site_id:row.site_id,site_name:row.site_name},expires:row.expires});this.credentials.set(row.token_hash,version);}
+    for(const row of rows){const version=createHash('sha256').update(row.password_hash).digest();if(row.credential_hash.length!==version.length||!timingSafeEqual(row.credential_hash,version)){db.prepare('DELETE FROM worker_sessions WHERE token_hash=?').run(row.token_hash);continue;}super.set(row.token_hash,{worker:{id:row.worker_id,name:row.name,site_id:row.site_id,site_name:row.site_name},expires:row.expires});}
   }
   set(key,session){
     const account=this.db.prepare('SELECT password_hash FROM worker_accounts WHERE worker_id=? AND site_id=?').get(session.worker.id,session.worker.site_id);if(!account)throw new Error('근로자 계정을 확인해 주세요.');
-    const version=createHash('sha256').update(account.password_hash).digest();this.db.prepare('INSERT OR REPLACE INTO worker_sessions(token_hash,worker_id,expires,credential_hash) VALUES(?,?,?,?)').run(key,session.worker.id,session.expires,version);this.credentials.set(key,version);return super.set(key,session);
+    const version=createHash('sha256').update(account.password_hash).digest();this.db.prepare('INSERT OR REPLACE INTO worker_sessions(token_hash,worker_id,expires,credential_hash) VALUES(?,?,?,?)').run(key,session.worker.id,session.expires,version);return super.set(key,session);
   }
   get(key){
-    const session=super.get(key);if(!session)return undefined;
-    const account=this.db.prepare('SELECT password_hash FROM worker_accounts WHERE worker_id=? AND site_id=?').get(session.worker.id,session.worker.site_id),version=account&&createHash('sha256').update(account.password_hash).digest(),expected=this.credentials.get(key);
-    if(!version||!expected||!timingSafeEqual(version,expected)){this.delete(key);return undefined;}return session;
+    if(typeof key!=='string'||!/^[a-f0-9]{64}$/.test(key))return undefined;
+    const row=this.db.prepare('SELECT s.worker_id,s.expires,s.credential_hash,a.password_hash,w.name,w.site_id,t.name AS site_name FROM worker_sessions s JOIN worker_accounts a ON a.worker_id=s.worker_id JOIN workers w ON w.id=a.worker_id AND w.site_id=a.site_id JOIN sites t ON t.id=w.site_id WHERE s.token_hash=?').get(key);
+    if(!row){super.delete(key);return undefined;}
+    const version=createHash('sha256').update(row.password_hash).digest();if(row.expires<=Date.now()||row.credential_hash.length!==version.length||!timingSafeEqual(row.credential_hash,version)){this.delete(key);return undefined;}
+    let session=super.get(key);if(!session||session.expires!==row.expires||session.worker.id!==row.worker_id||session.worker.site_id!==row.site_id){session={worker:{id:row.worker_id,name:row.name,site_id:row.site_id,site_name:row.site_name},expires:row.expires};super.set(key,session);}return session;
   }
-  delete(key){if(super.has(key))this.db.prepare('DELETE FROM worker_sessions WHERE token_hash=?').run(key);this.credentials.delete(key);return super.delete(key);}
+  delete(key){if(typeof key==='string'&&/^[a-f0-9]{64}$/.test(key))this.db.prepare('DELETE FROM worker_sessions WHERE token_hash=?').run(key);return super.delete(key);}
 }
