@@ -727,6 +727,17 @@ test('현장과 출입자를 분리하고 문서 결재 이력을 보존한다',
   } finally {s.close();}
 });
 
+test('현장별 휴일과 작업 종료는 독립적으로 접속과 자동 출역을 차단한다',()=>{
+  const dir=mkdtempSync(join(tmpdir(),'jweb-blocks-')),file=join(dir,'data.sqlite');let s=new Store(file);
+  try{
+    const a=s.createSite({name:'가상 A'}),b=s.createSite({name:'가상 B'}),make=siteId=>s.createWorker({siteId,name:'가상 근로자',category:'직영',company:'가상 업체',occupation:'가상 직종'}),one=make(a.id),two=make(b.id),date='2026-10-29';
+    s.setWorkerAccessBlock(a.id,date,'holiday',true);s.setWorkerAccessBlock(a.id,date,'ended',true);assert.equal(s.workerAccessBlocked(a.id,date),true);assert.equal(s.workerAccessBlocked(b.id,date),false);assert.throws(()=>s.recordWorkerLogin(one.id,date),/차단/);assert.deepEqual(s.workerAttendance(one.id,'2026-10'),[]);s.recordWorkerLogin(two.id,date);assert.deepEqual(s.workerAttendance(two.id,'2026-10'),[date]);
+    s.setAttendance({siteId:a.id,workerId:one.id,date,present:true});s.setWorkerAccessBlock(a.id,date,'holiday',false);assert.equal(s.workerAccessBlocked(a.id,date),true);s.close();s=new Store(file);
+    assert.deepEqual(s.workerAccessBlocks(a.id,'2026-10').map(row=>row.kind),['ended']);assert.throws(()=>s.recordWorkerLogin(one.id,date),/차단/);s.setWorkerAccessBlock(a.id,date,'ended',false);s.recordWorkerLogin(one.id,date);assert.equal(s.attendance(a.id,date)[0].source,'manual');assert.equal(s.workerAccessBlocked(a.id,date),false);
+    for(const args of [[a.id,'2026-02-30','holiday',true],[a.id,date,'invalid',true],[a.id,date,'holiday','true'],[999999,date,'holiday',true]])assert.throws(()=>s.setWorkerAccessBlock(...args));assert.throws(()=>s.workerAccessBlocks(a.id,'2026-13'),/월/);
+  }finally{s.close();rmSync(dir,{recursive:true,force:true});}
+});
+
 test('근로자 재접속은 날짜별 출역을 추가하고 수동 변경을 보존한다',()=>{
   const s=new Store(':memory:');try{
     const site=s.createSite({name:'가상 현장'}),worker=s.createWorker({siteId:site.id,name:'가상 근로자',category:'직영',company:'가상 회사',occupation:'목공'});

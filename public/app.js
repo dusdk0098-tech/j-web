@@ -20,6 +20,7 @@ labels['site-photos']='현장사진';
 labels['site-occupations']='자주 쓰는 직종';
 labels['ppe-issues']='보호구 지급';
 labels['reviewers']='시험 결재자';
+labels['worker-access-blocks']='출입자 접속 차단';
 document.querySelector('[data-page=stops]').insertAdjacentHTML('afterend','<button data-page="hazards">의견제안 및 위험신고</button>');
 document.querySelector('[data-page=attendance]').insertAdjacentHTML('afterend','<button data-page="restaurants">식대 기본설정</button>');
 document.querySelector('[data-page=restaurants]').insertAdjacentHTML('afterend','<button data-page="meal-checks">식대 체크</button>');
@@ -28,6 +29,7 @@ document.querySelector('[data-page=meal-checks]').insertAdjacentHTML('afterend',
 document.querySelector('[data-page=wages]').insertAdjacentHTML('afterend','<button data-page="site-articles">현장 자료실</button>');
 document.querySelector('[data-page=site-articles]').insertAdjacentHTML('beforebegin','<button data-page="site-photos">현장사진</button>');
 document.querySelector('[data-page=workers]').insertAdjacentHTML('afterend','<button data-page="site-occupations">자주 쓰는 직종</button>');
+document.querySelector('[data-page=workers]').insertAdjacentHTML('afterend','<button data-page="worker-access-blocks">출입자 접속 차단</button>');
 document.querySelector('[data-page=site-occupations]').insertAdjacentHTML('afterend','<button data-page="ppe-issues">보호구 지급</button>');
 document.querySelector('[data-page=approval]').insertAdjacentHTML('afterend','<button data-page="reviewers">시험 결재자</button>');
 const statusLabels = {draft:'임시저장',pending:'결재 대기',approved:'승인',rejected:'반려'};
@@ -539,6 +541,14 @@ async function render(){
   document.querySelectorAll('[data-page]').forEach(b=>b.classList.toggle('selected',b.dataset.page===state.page));
   if(!state.siteId){content.innerHTML='<section class="panel empty">먼저 현장을 추가해 주세요. 시험을 위해 가상의 현장명을 사용하세요.</section>';return;}
   if(state.detail)return renderDetail();
+  if(state.page==='worker-access-blocks'){
+    const siteId=state.siteId,month=state.blockMonth||today().slice(0,7),currentMonth=today().slice(0,7),path=value=>`/api/sites/${siteId}/worker-access-blocks?month=${encodeURIComponent(value)}`,[blocks,currentBlocks]=await Promise.all([api(path(month)),month===currentMonth?Promise.resolve(null):api(path(currentMonth))]);if(state.siteId!==siteId||state.page!=='worker-access-blocks'||(state.blockMonth||today().slice(0,7))!==month)return;
+    const todayBlocks=currentBlocks||blocks,days=new Date(Number(month.slice(0,4)),Number(month.slice(5,7)),0).getDate(),ended=todayBlocks.some(row=>row.date===today()&&row.kind==='ended');
+    content.innerHTML=`<section class="panel"><h2>현장별 근로자 접속 차단</h2><p class="muted">휴일 또는 당일 작업 종료 시 시험 근로자의 로그인과 기존 세션 접근을 차단합니다. 기존 출역 기록은 유지되며 관리자는 수동으로 출역을 수정할 수 있습니다.</p><label>조회 월 <input id="block-month" type="month" value="${esc(month)}"></label> <button type="button" id="block-load">조회</button><div class="block-calendar">${Array.from({length:days},(_,i)=>{const date=`${month}-${String(i+1).padStart(2,'0')}`,blocked=blocks.some(row=>row.date===date&&row.kind==='holiday');return `<button type="button" data-holiday-date="${date}" aria-pressed="${blocked}">${i+1}일<br>${blocked?'휴일 차단':'휴일 아님'}</button>`;}).join('')}</div><p>오늘 작업 종료: ${ended?'설정됨':'설정 안 됨'}${todayBlocks.some(row=>row.date===today()&&row.kind==='holiday')?' · 오늘 휴일 차단 적용':''}</p><button type="button" id="toggle-day-end">${ended?'오늘 작업 종료 취소':'오늘 작업 종료'}</button><p class="muted">휴일과 작업 종료는 별도 설정입니다. 한쪽을 해제해도 다른 차단이 남으면 접속할 수 없습니다. 가입 주소 조회와 신규 가입은 차단 대상이 아닙니다.</p></section>`;
+    $('#block-load').onclick=()=>{const value=$('#block-month').value;if(!/^\d{4}-(0[1-9]|1[0-2])$/.test(value)){flash('조회할 월을 확인해 주세요.',true);return;}state.blockMonth=value;render().catch(showError);};
+    const update=async(date,kind,blocked)=>{try{await api(`/api/sites/${siteId}/worker-access-blocks`,{method:'PUT',body:JSON.stringify({date,kind,blocked})});if(state.siteId===siteId&&state.page==='worker-access-blocks')await render();}catch(error){showError(error);}};
+    content.querySelectorAll('[data-holiday-date]').forEach(button=>button.onclick=()=>update(button.dataset.holidayDate,'holiday',button.getAttribute('aria-pressed')!=='true'));$('#toggle-day-end').onclick=()=>update(today(),'ended',!ended);return;
+  }
   if(state.page==='reviewers'){
     const siteId=state.siteId,people=await api(`/api/reviewers?siteId=${siteId}`);content.innerHTML=`<section class="panel"><div class="panel-head"><h2>가상 결재자 계정</h2><button type="button" id="new-reviewer">계정 추가</button></div><p>가상 정보만 사용하세요. 결재자는 별도 화면에서 본인 차례의 문서만 볼 수 있습니다.</p><p><a href="/review">시험 결재자 로그인 화면</a></p>${people.length?`<ul>${people.map(p=>`<li>${esc(p.name)} · ${esc(p.login_id)} · ${p.active?'사용 중':'중지됨'} <button type="button" data-reviewer-status="${p.id}">${p.active?'계정 중지':'계정 재개'}</button> <button type="button" data-reviewer-password="${p.id}">암호 재설정</button></li>`).join('')}</ul>`:'<p>등록된 시험 계정이 없습니다.</p>'}</section>`;
     $('#new-reviewer').onclick=()=>showDialog('가상 결재자 추가',`${field('name','가상 이름')}${field('loginId','시험 아이디')}<label>시험 암호<input type="password" name="password" minlength="12" maxlength="256" autocomplete="new-password" required></label><p>아이디는 영문·숫자·밑줄 3~40자이며 모든 현장에서 중복할 수 없습니다.</p>`,d=>api('/api/reviewers',{method:'POST',body:JSON.stringify({...d,siteId})}));

@@ -78,6 +78,23 @@ test('근로자 로그인 실패 제한은 현장과 계정별로 적용된다',
   }finally{child.kill();await once(child,'exit').catch(()=>{});rmSync(dir,{recursive:true,force:true});}
 });
 
+test('현장별 휴일과 작업 종료는 근로자 세션과 새 로그인에 적용된다',async()=>{
+  const dir=mkdtempSync(join(tmpdir(),'jweb-access-block-')),reservation=createServer();await new Promise(resolve=>reservation.listen(0,'127.0.0.1',resolve));const port=reservation.address().port;await new Promise(resolve=>reservation.close(resolve));
+  const child=spawn(process.execPath,['server.js'],{cwd:process.cwd(),env:{...process.env,PORT:String(port),JWEB_DATA_DIR:dir,JWEB_ADMIN_PASSWORD:'test-password-12345'},stdio:['ignore','pipe','pipe']});
+  try{
+    await Promise.race([once(child.stdout,'data'),once(child,'exit').then(()=>{throw Error('시험 서버가 종료됐습니다.');})]);const base=`http://127.0.0.1:${port}`,request=(path,method='GET',data=null,cookie='')=>fetch(`${base}${path}`,{method,headers:{...(cookie?{cookie}:{}),...(data?{'content-type':'application/json'}:{})},...(data?{body:JSON.stringify(data)}:{})});
+    const login=await request('/api/login','POST',{password:'test-password-12345'}),admin=login.headers.get('set-cookie').split(';')[0],a=await (await request('/api/sites','POST',{name:'가상 A'},admin)).json(),b=await (await request('/api/sites','POST',{name:'가상 B'},admin)).json();
+    const invitation=async site=>new URL((await (await request(`/api/sites/${site.id}/invitation`,'POST',{},admin)).json()).link).searchParams.get('token'),ta=await invitation(a),tb=await invitation(b),join=(token,id)=>request('/api/join','POST',{token,name:'가상 근로자',category:'직영',company:'가상 업체',occupation:'가상 직종',loginId:id,password:'virtual-password-123',acknowledged:true});
+    for(const [token,id] of [[ta,'block_one'],[ta,'block_two'],[tb,'block_other']])assert.equal((await join(token,id)).status,201);
+    const workerLogin=(token,id)=>request('/api/worker/login','POST',{token,loginId:id,password:'virtual-password-123'}),first=await workerLogin(ta,'block_one'),other=await workerLogin(tb,'block_other'),worker=first.headers.get('set-cookie').split(';')[0],otherWorker=other.headers.get('set-cookie').split(';')[0];assert.equal(first.status,200);assert.equal(other.status,200);
+    const now=new Date(),date=new Date(now.getTime()-now.getTimezoneOffset()*60000).toISOString().slice(0,10),month=date.slice(0,7),path=`/api/sites/${a.id}/worker-access-blocks`,set=(kind,blocked,day=date,cookie=admin)=>request(path,'PUT',{date:day,kind,blocked},cookie);
+    assert.equal((await set('holiday',true,date,'')).status,401);assert.equal((await set('holiday',true,date,worker)).status,401);assert.equal((await set('ended',true,'2000-01-01')).status,400);assert.equal((await set('holiday',true)).status,200);
+    assert.equal((await request('/api/worker/session','GET',null,worker)).status,403);assert.equal((await request('/api/worker/attendance?month='+month,'GET',null,worker)).status,403);assert.equal((await request('/api/worker/session','GET',null,otherWorker)).status,200);for(let i=0;i<11;i++)assert.equal((await workerLogin(ta,'block_two')).status,403);
+    const before=await (await request(`/api/attendance?siteId=${a.id}&date=${date}`,'GET',null,admin)).json();assert.equal(before.filter(row=>row.present).length,1);assert.equal((await set('ended',true)).status,200);assert.equal((await set('holiday',false)).status,200);assert.equal((await request('/api/worker/session','GET',null,worker)).status,403);assert.equal((await set('ended',false)).status,200);
+    assert.equal((await request('/api/worker/session','GET',null,worker)).status,200);assert.equal((await workerLogin(ta,'block_two')).status,200);const rows=await (await request(path+`?month=${month}`,'GET',null,admin)).json();assert.deepEqual(rows,[]);
+  }finally{child.kill();await once(child,'exit').catch(()=>{});rmSync(dir,{recursive:true,force:true});}
+});
+
 test('관리자 인증 모드가 문서 API를 보호하고 로그아웃을 적용한다',async()=>{
   const dir=mkdtempSync(join(tmpdir(),'j-web-auth-'));
   const reservation=createServer();await new Promise(resolve=>reservation.listen(0,'127.0.0.1',resolve));

@@ -51,6 +51,7 @@ export class Store {
       CREATE TABLE IF NOT EXISTS sites (id INTEGER PRIMARY KEY, name TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
       CREATE TABLE IF NOT EXISTS site_access (site_id INTEGER PRIMARY KEY REFERENCES sites(id),access_key TEXT NOT NULL UNIQUE);
       CREATE TABLE IF NOT EXISTS site_registration (site_id INTEGER PRIMARY KEY REFERENCES sites(id),expires_at INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS site_worker_blocks (site_id INTEGER NOT NULL REFERENCES sites(id),date TEXT NOT NULL,kind TEXT NOT NULL CHECK(kind IN ('holiday','ended')),PRIMARY KEY(site_id,date,kind));
       CREATE TABLE IF NOT EXISTS site_articles (id INTEGER PRIMARY KEY,site_id INTEGER NOT NULL REFERENCES sites(id),category TEXT NOT NULL,title TEXT NOT NULL,body TEXT NOT NULL,visible INTEGER NOT NULL CHECK(visible IN (0,1)),created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
       CREATE TABLE IF NOT EXISTS site_photos (id INTEGER PRIMARY KEY,site_id INTEGER NOT NULL REFERENCES sites(id),name TEXT NOT NULL,date TEXT NOT NULL,description TEXT NOT NULL DEFAULT '',data BLOB NOT NULL);
       CREATE TABLE IF NOT EXISTS site_article_files (id INTEGER PRIMARY KEY,article_id INTEGER NOT NULL REFERENCES site_articles(id),name TEXT NOT NULL,data BLOB NOT NULL);
@@ -750,9 +751,20 @@ export class Store {
     if(!result.changes)throw new Error('해당 월의 출역 기록이 없습니다.');
     return result.changes;
   }
+  workerAccessBlocks(siteId,month){
+    month=monthValue(month);siteId=Number(siteId);if(!this.db.prepare('SELECT 1 FROM sites WHERE id=?').get(siteId))throw new Error('현장을 확인해 주세요.');
+    return this.db.prepare('SELECT date,kind FROM site_worker_blocks WHERE site_id=? AND date BETWEEN ? AND ? ORDER BY date,kind').all(siteId,`${month}-01`,`${month}-31`);
+  }
+  setWorkerAccessBlock(siteId,date,kind,blocked){
+    siteId=Number(siteId);date=dateValue(date);if(!this.db.prepare('SELECT 1 FROM sites WHERE id=?').get(siteId))throw new Error('현장을 확인해 주세요.');
+    if(!['holiday','ended'].includes(kind)||typeof blocked!=='boolean')throw new Error('차단 설정을 확인해 주세요.');
+    if(blocked)this.db.prepare('INSERT OR IGNORE INTO site_worker_blocks(site_id,date,kind) VALUES(?,?,?)').run(siteId,date,kind);
+    else this.db.prepare('DELETE FROM site_worker_blocks WHERE site_id=? AND date=? AND kind=?').run(siteId,date,kind);
+  }
+  workerAccessBlocked(siteId,date){return !!this.db.prepare('SELECT 1 FROM site_worker_blocks WHERE site_id=? AND date=? LIMIT 1').get(Number(siteId),dateValue(date));}
   recordWorkerLogin(workerId,date) {
     date=dateValue(date);
-    this.db.exec('BEGIN IMMEDIATE');try{const result=this.db.prepare("INSERT OR IGNORE INTO attendance(worker_id,date,present,company_snapshot,occupation_snapshot,category_snapshot,source) SELECT id,?,1,company,occupation,category,'login' FROM workers WHERE id=?").run(date,Number(workerId));if(result.changes)this.applyMealDefaults(workerId,date);this.db.exec('COMMIT');}catch(error){this.db.exec('ROLLBACK');throw error;}
+    this.db.exec('BEGIN IMMEDIATE');try{const worker=this.db.prepare('SELECT site_id FROM workers WHERE id=?').get(Number(workerId));if(!worker)throw new Error('근로자를 확인해 주세요.');if(this.workerAccessBlocked(worker.site_id,date))throw new Error('해당 현장은 오늘 근로자 접속이 차단되었습니다.');const result=this.db.prepare("INSERT OR IGNORE INTO attendance(worker_id,date,present,company_snapshot,occupation_snapshot,category_snapshot,source) SELECT id,?,1,company,occupation,category,'login' FROM workers WHERE id=?").run(date,Number(workerId));if(result.changes)this.applyMealDefaults(workerId,date);this.db.exec('COMMIT');}catch(error){this.db.exec('ROLLBACK');throw error;}
   }
   attendanceReport(siteId, from, to, group) {
     from=dateValue(from); to=dateValue(to);

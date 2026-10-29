@@ -83,6 +83,10 @@ const server = http.createServer(async (req, res) => {
       return json(res,404,{error:'요청한 경로가 없습니다.'});
     }
     const workerToken=(req.headers.cookie||'').split(';').map(x=>x.trim()).find(x=>x.startsWith('jweb_worker='))?.slice(12)||'';
+    if(url.pathname.startsWith('/api/worker/')&&!['/api/worker/site','/api/worker/login','/api/worker/logout'].includes(url.pathname)){
+      const session=workerSessions.get(workerKey(workerToken)),now=new Date(),date=new Date(now.getTime()-now.getTimezoneOffset()*60000).toISOString().slice(0,10);
+      if(session&&session.expires>now.getTime()&&store.workerAccessBlocked(session.worker.site_id,date))return json(res,403,{error:'해당 현장은 오늘 근로자 접속이 차단되었습니다.'});
+    }
     if(url.pathname==='/worker.webmanifest'&&req.method==='GET'){
       const key=url.searchParams.get('site');if(!store.siteFromAccess(key))return json(res,404,{error:'현장 접속 주소를 확인해 주세요.'});
       const start=workerSitePath(key);res.writeHead(200,{'Content-Type':'application/manifest+json; charset=utf-8','Cache-Control':'no-store','Referrer-Policy':'no-referrer','X-Content-Type-Options':'nosniff'});return res.end(JSON.stringify({name:'J웹 현장 출입',short_name:'J웹',id:start,start_url:start,scope:'/join',display:'standalone',background_color:'#f4f6fa',theme_color:'#213c80',icons:[{src:'/jweb-icon.svg',sizes:'any',type:'image/svg+xml'},{src:'/jweb-icon-192.png',sizes:'192x192',type:'image/png'},{src:'/jweb-icon-512.png',sizes:'512x512',type:'image/png'}]}));
@@ -95,6 +99,7 @@ const server = http.createServer(async (req, res) => {
       const worker=store.authenticateWorker(input.token,input.loginId,input.password,input.siteKey);
       if(!worker){workerFailures.push(now);failures.push(now);workerAccountFailures.set(accountKey,failures);return json(res,401,{error:'가입 링크 또는 로그인 정보를 확인해 주세요.'});}
       const current=new Date(now),date=new Date(now-current.getTimezoneOffset()*60000).toISOString().slice(0,10);
+      if(store.workerAccessBlocked(worker.site_id,date))return json(res,403,{error:'해당 현장은 오늘 근로자 접속이 차단되었습니다.'});
       store.recordWorkerLogin(worker.id,date);
       workerAccountFailures.delete(accountKey);workerSessions.delete(workerKey(workerToken));
       for(const [key,session] of workerSessions)if(session.expires<=now)workerSessions.delete(key);
@@ -235,6 +240,8 @@ const server = http.createServer(async (req, res) => {
     if(url.pathname==='/api/reviewers'){if(req.method==='GET')return json(res,200,store.reviewers(url.searchParams.get('siteId')));if(req.method==='POST')return json(res,201,store.createReviewer(await body(req)));}
     const reviewerAccount=url.pathname.match(/^\/api\/reviewers\/(\d+)$/);
     if(reviewerAccount&&req.method==='PUT'){const input=await body(req),account=store.updateReviewer(input.siteId,reviewerAccount[1],input);if(input.password!==undefined){reviewerAccountFailures.delete(account.login_id);}if(input.password!==undefined||input.active===false)for(const [key,session] of reviewerSessions)if(session.id===account.id)reviewerSessions.delete(key);return json(res,200,account);}
+    const workerAccessBlocks=url.pathname.match(/^\/api\/sites\/(\d+)\/worker-access-blocks$/);
+    if(workerAccessBlocks){if(req.method==='GET')return json(res,200,store.workerAccessBlocks(workerAccessBlocks[1],url.searchParams.get('month')));if(req.method==='PUT'){const input=await body(req),now=new Date(),today=new Date(now.getTime()-now.getTimezoneOffset()*60000).toISOString().slice(0,10);if(input.kind==='ended'&&input.date!==today)throw new Error('작업 종료는 오늘만 설정할 수 있습니다.');store.setWorkerAccessBlock(workerAccessBlocks[1],input.date,input.kind,input.blocked);return json(res,200,{ok:true});}}
     const managerChecks=url.pathname.match(/^\/api\/sites\/(\d+)\/manager-checks$/);
     const managerDayOff=url.pathname.match(/^\/api\/sites\/(\d+)\/manager-checks\/day-off$/);
     if(managerDayOff && req.method==='POST'){const now=new Date(),date=new Date(now.getTime()-now.getTimezoneOffset()*60000).toISOString().slice(0,10);store.saveManagerDayOff(managerDayOff[1],date);return json(res,201,{ok:true});}
