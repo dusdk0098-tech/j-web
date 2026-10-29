@@ -7,7 +7,7 @@ import { types } from './domain.js';
 import QRCode from 'qrcode';
 import { issueAccessQr,issueInvitationQr } from './qr-issue.js';
 import { workerSpreadsheet, wageSpreadsheet } from './exports.js';
-import { LocalAuth, sessionToken, WorkerSessions } from './auth.js';
+import { LocalAuth, sessionToken, WorkerSessions, ReviewerSessions } from './auth.js';
 import { workerSitePath } from './public/worker-link.js';
 import { createHash, randomBytes } from 'node:crypto';
 
@@ -24,7 +24,7 @@ const auth=new LocalAuth(process.env.JWEB_ADMIN_PASSWORD);
 mkdirSync(dataDir, { recursive: true });
 const store = new Store(join(dataDir, 'jweb.sqlite'));
 const workerSessions=new WorkerSessions(store.db);
-const reviewerSessions=new Map(),reviewerAccountFailures=new Map();let reviewerFailures=[];
+const reviewerSessions=new ReviewerSessions(store.db),reviewerAccountFailures=new Map();let reviewerFailures=[];
 let workerFailures=[];
 const workerAccountFailures=new Map();
 const workerKey=raw=>typeof raw==='string' && /^[\w-]{43}$/.test(raw)?createHash('sha256').update(raw).digest('hex'):'';
@@ -62,9 +62,9 @@ const server = http.createServer(async (req, res) => {
     if(url.pathname==='/api/reviewer/login'&&req.method==='POST'){
       const input=await body(req),now=Date.now(),accountKey=typeof input.loginId==='string'&&/^[A-Za-z0-9_]{3,40}$/.test(input.loginId)?input.loginId:'invalid';reviewerFailures=reviewerFailures.filter(time=>time>now-5*60*1000);for(const [key,times] of reviewerAccountFailures){const recent=times.filter(time=>time>now-5*60*1000);if(recent.length)reviewerAccountFailures.set(key,recent);else reviewerAccountFailures.delete(key);}
       const failures=reviewerAccountFailures.get(accountKey)||[];if(reviewerFailures.length>=100||failures.length>=10)return json(res,429,{error:'잠시 후 다시 로그인해 주세요.'});
-      const reviewer=store.authenticateReviewer(input.loginId,input.password);if(!reviewer){reviewerFailures.push(now);failures.push(now);reviewerAccountFailures.set(accountKey,failures);return json(res,401,{error:'아이디 또는 암호가 올바르지 않습니다.'});}
-      reviewerAccountFailures.delete(accountKey);reviewerSessions.delete(workerKey(reviewerToken));for(const [key,session] of reviewerSessions)if(session.expires<=now)reviewerSessions.delete(key);
-      const raw=randomBytes(32).toString('base64url');reviewerSessions.set(workerKey(raw),{id:reviewer.id,expires:now+8*60*60*1000});res.setHeader('Set-Cookie',`jweb_reviewer=${raw}; HttpOnly; SameSite=Strict; Path=/; Max-Age=28800${secureCookie}`);return json(res,200,{ok:true});
+      const authenticated=store.authenticateReviewer(input.loginId,input.password,true);if(!authenticated){reviewerFailures.push(now);failures.push(now);reviewerAccountFailures.set(accountKey,failures);return json(res,401,{error:'아이디 또는 암호가 올바르지 않습니다.'});}
+      const raw=randomBytes(32).toString('base64url'),session={id:authenticated.reviewer.id,expires:now+8*60*60*1000};if(!reviewerSessions.issue(workerKey(raw),session,authenticated.credentialHash,authenticated.authVersion,workerKey(reviewerToken)))return json(res,401,{error:'아이디 또는 암호가 올바르지 않습니다.'});
+      reviewerAccountFailures.delete(accountKey);for(const [key,item] of reviewerSessions)if(item.expires<=now)reviewerSessions.delete(key);res.setHeader('Set-Cookie',`jweb_reviewer=${raw}; HttpOnly; SameSite=Strict; Path=/; Max-Age=28800${secureCookie}`);return json(res,200,{ok:true});
     }
     if(url.pathname.startsWith('/api/reviewer/')){
       const key=workerKey(reviewerToken),session=reviewerSessions.get(key),reviewer=session&&session.expires>Date.now()?store.reviewer(session.id):null;
@@ -82,7 +82,7 @@ const server = http.createServer(async (req, res) => {
       const reviewDoc=url.pathname.match(/^\/api\/reviewer\/documents\/(\d+)(?:\/(decision|attachments)(?:\/(\d+))?)?$/);
       if(reviewDoc){const [,id,part,fileId]=reviewDoc,doc=store.reviewerDocument(reviewer.id,id);if(!doc)return json(res,404,{error:'결재할 문서를 찾을 수 없습니다.'});
         if(!part&&req.method==='GET')return json(res,200,{...store.reviewerPayload(doc),priorReviews:store.priorReviewerEvents(doc,reviewer.id)});
-        if(part==='decision'&&!fileId&&req.method==='POST'){const input=await body(req);return json(res,200,store.reviewerTransition(id,reviewer.id,input.action,input.opinion,input.signature));}
+        if(part==='decision'&&!fileId&&req.method==='POST'){const input=await body(req);return json(res,200,store.reviewerTransition(id,reviewer.id,input.action,input.opinion,input.signature,()=>checkRequestSession(req)));}
         if(part==='attachments'&&fileId&&req.method==='GET'){const payload=store.reviewerPayload(doc),file=payload.attachments.some(item=>item.id===Number(fileId))&&store.reviewerAttachment(doc,fileId);if(!file)return json(res,404,{error:'첨부파일을 찾을 수 없습니다.'});const name=encodeURIComponent(file.name).replace(/[!'()*]/g,c=>`%${c.charCodeAt(0).toString(16).toUpperCase()}`);res.writeHead(200,{'Content-Type':'application/octet-stream','Content-Disposition':`attachment; filename="file"; filename*=UTF-8''${name}`,'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(file.data);}
       }
       return json(res,404,{error:'요청한 경로가 없습니다.'});
@@ -280,7 +280,7 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === '/api/types' && req.method === 'GET') return json(res,200,types);
     if(url.pathname==='/api/reviewers'){if(req.method==='GET')return json(res,200,store.reviewers(url.searchParams.get('siteId')));if(req.method==='POST')return json(res,201,store.createReviewer(await body(req)));}
     const reviewerAccount=url.pathname.match(/^\/api\/reviewers\/(\d+)$/);
-    if(reviewerAccount&&req.method==='PUT'){const input=await body(req),account=store.updateReviewer(input.siteId,reviewerAccount[1],input);if(input.password!==undefined){reviewerAccountFailures.delete(account.login_id);}if(input.password!==undefined||input.active===false)for(const [key,session] of reviewerSessions)if(session.id===account.id)reviewerSessions.delete(key);return json(res,200,account);}
+    if(reviewerAccount&&req.method==='PUT'){const input=await body(req),account=store.updateReviewer(input.siteId,reviewerAccount[1],input);if(input.password!==undefined){reviewerAccountFailures.delete(account.login_id);}return json(res,200,account);}
     const workerAccessBlocks=url.pathname.match(/^\/api\/sites\/(\d+)\/worker-access-blocks$/);
     if(workerAccessBlocks){if(req.method==='GET')return json(res,200,store.workerAccessBlocks(workerAccessBlocks[1],url.searchParams.get('month')));if(req.method==='PUT'){const input=await body(req),now=new Date(),today=new Date(now.getTime()-now.getTimezoneOffset()*60000).toISOString().slice(0,10);if(input.kind==='ended'&&input.date!==today)throw new Error('작업 종료는 오늘만 설정할 수 있습니다.');store.setWorkerAccessBlock(workerAccessBlocks[1],input.date,input.kind,input.blocked);return json(res,200,{ok:true});}}
     const managerChecks=url.pathname.match(/^\/api\/sites\/(\d+)\/manager-checks$/);

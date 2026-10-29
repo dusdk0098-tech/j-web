@@ -87,6 +87,7 @@ export class Store {
       CREATE TABLE IF NOT EXISTS basic_document_versions (document_id INTEGER PRIMARY KEY REFERENCES documents(id),version TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS work_plan_copies (document_id INTEGER PRIMARY KEY REFERENCES documents(id),source_document_id INTEGER NOT NULL REFERENCES documents(id));
       CREATE TABLE IF NOT EXISTS reviewers (id INTEGER PRIMARY KEY,site_id INTEGER NOT NULL REFERENCES sites(id),login_id TEXT NOT NULL UNIQUE,name TEXT NOT NULL,salt BLOB NOT NULL,password_hash BLOB NOT NULL,active INTEGER NOT NULL DEFAULT 1 CHECK(active IN (0,1)));
+      CREATE TABLE IF NOT EXISTS reviewer_sessions (token_hash TEXT PRIMARY KEY,reviewer_id INTEGER NOT NULL REFERENCES reviewers(id),expires INTEGER NOT NULL,credential_hash BLOB NOT NULL);
       CREATE TABLE IF NOT EXISTS approval_steps (document_id INTEGER NOT NULL REFERENCES documents(id),position INTEGER NOT NULL,reviewer_id INTEGER NOT NULL REFERENCES reviewers(id),state TEXT NOT NULL DEFAULT 'pending' CHECK(state IN ('pending','approved','rejected')),PRIMARY KEY(document_id,position),UNIQUE(document_id,reviewer_id));
       CREATE TABLE IF NOT EXISTS approval_cycles (id INTEGER PRIMARY KEY,document_id INTEGER NOT NULL REFERENCES documents(id),document_json TEXT NOT NULL,attachments_json TEXT NOT NULL,linked_json TEXT NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
       CREATE TABLE IF NOT EXISTS approval_cycle_files (cycle_id INTEGER NOT NULL REFERENCES approval_cycles(id),kind TEXT NOT NULL,parent_id INTEGER NOT NULL,file_id INTEGER NOT NULL,name TEXT NOT NULL,data BLOB NOT NULL,PRIMARY KEY(cycle_id,kind,parent_id,file_id));
@@ -127,6 +128,11 @@ export class Store {
         const ids=action==='INSERT'?'NEW.document_id':action==='DELETE'?'OLD.document_id':'OLD.document_id,NEW.document_id';
         this.db.exec(`CREATE TRIGGER IF NOT EXISTS basic_version_${table}_${action.toLowerCase()} AFTER ${action} ON ${table} BEGIN UPDATE basic_document_versions SET version=lower(hex(randomblob(16))) WHERE document_id IN (${ids}); END;`);
       }this.db.exec('COMMIT');
+    }catch(error){this.db.exec('ROLLBACK');throw error;}
+    this.db.exec('BEGIN IMMEDIATE');try{
+      if(!this.db.prepare('PRAGMA table_info(reviewers)').all().some(c=>c.name==='auth_version'))this.db.exec("ALTER TABLE reviewers ADD COLUMN auth_version TEXT NOT NULL DEFAULT ''");
+      this.db.exec("UPDATE reviewers SET auth_version=lower(hex(randomblob(16))) WHERE auth_version=''");
+      this.db.exec('COMMIT');
     }catch(error){this.db.exec('ROLLBACK');throw error;}
     if (!this.db.prepare('PRAGMA table_info(meal_checks)').all().some(c=>c.name==='tax_snapshot')) this.db.exec('ALTER TABLE meal_checks ADD COLUMN tax_snapshot INTEGER CHECK(tax_snapshot IS NULL OR tax_snapshot BETWEEN 0 AND 999999999)');
     if (!this.db.prepare('PRAGMA table_info(documents)').all().some(c=>c.name==='approval_cycle_id')) this.db.exec('ALTER TABLE documents ADD COLUMN approval_cycle_id INTEGER');
@@ -1089,7 +1095,7 @@ export class Store {
     if(typeof input.loginId!=='string'||!/^[A-Za-z0-9_]{3,40}$/.test(input.loginId))throw new Error('시험 아이디를 확인해 주세요.');
     if(typeof input.password!=='string'||input.password.length<12||input.password.length>256)throw new Error('시험 암호는 12자 이상 256자 이하여야 합니다.');
     if(this.db.prepare('SELECT 1 FROM reviewers WHERE login_id=?').get(input.loginId))throw new Error('이미 사용 중인 시험 아이디입니다.');
-    const salt=randomBytes(16),hash=scryptSync(input.password,salt,32),id=this.db.prepare('INSERT INTO reviewers(site_id,login_id,name,salt,password_hash) VALUES(?,?,?,?,?)').run(siteId,input.loginId,name,salt,hash).lastInsertRowid;
+    const salt=randomBytes(16),hash=scryptSync(input.password,salt,32),id=this.db.prepare('INSERT INTO reviewers(site_id,login_id,name,salt,password_hash,auth_version) VALUES(?,?,?,?,?,lower(hex(randomblob(16))))').run(siteId,input.loginId,name,salt,hash).lastInsertRowid;
     return this.db.prepare('SELECT id,site_id,login_id,name,active FROM reviewers WHERE id=?').get(id);
   }
   updateReviewer(siteId,id,input){
@@ -1097,13 +1103,13 @@ export class Store {
     if(input.active!==undefined&&typeof input.active!=='boolean')throw new Error('계정 상태를 확인해 주세요.');
     if(input.password!==undefined&&(typeof input.password!=='string'||input.password.length<12||input.password.length>256))throw new Error('시험 암호는 12자 이상 256자 이하여야 합니다.');
     if(input.active===undefined&&input.password===undefined)throw new Error('변경할 내용을 확인해 주세요.');
-    this.db.exec('SAVEPOINT update_reviewer');try{if(input.password!==undefined){const salt=randomBytes(16),hash=scryptSync(input.password,salt,32);this.db.prepare('UPDATE reviewers SET salt=?,password_hash=? WHERE id=?').run(salt,hash,row.id);}if(input.active!==undefined)this.db.prepare('UPDATE reviewers SET active=? WHERE id=?').run(input.active?1:0,row.id);this.db.exec('RELEASE update_reviewer');}catch(error){this.db.exec('ROLLBACK TO update_reviewer');this.db.exec('RELEASE update_reviewer');throw error;}
+    this.db.exec('SAVEPOINT update_reviewer');try{if(input.password!==undefined){const salt=randomBytes(16),hash=scryptSync(input.password,salt,32);this.db.prepare('UPDATE reviewers SET salt=?,password_hash=? WHERE id=?').run(salt,hash,row.id);}if(input.active!==undefined)this.db.prepare('UPDATE reviewers SET active=? WHERE id=?').run(input.active?1:0,row.id);if(input.password!==undefined||input.active===false){this.db.prepare('UPDATE reviewers SET auth_version=lower(hex(randomblob(16))) WHERE id=?').run(row.id);this.db.prepare('DELETE FROM reviewer_sessions WHERE reviewer_id=?').run(row.id);}this.db.exec('RELEASE update_reviewer');}catch(error){this.db.exec('ROLLBACK TO update_reviewer');this.db.exec('RELEASE update_reviewer');throw error;}
     return this.db.prepare('SELECT id,site_id,login_id,name,active FROM reviewers WHERE id=?').get(row.id);
   }
-  authenticateReviewer(loginId,password){
+  authenticateReviewer(loginId,password,withCredential=false){
     const row=typeof loginId==='string'&&/^[A-Za-z0-9_]{3,40}$/.test(loginId)?this.db.prepare('SELECT * FROM reviewers WHERE login_id=?').get(loginId):null;
     const salt=row?.salt||Buffer.alloc(16),candidate=typeof password==='string'&&password.length<=256?password:'',hash=scryptSync(candidate,salt,32),expected=row?.password_hash||Buffer.alloc(32);
-    return row&&row.active&&timingSafeEqual(hash,expected)?{id:row.id,site_id:row.site_id,name:row.name}:null;
+    if(!row||!row.active||!timingSafeEqual(hash,expected))return null;const reviewer={id:row.id,site_id:row.site_id,name:row.name};return withCredential?{reviewer,credentialHash:Buffer.from(row.password_hash),authVersion:row.auth_version}:reviewer;
   }
   approvalLine(id){return this.db.prepare('SELECT s.position,s.reviewer_id,s.state,r.name,r.active FROM approval_steps s JOIN reviewers r ON r.id=s.reviewer_id WHERE s.document_id=? ORDER BY s.position').all(Number(id));}
   previousApprovalLine(id){
@@ -1450,7 +1456,7 @@ export class Store {
     return this.document(id);
   }
   approveDocument(id,opinion,signature){return this.transition(id,'approve',opinion,signatureBytes(signature));}
-  reviewerTransition(id,reviewerId,action,opinion,signature){if(!['approve','reject'].includes(action)||!this.reviewerDocument(reviewerId,id))throw new Error('현재 차례의 결재자를 확인해 주세요.');return this.transition(id,action,opinion,action==='approve'?signatureBytes(signature):null,Number(reviewerId));}
+  reviewerTransition(id,reviewerId,action,opinion,signature,onAuthorize=null){this.db.exec('BEGIN IMMEDIATE');try{if(onAuthorize)onAuthorize();if(!['approve','reject'].includes(action)||!this.reviewerDocument(reviewerId,id))throw new Error('현재 차례의 결재자를 확인해 주세요.');const result=this.transition(id,action,opinion,action==='approve'?signatureBytes(signature):null,Number(reviewerId));this.db.exec('COMMIT');return result;}catch(error){this.db.exec('ROLLBACK');throw error;}}
   approveDocuments(siteId,ids,signature){
     if(!Number.isSafeInteger(siteId)||siteId<1||!Array.isArray(ids)||!ids.length||ids.length>100||ids.some(id=>!Number.isSafeInteger(id)||id<1)||new Set(ids).size!==ids.length)throw new Error('선택한 시험 문서를 확인해 주세요.');
     const bytes=signatureBytes(signature);

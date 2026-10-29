@@ -9,6 +9,52 @@ import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { PNG } from 'pngjs';
 import { Store } from '../store.js';
+import { DatabaseSync } from 'node:sqlite';
+import { createHash } from 'node:crypto';
+import { ReviewerSessions } from '../auth.js';
+
+test('인증 도중 계정이 변경되면 이전 인증으로 새 세션을 만들지 못한다',()=>{
+  const s=new Store(':memory:');try{
+    const site=s.createSite({name:'가상 현장'}),reviewer=s.createReviewer({siteId:site.id,loginId:'race_reviewer',name:'가상 결재자',password:'virtual-password-123'}),sessions=new ReviewerSessions(s.db),session={id:reviewer.id,expires:Date.now()+60000},key='a'.repeat(64);
+    const beforeDisable=s.authenticateReviewer('race_reviewer','virtual-password-123',true);
+    s.updateReviewer(site.id,reviewer.id,{active:false});s.updateReviewer(site.id,reviewer.id,{active:true});
+    assert.equal(sessions.issue(key,session,beforeDisable.credentialHash,beforeDisable.authVersion,''),false);
+    const beforeReset=s.authenticateReviewer('race_reviewer','virtual-password-123',true);
+    s.updateReviewer(site.id,reviewer.id,{password:'virtual-password-456'});
+    assert.equal(sessions.issue(key,session,beforeReset.credentialHash,beforeReset.authVersion,''),false);
+    const current=s.authenticateReviewer('race_reviewer','virtual-password-456',true);
+    assert.equal(sessions.issue(key,session,current.credentialHash,current.authVersion,''),true);
+    assert.equal(sessions.get(key).id,reviewer.id);
+  }finally{s.close();}
+});
+
+test('기존 결재자 데이터는 세션 구조 추가 후에도 로그인할 수 있다',()=>{
+  const dir=mkdtempSync(join(tmpdir(),'jweb-review-migrate-')),file=join(dir,'test.sqlite');let s=new Store(file);
+  try{
+    const site=s.createSite({name:'가상 현장'}),reviewer=s.createReviewer({siteId:site.id,loginId:'old_reviewer',name:'가상 결재자',password:'virtual-password-123'});
+    s.db.exec('DROP TABLE reviewer_sessions; ALTER TABLE reviewers DROP COLUMN auth_version');s.close();s=new Store(file);
+    const authenticated=s.authenticateReviewer('old_reviewer','virtual-password-123',true),sessions=new ReviewerSessions(s.db),key='b'.repeat(64);
+    assert.equal(authenticated.reviewer.id,reviewer.id);assert.ok(authenticated.authVersion);
+    assert.equal(sessions.issue(key,{id:reviewer.id,expires:Date.now()+60000},authenticated.credentialHash,authenticated.authVersion,''),true);
+  }finally{s.close();rmSync(dir,{recursive:true,force:true});}
+});
+
+test('결재자 세션은 재시작과 공유 DB에서 유지되고 폐기나 계정 변경이 반영된다',{timeout:30000},async()=>{
+  const dir=mkdtempSync(join(tmpdir(),'jweb-review-session-')),reservations=[createServer(),createServer()];
+  for(const socket of reservations)await new Promise(resolve=>socket.listen(0,'127.0.0.1',resolve));const ports=reservations.map(socket=>socket.address().port);for(const socket of reservations)await new Promise(resolve=>socket.close(resolve));
+  const children=[null,null],start=async index=>{const child=spawn(process.execPath,['server.js'],{cwd:process.cwd(),env:{...process.env,PORT:String(ports[index]),JWEB_DATA_DIR:dir,JWEB_ADMIN_PASSWORD:'virtual-admin-password'},stdio:['ignore','pipe','pipe']});children[index]=child;await Promise.race([once(child.stdout,'data'),once(child,'exit').then(()=>{throw Error('시험 서버가 종료됐습니다.');})]);},stop=async index=>{const child=children[index];if(child&&child.exitCode===null){const exited=once(child,'exit');child.kill();await exited;}children[index]=null;};
+  try{
+    await start(0);await start(1);const bases=ports.map(port=>`http://127.0.0.1:${port}`),send=(index,path,method='GET',data,cookie)=>fetch(bases[index]+path,{method,headers:{...(data===undefined?{}:{'content-type':'application/json'}),...(cookie?{cookie}:{})},...(data===undefined?{}:{body:JSON.stringify(data)})});
+    const admin=(await send(0,'/api/login','POST',{password:'virtual-admin-password'})).headers.get('set-cookie').split(';')[0],site=await (await send(0,'/api/sites','POST',{name:'가상 현장'},admin)).json(),reviewer=await (await send(0,'/api/reviewers','POST',{siteId:site.id,loginId:'shared_reviewer',name:'가상 결재자',password:'virtual-password-123'},admin)).json();
+    const login=async(index,password='virtual-password-123')=>{const res=await send(index,'/api/reviewer/login','POST',{loginId:'shared_reviewer',password});assert.equal(res.status,200);return res.headers.get('set-cookie').split(';')[0];},valid=async(index,cookie)=>(await send(index,'/api/reviewer/session','GET',undefined,cookie)).status;
+    const first=await login(0);assert.equal(await valid(1,first),200);await stop(0);await start(0);assert.equal(await valid(0,first),200);
+    const db=new DatabaseSync(join(dir,'jweb.sqlite'));try{const row=db.prepare('SELECT token_hash FROM reviewer_sessions').get();assert.equal(row.token_hash,createHash('sha256').update(first.split('=')[1]).digest('hex'));assert.notEqual(row.token_hash,first.split('=')[1]);}finally{db.close();}
+    assert.equal((await send(1,'/api/reviewer/logout','POST',{},first)).status,200);assert.equal(await valid(0,first),401);
+    const admin2=(await send(0,'/api/login','POST',{password:'virtual-admin-password'})).headers.get('set-cookie').split(';')[0],second=await login(1);
+    assert.equal((await send(0,`/api/reviewers/${reviewer.id}`,'PUT',{siteId:site.id,active:false},admin2)).status,200);assert.equal((await send(0,`/api/reviewers/${reviewer.id}`,'PUT',{siteId:site.id,active:true},admin2)).status,200);assert.equal(await valid(1,second),401);
+    const third=await login(1);assert.equal((await send(0,`/api/reviewers/${reviewer.id}`,'PUT',{siteId:site.id,password:'virtual-password-456'},admin2)).status,200);assert.equal(await valid(1,third),401);const fourth=await login(1,'virtual-password-456');await stop(1);await start(1);assert.equal(await valid(1,fourth),200);
+  }finally{await stop(0);await stop(1);rmSync(dir,{recursive:true,force:true});}
+});
 
 test('별도 시험 결재자는 자기 차례의 현장 문서만 열고 순서대로 승인한다',async()=>{
   const dir=mkdtempSync(join(tmpdir(),'jweb-review-')),reservation=createServer();await new Promise(resolve=>reservation.listen(0,'127.0.0.1',resolve));const port=reservation.address().port;await new Promise(resolve=>reservation.close(resolve));

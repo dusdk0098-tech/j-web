@@ -49,3 +49,26 @@ export class WorkerSessions extends Map {
   }
   delete(key){if(typeof key==='string'&&/^[a-f0-9]{64}$/.test(key))this.db.prepare('DELETE FROM worker_sessions WHERE token_hash=?').run(key);return super.delete(key);}
 }
+
+export class ReviewerSessions extends Map {
+  constructor(db,now=Date.now()){super();this.db=db;db.prepare('DELETE FROM reviewer_sessions WHERE expires<=?').run(now);}
+  issue(key,session,verifiedHash,verifiedVersion,oldKey){
+    this.db.exec('BEGIN IMMEDIATE');try{
+      const account=this.db.prepare('SELECT password_hash,auth_version FROM reviewers WHERE id=? AND active=1').get(session.id);
+      if(!account||!verifiedHash||account.auth_version!==verifiedVersion||account.password_hash.length!==verifiedHash.length||!timingSafeEqual(account.password_hash,verifiedHash)){this.db.exec('ROLLBACK');return false;}
+      if(typeof oldKey==='string'&&/^[a-f0-9]{64}$/.test(oldKey))this.db.prepare('DELETE FROM reviewer_sessions WHERE token_hash=?').run(oldKey);
+      const credential=createHash('sha256').update(account.password_hash).update(account.auth_version).digest();
+      this.db.prepare('INSERT INTO reviewer_sessions(token_hash,reviewer_id,expires,credential_hash) VALUES(?,?,?,?)').run(key,session.id,session.expires,credential);
+      this.db.exec('COMMIT');super.delete(oldKey);super.set(key,session);return true;
+    }catch(error){this.db.exec('ROLLBACK');throw error;}
+  }
+  get(key){
+    if(typeof key!=='string'||!/^[a-f0-9]{64}$/.test(key))return undefined;
+    const row=this.db.prepare('SELECT s.reviewer_id,s.expires,s.credential_hash,r.password_hash,r.auth_version,r.active FROM reviewer_sessions s JOIN reviewers r ON r.id=s.reviewer_id WHERE s.token_hash=?').get(key);
+    if(!row){super.delete(key);return undefined;}
+    const credential=createHash('sha256').update(row.password_hash).update(row.auth_version).digest();
+    if(!row.active||row.expires<=Date.now()||row.credential_hash.length!==credential.length||!timingSafeEqual(row.credential_hash,credential)){this.delete(key);return undefined;}
+    let session=super.get(key);if(!session||session.id!==row.reviewer_id||session.expires!==row.expires){session={id:row.reviewer_id,expires:row.expires};super.set(key,session);}return session;
+  }
+  delete(key){if(typeof key==='string'&&/^[a-f0-9]{64}$/.test(key))this.db.prepare('DELETE FROM reviewer_sessions WHERE token_hash=?').run(key);return super.delete(key);}
+}
