@@ -8,7 +8,8 @@ test('가상 노임 엑셀은 선택한 현장과 월의 기록만 내보낸다'
   const s=new Store(':memory:');try{
     const a=s.createSite({name:'가상 A'}),b=s.createSite({name:'가상 B'}),add=(siteId,name)=>s.createWorker({siteId,name,category:'직영',company:'가상 회사',occupation:'목공'}),one=add(a.id,'=가상 근로자'),other=add(b.id,'다른 현장'),deductions={income:'100',local:'10',health:'20',care:'3',pension:'50',employment:'5'};
     for(const [siteId,workerId,month] of [[a.id,one.id,'2024-02'],[a.id,one.id,'2024-03'],[b.id,other.id,'2024-02']])s.saveWageRecord({siteId,workerId,month,gross:'1000',deductions});
-    const rows=await readSheet(await wageSpreadsheet(s.wageRecords(a.id,'2024-02')));assert.equal(rows.length,2);assert.equal(rows[1][0],'=가상 근로자');assert.equal(rows[1][3],1000);assert.equal(rows[1][10],188);assert.equal(rows[1][11],812);
+    for(const date of ['2024-02-01','2024-02-02'])s.setAttendance({siteId:a.id,workerId:one.id,date,present:true});s.setAttendanceUnits({siteId:a.id,workerId:one.id,date:'2024-02-01',units:'0.50'});
+    const rows=await readSheet(await wageSpreadsheet(s.wageRecords(a.id,'2024-02')));assert.equal(rows.length,2);assert.equal(rows[1][0],'=가상 근로자');assert.equal(rows[1][3],1000);assert.equal(rows[1][10],188);assert.equal(rows[1][11],812);assert.equal(rows[1][12],2);assert.equal(rows[1][13],0.5);assert.equal(rows[1][14],1);
   }finally{s.close();}
 });
 
