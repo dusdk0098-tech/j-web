@@ -742,6 +742,11 @@ export class Store {
     const response=text(input.response,'조치 내용',2000),result=this.db.prepare('UPDATE work_stops SET response=? WHERE site_id=? AND id=? AND response IS ?').run(response,Number(siteId),Number(id),input.previousResponse);
     if(!result.changes){if(this.db.prepare('SELECT 1 FROM work_stops WHERE site_id=? AND id=?').get(Number(siteId),Number(id)))throw new Error('다른 변경이 있습니다. 다시 조회해 주세요.');throw new Error('선택한 현장의 요청을 확인해 주세요.');}
   }
+  deleteWorkStop(siteId,id,input){
+    if(!input||typeof input!=='object'||Array.isArray(input)||!(input.previousResponse===null||typeof input.previousResponse==='string'))throw new Error('기존 조치 내용을 확인해 주세요.');
+    const result=this.db.prepare('DELETE FROM work_stops WHERE site_id=? AND id=? AND response IS ?').run(Number(siteId),Number(id),input.previousResponse);
+    if(!result.changes){if(this.db.prepare('SELECT 1 FROM work_stops WHERE site_id=? AND id=?').get(Number(siteId),Number(id)))throw new Error('다른 변경이 있습니다. 다시 조회해 주세요.');throw new Error('선택한 현장의 요청을 확인해 주세요.');}
+  }
   workStopPhoto(siteId,id) {return this.db.prepare('SELECT photo FROM work_stops WHERE site_id=? AND id=? AND photo IS NOT NULL').get(Number(siteId),Number(id))?.photo || null;}
   createHazardReport(siteId,input,workerId=null){
     if(!this.db.prepare('SELECT 1 FROM sites WHERE id=?').get(Number(siteId)))throw new Error('현장을 확인해 주세요.');

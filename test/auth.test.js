@@ -654,6 +654,7 @@ test('관리자 인증 모드가 문서 API를 보호하고 로그아웃을 적�
     assert.equal((await fetch(`${base}/api/sites/${other.id}/work-stops/${stops[1].id}/photo`,{headers:{cookie}})).status,404);
     const photoResponse=await fetch(`${base}/api/sites/${site.id}/work-stops/${stops[1].id}/photo`,{headers:{cookie}});
     assert.equal(photoResponse.status,200);assert.deepEqual(Buffer.from(await photoResponse.arrayBuffer()),photo);
+    const deleteStop=(url,data,session)=>fetch(url,{method:'DELETE',headers:{...(session?{cookie:session}:{}),'content-type':'application/json'},body:JSON.stringify(data)});assert.equal((await deleteStop(stopResponse,{previousResponse:'수정 조치'})).status,401);assert.equal((await deleteStop(stopResponse,{previousResponse:'수정 조치'},workerCookie)).status,401);assert.equal((await deleteStop(`${base}/api/sites/${other.id}/work-stops/${stops[1].id}`,{previousResponse:'수정 조치'},cookie)).status,400);assert.equal((await deleteStop(stopResponse,{previousResponse:'가상 조치'},cookie)).status,400);assert.equal((await deleteStop(stopResponse,{previousResponse:'수정 조치'},cookie)).status,200);assert.equal((await fetch(`${stopResponse}/photo`,{headers:{cookie}})).status,404);assert.equal((await deleteStop(stopResponse,{previousResponse:'수정 조치'},cookie)).status,400);
     assert.deepEqual(await (await fetch(`${base}/api/sites/${other.id}/work-stops`,{headers:{cookie}})).json(),[]);
     const fragmented=Buffer.from(JSON.stringify({anonymous:true,place:'가상 장소',reason:'가상 사유'}));
     const split=fragmented.indexOf(Buffer.from('가'))+1;
