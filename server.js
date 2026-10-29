@@ -316,8 +316,9 @@ const server = http.createServer(async (req, res) => {
     const siteArticle=url.pathname.match(/^\/api\/site-articles\/(\d+)$/);
     if(siteArticle&&req.method==='PUT')return json(res,200,store.saveSiteArticle(await body(req),siteArticle[1]));
     if(url.pathname==='/api/wages/summary'&&req.method==='GET')return json(res,200,store.wageSummary(url.searchParams.get('siteId'),url.searchParams.get('month'),Object.fromEntries(url.searchParams)));
+    if(url.pathname==='/api/wages/daily'&&req.method==='GET')return json(res,200,store.wageDailyRecords(url.searchParams.get('siteId'),url.searchParams.get('month'),Object.fromEntries(url.searchParams)));
     if(url.pathname==='/api/wages/export'&&req.method==='GET'){
-      const data=await wageSpreadsheet(store.wageRecords(url.searchParams.get('siteId'),url.searchParams.get('month'),Object.fromEntries(url.searchParams)));
+      const siteId=url.searchParams.get('siteId'),month=url.searchParams.get('month'),filters=Object.fromEntries(url.searchParams),data=await wageSpreadsheet(store.wageRecords(siteId,month,filters),month,store.wageDailyRecords(siteId,month,filters));
       res.writeHead(200,{'Content-Type':'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet','Content-Disposition':'attachment; filename=wages.xlsx','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(data);
     }
     if(url.pathname==='/api/wages'){

@@ -244,6 +244,10 @@ export class Store {
     for(const row of this.wageRecords(siteId,month,filters)){let group=groups.get(row.occupation);if(!group){group={occupation:row.occupation,count:0,gross:0,deductions:0,net:0};groups.set(row.occupation,group);}group.count++;group.gross+=row.gross;group.deductions+=row.total;group.net+=row.net;}
     return [...groups.values()].sort((a,b)=>a.occupation.localeCompare(b.occupation,'ko'));
   }
+  wageDailyRecords(siteId,month,filters={}) {
+    const records=this.wageRecords(siteId,month,filters),days=new Map(this.monthlyAttendance(siteId,month).map(worker=>[worker.id,worker.units]));
+    return records.map(row=>({worker_id:row.worker_id,days:days.get(row.worker_id)||[]}));
+  }
   saveWageRecord(input,update=false) {
     const siteId=Number(input.siteId),workerId=Number(input.workerId),month=monthValue(input.month);
     const worker=this.db.prepare('SELECT name,company,occupation,category FROM workers WHERE id=? AND site_id=?').get(workerId,siteId);if(!worker)throw new Error('선택한 현장의 출입자를 확인해 주세요.');
