@@ -56,6 +56,18 @@ test('HTTPS 중계 주소는 QR과 보안 쿠키에 사용되고 다른 주소�
   }finally{child.kill();await once(child,'exit').catch(()=>{});rmSync(dir,{recursive:true,force:true});}
 });
 
+test('느린 근로자 로그인은 입력을 받은 시각의 출역일과 세션 만료를 사용한다',async()=>{
+  const dir=mkdtempSync(join(tmpdir(),'jweb-login-clock-')),reservation=createServer();await new Promise(resolve=>reservation.listen(0,'127.0.0.1',resolve));const port=reservation.address().port;await new Promise(resolve=>reservation.close(resolve));
+  const clockCode="import http from 'node:http';const create=http.createServer;http.createServer=handler=>create((req,res)=>{if(req.url==='/api/worker/login')process.stdout.write('LOGIN_RECEIVED\\n');return handler(req,res)});let now=Date.parse('2026-10-29T03:00:00Z');Date.now=()=>now;process.stdin.on('data',()=>{now=Date.parse('2026-10-30T03:00:00Z');process.stdout.write('CLOCK_ADVANCED\\n')});",child=spawn(process.execPath,['--import',`data:text/javascript,${encodeURIComponent(clockCode)}`,'server.js'],{cwd:process.cwd(),env:{...process.env,TZ:'Asia/Seoul',PORT:String(port),JWEB_DATA_DIR:dir,JWEB_ADMIN_PASSWORD:'test-password-12345'},stdio:['pipe','pipe','pipe']});
+  try{
+    await Promise.race([once(child.stdout,'data'),once(child,'exit').then(()=>{throw Error('시험 서버가 종료됐습니다.');})]);const base=`http://127.0.0.1:${port}`,send=(path,data,cookie)=>fetch(base+path,{method:'POST',headers:{'content-type':'application/json',...(cookie?{cookie}:{})},body:JSON.stringify(data)}),admin=(await send('/api/login',{password:'test-password-12345'})).headers.get('set-cookie').split(';')[0],site=await (await send('/api/sites',{name:'가상 현장'},admin)).json(),invitation=await (await send(`/api/sites/${site.id}/invitation`,{},admin)).json(),token=new URL(invitation.link).searchParams.get('token');
+    assert.equal((await send('/api/join',{token,name:'가상 근로자',category:'직영',company:'가상 업체',occupation:'가상 직종',loginId:'clock_worker',password:'virtual-password-123',acknowledged:true})).status,201);
+    const payload=JSON.stringify({token,loginId:'clock_worker',password:'virtual-password-123'}),req=request(base+'/api/worker/login',{method:'POST',headers:{'content-type':'application/json'}}),response=new Promise((resolve,reject)=>{req.on('response',res=>{res.resume();res.on('end',()=>resolve({status:res.statusCode,cookie:res.headers['set-cookie']?.[0]?.split(';')[0]}));});req.on('error',reject);});const received=once(child.stdout,'data');req.write(payload.slice(0,1));assert.match(String((await received)[0]),/LOGIN_RECEIVED/);const advanced=once(child.stdout,'data');child.stdin.write('advance\n');assert.match(String((await advanced)[0]),/CLOCK_ADVANCED/);req.end(payload.slice(1));
+    const result=await response;assert.equal(result.status,200);assert.equal((await fetch(base+'/api/worker/session',{headers:{cookie:result.cookie}})).status,200);
+    const admin2=(await send('/api/login',{password:'test-password-12345'})).headers.get('set-cookie').split(';')[0],next=await (await fetch(`${base}/api/attendance?siteId=${site.id}&date=2026-10-30`,{headers:{cookie:admin2}})).json(),prior=await (await fetch(`${base}/api/attendance?siteId=${site.id}&date=2026-10-29`,{headers:{cookie:admin2}})).json();assert.equal(next[0].present,1);assert.equal(prior[0].present,0);
+  }finally{child.kill();await once(child,'exit').catch(()=>{});rmSync(dir,{recursive:true,force:true});}
+});
+
 test('근로자 로그인 실패 제한은 현장과 계정별로 적용된다',async()=>{
   const dir=mkdtempSync(join(tmpdir(),'j-web-worker-limit-'));
   const reservation=createServer();await new Promise(resolve=>reservation.listen(0,'127.0.0.1',resolve));const port=reservation.address().port;await new Promise(resolve=>reservation.close(resolve));

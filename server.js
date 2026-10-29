@@ -99,7 +99,7 @@ const server = http.createServer(async (req, res) => {
     }
     if(url.pathname==='/api/worker/site'&&req.method==='GET'){const site=store.siteFromAccess(url.searchParams.get('key'));if(!site)return json(res,404,{error:'현장 접속 주소를 확인해 주세요.'});const canSignup=store.siteRegistrationOpen(site.id);return json(res,200,{...site,canSignup,...(canSignup?{companies:store.companies(site.id).map(c=>c.name),occupations:store.siteOccupations(site.id).map(o=>o.name)}:{})});}
     if(url.pathname==='/api/worker/login' && req.method==='POST'){
-      const now=Date.now(),input=await body(req),site=input.siteKey?store.siteFromAccess(input.siteKey):store.invitation(input.token),accountKey=site&&typeof input.loginId==='string'&&/^[a-zA-Z0-9_]{3,40}$/.test(input.loginId)?`${site.id}:${input.loginId}`:'invalid';
+      const input=await body(req),now=Date.now(),site=input.siteKey?store.siteFromAccess(input.siteKey):store.invitation(input.token),accountKey=site&&typeof input.loginId==='string'&&/^[a-zA-Z0-9_]{3,40}$/.test(input.loginId)?`${site.id}:${input.loginId}`:'invalid';
       workerFailures=workerFailures.filter(t=>t>now-5*60*1000);for(const [key,times] of workerAccountFailures){const recent=times.filter(t=>t>now-5*60*1000);if(recent.length)workerAccountFailures.set(key,recent);else workerAccountFailures.delete(key);}
       const failures=workerAccountFailures.get(accountKey)||[];if(workerFailures.length>=100||failures.length>=10)return json(res,429,{error:'잠시 후 다시 로그인해 주세요.'});
       const worker=store.authenticateWorker(input.token,input.loginId,input.password,input.siteKey);
