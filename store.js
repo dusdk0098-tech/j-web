@@ -1175,7 +1175,7 @@ export class Store {
         const details=JSON.parse(doc.details),get=this.db.prepare('SELECT id,kind,model,capacity,manufacturer,registration,details FROM equipment WHERE id=? AND site_id=?');
         if(details.equipmentIds!==undefined){details.equipmentSnapshot=details.equipmentIds.map(equipmentId=>{const item=get.get(equipmentId,doc.site_id);if(!item)throw new Error('같은 현장의 장비를 확인해 주세요.');return item;});this.db.prepare('UPDATE documents SET details=? WHERE id=?').run(JSON.stringify(details),Number(id));}
       }
-      if(action==='submit'){if(line.length)cycleId=this.captureApprovalCycle(this.document(id));else{cycleId=null;this.db.prepare('UPDATE documents SET approval_cycle_id=NULL WHERE id=?').run(Number(id));}}
+      if(action==='submit')cycleId=this.captureApprovalCycle(this.document(id));
       this.db.prepare('UPDATE documents SET status=?,updated_at=CURRENT_TIMESTAMP WHERE id=?').run(next, Number(id));
       this.db.prepare('INSERT INTO events(document_id,action,from_status,to_status,opinion,signature,reviewer_id,reviewer_name,approval_cycle_id) VALUES(?,?,?,?,?,?,?,?,?)').run(Number(id),action,doc.status,next,opinion,signature,reviewer?.reviewer_id||null,reviewer?.name||null,cycleId);
       this.db.exec('RELEASE document_transition');

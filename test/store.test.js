@@ -31,6 +31,17 @@ test('시험 결재 계정과 진행 순서는 데이터베이스를 다시 열�
   }finally{s.close();rmSync(dir,{recursive:true,force:true});}
 });
 
+test('관리자 단독 결재 요청도 사본을 보존하고 재요청과 저장 실패를 분리한다',()=>{
+  const dir=mkdtempSync(join(tmpdir(),'jweb-admin-cycle-')),file=join(dir,'data.sqlite');let s=new Store(file);
+  try{
+    const site=s.createSite({name:'가상 현장'}),doc=s.createDocument({siteId:site.id,type:'risk',title:'가상 평가',date:'2026-10-29',details:{items:[{task:'가상 작업',dueDate:'2026-11-01',responsible:'가상 담당'}]}}),attachment=s.addAttachment(doc.id,'가상.txt',Buffer.from('가상 자료'));
+    s.transition(doc.id,'submit');const first=s.document(doc.id).approval_cycle_id;assert.ok(first);assert.equal(s.events(doc.id)[0].approval_cycle_id,first);assert.deepEqual(Buffer.from(s.approvalCycleFile(doc.id,first,'document',0,attachment).data),Buffer.from('가상 자료'));
+    s.transition(doc.id,'withdraw');s.updateDocument(doc.id,{siteId:site.id,type:'risk',title:'수정 평가',date:'2026-10-29',details:{items:[{task:'변경 작업',dueDate:'2026-11-02'}]}});s.transition(doc.id,'submit');const second=s.document(doc.id).approval_cycle_id;assert.notEqual(first,second);s.transition(doc.id,'approve');s.updateRiskImprovement(doc.id,{siteId:site.id,index:0,dueDate:'2026-11-03',completionDate:'',responsible:'새 담당'});
+    s.close();s=new Store(file);assert.equal(JSON.parse(s.approvalCycle(doc.id,first).document.details).items[0].task,'가상 작업');assert.equal(JSON.parse(s.approvalCycle(doc.id,second).document.details).items[0].dueDate,'2026-11-02');assert.equal(JSON.parse(s.document(doc.id).details).items[0].dueDate,'2026-11-03');
+    const failing=s.createDocument({siteId:site.id,type:'tbm',title:'보존 실패',date:'2026-10-29'});s.addAttachment(failing.id,'가상.txt',Buffer.from('첨부'));s.db.exec("CREATE TRIGGER fail_admin_capture BEFORE INSERT ON approval_cycle_files BEGIN SELECT RAISE(ABORT,'보존 시험 오류'); END");assert.throws(()=>s.transition(failing.id,'submit'),/보존 시험 오류/);assert.equal(s.document(failing.id).status,'draft');assert.equal(s.document(failing.id).approval_cycle_id,null);assert.deepEqual(s.events(failing.id),[]);
+  }finally{s.close();rmSync(dir,{recursive:true,force:true});}
+});
+
 test('순차 결재는 요청 당시 자료를 보존하고 재요청 시 새 자료를 별도로 보존한다',()=>{
   const s=new Store(':memory:');try{
     const site=s.createSite({name:'가상 현장'}),reviewer=(id)=>s.createReviewer({siteId:site.id,loginId:id,name:id,password:'virtual-password-123'}),one=reviewer('snapshot_one'),two=reviewer('snapshot_two'),doc=s.createDocument({siteId:site.id,type:'risk',title:'가상 평가',date:'2026-10-29',body:'첫 내용'}),png=new PNG({width:1,height:1});png.data[3]=255;const bytes=PNG.sync.write(png),signature=`data:image/png;base64,${bytes.toString('base64')}`,input={kind:'meeting',date:'2026-10-29',place:'가상 장소',host:'가상 주관',participants:'가상 참석',content:'첫 활동'},activity=s.saveRiskActivity(doc.id,input),photo=s.addRiskActivityPhoto(doc.id,activity,'가상.png',bytes),attachment=s.addAttachment(doc.id,'가상.txt',Buffer.from('첫 첨부'));
