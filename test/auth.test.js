@@ -181,6 +181,13 @@ test('관리자 인증 모드가 문서 API를 보호하고 로그아웃을 적�
     const mealStatement=`${mealPath}/statement?siteId=${site.id}&month=2024-02`;
     assert.equal((await fetch(mealStatement)).status,401);assert.equal((await fetch(mealStatement,{headers:{cookie:workerCookie}})).status,401);
     const reportMeal=await (await fetch(mealStatement,{headers:{cookie}})).json();assert.equal(reportMeal.rows.length,2);assert.equal(reportMeal.groups.reduce((sum,row)=>sum+row.total,0),10000);
+    const defaultsPath=`${base}/api/meal-defaults`,defaultsInput={siteId:site.id,items:[{kind:'lunch',restaurantId}]};
+    assert.equal((await fetch(`${defaultsPath}?siteId=${site.id}`)).status,401);assert.equal((await fetch(defaultsPath,{method:'PUT',headers:{cookie:workerCookie,'content-type':'application/json'},body:JSON.stringify(defaultsInput)})).status,401);
+    assert.equal((await fetch(defaultsPath,{method:'PUT',headers:{cookie,'content-type':'application/json'},body:JSON.stringify(defaultsInput)})).status,200);
+    assert.equal((await (await fetch(`${defaultsPath}?siteId=${site.id}`,{headers:{cookie}})).json())[0].kind,'lunch');
+    assert.equal((await post('/api/attendance',{siteId:site.id,workerId:own.id,date:'2024-01-28',present:true})).status,200);
+    assert.equal((await (await fetch(`${mealPath}?siteId=${site.id}&date=2024-01-28`,{headers:{cookie}})).json())[0].price,5000);
+    assert.equal((await fetch(defaultsPath,{method:'PUT',headers:{cookie,'content-type':'application/json'},body:JSON.stringify({siteId:site.id,items:[]})})).status,200);
     const joinRecord=`${base}/api/workers/${own.id}/join-record?siteId=${site.id}`;assert.equal((await fetch(joinRecord,{headers:{cookie:workerCookie}})).status,401);
     const savedJoin=await (await fetch(joinRecord,{headers:{cookie}})).json();assert.deepEqual(savedJoin.equipment,['안전모','안전화']);assert.equal(savedJoin.has_signature,1);
     assert.equal(await (await fetch(`${base}/api/workers/${own.id}/join-record?siteId=${other.id}`,{headers:{cookie}})).json(),null);

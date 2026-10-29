@@ -49,6 +49,7 @@ export class Store {
       CREATE TABLE IF NOT EXISTS companies (id INTEGER PRIMARY KEY, site_id INTEGER NOT NULL REFERENCES sites(id), name TEXT NOT NULL, trade TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS site_occupations (id INTEGER PRIMARY KEY,site_id INTEGER NOT NULL REFERENCES sites(id),name TEXT NOT NULL,UNIQUE(site_id,name));
       CREATE TABLE IF NOT EXISTS restaurants (id INTEGER PRIMARY KEY,site_id INTEGER NOT NULL REFERENCES sites(id),name TEXT NOT NULL,meal_price INTEGER NOT NULL,snack_price INTEGER NOT NULL,tax INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS meal_defaults (site_id INTEGER NOT NULL REFERENCES sites(id),kind TEXT NOT NULL,restaurant_id INTEGER NOT NULL REFERENCES restaurants(id),PRIMARY KEY(site_id,kind));
       CREATE TABLE IF NOT EXISTS meal_checks (id INTEGER PRIMARY KEY,site_id INTEGER NOT NULL REFERENCES sites(id),worker_id INTEGER NOT NULL REFERENCES workers(id),date TEXT NOT NULL,kind TEXT NOT NULL,restaurant_id INTEGER NOT NULL REFERENCES restaurants(id),restaurant_name TEXT NOT NULL,price INTEGER NOT NULL,UNIQUE(worker_id,date,kind));
       CREATE TABLE IF NOT EXISTS wage_records (site_id INTEGER NOT NULL REFERENCES sites(id),worker_id INTEGER NOT NULL REFERENCES workers(id),month TEXT NOT NULL,gross INTEGER NOT NULL,deductions TEXT NOT NULL,PRIMARY KEY(worker_id,month));
       CREATE TABLE IF NOT EXISTS safety_costs (id INTEGER PRIMARY KEY,site_id INTEGER NOT NULL REFERENCES sites(id),category INTEGER NOT NULL,date TEXT NOT NULL,description TEXT NOT NULL,note TEXT NOT NULL,unit_price TEXT NOT NULL,quantity TEXT NOT NULL,unit TEXT NOT NULL,amount TEXT NOT NULL);
@@ -184,6 +185,19 @@ export class Store {
   deleteSiteOccupation(siteId,id){if(!this.db.prepare('DELETE FROM site_occupations WHERE site_id=? AND id=?').run(Number(siteId),Number(id)).changes)throw new Error('직종을 찾을 수 없습니다.');}
   restaurants(siteId) {
     return this.db.prepare('SELECT * FROM restaurants WHERE site_id=? ORDER BY name,id').all(Number(siteId));
+  }
+  mealDefaults(siteId) {
+    return this.db.prepare('SELECT kind,restaurant_id FROM meal_defaults WHERE site_id=? ORDER BY kind').all(Number(siteId));
+  }
+  saveMealDefaults(siteId,items) {
+    siteId=Number(siteId);if(!this.db.prepare('SELECT 1 FROM sites WHERE id=?').get(siteId))throw new Error('현장을 선택해 주세요.');
+    if(!Array.isArray(items)||items.length>4||new Set(items.map(x=>x?.kind)).size!==items.length)throw new Error('자동 식대 설정을 확인해 주세요.');
+    for(const item of items){if(!item||!['breakfast','lunch','dinner','snack'].includes(item.kind)||!this.db.prepare('SELECT 1 FROM restaurants WHERE id=? AND site_id=?').get(Number(item.restaurantId),siteId))throw new Error('식사 종류와 현장의 식당을 확인해 주세요.');}
+    this.db.exec('BEGIN IMMEDIATE');try{this.db.prepare('DELETE FROM meal_defaults WHERE site_id=?').run(siteId);const insert=this.db.prepare('INSERT INTO meal_defaults(site_id,kind,restaurant_id) VALUES(?,?,?)');for(const item of items)insert.run(siteId,item.kind,Number(item.restaurantId));this.db.exec('COMMIT');}catch(error){this.db.exec('ROLLBACK');throw error;}
+    return this.mealDefaults(siteId);
+  }
+  applyMealDefaults(workerId,date) {
+    this.db.prepare("INSERT OR IGNORE INTO meal_checks(site_id,worker_id,date,kind,restaurant_id,restaurant_name,price) SELECT w.site_id,w.id,?,d.kind,r.id,r.name,CASE WHEN d.kind='snack' THEN r.snack_price ELSE r.meal_price END FROM workers w JOIN meal_defaults d ON d.site_id=w.site_id JOIN restaurants r ON r.id=d.restaurant_id AND r.site_id=w.site_id WHERE w.id=? AND w.category='직영'").run(date,Number(workerId));
   }
   wageRecords(siteId,month) {
     month=monthValue(month);
@@ -592,11 +606,14 @@ export class Store {
     if (typeof input.present !== 'boolean') throw new Error('출역 상태를 확인해 주세요.');
     const worker = this.db.prepare('SELECT id,company,occupation,category FROM workers WHERE id=? AND site_id=?').get(Number(input.workerId),Number(input.siteId));
     if (!worker) throw new Error('선택한 현장의 출입자를 확인해 주세요.');
+    this.db.exec('BEGIN IMMEDIATE');try{
+    const previous=this.db.prepare('SELECT present FROM attendance WHERE worker_id=? AND date=?').get(worker.id,date);
     this.db.prepare("INSERT INTO attendance(worker_id,date,present,company_snapshot,occupation_snapshot,category_snapshot,source) VALUES(?,?,?,?,?,?,'manual') ON CONFLICT(worker_id,date) DO UPDATE SET company_snapshot=CASE WHEN attendance.present=0 AND excluded.present=1 THEN excluded.company_snapshot ELSE attendance.company_snapshot END,occupation_snapshot=CASE WHEN attendance.present=0 AND excluded.present=1 THEN excluded.occupation_snapshot ELSE attendance.occupation_snapshot END,category_snapshot=CASE WHEN attendance.present=0 AND excluded.present=1 THEN excluded.category_snapshot ELSE attendance.category_snapshot END,present=excluded.present,source='manual',updated_at=CURRENT_TIMESTAMP").run(worker.id,date,input.present?1:0,input.present?worker.company:null,input.present?worker.occupation:null,input.present?worker.category:null);
+    if(input.present&&!previous?.present)this.applyMealDefaults(worker.id,date);this.db.exec('COMMIT');}catch(error){this.db.exec('ROLLBACK');throw error;}
   }
   recordWorkerLogin(workerId,date) {
     date=dateValue(date);
-    this.db.prepare("INSERT OR IGNORE INTO attendance(worker_id,date,present,company_snapshot,occupation_snapshot,category_snapshot,source) SELECT id,?,1,company,occupation,category,'login' FROM workers WHERE id=?").run(date,Number(workerId));
+    this.db.exec('BEGIN IMMEDIATE');try{const result=this.db.prepare("INSERT OR IGNORE INTO attendance(worker_id,date,present,company_snapshot,occupation_snapshot,category_snapshot,source) SELECT id,?,1,company,occupation,category,'login' FROM workers WHERE id=?").run(date,Number(workerId));if(result.changes)this.applyMealDefaults(workerId,date);this.db.exec('COMMIT');}catch(error){this.db.exec('ROLLBACK');throw error;}
   }
   attendanceReport(siteId, from, to, group) {
     from=dateValue(from); to=dateValue(to);
