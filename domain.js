@@ -7,7 +7,7 @@ export const types = {
   permit: '작업 허가서', instruction: '작업 지시서', cost: '산업안전보건관리비',
   incident: '재해 발생 보고서', risk: '위험성평가', safety_meeting: '안전간담회', work_council: '노사협의체', joint_inspection: '합동 안전점검 일지', daily_report: '작업일보',
   site_photo: '현장사진', partner: '협력사 관리', archive: '현장별 자료실',
-  attendance: '출역 관리', meal: '식대 관리', wage: '노임 명세서', ppe: '보호구 지급'
+  attendance: '출역 관리', meal: '식대 관리', wage: '노임 명세서', ppe: '보호구 지급', office: '업무 문서'
 };
 
 export const transitions = {
@@ -34,6 +34,10 @@ export function recordInput(input) {
   if (!Object.hasOwn(types, type)) throw new Error('지원하지 않는 문서 유형입니다.');
   const date = dateValue(input.date);
   let details = {};
+  if(type==='office'){
+    const value=input.details;if(!value||typeof value!=='object'||Array.isArray(value)||!['품의서','경비청구','휴가신청서','사고발생보고서','기타'].includes(value.kind))throw new Error('업무 문서 구분을 확인해 주세요.');
+    details.kind=value.kind;details.otherKind=value.kind==='기타'?text(value.otherKind,'기타 구분'):'';
+  }
   if(type==='checklist'){
     const value=input.details??{};if(!value||typeof value!=='object'||Array.isArray(value))throw new Error('체크리스트를 확인해 주세요.');const kind=value.kind??'';if(!['','rain','wind','thaw','heat','cold','wet_season','heavy_rain','electrical','fire','formwork','falling','confined','excavation','semiannual','morning','afternoon','evening'].includes(kind))throw new Error('체크리스트 종류를 확인해 주세요.');details.kind=kind;
     if(['wind','thaw','heat','cold','wet_season','heavy_rain','electrical','fire','formwork','falling','confined','excavation'].includes(kind)){const answers=value.answers,lengths={wind:9,thaw:15,heat:8,cold:10,wet_season:6,heavy_rain:11,electrical:12,fire:5,formwork:7,falling:8,confined:4,excavation:8};if(!Array.isArray(answers)||answers.length!==lengths[kind])throw new Error('체크리스트 문항을 확인해 주세요.');details.answers=answers.map((item,i)=>{const na=kind==='heat'?[2,5,6,7].includes(i):kind==='heavy_rain'?i>0:true;if(!item||!['','O','X',...(na?['해당없음']:[])].includes(item.answer)||typeof item.note!=='string'||item.note.length>1000)throw new Error('체크리스트 답변을 확인해 주세요.');return {answer:item.answer,note:item.note.trim()};});}
