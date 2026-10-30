@@ -151,6 +151,11 @@ export class Store {
       if(!this.db.prepare('PRAGMA table_info(invitations)').all().some(c=>c.name==='pending'))this.db.exec('ALTER TABLE invitations ADD COLUMN pending INTEGER NOT NULL DEFAULT 0 CHECK(pending IN (0,1))');
       if(!this.db.prepare('PRAGMA table_info(schedules)').all().some(c=>c.name==='target_id'))this.db.exec('ALTER TABLE schedules ADD COLUMN target_id INTEGER REFERENCES reviewers(id)');
       if(!this.db.prepare('PRAGMA table_info(schedules)').all().some(c=>c.name==='target_name'))this.db.exec("ALTER TABLE schedules ADD COLUMN target_name TEXT NOT NULL DEFAULT ''");
+      if(!this.db.prepare('PRAGMA table_info(board_posts)').all().some(c=>c.name==='author_id'))this.db.exec('ALTER TABLE board_posts ADD COLUMN author_id INTEGER REFERENCES reviewers(id)');
+      if(!this.db.prepare('PRAGMA table_info(board_posts)').all().some(c=>c.name==='author_name'))this.db.exec("ALTER TABLE board_posts ADD COLUMN author_name TEXT NOT NULL DEFAULT ''");
+      if(!this.db.prepare('PRAGMA table_info(board_posts)').all().some(c=>c.name==='version'))this.db.exec("ALTER TABLE board_posts ADD COLUMN version TEXT NOT NULL DEFAULT ''");
+      if(!this.db.prepare('PRAGMA table_info(board_posts)').all().some(c=>c.name==='shared'))this.db.exec('ALTER TABLE board_posts ADD COLUMN shared INTEGER NOT NULL DEFAULT 0 CHECK(shared IN (0,1))');
+      this.db.exec("UPDATE board_posts SET version=lower(hex(randomblob(16))) WHERE version=''");
       this.db.exec("UPDATE reviewers SET auth_version=lower(hex(randomblob(16))) WHERE auth_version=''");
       this.db.exec('COMMIT');
     }catch(error){this.db.exec('ROLLBACK');throw error;}
@@ -237,14 +242,29 @@ export class Store {
     if(!['notice','question','general'].includes(kind)||typeof query!=='string'||query.length>200)throw new Error('게시판 또는 검색어를 확인해 주세요.');
     return this.db.prepare('SELECT * FROM board_posts WHERE kind=? AND (instr(title,?)>0 OR instr(body,?)>0) ORDER BY id DESC').all(kind,query,query);
   }
-  saveBoardPost(input,id=null){
-    if(!['notice','question','general'].includes(input.kind)||typeof input.secret!=='boolean'||(input.secret&&input.kind!=='question'))throw new Error('게시판과 비밀글 설정을 확인해 주세요.');
+  saveBoardPost(input,id=null,onAuthorize=()=>{}){
+    if(!['notice','question','general'].includes(input.kind)||typeof input.secret!=='boolean'||(input.secret&&input.kind!=='question')||(input.shared!==undefined&&typeof input.shared!=='boolean'))throw new Error('게시판과 공개 설정을 확인해 주세요.');
     const title=text(input.title,'제목'),body=text(input.body,'내용',10000),secret=input.secret?1:0;
-    if(id===null)id=this.db.prepare('INSERT INTO board_posts(kind,title,body,secret) VALUES(?,?,?,?)').run(input.kind,title,body,secret).lastInsertRowid;
-    else if(!this.db.prepare('UPDATE board_posts SET title=?,body=?,secret=? WHERE id=? AND kind=?').run(title,body,secret,Number(id),input.kind).changes)throw new Error('게시글을 찾을 수 없습니다.');
-    return this.db.prepare('SELECT * FROM board_posts WHERE id=?').get(Number(id));
+    this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();const current=id===null?null:this.db.prepare('SELECT shared,version FROM board_posts WHERE id=? AND kind=?').get(Number(id),input.kind);if(id!==null&&!current)throw new Error('게시글을 찾을 수 없습니다.');if(current&&input.expectedVersion!==undefined&&(typeof input.expectedVersion!=='string'||input.expectedVersion!==current.version))throw Object.assign(new Error('게시글이 변경되었습니다. 다시 조회해 주세요.'),{sessionStatus:409});const shared=input.shared===undefined?(current?.shared||0):(input.shared?1:0);if(id===null)id=this.db.prepare("INSERT INTO board_posts(kind,title,body,secret,shared,version) VALUES(?,?,?,?,?,lower(hex(randomblob(16))))").run(input.kind,title,body,secret,shared).lastInsertRowid;
+      else this.db.prepare("UPDATE board_posts SET title=?,body=?,secret=?,shared=?,version=lower(hex(randomblob(16))) WHERE id=? AND kind=?").run(title,body,secret,shared,Number(id),input.kind);const result=this.db.prepare('SELECT * FROM board_posts WHERE id=?').get(Number(id));this.db.exec('COMMIT');return result;
+    }catch(error){this.db.exec('ROLLBACK');throw error;}
   }
-  deleteBoardPost(kind,id){if(!['notice','question','general'].includes(kind)||!this.db.prepare('DELETE FROM board_posts WHERE kind=? AND id=?').run(kind,Number(id)).changes)throw new Error('게시글을 찾을 수 없습니다.');}
+  deleteBoardPost(kind,id,onAuthorize=()=>{},expectedVersion=undefined){if(!['notice','question','general'].includes(kind))throw new Error('게시글을 찾을 수 없습니다.');this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();const current=this.db.prepare('SELECT version FROM board_posts WHERE kind=? AND id=?').get(kind,Number(id));if(!current)throw new Error('게시글을 찾을 수 없습니다.');if(expectedVersion!==undefined&&(typeof expectedVersion!=='string'||expectedVersion!==current.version))throw Object.assign(new Error('게시글이 변경되었습니다. 다시 조회해 주세요.'),{sessionStatus:409});this.db.prepare('DELETE FROM board_posts WHERE kind=? AND id=?').run(kind,Number(id));this.db.exec('COMMIT');}catch(error){this.db.exec('ROLLBACK');throw error;}}
+  reviewerBoardPosts(actor,kind,query=''){
+    if(!['notice','question','general'].includes(kind)||typeof query!=='string'||query.length>200)throw new Error('게시판 또는 검색어를 확인해 주세요.');
+    return this.db.prepare('SELECT id,kind,title,body,secret,created_at,author_id,author_name,version FROM board_posts WHERE kind=? AND (author_id=? OR (shared=1 AND secret=0)) AND (instr(title,?)>0 OR instr(body,?)>0) ORDER BY id DESC').all(kind,Number(actor.id),query,query);
+  }
+  saveReviewerBoardPost(actor,input,id=null,onAuthorize=()=>{}){
+    if(!['question','general'].includes(input.kind)||typeof input.secret!=='boolean'||(input.secret&&input.kind!=='question'))throw new Error('게시판과 비밀글 설정을 확인해 주세요.');const title=text(input.title,'제목'),body=text(input.body,'내용',10000);
+    this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();const author=this.db.prepare('SELECT id,name FROM reviewers WHERE id=? AND site_id=? AND active=1').get(Number(actor.id),Number(actor.site_id));if(!author)throw new Error('활성 시험 계정을 확인해 주세요.');
+      if(id===null)id=this.db.prepare("INSERT INTO board_posts(kind,title,body,secret,author_id,author_name,shared,version) VALUES(?,?,?,?,?,?,1,lower(hex(randomblob(16))))").run(input.kind,title,body,input.secret?1:0,author.id,author.name).lastInsertRowid;
+      else{const current=this.db.prepare('SELECT version FROM board_posts WHERE id=? AND kind=? AND author_id=?').get(Number(id),input.kind,author.id);if(!current)throw new Error('수정할 게시글을 확인해 주세요.');if(typeof input.version!=='string'||input.version!==current.version)throw Object.assign(new Error('게시글이 변경되었습니다. 다시 조회해 주세요.'),{sessionStatus:409});this.db.prepare("UPDATE board_posts SET title=?,body=?,secret=?,version=lower(hex(randomblob(16))) WHERE id=?").run(title,body,input.secret?1:0,Number(id));}
+      const result=this.db.prepare('SELECT * FROM board_posts WHERE id=?').get(Number(id));this.db.exec('COMMIT');return result;
+    }catch(error){this.db.exec('ROLLBACK');throw error;}
+  }
+  deleteReviewerBoardPost(actor,kind,id,version,onAuthorize=()=>{}){
+    if(!['question','general'].includes(kind))throw new Error('게시판을 확인해 주세요.');this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();const author=this.db.prepare('SELECT id FROM reviewers WHERE id=? AND site_id=? AND active=1').get(Number(actor.id),Number(actor.site_id));if(!author)throw new Error('활성 시험 계정을 확인해 주세요.');const current=this.db.prepare('SELECT version FROM board_posts WHERE id=? AND kind=? AND author_id=?').get(Number(id),kind,author.id);if(!current)throw new Error('삭제할 게시글을 확인해 주세요.');if(typeof version!=='string'||version!==current.version)throw Object.assign(new Error('게시글이 변경되었습니다. 다시 조회해 주세요.'),{sessionStatus:409});this.db.prepare('DELETE FROM board_posts WHERE id=?').run(Number(id));this.db.exec('COMMIT');}catch(error){this.db.exec('ROLLBACK');throw error;}
+  }
   schedules(siteId,month,query='') {
     month=monthValue(month);if(typeof query!=='string'||query.length>200)throw new Error('검색어를 확인해 주세요.');
     return this.db.prepare('SELECT * FROM schedules WHERE site_id=? AND substr(start_date,1,7)<=? AND substr(end_date,1,7)>=? AND (instr(content,?)>0 OR instr(target_name,?)>0) ORDER BY start_date,start_time,id').all(Number(siteId),month,month,query,query);
