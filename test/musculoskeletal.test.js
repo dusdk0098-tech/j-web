@@ -1,7 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Store } from '../store.js';
-import { copyMusculoskeletalItems } from '../public/risk-scale.js';
+import { copyMusculoskeletalItems, selectedMusculoskeletalItems } from '../public/risk-scale.js';
+
+test('근골격계 평가 표시에는 선택된 항목만 사용하고 원본 항목은 보존한다',()=>{
+  const rows=[{hazard:'선택된 항목',selected:true},{hazard:'선택 안 함',selected:false}];
+  assert.deepEqual(selectedMusculoskeletalItems(rows).map(row=>row.hazard),['선택된 항목']);
+  assert.equal(rows.length,2);
+  assert.deepEqual(selectedMusculoskeletalItems([]),[]);
+  assert.deepEqual(selectedMusculoskeletalItems(undefined),[]);
+});
 
 test('근골격계 시험 항목은 별도로 검증하고 현장과 결재 당시 값을 보존한다',()=>{
   const s=new Store(':memory:');try{

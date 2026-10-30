@@ -12,6 +12,10 @@ export function riskScore(scale, likelihood, severity) {
   return Number(likelihood) * Number(severity);
 }
 
+export function selectedMusculoskeletalItems(items) {
+  return Array.isArray(items) ? items.filter(item => item?.selected === true) : [];
+}
+
 export function copyRiskItem(item){
   return {...item,supervisorOpinion:'',safetyOpinion:'',healthOpinion:'',managerOpinion:''};
 }
