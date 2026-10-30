@@ -8,6 +8,7 @@ import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { PNG } from 'pngjs';
 import { Store } from '../store.js';
+import { officeSourceContent } from '../public/office-template.js';
 
 const png=new PNG({width:1,height:1});png.data[3]=255;const signature=`data:image/png;base64,${PNG.sync.write(png).toString('base64')}`;
 
@@ -28,6 +29,7 @@ test('업무 문서 복사 API는 관리자와 같은 현장으로 제한한다'
   try{
     await Promise.race([once(child.stdout,'data'),once(child,'exit').then(()=>{throw Error('시험 서버가 종료됐습니다.');})]);const base=`http://127.0.0.1:${port}`,send=(path,method='GET',data,cookie)=>fetch(base+path,{method,headers:{...(data===undefined?{}:{'content-type':'application/json'}),...(cookie?{cookie}:{})},...(data===undefined?{}:{body:JSON.stringify(data)})});
     const admin=(await send('/api/login','POST',{password:'virtual-admin-password'})).headers.get('set-cookie').split(';')[0],site=await (await send('/api/sites','POST',{name:'가상 현장'},admin)).json(),other=await (await send('/api/sites','POST',{name:'다른 현장'},admin)).json(),reviewer=await (await send('/api/reviewers','POST',{siteId:site.id,loginId:'copy_review',name:'가상 결재자',password:'virtual-password-123'},admin)).json(),review=(await send('/api/reviewer/login','POST',{loginId:reviewer.login_id,password:'virtual-password-123'})).headers.get('set-cookie').split(';')[0],doc=await (await send('/api/documents','POST',{siteId:site.id,type:'office',title:'가상 문서',date:'2026-10-30',body:'가상 내용',details:{kind:'품의서'}},admin)).json(),path=`/api/documents/${doc.id}/copy-office`,input={siteId:site.id,title:'가상 복사',date:'2026-10-31'};
+    assert.equal((await send(`/api/documents/${doc.id}`)).status,401);const fetched=await (await send(`/api/documents/${doc.id}`,'GET',undefined,admin)).json();assert.deepEqual(officeSourceContent(fetched,site.id),{title:'가상 문서',body:'가상 내용',rich:null});assert.throws(()=>officeSourceContent(fetched,other.id),/현장/);
     assert.equal((await send(path,'POST',input)).status,401);assert.equal((await send(path,'POST',input,review)).status,401);assert.equal((await send(path,'POST',{...input,siteId:other.id},admin)).status,400);const result=await send(path,'POST',input,admin);assert.equal(result.status,201);const copy=await result.json();assert.equal(copy.copied_from,doc.id);assert.equal(copy.status,'draft');assert.equal(copy.body,'가상 내용');
   }finally{if(child.exitCode===null){const exited=once(child,'exit');child.kill();await exited;}rmSync(dir,{recursive:true,force:true});}
 });

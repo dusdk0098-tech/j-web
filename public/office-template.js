@@ -8,6 +8,22 @@ export function officeValuesForScope(values,lastAutomatic,lastScope,nextScope){
   const same=Array.isArray(lastAutomatic)&&values.length===lastAutomatic.length&&values.every((value,index)=>value===lastAutomatic[index]);return lastScope&&lastScope!==nextScope&&same?values.map(()=>''):[...values];
 }
 
+export function officeSourceContent(source,siteId){
+  if(!source||source.type!=='office'||source.site_id!==Number(siteId)||!Number.isSafeInteger(source.id)||typeof source.title!=='string'||typeof source.body!=='string')throw Error('같은 현장의 업무 문서를 확인해 주세요.');
+  let details;try{details=JSON.parse(source.details);}catch{throw Error('업무 문서 내용을 확인해 주세요.');}
+  if(!details||typeof details!=='object'||Array.isArray(details)||(details.bodyRich!=null&&!Array.isArray(details.bodyRich)))throw Error('업무 문서 내용을 확인해 주세요.');
+  return {title:source.title,body:source.body,rich:details.bodyRich??null};
+}
+
+export function officeSourceCurrent(expected,current){
+  return !!expected&&!!current&&current.connected&&current.open&&expected.siteId===current.siteId&&expected.selected===current.selected&&expected.signatureRevision===current.signatureRevision&&JSON.stringify(expected.draft)===JSON.stringify(current.draft);
+}
+
+export function officeDraftSignature(){
+  let snapshot=null;
+  return {mark(value){snapshot=JSON.stringify(value);},matches(value){return snapshot!==null&&snapshot===JSON.stringify(value);},clear(){snapshot=null;}};
+}
+
 export function officeTemplate(kind,example,title,body){
   if(typeof title!=='string'||typeof body!=='string')throw Error('문서 입력을 확인해 주세요.');
   if(body.trim())throw Error('내용이 이미 입력되어 있습니다. 예시를 적용하려면 내용을 비워 주세요.');
