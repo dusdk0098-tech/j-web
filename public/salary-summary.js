@@ -19,6 +19,10 @@ export function salarySummary(records){
   return {total:[...groups.values()].reduce((sum,item)=>sum+item.total,0),reason:null};
 }
 
+export function wageEstimateCurrent(expected,current){
+  return !!expected&&!!current&&current.connected&&current.open&&expected.siteId===current.siteId&&expected.month===current.month&&expected.workerId===current.workerId&&expected.gross===current.gross&&expected.mode===current.mode;
+}
+
 export function salaryDay(day){
   if(!day)return {kind:'미출역',amount:'미출역'};
   if(day.salary_kind){const labels={monthly:'월급',yearly:'연봉',other:'기타'};return {kind:labels[day.salary_kind]||'미기록',amount:day.salary_amount??'미기록'};}

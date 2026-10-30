@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { salarySummary, salaryDay, groupWageRecords } from '../public/salary-summary.js';
+import { salarySummary, salaryDay, groupWageRecords, wageEstimateCurrent } from '../public/salary-summary.js';
 
 test('시험 급여는 종류와 근로 구분에 따라 계산하며 모순은 표시하지 않는다',()=>{
   const daily=(rate,units=100,category='직영')=>({category,salary_kind:null,daily_rate:rate,units_hundredths:units}),fixed=(kind,amount,category='직영')=>({category,salary_kind:kind,salary_amount:amount});
@@ -27,4 +27,9 @@ test('직종별 가상 명세는 근로자 기록과 미기록 공수를 보존�
   const groups=groupWageRecords(rows),carpenter=groups.find(group=>group.occupation==='목공'),electrician=groups.find(group=>group.occupation==='전기');
   assert.deepEqual(carpenter.rows.map(row=>row.worker_id),[1,3]);assert.equal(carpenter.units_hundredths,125);assert.equal(carpenter.units_missing,1);assert.equal(carpenter.gross,1000);
   assert.equal(electrician.units_hundredths,null);assert.equal(electrician.units_missing,2);assert.equal(electrician.gross,300);assert.deepEqual(groupWageRecords([]),[]);
+});
+
+test('늦은 노임 계산 응답은 다른 현장·근로자나 변경된 입력에 적용하지 않는다',()=>{
+  const expected={siteId:1,month:'2026-10',workerId:'4',gross:'100',mode:'manual'},current={...expected,connected:true,open:true};assert.equal(wageEstimateCurrent(expected,current),true);
+  for(const change of [{siteId:2},{month:'2026-11'},{workerId:'5'},{gross:'200'},{mode:'attendance'},{connected:false},{open:false}])assert.equal(wageEstimateCurrent(expected,{...current,...change}),false);
 });

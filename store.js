@@ -15,7 +15,16 @@ function monthValue(month) {
   if(typeof month!=='string' || !/^\d{4}-(0[1-9]|1[0-2])$/.test(month) || Number(month.slice(0,4))<1000)throw new Error('조회할 월을 확인해 주세요.');
   return month;
 }
-function wageVersion(row){return createHash('sha256').update(JSON.stringify([row.gross,row.deductions,row.manual_total,row.remark])).digest('hex');}
+function wageVersion(row){return createHash('sha256').update(JSON.stringify([row.gross,row.deductions,row.manual_total,row.remark,row.gross_mode??'manual',row.attendance_version??null])).digest('hex');}
+function attendanceWageEstimate(days){
+  const entries=days.map(row=>[row.date,row.daily_rate??null,row.units_hundredths??null,row.salary_kind??null]).sort((a,b)=>a[0].localeCompare(b[0]));
+  const version=createHash('sha256').update(JSON.stringify(entries)).digest('hex'),incomplete=entries.filter(row=>row[1]===null||row[2]===null||row[3]!==null).length;
+  if(!entries.length)return {gross:null,version,days:0,incomplete:0,reason:'출역 기록이 없습니다.'};
+  if(incomplete)return {gross:null,version,days:entries.length,incomplete,reason:'일당 외 급여 또는 일당·공수가 미기록인 출역이 있습니다.'};
+  const gross=entries.reduce((sum,row)=>sum+Math.floor((row[1]*row[2]+50)/100),0);
+  if(!Number.isSafeInteger(gross)||gross>999999999)return {gross:null,version,days:entries.length,incomplete:0,reason:'시험 노임 금액 한도를 초과했습니다.'};
+  return {gross,version,days:entries.length,incomplete:0,reason:null};
+}
 function dailyRateValue(value){if(typeof value!=='string'||!/^$|^\d{1,9}$/.test(value))throw new Error('시험 일당은 0부터 999999999까지 정수로 입력해 주세요.');return value===''?null:Number(value);}
 function ppeValues(input){
   const date=dateValue(input.date),item=text(input.item,'보호구');
@@ -210,6 +219,8 @@ export class Store {
     const wageColumns=this.db.prepare('PRAGMA table_info(wage_records)').all().map(c=>c.name);
     for(const column of ['name_snapshot','company_snapshot','occupation_snapshot','category_snapshot','birth_date_snapshot','remark'])if(!wageColumns.includes(column))this.db.exec(`ALTER TABLE wage_records ADD COLUMN ${column} TEXT`);
     if(!wageColumns.includes('manual_total'))this.db.exec('ALTER TABLE wage_records ADD COLUMN manual_total INTEGER CHECK(manual_total IS NULL OR manual_total BETWEEN 0 AND 999999999)');
+    if(!wageColumns.includes('gross_mode'))this.db.exec("ALTER TABLE wage_records ADD COLUMN gross_mode TEXT NOT NULL DEFAULT 'manual' CHECK(gross_mode IN ('manual','attendance'))");
+    if(!wageColumns.includes('attendance_version'))this.db.exec('ALTER TABLE wage_records ADD COLUMN attendance_version TEXT');
     if(!attendanceColumns.includes('company_snapshot'))this.db.exec('ALTER TABLE attendance ADD COLUMN company_snapshot TEXT');
     if(!attendanceColumns.includes('occupation_snapshot'))this.db.exec('ALTER TABLE attendance ADD COLUMN occupation_snapshot TEXT');
     if(!attendanceColumns.includes('category_snapshot'))this.db.exec('ALTER TABLE attendance ADD COLUMN category_snapshot TEXT');
@@ -502,9 +513,17 @@ export class Store {
     const category=this.db.prepare('SELECT category FROM workers WHERE id=?').get(Number(workerId))?.category,table=category==='직영'?'meal_defaults':category==='현장관리자'?'manager_meal_defaults':null;if(!table)return;
     this.db.prepare(`INSERT OR IGNORE INTO meal_checks(site_id,worker_id,date,kind,restaurant_id,restaurant_name,price,tax_snapshot) SELECT w.site_id,w.id,?,d.kind,r.id,r.name,CASE WHEN d.kind='snack' THEN r.snack_price ELSE r.meal_price END,CASE WHEN d.kind='snack' THEN NULL ELSE r.tax END FROM workers w JOIN ${table} d ON d.site_id=w.site_id JOIN restaurants r ON r.id=d.restaurant_id AND r.site_id=w.site_id WHERE w.id=?`).run(date,Number(workerId));
   }
+  wageEstimate(siteId,workerId,month){
+    siteId=Number(siteId);workerId=Number(workerId);month=monthValue(month);
+    if(!this.db.prepare('SELECT 1 FROM workers WHERE id=? AND site_id=?').get(workerId,siteId))throw new Error('선택한 현장의 출입자를 확인해 주세요.');
+    const rows=this.db.prepare('SELECT date,daily_rate,units_hundredths,salary_kind FROM attendance WHERE worker_id=? AND present=1 AND date BETWEEN ? AND ? ORDER BY date').all(workerId,`${month}-01`,`${month}-31`);
+    return attendanceWageEstimate(rows);
+  }
   wageRecords(siteId,month,filters={}) {
     month=monthValue(month);
-    return this.db.prepare("SELECT r.worker_id,r.month,r.gross,r.deductions,r.manual_total,r.birth_date_snapshot,r.remark,r.category_snapshot AS category,COALESCE(r.name_snapshot,'기록 없음') AS name,COALESCE(r.company_snapshot,'기록 없음') AS company,COALESCE(r.occupation_snapshot,'기록 없음') AS occupation,COUNT(a.date) AS attendance_days,SUM(a.units_hundredths) AS units_hundredths,COUNT(a.date)-COUNT(a.units_hundredths) AS units_missing,SUM(CASE WHEN a.salary_kind IS NULL AND a.daily_rate IS NOT NULL AND a.units_hundredths IS NOT NULL THEN (a.daily_rate*a.units_hundredths+50)/100 END) AS estimated_pay,COUNT(a.date)-COUNT(CASE WHEN a.salary_kind IS NULL AND a.daily_rate IS NOT NULL AND a.units_hundredths IS NOT NULL THEN a.date END) AS pay_missing FROM wage_records r JOIN workers w ON w.id=r.worker_id AND w.site_id=r.site_id LEFT JOIN attendance a ON a.worker_id=r.worker_id AND a.present=1 AND a.date BETWEEN ? AND ? WHERE r.site_id=? AND r.month=? GROUP BY r.worker_id,r.month ORDER BY name,w.id").all(`${month}-01`,`${month}-31`,Number(siteId),month).map(row=>{const version=wageVersion(row),deductions=JSON.parse(row.deductions),detail_total=Object.values(deductions).reduce((a,b)=>a+b,0),total=row.manual_total??detail_total;return {...row,deductions,detail_total,total,net:row.gross-total,version};}).filter(row=>(!filters.company||row.company===filters.company)&&(!filters.category||row.category===filters.category)&&(!filters.q||row.name.toLocaleLowerCase().includes(filters.q.trim().toLocaleLowerCase())));
+    const rows=this.db.prepare("SELECT r.worker_id,r.month,r.gross,r.deductions,r.manual_total,r.gross_mode,r.attendance_version,r.birth_date_snapshot,r.remark,r.category_snapshot AS category,COALESCE(r.name_snapshot,'기록 없음') AS name,COALESCE(r.company_snapshot,'기록 없음') AS company,COALESCE(r.occupation_snapshot,'기록 없음') AS occupation,COUNT(a.date) AS attendance_days,SUM(a.units_hundredths) AS units_hundredths,COUNT(a.date)-COUNT(a.units_hundredths) AS units_missing,SUM(CASE WHEN a.salary_kind IS NULL AND a.daily_rate IS NOT NULL AND a.units_hundredths IS NOT NULL THEN (a.daily_rate*a.units_hundredths+50)/100 END) AS estimated_pay,COUNT(a.date)-COUNT(CASE WHEN a.salary_kind IS NULL AND a.daily_rate IS NOT NULL AND a.units_hundredths IS NOT NULL THEN a.date END) AS pay_missing FROM wage_records r JOIN workers w ON w.id=r.worker_id AND w.site_id=r.site_id LEFT JOIN attendance a ON a.worker_id=r.worker_id AND a.present=1 AND a.date BETWEEN ? AND ? WHERE r.site_id=? AND r.month=? GROUP BY r.worker_id,r.month ORDER BY name,w.id").all(`${month}-01`,`${month}-31`,Number(siteId),month);
+    const estimates=rows.some(row=>row.gross_mode==='attendance')?new Map(this.monthlyAttendance(siteId,month).map(worker=>[worker.id,attendanceWageEstimate(worker.units)])):new Map();
+    return rows.map(row=>{const version=wageVersion(row),deductions=JSON.parse(row.deductions),detail_total=Object.values(deductions).reduce((a,b)=>a+b,0),total=row.manual_total??detail_total;const estimate=estimates.get(row.worker_id),gross_status=row.gross_mode==='attendance'?(estimate&&estimate.version===row.attendance_version&&estimate.gross===row.gross?'current':'changed'):'manual';return {...row,deductions,detail_total,total,net:row.gross-total,version,gross_status};}).filter(row=>(!filters.company||row.company===filters.company)&&(!filters.category||row.category===filters.category)&&(!filters.q||row.name.toLocaleLowerCase().includes(filters.q.trim().toLocaleLowerCase())));
   }
   wageSummary(siteId,month,filters={}) {
     const groups=new Map();
@@ -522,16 +541,26 @@ export class Store {
     const amount=(value)=>{if(typeof value!=='string'||!/^\d{1,9}$/.test(value))throw new Error('금액은 0 이상의 정수로 입력해 주세요.');return Number(value);},gross=amount(input.gross);
     if(!input.deductions||typeof input.deductions!=='object'||Array.isArray(input.deductions))throw new Error('공제 항목을 확인해 주세요.');
     const deductions=Object.fromEntries(['income','local','health','care','pension','employment'].map(key=>[key,amount(input.deductions[key])]));
-    const previous=update?this.db.prepare('SELECT gross,deductions,manual_total,remark FROM wage_records WHERE site_id=? AND worker_id=? AND month=?').get(siteId,workerId,month):null;
+    const previous=update?this.db.prepare('SELECT gross,deductions,manual_total,remark,gross_mode,attendance_version FROM wage_records WHERE site_id=? AND worker_id=? AND month=?').get(siteId,workerId,month):null;
     if(update&&!previous)throw new Error('수정할 노임 기록을 찾을 수 없습니다.');
     if(update&&input.expectedVersion!==undefined&&input.expectedVersion!==wageVersion(previous))throw Object.assign(new Error('노임 기록이 변경되었습니다. 다시 조회해 주세요.'),{sessionStatus:409});
+    const grossMode=input.grossMode===undefined?'manual':input.grossMode;let attendanceVersion=null;
+    if(!['manual','attendance'].includes(grossMode))throw new Error('시험 노임 입력 방식을 확인해 주세요.');
+    if(grossMode==='attendance'){
+      if(typeof input.attendanceVersion!=='string'||!/^[0-9a-f]{64}$/.test(input.attendanceVersion))throw new Error('출역 기준 시험 계산을 다시 확인해 주세요.');
+      const estimate=this.wageEstimate(siteId,workerId,month);
+      if(estimate.version!==input.attendanceVersion)throw Object.assign(new Error('출역 정보가 변경되었습니다. 시험 계산을 다시 확인해 주세요.'),{sessionStatus:409});
+      if(estimate.gross===null)throw new Error(estimate.reason);
+      if(gross!==estimate.gross)throw new Error('출역 기준 시험 계산액을 다시 확인해 주세요.');
+      attendanceVersion=estimate.version;
+    }
     const manualTotal=input.manualTotal===undefined?previous?.manual_total??null:input.manualTotal===null||input.manualTotal===''?null:amount(input.manualTotal);
     if(Object.values(deductions).reduce((a,b)=>a+b,0)>gross||manualTotal!==null&&manualTotal>gross)throw new Error('공제액 합계가 노임보다 큽니다.');
     if(input.remark!==undefined&&(typeof input.remark!=='string'||input.remark.length>500||/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/.test(input.remark)))throw new Error('시험 비고를 확인해 주세요.');
     const remark=input.remark===undefined?null:input.remark.trim();
     if(update){
-      this.db.prepare('UPDATE wage_records SET gross=?,deductions=?,manual_total=?,remark=COALESCE(?,remark) WHERE site_id=? AND worker_id=? AND month=?').run(gross,JSON.stringify(deductions),manualTotal,remark,siteId,workerId,month);
-    }else if(!this.db.prepare('INSERT INTO wage_records(site_id,worker_id,month,gross,deductions,manual_total,name_snapshot,company_snapshot,occupation_snapshot,category_snapshot,birth_date_snapshot,remark) VALUES(?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(worker_id,month) DO NOTHING').run(siteId,workerId,month,gross,JSON.stringify(deductions),manualTotal,worker.name,worker.company,worker.occupation,worker.category,this.joinAcknowledgement(siteId,workerId)?.profile?.birthDate||null,remark).changes)throw new Error('이미 등록된 노임 기록입니다. 수정을 이용해 주세요.');
+      this.db.prepare('UPDATE wage_records SET gross=?,deductions=?,manual_total=?,remark=COALESCE(?,remark),gross_mode=?,attendance_version=? WHERE site_id=? AND worker_id=? AND month=?').run(gross,JSON.stringify(deductions),manualTotal,remark,grossMode,attendanceVersion,siteId,workerId,month);
+    }else if(!this.db.prepare('INSERT INTO wage_records(site_id,worker_id,month,gross,deductions,manual_total,name_snapshot,company_snapshot,occupation_snapshot,category_snapshot,birth_date_snapshot,remark,gross_mode,attendance_version) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(worker_id,month) DO NOTHING').run(siteId,workerId,month,gross,JSON.stringify(deductions),manualTotal,worker.name,worker.company,worker.occupation,worker.category,this.joinAcknowledgement(siteId,workerId)?.profile?.birthDate||null,remark,grossMode,attendanceVersion).changes)throw new Error('이미 등록된 노임 기록입니다. 수정을 이용해 주세요.');
     this.db.exec('COMMIT');}catch(error){this.db.exec('ROLLBACK');throw error;}
   }
   mealChecks(siteId,date) {
