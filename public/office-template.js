@@ -1,5 +1,13 @@
 export const leaveExamples={leave:'휴가',morning:'오전 반차',afternoon:'오후 반차',early:'조퇴',reserve:'예비군',civil:'민방위'};
 
+export function officeSuggestionCurrent(expected,current){
+  return !!expected&&!!current&&current.connected&&current.open&&current.enabled&&expected.epoch===current.epoch&&expected.siteId===current.siteId&&expected.kind===current.kind&&expected.otherKind===current.otherKind&&expected.manual===current.manual&&Array.isArray(expected.values)&&Array.isArray(current.values)&&expected.values.length===current.values.length&&expected.values.every((value,index)=>value===current.values[index]);
+}
+
+export function officeValuesForScope(values,lastAutomatic,lastScope,nextScope){
+  const same=Array.isArray(lastAutomatic)&&values.length===lastAutomatic.length&&values.every((value,index)=>value===lastAutomatic[index]);return lastScope&&lastScope!==nextScope&&same?values.map(()=>''):[...values];
+}
+
 export function officeTemplate(kind,example,title,body){
   if(typeof title!=='string'||typeof body!=='string')throw Error('문서 입력을 확인해 주세요.');
   if(body.trim())throw Error('내용이 이미 입력되어 있습니다. 예시를 적용하려면 내용을 비워 주세요.');

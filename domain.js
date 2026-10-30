@@ -19,6 +19,7 @@ export const transitions = {
   approved: {}
 };
 export const permitKinds=['가설공사(1.5m이상)','토목공사','건축공사','철골구조물 공사','습식공사(미장/방수)','금속창호공사','마감공사(내부/외부)','설비공사(전기/통신/소방)','추락위험작업(2m이상)','낙하위험작업','전도위험작업','붕괴위험작업','화재,특별위험작업','유해위험물취급작업(중독)','유해위험기계기구작업(협착/절단)','차량계 하역운반기계','차량계 건설기계 사용작업','중량물의 취급작업(기중기/인력)','관리대상물질취급작업','굴착작업(1.5m이상)','건물 해체작업','타워크레인 설치·조립·해체','화학설비 사용작업','특고압작업','터널굴착작업','교량 설치·해체·변경작업','채석작업','궤도설비보수·점검작업','열차 입환작업','화기작업','밀폐공간작업'];
+export const officeKinds=['품의서','경비청구','휴가신청서','사고발생보고서','기타'];
 
 export function text(value, name, max = 200) {
   if (typeof value !== 'string' || !value.trim() || value.trim().length > max) throw new Error(`${name}을 확인해 주세요.`);
@@ -37,7 +38,7 @@ export function recordInput(input) {
   const date = dateValue(input.date);
   let details = {};
   if(type==='office'){
-    const value=input.details;if(!value||typeof value!=='object'||Array.isArray(value)||!['품의서','경비청구','휴가신청서','사고발생보고서','기타'].includes(value.kind))throw new Error('업무 문서 구분을 확인해 주세요.');
+    const value=input.details;if(!value||typeof value!=='object'||Array.isArray(value)||!officeKinds.includes(value.kind))throw new Error('업무 문서 구분을 확인해 주세요.');
     const referenceId=value.referenceId??0,referenceDocId=value.referenceDocId??0;if(!Number.isSafeInteger(referenceId)||referenceId<0||(referenceId&&value.kind!=='경비청구'))throw new Error('연결할 품의서를 확인해 주세요.');if(!Number.isSafeInteger(referenceDocId)||referenceDocId<0||(referenceId&&referenceDocId))throw new Error('연결할 업무 문서를 확인해 주세요.');
     details.kind=value.kind;details.otherKind=value.kind==='기타'?text(value.otherKind,'기타 구분'):'';details.referenceId=referenceId;details.referenceDocId=referenceDocId;
     if(value.bodyRich!==undefined)details.bodyRich=normalizeRichText(value.bodyRich,documentRichLimits);

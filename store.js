@@ -1,6 +1,6 @@
 import { DatabaseSync } from 'node:sqlite';
 import { createHash, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
-import { dateValue, recordInput, text, transitions } from './domain.js';
+import { dateValue, officeKinds, recordInput, text, transitions } from './domain.js';
 import { PNG } from 'pngjs';
 import { scheduleTypes } from './public/schedule.js';
 import { verifyWorkerLocation } from './geo.js';
@@ -1338,6 +1338,15 @@ export class Store {
     const doc=this.document(id);if(!doc||!['draft','rejected'].includes(doc.status))throw new Error('수정 가능한 문서를 확인해 주세요.');
     const previous=this.db.prepare('SELECT d.id,d.title,d.date FROM documents d WHERE d.site_id=? AND d.type=? AND d.id<? AND EXISTS (SELECT 1 FROM approval_steps s WHERE s.document_id=d.id) ORDER BY d.id DESC LIMIT 1').get(doc.site_id,doc.type,doc.id);
     return previous?{document:previous,reviewers:this.approvalLine(previous.id)}:null;
+  }
+  officeApprovalDefault(siteId,kind,otherKind=''){
+    siteId=Number(siteId);if(!Number.isSafeInteger(siteId)||siteId<1||!officeKinds.includes(kind))throw new Error('현장과 업무 문서 구분을 확인해 주세요.');const other=kind==='기타'?text(otherKind,'기타 구분'):'';
+    this.db.exec('SAVEPOINT office_approval_default');try{if(!this.db.prepare('SELECT 1 FROM sites WHERE id=?').get(siteId))throw new Error('현장을 확인해 주세요.');const previous=this.db.prepare("SELECT d.id,d.title,d.date FROM documents d WHERE d.site_id=? AND d.type='office' AND json_extract(d.details,'$.kind')=? AND (?<>'기타' OR json_extract(d.details,'$.otherKind')=?) AND EXISTS(SELECT 1 FROM approval_steps s WHERE s.document_id=d.id) ORDER BY d.id DESC LIMIT 1").get(siteId,kind,kind,other),result=previous?{document:previous,reviewers:this.approvalLine(previous.id)}:null;this.db.exec('RELEASE office_approval_default');return result;}catch(error){this.db.exec('ROLLBACK TO office_approval_default');this.db.exec('RELEASE office_approval_default');throw error;}
+  }
+  createOfficeDraft(input,onAuthorize=()=>{}){
+    const setup=input?.officeSetup,valid=(ids,max,min=0)=>Array.isArray(ids)&&ids.length>=min&&ids.length<=max&&ids.every(id=>Number.isSafeInteger(id)&&id>0)&&new Set(ids).size===ids.length;
+    if(input?.type!=='office'||!setup||typeof setup!=='object'||Array.isArray(setup)||!valid(setup.reviewerIds,9,1)||!valid(setup.referenceIds,10))throw new Error('시험 결재자와 참조자를 확인해 주세요.');const signature=signatureBytes(setup.signature);
+    this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();const doc=this.createDocument(input),exists=this.db.prepare('SELECT 1 FROM reviewers WHERE id=? AND site_id=? AND active=1');if([...setup.reviewerIds,...setup.referenceIds].some(id=>!exists.get(id,doc.site_id)))throw new Error('같은 현장의 활성 결재자와 참조자를 선택해 주세요.');const line=this.db.prepare('INSERT INTO approval_steps(document_id,position,reviewer_id) VALUES(?,?,?)');setup.reviewerIds.forEach((id,index)=>line.run(doc.id,index+1,id));const ref=this.db.prepare('INSERT INTO office_reference_recipients(document_id,reviewer_id) VALUES(?,?)');for(const id of setup.referenceIds)ref.run(doc.id,id);this.db.prepare('INSERT INTO meeting_signatures(document_id,signature) VALUES(?,?)').run(doc.id,signature);this.db.exec('COMMIT');return doc;}catch(error){this.db.exec('ROLLBACK');throw error;}
   }
   setApprovalLine(id,ids,onAuthorize=()=>{}){
     if(!Array.isArray(ids)||ids.some(x=>!Number.isSafeInteger(x)||x<1)||new Set(ids).size!==ids.length)throw new Error('결재자를 확인해 주세요.');
