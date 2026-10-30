@@ -4,6 +4,7 @@ import { dirname, extname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Store } from './store.js';
 import { PersonalNotes } from './personal-notes.js';
+import { CommonWork } from './common-work.js';
 import { types } from './domain.js';
 import QRCode from 'qrcode';
 import { issueAccessQr,issueInvitationQr } from './qr-issue.js';
@@ -25,6 +26,7 @@ const auth=new LocalAuth(process.env.JWEB_ADMIN_PASSWORD);
 mkdirSync(dataDir, { recursive: true });
 const store = new Store(join(dataDir, 'jweb.sqlite'));
 const personalNotes = new PersonalNotes(store.db);
+const commonWork = new CommonWork(store.db);
 const workerSessions=new WorkerSessions(store.db);
 const reviewerSessions=new ReviewerSessions(store.db),reviewerAccountFailures=new Map();let reviewerFailures=[];
 let workerFailures=[];
@@ -33,7 +35,7 @@ const workerKey=raw=>typeof raw==='string' && /^[\w-]{43}$/.test(raw)?createHash
 function workerSessionError(raw,expected){const now=new Date(),session=workerSessions.get(workerKey(raw));if(session!==expected||!session||session.expires<=now.getTime())return {status:401,error:'근로자 로그인이 필요합니다.'};const date=new Date(now.getTime()-now.getTimezoneOffset()*60000).toISOString().slice(0,10);return store.workerAccessBlocked(session.worker.site_id,date)?{status:403,error:'해당 현장은 오늘 근로자 접속이 차단되었습니다.'}:null;}
 delete process.env.JWEB_ADMIN_PASSWORD;
 const mime = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg':'image/svg+xml', '.png':'image/png' };
-const assets = new Set(['/','/app.js','/schedule.js','/batch-print.js','/date-range.js','/daily-quantities.js','/risk-scale.js','/musculoskeletal.js','/worker-link.js','/worker-documents.js','/join-choices.js','/join-flow.js','/worker-fields.js','/site-qr.js','/tbm-sources.js','/training-groups.js','/site-statistics.js','/restaurant-price.js','/salary-summary.js','/attendance-meals.js','/joint-examples.js','/safety-log-sources.js','/style.css','/jweb-icon.svg','/jweb-icon-192.png','/jweb-icon-512.png','/join','/join.js','/login','/login.js','/review','/review.js']);
+const assets = new Set(['/','/app.js','/common-work-view.js','/schedule.js','/batch-print.js','/date-range.js','/daily-quantities.js','/risk-scale.js','/musculoskeletal.js','/worker-link.js','/worker-documents.js','/join-choices.js','/join-flow.js','/worker-fields.js','/site-qr.js','/tbm-sources.js','/training-groups.js','/site-statistics.js','/restaurant-price.js','/salary-summary.js','/attendance-meals.js','/joint-examples.js','/safety-log-sources.js','/style.css','/jweb-icon.svg','/jweb-icon-192.png','/jweb-icon-512.png','/join','/join.js','/login','/login.js','/review','/review.js']);
 const json = (res, code, value) => { res.writeHead(code, {'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}); res.end(JSON.stringify(value)); };
 function checkRequestSession(req){const failure=req.checkSession?.();if(failure)throw Object.assign(new Error(failure.error),{sessionStatus:failure.status});}
 async function body(req,max=65536) {
@@ -41,6 +43,21 @@ async function body(req,max=65536) {
   for await (const chunk of req) { size+=chunk.length;if(size>max)throw new Error('입력 내용이 너무 깁니다.');chunks.push(chunk); }
   checkRequestSession(req);
   try { const raw=new TextDecoder('utf-8',{fatal:true}).decode(Buffer.concat(chunks));const value = JSON.parse(raw); if (!value || typeof value !== 'object' || Array.isArray(value)) throw Error(); return value; } catch { throw new Error('입력 형식이 올바르지 않습니다.'); }
+}
+async function handleCommonWork(req,res,url,prefix,actor=null){
+  if(url.pathname!==prefix&&!url.pathname.startsWith(prefix+'/'))return false;
+  const site=input=>actor?actor.site_id:input?.siteId||url.searchParams.get('siteId'),authorize=()=>checkRequestSession(req),parts=url.pathname.slice(prefix.length).split('/').filter(Boolean);
+  if(!parts.length&&req.method==='GET'){json(res,200,commonWork.list(site(),Object.fromEntries(url.searchParams),actor));return true;}
+  if(!parts.length&&req.method==='POST'){const input=await body(req);json(res,201,commonWork.create(site(input),input,authorize,actor));return true;}
+  if(!/^\d+$/.test(parts[0]||'')){json(res,404,{error:'요청한 경로가 없습니다.'});return true;}const id=parts[0];
+  if(parts.length===1&&req.method==='PUT'){const input=await body(req);json(res,200,commonWork.update(site(input),id,input,authorize,actor));return true;}
+  if(parts.length===1&&req.method==='DELETE'){const input=await body(req);commonWork.remove(site(input),id,input.version,authorize,actor);json(res,200,{ok:true});return true;}
+  if(parts[1]==='comments'&&parts.length===2&&req.method==='POST'){const input=await body(req);json(res,201,commonWork.addComment(site(input),id,input,authorize,actor));return true;}
+  if(parts[1]==='comments'&&parts.length===3&&/^\d+$/.test(parts[2])&&['PUT','DELETE'].includes(req.method)){const input=await body(req);commonWork.changeComment(site(input),id,parts[2],input,req.method==='DELETE',authorize,actor);json(res,200,{ok:true});return true;}
+  if(parts[1]==='files'&&parts.length===2&&req.method==='POST'){const raw=url.searchParams.get('commentId');if(raw&&!/^\d+$/.test(raw))throw Error('의견을 확인해 주세요.');const chunks=[];let size=0;for await(const chunk of req){size+=chunk.length;if(size>2*1024*1024)throw Error('파일은 2MB 이하여야 합니다.');chunks.push(chunk);}checkRequestSession(req);let name;try{name=decodeURIComponent(req.headers['x-file-name']||'');}catch{throw Error('파일 이름을 확인해 주세요.');}json(res,201,commonWork.addFile(site(),id,raw?Number(raw):null,url.searchParams.get('version'),name,Buffer.concat(chunks),authorize,actor));return true;}
+  if(parts[1]==='files'&&parts.length===3&&/^\d+$/.test(parts[2])&&req.method==='GET'){const file=commonWork.file(site(),id,parts[2],actor);if(!file){json(res,404,{error:'첨부파일을 찾을 수 없습니다.'});return true;}const name=encodeURIComponent(file.name).replace(/[!'()*]/g,c=>`%${c.charCodeAt(0).toString(16).toUpperCase()}`);res.writeHead(200,{'Content-Type':'application/octet-stream','Content-Disposition':`attachment; filename="attachment"; filename*=UTF-8''${name}`,'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});res.end(file.data);return true;}
+  if(parts[1]==='files'&&parts.length===3&&/^\d+$/.test(parts[2])&&req.method==='DELETE'){const input=await body(req);commonWork.removeFile(site(input),id,parts[2],input.version,authorize,actor);json(res,200,{ok:true});return true;}
+  json(res,404,{error:'요청한 경로가 없습니다.'});return true;
 }
 const server = http.createServer(async (req, res) => {
   try {
@@ -73,6 +90,7 @@ const server = http.createServer(async (req, res) => {
       if(!reviewer){reviewerSessions.delete(key);return json(res,401,{error:'결재자 로그인이 필요합니다.'});}
       if(url.pathname==='/api/reviewer/logout'&&req.method==='POST'){reviewerSessions.delete(key);res.setHeader('Set-Cookie',`jweb_reviewer=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0${secureCookie}`);return json(res,200,{ok:true});}
       req.checkSession=()=>reviewerSessions.get(key)===session&&session.expires>Date.now()&&store.reviewer(session.id)?null:{status:401,error:'결재자 로그인이 필요합니다.'};
+      if(await handleCommonWork(req,res,url,'/api/reviewer/common-work',reviewer))return;
       if(url.pathname==='/api/reviewer/session'&&req.method==='GET')return json(res,200,{reviewer});
       if(url.pathname==='/api/reviewer/personal-supervisor'&&req.method==='GET')return json(res,200,personalNotes.supervisor(reviewer.site_id));
       if(url.pathname==='/api/reviewer/personal-notes'){
@@ -300,6 +318,7 @@ const server = http.createServer(async (req, res) => {
     }
     if(url.pathname.startsWith('/api/') && url.pathname!=='/api/join' && !auth.valid(token))return json(res,401,{error:'관리자 로그인이 필요합니다.'});
     if(url.pathname.startsWith('/api/')&&url.pathname!=='/api/join')req.checkSession=()=>auth.valid(token)?null:{status:401,error:'관리자 로그인이 필요합니다.'};
+    if(await handleCommonWork(req,res,url,'/api/common-work'))return;
     if (req.method === 'GET' && assets.has(url.pathname)) {
       const path = url.pathname === '/' ? '/index.html' : url.pathname === '/join' ? '/join.html' : url.pathname === '/login' ? '/login.html' : url.pathname === '/review' ? '/review.html' : url.pathname;
       res.writeHead(200, {'Content-Type':mime[extname(path)],'X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer','Content-Security-Policy':"default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; object-src 'none'; frame-ancestors 'none'"});

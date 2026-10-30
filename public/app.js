@@ -1,6 +1,7 @@
 import { riskScaleOptions, riskScore, copyRiskItem, copyRiskImprovement, groupRiskItems } from './risk-scale.js';
 import { selectBatchDocuments } from './batch-print.js';
 import { siteQrSession, printSiteQr } from './site-qr.js';
+import { mountCommonWork } from './common-work-view.js';
 import { selectTbmSources, mergeTbmSource } from './tbm-sources.js';
 import { trainingGroups, trainingRoster, filterEducationReport } from './training-groups.js';
 import { summarizeSiteAttendance } from './site-statistics.js';
@@ -35,6 +36,7 @@ labels['schedules']='일정 관리';
 labels['board']='게시판';
 labels['office-documents']='업무 문서';
 labels['personal-notes']='개인업무 일지';
+labels['common-work']='공통업무';
 document.querySelector('[data-page=stops]').insertAdjacentHTML('afterend','<button data-page="hazards">의견제안 및 위험신고</button>');
 document.querySelector('[data-page=attendance]').insertAdjacentHTML('afterend','<button data-page="restaurants">식대 기본설정</button>');
 document.querySelector('[data-page=restaurants]').insertAdjacentHTML('afterend','<button data-page="meal-checks">식대 체크</button>');
@@ -42,6 +44,7 @@ document.querySelector('[data-page=meal-checks]').insertAdjacentHTML('afterend',
 document.querySelector('[data-page=meal-checks]').insertAdjacentHTML('afterend','<button data-page="meal-statement">식대 명세서</button>');
 document.querySelector('[data-page=wages]').insertAdjacentHTML('afterend','<button data-page="site-articles">현장 자료실</button>');
 document.querySelector('[data-page=site-articles]').insertAdjacentHTML('afterend','<button data-page="personal-notes">개인업무 일지</button>');
+document.querySelector('[data-page=personal-notes]').insertAdjacentHTML('beforebegin','<button data-page="common-work">공통업무</button>');
 document.querySelector('[data-page=site-articles]').insertAdjacentHTML('beforebegin','<button data-page="site-photos">현장사진</button>');
 document.querySelector('[data-page=workers]').insertAdjacentHTML('afterend','<button data-page="site-occupations">자주 쓰는 직종</button>');
 document.querySelector('[data-page=workers]').insertAdjacentHTML('afterend','<button data-page="worker-access-blocks">출입자 접속 차단</button>');
@@ -829,6 +832,7 @@ async function render(){
     content.querySelectorAll('[data-edit-photo]').forEach(b=>b.onclick=()=>{const photo=photos.find(p=>p.id===Number(b.dataset.editPhoto));showDialog('사진 정보 수정',`${field('date','촬영일',photo.date,'date')}${field('description','설명',photo.description,'text',false)}`,d=>api(`/api/site-photos/${photo.id}?siteId=${siteId}`,{method:'PUT',body:JSON.stringify(d)}));});
     content.querySelectorAll('[data-delete-photo]').forEach(b=>b.onclick=async()=>{if(!confirm('가상 사진을 삭제할까요?'))return;try{await api(`/api/site-photos/${b.dataset.deletePhoto}?siteId=${siteId}`,{method:'DELETE'});await render();}catch(error){showError(error);}});return;
   }
+  if(state.page==='common-work'){const siteId=state.siteId;content.innerHTML='<section class="panel" id="common-work-panel"></section>';await mountCommonWork({target:$('#common-work-panel'),base:'/api/common-work',siteId,api,active:()=>state.page==='common-work'&&state.siteId===siteId});return;}
   if(state.page==='personal-notes'){
     const siteId=state.siteId,filters=state.personalFilters||{from:'',to:'',q:''},params=new URLSearchParams({siteId:String(siteId),...filters}),notes=await api(`/api/personal-notes?${params}`);if(state.page!=='personal-notes'||state.siteId!==siteId)return;
     content.innerHTML=`<section class="panel"><div class="panel-head"><h2>가상 개인업무 일지</h2><button type="button" id="personal-add">일지 작성</button></div><p class="muted">이 목록은 관리자 시험 기록입니다. 비공개 표시는 별도 계정 권한이 아닙니다. 시험 계정의 일지는 시험 결재자 화면에서 작성·확인합니다. 시험 확인 후에는 수정과 삭제가 불가능합니다.</p><div class="filters"><label>시작일 <input type="date" id="personal-from" value="${esc(filters.from)}"></label><label>종료일 <input type="date" id="personal-to" value="${esc(filters.to)}"></label><label>내용 검색 <input id="personal-query" maxlength="200" value="${esc(filters.q)}"></label><button type="button" id="personal-search">검색</button></div>${notes.length?notes.map(note=>`<article data-personal-note="${note.id}"><h3>${esc(note.date)} · ${note.checked?'시험 확인 완료':'시험 미확인'} ${note.private?'· 비공개 표시':''}</h3><p class="detail-body">${esc(note.content)}</p><p>가상 첨부파일</p>${note.files.map(file=>`<p><a href="/api/personal-notes/${note.id}/files/${file.id}?siteId=${siteId}">${esc(file.name)}</a> (${file.size}바이트) ${note.checked?'':`<button type="button" data-personal-file-delete="${file.id}">삭제</button>`}</p>`).join('')||'<p>첨부파일 없음</p>'}${note.checked?'':`<label>가상 파일 추가 <input type="file" data-personal-file></label><div class="action-row"><button type="button" data-personal-edit>수정</button><button type="button" data-personal-check>시험 확인</button><button type="button" data-personal-delete>삭제</button></div>`}</article>`).join(''):'<p>등록된 일지가 없습니다.</p>'}</section>`;
