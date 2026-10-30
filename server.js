@@ -599,7 +599,7 @@ const server = http.createServer(async (req, res) => {
       if(req.method==='GET')return json(res,200,store.safetyCosts(url.searchParams.get('siteId'),url.searchParams.get('month')));
       if(req.method==='POST')return json(res,201,store.createSafetyCost(await body(req)));
     }
-    if(url.pathname==='/api/safety-cost-reports'&&req.method==='POST')return json(res,201,store.createSafetyCostReport(await body(req)));
+    if(url.pathname==='/api/safety-cost-reports'&&req.method==='POST')return json(res,201,store.createSafetyCostReport(await body(req),()=>checkRequestSession(req)));
     const costPhotos=url.pathname.match(/^\/api\/safety-costs\/(\d+)\/photos(?:\/(\d+))?$/);
     if(costPhotos){
       const siteId=url.searchParams.get('siteId'),id=costPhotos[1],photoId=costPhotos[2];

@@ -555,16 +555,13 @@ export class Store {
     const id=this.db.prepare('INSERT INTO safety_costs(site_id,category,date,description,note,unit_price,quantity,unit,amount) VALUES(?,?,?,?,?,?,?,?,?)').run(siteId,category,date,description,input.note.trim(),price,quantity,unit,amount).lastInsertRowid;
     return this.db.prepare('SELECT * FROM safety_costs WHERE id=?').get(id);
   }
-  createSafetyCostReport(input){
-    const siteId=Number(input.siteId);if(!this.db.prepare('SELECT 1 FROM sites WHERE id=?').get(siteId))throw new Error('현장을 선택해 주세요.');
-    const month=input.month,report=this.safetyCosts(siteId,month);if(!report.rows.length)throw new Error('해당 월의 사용내역을 먼저 등록해 주세요.');
+  createSafetyCostReport(input,onAuthorize=()=>{}){
+    const siteId=Number(input.siteId),month=input.month;
     const periodFrom=dateValue(input.periodFrom),periodTo=dateValue(input.periodTo);if(periodFrom>periodTo)throw new Error('공사기간을 확인해 주세요.');
     const amounts={};for(const key of ['contractAmount','budget','progressAmount']){const value=input[key];if(typeof value!=='string'||!/^\d{1,20}$/.test(value))throw new Error('금액을 확인해 주세요.');amounts[key]=value;}
     const progress=input.progress;if(typeof progress!=='string'||!/^\d{1,3}(?:\.\d{1,2})?$/.test(progress)||Number(progress)>100)throw new Error('공정률을 확인해 주세요.');
-    const categoryTotals=Array.from({length:9},(_,index)=>report.rows.filter(row=>row.category===index+1).reduce((sum,row)=>sum+BigInt(row.amount),0n).toString());
-    const details={month,periodFrom,periodTo,...amounts,progress,categoryTotals,total:report.total,rows:report.rows};
     const date=dateValue(input.date);this.db.exec('BEGIN IMMEDIATE');
-    try{const id=this.db.prepare('INSERT INTO documents(site_id,type,title,date,body,details) VALUES(?,?,?,?,?,?)').run(siteId,'cost',`${month} 가상 월간 사용내역서`,date,'시험용 문서입니다.',JSON.stringify(details)).lastInsertRowid;
+    try{onAuthorize();if(!this.db.prepare('SELECT 1 FROM sites WHERE id=?').get(siteId))throw new Error('현장을 선택해 주세요.');const report=this.safetyCosts(siteId,month);if(!report.rows.length)throw new Error('해당 월의 사용내역을 먼저 등록해 주세요.');const categoryTotals=Array.from({length:9},(_,index)=>report.rows.filter(row=>row.category===index+1).reduce((sum,row)=>sum+BigInt(row.amount),0n).toString());const details={month,periodFrom,periodTo,...amounts,progress,categoryTotals,total:report.total,rows:report.rows};const id=this.db.prepare('INSERT INTO documents(site_id,type,title,date,body,details) VALUES(?,?,?,?,?,?)').run(siteId,'cost',`${month} 가상 월간 사용내역서`,date,'시험용 문서입니다.',JSON.stringify(details)).lastInsertRowid;
       const copy=this.db.prepare('INSERT INTO safety_cost_report_photos(document_id,cost_id,name,data) SELECT ?,cost_id,name,data FROM safety_cost_photos WHERE cost_id=?');for(const row of report.rows)copy.run(id,row.id);
       this.db.exec('COMMIT');return this.document(id);
     }catch(error){this.db.exec('ROLLBACK');throw error;}
