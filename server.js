@@ -230,7 +230,7 @@ const server = http.createServer(async (req, res) => {
       const key=workerKey(workerToken),session=workerSessions.get(key);
       if(!session||session.expires<=Date.now()){workerSessions.delete(key);return json(res,401,{error:'근로자 로그인이 필요합니다.'});}
       if(req.method==='GET')return json(res,200,store.workerInstructions(session.worker.id));
-      const input=await body(req);return json(res,201,store.respondInstruction(session.worker.id,input.documentId,input));
+      const input=await body(req);return json(res,201,store.respondInstruction(session.worker.id,input.documentId,input,()=>checkRequestSession(req)));
     }
     const workerInstructionAttachments=url.pathname.match(/^\/api\/worker\/instructions\/(\d+)\/attachments(?:\/(\d+))?$/);
     if(workerInstructionAttachments && req.method==='GET'){
@@ -273,7 +273,7 @@ const server = http.createServer(async (req, res) => {
       if(!session || session.expires<=Date.now()){workerSessions.delete(key);return json(res,401,{error:'근로자 로그인이 필요합니다.'});}
       const input=req.method==='POST'?await body(req):null,now=new Date(),date=new Date(now.getTime()-now.getTimezoneOffset()*60000).toISOString().slice(0,10);
       if(req.method==='GET')return json(res,200,{check:store.workerSelfCheck(session.worker.id,date)});
-      return json(res,200,{check:store.createWorkerSelfCheck(session.worker.id,date,input.answers,input.signature)});
+      return json(res,200,{check:store.createWorkerSelfCheck(session.worker.id,date,input.answers,input.signature,()=>checkRequestSession(req))});
     }
     if(url.pathname==='/api/worker/daily-training' && ['GET','POST'].includes(req.method)){
       const key=workerKey(workerToken),session=workerSessions.get(key);

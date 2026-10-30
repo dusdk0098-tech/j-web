@@ -923,12 +923,11 @@ export class Store {
     if(!this.db.prepare('UPDATE hazard_reports SET status=?,response=? WHERE site_id=? AND id=?').run(input.status,input.response.trim(),Number(siteId),Number(id)).changes)throw new Error('선택한 현장의 신고를 확인해 주세요.');
   }
   hazardReportPhoto(siteId,id){return this.db.prepare('SELECT photo FROM hazard_reports WHERE site_id=? AND id=? AND photo IS NOT NULL').get(Number(siteId),Number(id))?.photo||null;}
-  createWorkerSelfCheck(workerId,date,answers,signature) {
+  createWorkerSelfCheck(workerId,date,answers,signature,onAuthorize=()=>{}) {
     date=dateValue(date);
     if(!answers || typeof answers!=='object' || Array.isArray(answers) || !['equipment','sober','exercise','briefing'].every(key=>answers[key]===true))throw new Error('자가점검 네 항목을 모두 확인해 주세요.');
     const bytes=signatureBytes(signature);
-    this.db.prepare('INSERT OR IGNORE INTO worker_self_checks(worker_id,date,signature,answers) VALUES(?,?,?,?)').run(Number(workerId),date,bytes,JSON.stringify(Object.fromEntries(['equipment','sober','exercise','briefing'].map(key=>[key,answers[key]]))));
-    return this.workerSelfCheck(workerId,date);
+    this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();this.db.prepare('INSERT OR IGNORE INTO worker_self_checks(worker_id,date,signature,answers) VALUES(?,?,?,?)').run(Number(workerId),date,bytes,JSON.stringify(Object.fromEntries(['equipment','sober','exercise','briefing'].map(key=>[key,answers[key]]))));const result=this.workerSelfCheck(workerId,date);this.db.exec('COMMIT');return result;}catch(error){this.db.exec('ROLLBACK');throw error;}
   }
   workerPermissions(siteId,workerId){
     if(!this.db.prepare('SELECT 1 FROM workers WHERE id=? AND site_id=?').get(Number(workerId),Number(siteId)))throw new Error('선택한 현장의 출입자를 확인해 주세요.');
@@ -1386,10 +1385,8 @@ export class Store {
     if(!doc||!worker||doc.site_id!==worker.site_id||doc.type!=='instruction'||doc.status!=='approved'||JSON.parse(doc.details).recipientId!==Number(workerId))throw new Error('지정된 시험 지시서를 확인해 주세요.');
     return this.attachments(id);
   }
-  respondInstruction(workerId,id,input){
-    const worker=this.db.prepare('SELECT id,name,site_id FROM workers WHERE id=?').get(Number(workerId)),doc=this.document(id);
-    if(!worker||!doc||doc.site_id!==worker.site_id||doc.type!=='instruction'||doc.status!=='approved'||JSON.parse(doc.details).recipientId!==worker.id)throw new Error('지정된 시험 지시서를 확인해 주세요.');
-    return this.addInstructionResult(id,{date:input.date,actor:worker.name,content:input.content,signature:input.signature},'worker');
+  respondInstruction(workerId,id,input,onAuthorize=()=>{}){
+    this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();const worker=this.db.prepare('SELECT id,name,site_id FROM workers WHERE id=?').get(Number(workerId)),doc=this.document(id);if(!worker||!doc||doc.site_id!==worker.site_id||doc.type!=='instruction'||doc.status!=='approved'||JSON.parse(doc.details).recipientId!==worker.id)throw new Error('지정된 시험 지시서를 확인해 주세요.');const result=this.addInstructionResult(id,{date:input.date,actor:worker.name,content:input.content,signature:input.signature},'worker');this.db.exec('COMMIT');return result;}catch(error){this.db.exec('ROLLBACK');throw error;}
   }
   workerInstructionPhotos(workerId,id){
     const doc=this.document(id),worker=this.db.prepare('SELECT site_id FROM workers WHERE id=?').get(Number(workerId));
