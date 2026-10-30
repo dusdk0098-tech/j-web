@@ -4,6 +4,7 @@ import { siteQrSession } from './site-qr.js';
 import { selectTbmSources, mergeTbmSource } from './tbm-sources.js';
 import { trainingGroups, trainingRoster, filterEducationReport } from './training-groups.js';
 import { summarizeSiteAttendance } from './site-statistics.js';
+import { dateRangePreset } from './date-range.js';
 import { restaurantPrice } from './restaurant-price.js';
 import { salarySummary, salaryDay, groupWageRecords } from './salary-summary.js';
 import { attendanceMealChange } from './attendance-meals.js';
@@ -98,8 +99,8 @@ $('#site-qr').onclick=async event=>{
   } catch(e){showError(e);} finally {button.disabled=false;}
 };
 function options() {return Object.entries(state.types).filter(([id])=>state.page==='approval'||id!=='office').map(([id,name])=>`<option value="${id}" ${id===state.type?'selected':''}>${esc(name)}</option>`).join('');}
-function searchBar(withType=false){return `<div class="filters">${withType?`<label>문서 유형 <select id="type-filter"><option value="">전체 문서</option>${options()}</select></label><label>시작일 <input id="document-from" type="date" value="${esc(state.documentFrom)}"></label><label>종료일 <input id="document-to" type="date" value="${esc(state.documentTo)}"></label>`:''}<input id="query" placeholder="제목 또는 내용 검색" value="${esc(state.query)}"><button id="search" class="outline">검색</button></div>`;}
-function wireSearch(){$('#search').onclick=()=>{const from=$('#document-from')?.value||'',to=$('#document-to')?.value||'';if(from&&to&&from>to){flash('조회 기간을 확인해 주세요.',true);return;}state.type=$('#type-filter')?.value||'';state.documentFrom=from;state.documentTo=to;state.query=$('#query').value;render().catch(showError);};$('#query').onkeydown=e=>{if(e.key==='Enter')$('#search').click();};}
+function searchBar(withType=false){return `<div class="filters">${withType?`<label>문서 유형 <select id="type-filter"><option value="">전체 문서</option>${options()}</select></label><label>시작일 <input id="document-from" type="date" value="${esc(state.documentFrom)}"></label><label>종료일 <input id="document-to" type="date" value="${esc(state.documentTo)}"></label><button type="button" data-date-preset="yesterday">어제</button><button type="button" data-date-preset="today">오늘</button><button type="button" data-date-preset="month">이번 달</button>`:''}<input id="query" placeholder="제목 또는 내용 검색" value="${esc(state.query)}"><button id="search" class="outline">검색</button></div>`;}
+function wireSearch(){$('#search').onclick=()=>{const from=$('#document-from')?.value||'',to=$('#document-to')?.value||'';if(from&&to&&from>to){flash('조회 기간을 확인해 주세요.',true);return;}state.type=$('#type-filter')?.value||'';state.documentFrom=from;state.documentTo=to;state.query=$('#query').value;render().catch(showError);};content.querySelectorAll('[data-date-preset]').forEach(button=>button.onclick=()=>{const {from,to}=dateRangePreset(today(),button.dataset.datePreset);$('#document-from').value=from;$('#document-to').value=to;$('#search').click();});$('#query').onkeydown=e=>{if(e.key==='Enter')$('#search').click();};}
 async function editWorker(worker=null){
   try {
     const siteId=state.siteId,[companies,occupations]=await Promise.all([api(`/api/companies?siteId=${siteId}`),api(`/api/site-occupations?siteId=${siteId}`)]);
