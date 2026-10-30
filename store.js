@@ -1078,8 +1078,8 @@ export class Store {
     this.db.prepare('INSERT INTO invitations(token_hash,site_id,expires_at,pending) VALUES(?,?,?,?)').run(hash,Number(siteId),expiresAt,pending?1:0);
     return { token, expiresAt };
   }
-  revokeInvitations(siteId) {
-    this.db.exec('BEGIN IMMEDIATE');try{const count=this.db.prepare('SELECT COUNT(*) AS n FROM invitations WHERE site_id=? AND revoked=0 AND pending=0').get(Number(siteId)).n;this.db.prepare('UPDATE invitations SET revoked=1 WHERE site_id=? AND revoked=0').run(Number(siteId));this.db.prepare('DELETE FROM site_registration WHERE site_id=?').run(Number(siteId));this.db.exec('COMMIT');return count;}catch(error){this.db.exec('ROLLBACK');throw error;}
+  revokeInvitations(siteId,authorize=()=>{}) {
+    this.db.exec('BEGIN IMMEDIATE');try{authorize();const count=this.db.prepare('SELECT COUNT(*) AS n FROM invitations WHERE site_id=? AND revoked=0 AND pending=0').get(Number(siteId)).n;this.db.prepare('UPDATE invitations SET revoked=1 WHERE site_id=? AND revoked=0').run(Number(siteId));this.db.prepare('DELETE FROM site_registration WHERE site_id=?').run(Number(siteId));this.db.exec('COMMIT');return count;}catch(error){this.db.exec('ROLLBACK');throw error;}
   }
   activateInvitation(token,authorize){
     const hash=createHash('sha256').update(token).digest('hex');this.db.exec('BEGIN IMMEDIATE');try{authorize();const result=this.db.prepare('UPDATE invitations SET pending=0 WHERE token_hash=? AND pending=1 AND revoked=0 AND expires_at>?').run(hash,Date.now());this.db.exec('COMMIT');return result.changes===1;}catch(error){this.db.exec('ROLLBACK');throw error;}
@@ -1107,9 +1107,9 @@ export class Store {
     return this.db.prepare('SELECT s.id,s.name FROM site_access a JOIN sites s ON s.id=a.site_id WHERE a.access_key=?').get(key)||null;
   }
   siteAccessKey(siteId){return this.db.prepare('SELECT access_key FROM site_access WHERE site_id=?').get(Number(siteId))?.access_key||null;}
-  openSiteRegistration(siteId){
-    this.ensureSiteAccess(siteId);const expiresAt=Date.now()+30*24*60*60*1000;
-    this.db.prepare('INSERT INTO site_registration(site_id,expires_at) VALUES(?,?) ON CONFLICT(site_id) DO UPDATE SET expires_at=excluded.expires_at').run(Number(siteId),expiresAt);return expiresAt;
+  openSiteRegistration(siteId,authorize=()=>{}){
+    this.db.exec('BEGIN IMMEDIATE');try{authorize();this.ensureSiteAccess(siteId);const expiresAt=Date.now()+30*24*60*60*1000;
+    this.db.prepare('INSERT INTO site_registration(site_id,expires_at) VALUES(?,?) ON CONFLICT(site_id) DO UPDATE SET expires_at=excluded.expires_at').run(Number(siteId),expiresAt);this.db.exec('COMMIT');return expiresAt;}catch(error){this.db.exec('ROLLBACK');throw error;}
   }
   siteRegistrationExpiry(siteId){return this.db.prepare('SELECT expires_at FROM site_registration WHERE site_id=? AND expires_at>?').get(Number(siteId),Date.now())?.expires_at||null;}
   siteRegistrationOpen(siteId){return this.siteRegistrationExpiry(siteId)!==null;}
