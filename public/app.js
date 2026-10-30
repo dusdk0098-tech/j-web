@@ -3,6 +3,7 @@ import { selectBatchDocuments } from './batch-print.js';
 import { siteQrSession } from './site-qr.js';
 import { selectTbmSources, mergeTbmSource } from './tbm-sources.js';
 import { trainingGroups, trainingRoster, filterEducationReport } from './training-groups.js';
+import { summarizeSiteAttendance } from './site-statistics.js';
 import { restaurantPrice } from './restaurant-price.js';
 import { salarySummary, salaryDay, groupWageRecords } from './salary-summary.js';
 import { attendanceMealChange } from './attendance-meals.js';
@@ -630,9 +631,10 @@ async function renderDailyTrainingStatistics(siteId,from,to,month,day){
 async function renderAllSiteStatistics(siteId,from,to,month,day){
   const anchor=content.querySelector('#education-report'),rows=await api(`/api/attendance/sites-report?${new URLSearchParams({from,to})}`);
   if(!anchor?.isConnected||state.page!=='statistics'||state.siteId!==siteId||(state.statisticsMonth||today().slice(0,7))!==month||state.statisticsDay!==day)return;
-  const totals=new Map();for(const row of rows)for(const item of row.categories)totals.set(item.label,(totals.get(item.label)||0)+item.days);
+  const {sites,totals}=summarizeSiteAttendance(rows);
   const describe=categories=>categories.map(item=>`${esc(item.label)} ${item.days}`).join(' · ')||'없음',section=document.createElement('section');section.className='panel';
-  section.innerHTML=`<h2>전체 현장 가상 출역</h2><p class="muted">${esc(from)} ~ ${esc(to)}의 기록 당시 구분별 출역 인일입니다.</p><div class="table-wrap"><table><thead><tr><th>현장</th><th>구분별 인일</th><th>합계</th></tr></thead><tbody>${rows.map(row=>`<tr><td>${esc(row.name)}</td><td>${describe(row.categories)}</td><td>${row.categories.reduce((sum,item)=>sum+item.days,0)}</td></tr>`).join('')}<tr><th>전체 합계</th><td>${describe([...totals].map(([label,days])=>({label,days})))}</td><td>${[...totals.values()].reduce((sum,n)=>sum+n,0)}</td></tr></tbody></table></div>`;anchor.before(section);
+  section.innerHTML=`<h2>전체 현장 가상 출역</h2><p class="muted">${esc(from)} ~ ${esc(to)}의 기록 당시 구분별 출역 인일입니다. 직영·외주는 같은 이름으로 기록된 항목이며 다른 구분은 별도로 표시합니다.</p><div class="table-wrap"><table><thead><tr><th>현장</th><th>교육 통계</th><th>직영</th><th>외주</th><th>그 외 구분</th><th>합계</th></tr></thead><tbody>${sites.map(row=>`<tr><td>${esc(row.name)}</td><td><button type="button" data-site-education="${row.id}">상세보기</button></td><td>${row.direct}</td><td>${row.external}</td><td>${describe(row.other)}</td><td>${row.total}</td></tr>`).join('')}<tr><th>전체 합계</th><td></td><td>${totals.direct}</td><td>${totals.external}</td><td>${describe(totals.other)}</td><td>${totals.total}</td></tr></tbody></table></div>`;anchor.before(section);
+  section.querySelectorAll('[data-site-education]').forEach(button=>button.onclick=async()=>{const target=Number(button.dataset.siteEducation);state.siteId=target;state.statisticsDay='';state.detail=null;state.workerFilters={};state.wageFilters={};try{await render();if(state.page==='statistics'&&state.siteId===target)content.querySelector('#education-report')?.scrollIntoView({block:'start'});}catch(error){showError(error);}});
 }
 async function render(){
   await loadSites(); $('#heading').textContent=labels[state.page];$('#crumb').textContent=labels[state.page];
