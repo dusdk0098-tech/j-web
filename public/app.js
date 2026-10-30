@@ -63,7 +63,7 @@ const esc = (v) => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&
 const today = () => new Date(Date.now() - new Date().getTimezoneOffset()*60000).toISOString().slice(0,10);
 async function api(path, options={}) {
   const res=await fetch(path,{...options,headers:{'Content-Type':'application/json',...(options.headers||{})}});
-  const data=await res.json(); if(res.status===401){location.assign('/login');throw new Error('관리자 로그인이 필요합니다.');} if(!res.ok) throw new Error(data.error || '요청에 실패했습니다.'); return data;
+  const data=await res.json(); if(res.status===401){if(dialog.open)throw new Error('로그인이 만료되었습니다. 다른 탭에서 다시 로그인한 뒤 저장해 주세요.');location.assign('/login');throw new Error('관리자 로그인이 필요합니다.');} if(!res.ok) throw new Error(data.error || '요청에 실패했습니다.'); return data;
 }
 function flash(message, error=false) { notice.textContent=message; notice.className=error?'error':''; }
 function field(name,label,value='',type='text',required=true) { return `<label>${esc(label)}<input name="${esc(name)}" type="${type}" value="${esc(value)}" ${required?'required':''}></label>`; }
@@ -75,7 +75,7 @@ function signaturePad(canvas,clear){
 function showDialog(title, html, onSubmit) {
   $('#dialog-title').textContent=title; $('#dialog-body').innerHTML=html; $('#dialog-error').textContent='';
   $('#dialog-form button[type=submit]').textContent='저장';
-  $('#dialog-form').onsubmit=async (e)=>{e.preventDefault(); try {await onSubmit(Object.fromEntries(new FormData(e.currentTarget))); dialog.close(); flash('저장했습니다.'); await render();} catch(err) {$('#dialog-error').textContent=err.message;} };
+  $('#dialog-form').onsubmit=async (e)=>{e.preventDefault(); const submit=$('#dialog-form button[type=submit]'); if(submit.disabled)return; submit.disabled=true; try {await onSubmit(Object.fromEntries(new FormData(e.currentTarget))); dialog.close(); flash('저장했습니다.'); await render();} catch(err) {$('#dialog-error').textContent=err.message;} finally {submit.disabled=false;} };
   dialog.showModal();
 }
 $('#dialog-close').onclick=$('#dialog-cancel').onclick=()=>dialog.close();

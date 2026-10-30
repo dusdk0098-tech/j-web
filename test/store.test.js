@@ -1870,3 +1870,12 @@ test('출입자 수정은 현장 경계를 지키고 과거 출역의 소속·�
     assert.equal(s.attendanceReport(a.id,'2026-10-27','2026-10-27','category')[0].label,'기록 없음');
   } finally {s.close();}
 });
+
+test('가입 신청은 가입 화면의 구분만 허용한다',()=>{
+  const s=new Store(':memory:');try{
+    const site=s.createSite({name:'가상 현장'}),invite=s.createInvitation(site.id),input={name:'가상 근로자',company:'가상 업체',occupation:'목공',loginId:'join_category',password:'virtual-password-123',acknowledged:true,profile:{birthDate:'1990-01-02',phone:'010-0000-0000'}};
+    assert.throws(()=>s.join(invite.token,{...input,category:'현장관리자'}),/구분을 확인해 주세요/);
+    assert.equal(s.workers(site.id,'',{}).length,0);
+    assert.equal(s.join(invite.token,{...input,category:'협력업체 관리자'}).category,'협력업체 관리자');
+  }finally{s.close();}
+});
