@@ -1096,11 +1096,16 @@ export class Store {
     if(!timingSafeEqual(hash,account.password_hash))return null;
     const worker=this.db.prepare('SELECT workers.id,workers.name,workers.site_id,sites.name AS site_name FROM workers JOIN sites ON sites.id=workers.site_id WHERE workers.id=?').get(account.worker_id);return withCredential&&worker?{worker,credentialHash:Buffer.from(account.password_hash)}:worker;
   }
-  documents(siteId, type = '', query = '', from = '', to = '') {
+  documents(siteId, type = '', query = '', from = '', to = '', riskKind = '', riskContractorId = '') {
     if(from)from=dateValue(from);if(to)to=dateValue(to);
     if(from && to && from>to)throw new Error('조회 시작일은 종료일보다 늦을 수 없습니다.');
     siteId=Number(siteId);if(!this.db.prepare('SELECT 1 FROM sites WHERE id=?').get(siteId))throw new Error('현장을 선택해 주세요.');
-    return this.db.prepare("SELECT documents.*,EXISTS(SELECT 1 FROM approval_steps WHERE document_id=documents.id) AS has_approval_line,COALESCE((SELECT source_document_id FROM work_plan_copies WHERE document_id=documents.id),(SELECT source_document_id FROM office_document_copies WHERE document_id=documents.id)) AS copied_from FROM documents WHERE (site_id=? OR (type='basic' AND status='approved' AND json_extract(details,'$.shared')=1)) AND (?='' OR type=?) AND (title LIKE ? OR body LIKE ? OR details LIKE ?) AND (?='' OR date>=?) AND (?='' OR date<=?) ORDER BY date DESC,id DESC").all(siteId,type,type,...Array(3).fill(`%${query}%`),from,from,to,to);
+    if((riskKind||riskContractorId)&&type!=='risk')throw new Error('위험성평가 검색 조건을 확인해 주세요.');
+    if(riskKind&&!['initial','regular','occasional','continuous'].includes(riskKind))throw new Error('평가 종류를 확인해 주세요.');
+    if(riskContractorId&&(!/^[1-9]\d*$/.test(String(riskContractorId))||!Number.isSafeInteger(Number(riskContractorId))||!this.db.prepare('SELECT 1 FROM companies WHERE id=? AND site_id=?').get(Number(riskContractorId),siteId)))throw new Error('같은 현장의 협력사를 선택해 주세요.');
+    const rows=this.db.prepare("SELECT documents.*,EXISTS(SELECT 1 FROM approval_steps WHERE document_id=documents.id) AS has_approval_line,COALESCE((SELECT source_document_id FROM work_plan_copies WHERE document_id=documents.id),(SELECT source_document_id FROM office_document_copies WHERE document_id=documents.id)) AS copied_from FROM documents WHERE (site_id=? OR (type='basic' AND status='approved' AND json_extract(details,'$.shared')=1)) AND (?='' OR type=?) AND (title LIKE ? OR body LIKE ? OR details LIKE ?) AND (?='' OR date>=?) AND (?='' OR date<=?) ORDER BY date DESC,id DESC").all(siteId,type,type,...Array(3).fill(`%${query}%`),from,from,to,to);
+    if(!riskKind&&!riskContractorId)return rows;
+    return rows.filter(doc=>{const details=JSON.parse(doc.details);if(riskKind&&details.kind!==riskKind)return false;if(!riskContractorId)return true;return [details,...(Array.isArray(details.items)?details.items:[]),...(Array.isArray(details.musculoskeletalItems)?details.musculoskeletalItems:[])].some(item=>item&&item.contractorId===Number(riskContractorId));});
   }
   previousDailyReport(siteId, before) {
     before=dateValue(before);

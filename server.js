@@ -589,7 +589,7 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === '/api/attendance/sites-report' && req.method === 'GET') return json(res,200,store.attendanceSitesReport(url.searchParams.get('from'),url.searchParams.get('to')));
     if (url.pathname === '/api/attendance/delegated-events' && req.method === 'GET') return json(res,200,store.delegatedAttendanceEvents(url.searchParams.get('siteId'),url.searchParams.get('date')));
     if (url.pathname === '/api/documents') {
-      if (req.method === 'GET') return json(res,200,store.documents(url.searchParams.get('siteId'),url.searchParams.get('type') || '',url.searchParams.get('q') || '',url.searchParams.get('from') || '',url.searchParams.get('to') || ''));
+      if (req.method === 'GET') return json(res,200,store.documents(url.searchParams.get('siteId'),url.searchParams.get('type') || '',url.searchParams.get('q') || '',url.searchParams.get('from') || '',url.searchParams.get('to') || '',url.searchParams.get('riskKind') || '',url.searchParams.get('riskContractorId') || ''));
       if (req.method === 'POST') return json(res,201,store.createDocument(await body(req)));
     }
     const copyWorkPlan=url.pathname.match(/^\/api\/documents\/(\d+)\/copy-work-plan$/);
