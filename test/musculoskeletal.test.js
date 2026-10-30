@@ -21,7 +21,7 @@ test('근골격계 시험 항목은 별도로 검증하고 현장과 결재 당�
 
 test('근로자 시험 권한도 근골격계 항목을 보존한다',()=>{
   const s=new Store(':memory:');try{
-    const site=s.createSite({name:'가상 현장'}),invite=s.createInvitation(site.id),worker=s.join(invite.token,{name:'가상 근로자',category:'직영',company:'가상 업체',occupation:'가상 직종',loginId:'muscle_worker',password:'virtual-password-123',acknowledged:true});
+    const site=s.createSite({name:'가상 현장'}),invite=s.createInvitation(site.id),worker=s.join(invite.token,{name:'가상 근로자',category:'직영',company:'가상 업체',occupation:'가상 직종',loginId:'muscle_worker',password:'virtual-password-123',acknowledged:true,profile:{birthDate:'2000-01-01',phone:'010-0000-0000'}});
     s.setWorkerPermissions(site.id,worker.id,['risk']);const input={type:'risk',title:'가상 평가',date:'2026-10-29',details:{scale:'5x4',items:[],musculoskeletalItems:[{task:'시험 작업',hazard:'가상 부담',likelihood:'5',severity:'4',selected:true}]}};
     const doc=s.createWorkerDocument(site.id,worker.id,input);assert.equal(JSON.parse(doc.details).musculoskeletalItems[0].score,20);
     assert.throws(()=>s.updateWorkerDocument(site.id,worker.id,doc.id,{...input,details:{scale:'5x4',items:[]}}),/근골격계/);

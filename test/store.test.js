@@ -89,7 +89,7 @@ test('가상 노임 직종별 합계는 현장과 월, 기록 당시 직종으�
 
 test('가상 노임 생년월일은 등록 당시 가입 정보만 보존하고 비고를 수정한다',()=>{
   const s=new Store(':memory:');try{
-    const site=s.createSite({name:'가상 현장'}),other=s.createSite({name:'다른 현장'}),invite=s.createInvitation(site.id),worker=s.join(invite.token,{name:'가상 근로자',category:'직영',company:'가상 업체',occupation:'목공',loginId:'wage_virtual',password:'virtual-password-123',acknowledged:true,profile:{birthDate:'1990-01-02'}}),deductions={income:'0',local:'0',health:'0',care:'0',pension:'0',employment:'0'},input={siteId:site.id,workerId:worker.id,month:'2024-02',gross:'1000',deductions,remark:'가상 비고'};
+    const site=s.createSite({name:'가상 현장'}),other=s.createSite({name:'다른 현장'}),invite=s.createInvitation(site.id),worker=s.join(invite.token,{name:'가상 근로자',category:'직영',company:'가상 업체',occupation:'목공',loginId:'wage_virtual',password:'virtual-password-123',acknowledged:true,profile:{birthDate:'1990-01-02',phone:'010-0000-0000'}}),deductions={income:'0',local:'0',health:'0',care:'0',pension:'0',employment:'0'},input={siteId:site.id,workerId:worker.id,month:'2024-02',gross:'1000',deductions,remark:'가상 비고'};
     s.saveWageRecord(input);let row=s.wageRecords(site.id,'2024-02')[0];assert.equal(row.birth_date_snapshot,'1990-01-02');assert.equal(row.remark,'가상 비고');
     s.db.prepare('UPDATE join_acknowledgements SET profile=? WHERE worker_id=?').run(JSON.stringify({birthDate:'2000-02-03'}),worker.id);
     s.saveWageRecord({...input,gross:'1100',remark:'수정 비고'},true);row=s.wageRecords(site.id,'2024-02')[0];assert.equal(row.birth_date_snapshot,'1990-01-02');assert.equal(row.remark,'수정 비고');
@@ -930,10 +930,10 @@ test('현장과 출입자를 분리하고 문서 결재 이력을 보존한다',
     assert.throws(()=>s.join(invite.token,input),/확인/);
     assert.throws(()=>s.join(invite.token,{...input,acknowledged:'true'}),/확인/);
     assert.equal(s.workers(a.id).length,1);
-    const joined=s.join(invite.token,{...input,acknowledged:true});assert.equal(s.joinAcknowledgement(a.id,joined.id).profile,null);
+    const joined=s.join(invite.token,{...input,acknowledged:true,profile:{birthDate:'2000-01-01',phone:'010-0000-0000'}});assert.equal(s.joinAcknowledgement(a.id,joined.id).profile.birthDate,'2000-01-01');
     assert.equal(s.authenticateWorker(invite.token,'worker1','virtual-password-123').name,'가상 근로자');
     assert.equal(s.authenticateWorker(invite.token,'worker1','wrong-password'),null);
-    assert.throws(()=>s.join(invite.token,{...input,acknowledged:true}),/아이디/);
+    assert.throws(()=>s.join(invite.token,{...input,acknowledged:true,profile:{birthDate:'2000-01-01',phone:'010-0000-0000'}}),/아이디/);
     assert.equal(s.workers(a.id).length,2);
     assert.equal(s.db.prepare('SELECT notice_version FROM join_acknowledgements').get().notice_version,'demo-v1');
     assert.throws(()=>s.join('invalid',{name:'x'}),/만료/);
@@ -958,7 +958,7 @@ test('계획서 안전대책은 선택 장비를 검증하고 이전 작성과 �
 
 test('문서 작성 시험 권한은 현장과 작성자를 제한하며 취소 후 권한을 재검사한다',()=>{
   const s=new Store(':memory:');try{
-    const a=s.createSite({name:'가상 A'}),b=s.createSite({name:'가상 B'}),invite=s.createInvitation(a.id),make=id=>s.join(invite.token,{name:id,category:'직영',company:'가상 업체',occupation:'가상 직종',loginId:id,password:'virtual-password-123',acknowledged:true}),one=make('author_one'),two=make('author_two'),company=s.createCompany({siteId:a.id,name:'가상 업체',trade:'가상 공종'}),other=s.createCompany({siteId:b.id,name:'다른 업체',trade:'가상 공종'}),input={siteId:b.id,type:'risk',title:'가상 평가',date:'2026-10-29',details:{items:[{task:'가상 작업',contractorId:company.id}]}};
+    const a=s.createSite({name:'가상 A'}),b=s.createSite({name:'가상 B'}),invite=s.createInvitation(a.id),make=id=>s.join(invite.token,{name:id,category:'직영',company:'가상 업체',occupation:'가상 직종',loginId:id,password:'virtual-password-123',acknowledged:true,profile:{birthDate:'2000-01-01',phone:'010-0000-0000'}}),one=make('author_one'),two=make('author_two'),company=s.createCompany({siteId:a.id,name:'가상 업체',trade:'가상 공종'}),other=s.createCompany({siteId:b.id,name:'다른 업체',trade:'가상 공종'}),input={siteId:b.id,type:'risk',title:'가상 평가',date:'2026-10-29',details:{items:[{task:'가상 작업',contractorId:company.id}]}};
     assert.throws(()=>s.createWorkerDocument(a.id,one.id,input),/권한/);s.setWorkerPermissions(a.id,one.id,['risk','work_plan']);s.setWorkerPermissions(a.id,two.id,['risk']);assert.deepEqual(s.workerDocumentOptions(a.id,one.id,'risk').companies.map(c=>c.id),[company.id]);assert.throws(()=>s.createWorkerDocument(a.id,one.id,{...input,details:{items:[{contractorId:other.id}]}}),/현장/);
     const doc=s.createWorkerDocument(a.id,one.id,input);assert.equal(doc.site_id,a.id);assert.equal(JSON.parse(doc.details).items[0].contractor,'가상 업체');assert.deepEqual(s.workerDocuments(a.id,two.id),[]);assert.throws(()=>s.workerDocument(a.id,two.id,doc.id),/본인/);assert.throws(()=>s.updateWorkerDocument(a.id,two.id,doc.id,input),/본인/);assert.throws(()=>s.workerDocument(b.id,one.id,doc.id),/현장/);
     const riskOrder={...input,details:{items:[{task:'둘째 작업'},{task:'첫 작업'}]}};s.updateWorkerDocument(a.id,one.id,doc.id,riskOrder);assert.deepEqual(JSON.parse(s.workerDocument(a.id,one.id,doc.id).details).items.map(item=>item.task),['둘째 작업','첫 작업']);
@@ -972,7 +972,7 @@ test('문서 작성 시험 권한은 현장과 작성자를 제한하며 취소 
 test('출역 관리 시험 권한은 현장과 계정에 한정되고 변경 이력을 원자적으로 남긴다',()=>{
   const dir=mkdtempSync(join(tmpdir(),'jweb-delegated-')),file=join(dir,'data.sqlite');let s=new Store(file);
   try{
-    const a=s.createSite({name:'가상 A'}),b=s.createSite({name:'가상 B'}),invite=s.createInvitation(a.id),actor=s.join(invite.token,{name:'가상 담당',category:'직영',company:'가상 업체',occupation:'가상 직종',loginId:'delegated_worker',password:'virtual-password-123',acknowledged:true}),make=siteId=>s.createWorker({siteId,name:'가상 대상',category:'직영',company:'가상 업체',occupation:'가상 직종'}),target=make(a.id),foreign=make(b.id),date='2026-10-29';
+    const a=s.createSite({name:'가상 A'}),b=s.createSite({name:'가상 B'}),invite=s.createInvitation(a.id),actor=s.join(invite.token,{name:'가상 담당',category:'직영',company:'가상 업체',occupation:'가상 직종',loginId:'delegated_worker',password:'virtual-password-123',acknowledged:true,profile:{birthDate:'2000-01-01',phone:'010-0000-0000'}}),make=siteId=>s.createWorker({siteId,name:'가상 대상',category:'직영',company:'가상 업체',occupation:'가상 직종'}),target=make(a.id),foreign=make(b.id),date='2026-10-29';
     assert.deepEqual(s.workerPermissions(a.id,actor.id),[]);assert.throws(()=>s.delegatedAttendance(a.id,actor.id,date),/권한/);assert.throws(()=>s.setWorkerPermissions(a.id,target.id,['attendance']),/계정/);assert.throws(()=>s.setWorkerPermissions(b.id,actor.id,['attendance']),/현장/);assert.throws(()=>s.setWorkerPermissions(a.id,actor.id,['unknown']),/권한/);
     s.setWorkerPermissions(a.id,actor.id,['attendance']);assert.throws(()=>s.setDelegatedAttendance(a.id,actor.id,{workerId:foreign.id,date,present:true}),/현장/);s.setDelegatedAttendance(a.id,actor.id,{workerId:target.id,date:` ${date} `,present:true});assert.equal(s.attendance(a.id,date).find(row=>row.id===target.id).source,'delegated');assert.equal(s.delegatedAttendance(a.id,actor.id,date).find(row=>row.id===target.id).present,1);assert.equal('daily_rate' in s.delegatedAttendance(a.id,actor.id,date)[0],false);
     s.db.exec("CREATE TRIGGER fail_delegated_event BEFORE INSERT ON delegated_attendance_events BEGIN SELECT RAISE(ABORT,'기록 시험 오류'); END");assert.throws(()=>s.setDelegatedAttendance(a.id,actor.id,{workerId:target.id,date,present:false}),/기록 시험 오류/);assert.equal(s.attendance(a.id,date).find(row=>row.id===target.id).present,1);s.db.exec('DROP TRIGGER fail_delegated_event');s.close();s=new Store(file);
@@ -1003,7 +1003,7 @@ test('근로자 재접속은 날짜별 출역을 추가하고 수동 변경을 �
 
 test('시험 암호 재설정은 현장과 계정을 검증하고 새 해시와 솔트를 저장한다',()=>{
   const s=new Store(':memory:');try{
-    const site=s.createSite({name:'가상 현장'}),other=s.createSite({name:'다른 현장'}),invite=s.createInvitation(site.id),worker=s.join(invite.token,{name:'가상 근로자',category:'직영',company:'가상 업체',occupation:'목공',loginId:'virtual_worker',password:'virtual-password-123',acknowledged:true}),read=()=>s.db.prepare('SELECT salt,password_hash FROM worker_accounts WHERE worker_id=?').get(worker.id),before=read();
+    const site=s.createSite({name:'가상 현장'}),other=s.createSite({name:'다른 현장'}),invite=s.createInvitation(site.id),worker=s.join(invite.token,{name:'가상 근로자',category:'직영',company:'가상 업체',occupation:'목공',loginId:'virtual_worker',password:'virtual-password-123',acknowledged:true,profile:{birthDate:'2000-01-01',phone:'010-0000-0000'}}),read=()=>s.db.prepare('SELECT salt,password_hash FROM worker_accounts WHERE worker_id=?').get(worker.id),before=read();
     assert.throws(()=>s.resetWorkerPassword(other.id,worker.id,'replacement-password-123'),/현장/);assert.throws(()=>s.resetWorkerPassword(site.id,worker.id,'short'),/암호/);assert.deepEqual(Buffer.from(read().password_hash),Buffer.from(before.password_hash));
     s.resetWorkerPassword(site.id,worker.id,'replacement-password-123');const after=read();assert.notDeepEqual(Buffer.from(after.salt),Buffer.from(before.salt));assert.notDeepEqual(Buffer.from(after.password_hash),Buffer.from(before.password_hash));assert.equal(s.authenticateWorker(invite.token,'virtual_worker','virtual-password-123'),null);assert.equal(s.authenticateWorker(invite.token,'virtual_worker','replacement-password-123').id,worker.id);
   }finally{s.close();}
@@ -1011,7 +1011,7 @@ test('시험 암호 재설정은 현장과 계정을 검증하고 새 해시와 
 
 test('가입 확인 후 초대 중지·만료 또는 현장 주소 교체가 완료되면 가입을 저장하지 않는다',()=>{
   const dir=mkdtempSync(join(tmpdir(),'jweb-join-race-')),file=join(dir,'jweb.sqlite'),s=new Store(file),other=new Store(file);try{
-    const input={name:'가상 근로자',category:'직영',company:'가상 업체',occupation:'가상 직종',loginId:'race_worker',password:'virtual-password-123',acknowledged:true};
+    const input={name:'가상 근로자',category:'직영',company:'가상 업체',occupation:'가상 직종',loginId:'race_worker',password:'virtual-password-123',acknowledged:true,profile:{birthDate:'2000-01-01',phone:'010-0000-0000'}};
     for(const mode of ['revoked','expired','closed','rotated']){
       const site=s.createSite({name:`가상 현장 ${mode}`}),invite=s.createInvitation(site.id),siteKey=s.siteAccessKey(site.id);s.openSiteRegistration(site.id);
       if(mode==='revoked'||mode==='expired'){const original=s.invitation.bind(s);let first=true;s.invitation=token=>{const result=original(token);if(first){first=false;if(mode==='revoked')other.revokeInvitations(site.id);else other.db.prepare('UPDATE invitations SET expires_at=0 WHERE site_id=?').run(site.id);}return result;};assert.throws(()=>s.join(invite.token,input),/만료/);s.invitation=original;}
@@ -1024,7 +1024,7 @@ test('가입 확인 후 초대 중지·만료 또는 현장 주소 교체가 완
 
 test('현장 QR 가입은 현장별로 열고 만료 또는 중지 시 차단된다',()=>{
   const s=new Store(':memory:');try{
-    const a=s.createSite({name:'가상 현장 A'}),b=s.createSite({name:'가상 현장 B'}),key=s.ensureSiteAccess(a.id),otherKey=s.ensureSiteAccess(b.id),input={name:'가상 근로자',category:'직영',company:'가상 업체',occupation:'기타',loginId:'demo_worker',password:'virtual-password-123',acknowledged:true};
+    const a=s.createSite({name:'가상 현장 A'}),b=s.createSite({name:'가상 현장 B'}),key=s.ensureSiteAccess(a.id),otherKey=s.ensureSiteAccess(b.id),input={name:'가상 근로자',category:'직영',company:'가상 업체',occupation:'기타',loginId:'demo_worker',password:'virtual-password-123',acknowledged:true,profile:{birthDate:'2000-01-01',phone:'010-0000-0000'}};
     assert.throws(()=>s.join(null,{...input,siteKey:key}),/중지|만료/);
     assert.ok(s.openSiteRegistration(a.id)>Date.now());assert.equal(s.siteRegistrationOpen(b.id),false);
     assert.throws(()=>s.join(null,{...input,siteKey:otherKey}),/중지|만료/);
@@ -1043,7 +1043,7 @@ test('저장한 현장과 가입 정보가 서버 재시작 후 유지되고 만
     const site=s.createSite({name:'지속성 시험 현장'});
     const invite=s.createInvitation(site.id);
     const access=s.siteAccessKey(site.id);assert.equal(s.ensureSiteAccess(site.id),access);
-    s.join(invite.token,{name:'가상 근로자',category:'직영',company:'가상 회사',occupation:'기타',loginId:'worker1',password:'virtual-password-123',acknowledged:true});
+    s.join(invite.token,{name:'가상 근로자',category:'직영',company:'가상 회사',occupation:'기타',loginId:'worker1',password:'virtual-password-123',acknowledged:true,profile:{birthDate:'2000-01-01',phone:'010-0000-0000'}});
     s.close();
     s=new Store(path);
     try {

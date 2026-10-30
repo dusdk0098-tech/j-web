@@ -14,7 +14,7 @@ test('현장 가입 API와 관리자 수정은 구분별 선택 항목을 검증
     await Promise.race([once(child.stdout,'data'),once(child,'exit').then(()=>{throw Error('시험 서버가 종료됐습니다.');})]);
     const base=`http://127.0.0.1:${port}`,call=(path,method='GET',data,cookie)=>fetch(base+path,{method,headers:{...(data?{'content-type':'application/json'}:{}),...(cookie?{cookie}:{})},...(data?{body:JSON.stringify(data)}:{})});
     const admin=(await call('/api/login','POST',{password:'test-password-12345'})).headers.get('set-cookie').split(';')[0],site=await (await call('/api/sites','POST',{name:'가상 현장'},admin)).json(),invite=await (await call(`/api/sites/${site.id}/invitation`,'POST',{},admin)).json(),token=new URL(invite.link).searchParams.get('token');
-    const input={token,name:'가상 출입자',category:'직영',company:'',occupation:'가상 직종',loginId:'direct_virtual',password:'virtual-password-123',acknowledged:true};
+    const input={token,name:'가상 출입자',category:'직영',company:'',occupation:'가상 직종',loginId:'direct_virtual',password:'virtual-password-123',acknowledged:true,profile:{birthDate:'2000-01-01',phone:'010-0000-0000'}};
     assert.equal((await call('/api/join','POST',input)).status,201);assert.equal((await call('/api/join','POST',{...input,category:'협력업체 근로자',loginId:'missing_virtual'})).status,400);
     assert.equal((await call('/api/join','POST',{...input,category:'근로를 제공하지 않는 사람',occupation:'',loginId:'visitor_virtual'})).status,201);
     assert.equal((await call('/api/worker/login','POST',{token,loginId:'visitor_virtual',password:input.password})).status,200);

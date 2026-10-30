@@ -66,7 +66,7 @@ test('개선 후 시험 위험성은 척도에 맞게 검증하고 서버에서 
 
 test('근로자 위험성평가도 개선 후 항목을 보존하고 이전 화면의 저장을 거부한다',()=>{
   const store=new Store(':memory:');try{
-    const site=store.createSite({name:'가상 현장'}),invite=store.createInvitation(site.id),worker=store.join(invite.token,{name:'가상 근로자',category:'직영',company:'가상 업체',occupation:'가상 직종',loginId:'risk_writer',password:'virtual-password-123',acknowledged:true});store.setWorkerPermissions(site.id,worker.id,['risk']);
+    const site=store.createSite({name:'가상 현장'}),invite=store.createInvitation(site.id),worker=store.join(invite.token,{name:'가상 근로자',category:'직영',company:'가상 업체',occupation:'가상 직종',loginId:'risk_writer',password:'virtual-password-123',acknowledged:true,profile:{birthDate:'2000-01-01',phone:'010-0000-0000'}});store.setWorkerPermissions(site.id,worker.id,['risk']);
     const row={task:'가상 작업',improvedGrade:'',improvedLikelihood:'5',improvedSeverity:'4'},input={type:'risk',title:'가상 평가',date:'2041-01-01',details:{scale:'5x4',items:[row]}},doc=store.createWorkerDocument(site.id,worker.id,input);assert.equal(JSON.parse(doc.details).items[0].improvedScore,20);
     assert.throws(()=>store.updateWorkerDocument(site.id,worker.id,doc.id,{...input,details:{scale:'5x4',items:[{task:'이전 화면'}]}}),/새로고침/);assert.equal(JSON.parse(store.workerDocument(site.id,worker.id,doc.id).details).items[0].improvedScore,20);
     store.updateWorkerDocument(site.id,worker.id,doc.id,{...input,details:{scale:'5x4',items:[{...row,improvedLikelihood:'',improvedSeverity:''}]}});assert.equal(Object.hasOwn(JSON.parse(store.workerDocument(site.id,worker.id,doc.id).details).items[0],'improvedScore'),false);
