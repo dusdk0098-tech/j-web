@@ -1470,23 +1470,29 @@ export class Store {
     this.db.exec('SAVEPOINT copy_work_plan');try{const copy=this.createDocument({siteId:source.site_id,type:'work_plan',title:input.title,date:input.date,body:source.body,details:JSON.parse(source.details)});this.db.prepare('INSERT INTO work_plan_copies(document_id,source_document_id) VALUES(?,?)').run(copy.id,source.id);this.db.exec('RELEASE copy_work_plan');return this.document(copy.id);}catch(error){this.db.exec('ROLLBACK TO copy_work_plan');this.db.exec('RELEASE copy_work_plan');throw error;}
   }
   permitChecks(documentId){const doc=this.document(documentId);if(!doc||doc.type!=='permit')throw new Error('시험 작업허가서를 확인해 주세요.');return this.db.prepare('SELECT * FROM permit_checks WHERE document_id=? ORDER BY date DESC,id DESC').all(Number(documentId)).map(row=>({...row,items:JSON.parse(row.items)}));}
-  savePermitCheck(documentId,input,id=null){
-    this.permitChecks(documentId);const date=dateValue(input.date);if(!Array.isArray(input.items)||input.items.length<1||input.items.length>20)throw new Error('점검 항목은 1개부터 20개까지 입력해 주세요.');
+  savePermitCheck(documentId,input,id=null,onAuthorize=()=>{}){
+    const date=dateValue(input.date);if(!Array.isArray(input.items)||input.items.length<1||input.items.length>20)throw new Error('점검 항목은 1개부터 20개까지 입력해 주세요.');
     const items=input.items.map(item=>{if(!item||typeof item!=='object'||Array.isArray(item)||!['pass','fail'].includes(item.result)||typeof item.action!=='string'||item.action.length>1000)throw new Error('점검 결과를 확인해 주세요.');const name=text(item.name,'점검 항목',500),action=item.action.trim();if(item.result==='pass'&&action)throw new Error('적정 항목의 조치 내용을 비워 주세요.');return {name,result:item.result,action};});
-    if(id!==null){if(!this.db.prepare('UPDATE permit_checks SET date=?,items=? WHERE id=? AND document_id=?').run(date,JSON.stringify(items),Number(id),Number(documentId)).changes)throw new Error('시험 점검을 찾을 수 없습니다.');return Number(id);}
-    return this.db.prepare('INSERT INTO permit_checks(document_id,date,items) VALUES(?,?,?)').run(Number(documentId),date,JSON.stringify(items)).lastInsertRowid;
+    this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();this.permitChecks(documentId);let result;
+      if(id!==null){if(!this.db.prepare('UPDATE permit_checks SET date=?,items=? WHERE id=? AND document_id=?').run(date,JSON.stringify(items),Number(id),Number(documentId)).changes)throw new Error('시험 점검을 찾을 수 없습니다.');result=Number(id);}
+      else result=this.db.prepare('INSERT INTO permit_checks(document_id,date,items) VALUES(?,?,?)').run(Number(documentId),date,JSON.stringify(items)).lastInsertRowid;
+      this.db.exec('COMMIT');return result;
+    }catch(error){this.db.exec('ROLLBACK');throw error;}
   }
-  deletePermitCheck(documentId,id){this.permitChecks(documentId);if(!this.db.prepare('DELETE FROM permit_checks WHERE id=? AND document_id=?').run(Number(id),Number(documentId)).changes)throw new Error('시험 점검을 찾을 수 없습니다.');}
+  deletePermitCheck(documentId,id,onAuthorize=()=>{}){this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();this.permitChecks(documentId);if(!this.db.prepare('DELETE FROM permit_checks WHERE id=? AND document_id=?').run(Number(id),Number(documentId)).changes)throw new Error('시험 점검을 찾을 수 없습니다.');this.db.exec('COMMIT');}catch(error){this.db.exec('ROLLBACK');throw error;}}
   permitExtensions(documentId){const doc=this.document(documentId);if(!doc||doc.type!=='permit')throw new Error('시험 작업허가서를 확인해 주세요.');return this.db.prepare('SELECT id,date_from,date_to,time_from,time_to,created_at FROM permit_extensions WHERE document_id=? ORDER BY date_from DESC,id DESC').all(Number(documentId));}
   permitExtensionSignature(documentId,id){this.permitExtensions(documentId);return this.db.prepare('SELECT signature FROM permit_extensions WHERE id=? AND document_id=?').get(Number(id),Number(documentId))?.signature||null;}
-  savePermitExtension(documentId,input,id=null){
-    this.permitExtensions(documentId);const from=dateValue(input.dateFrom),to=dateValue(input.dateTo),timeFrom=input.timeFrom??'',timeTo=input.timeTo??'',valid=time=>typeof time==='string'&&/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(time);
+  savePermitExtension(documentId,input,id=null,onAuthorize=()=>{}){
+    const from=dateValue(input.dateFrom),to=dateValue(input.dateTo),timeFrom=input.timeFrom??'',timeTo=input.timeTo??'',valid=time=>typeof time==='string'&&/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(time);
     if(from>to||typeof timeFrom!=='string'||typeof timeTo!=='string'||(timeFrom||timeTo)&&(!valid(timeFrom)||!valid(timeTo)||from===to&&timeFrom>timeTo))throw new Error('연장 기간과 시간을 확인해 주세요.');
     const signature=signatureBytes(input.signature);
-    if(id!==null){if(!this.db.prepare('UPDATE permit_extensions SET date_from=?,date_to=?,time_from=?,time_to=?,signature=? WHERE id=? AND document_id=?').run(from,to,timeFrom,timeTo,signature,Number(id),Number(documentId)).changes)throw new Error('시험 연장 기록을 찾을 수 없습니다.');return Number(id);}
-    return this.db.prepare('INSERT INTO permit_extensions(document_id,date_from,date_to,time_from,time_to,signature) VALUES(?,?,?,?,?,?)').run(Number(documentId),from,to,timeFrom,timeTo,signature).lastInsertRowid;
+    this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();this.permitExtensions(documentId);let result;
+      if(id!==null){if(!this.db.prepare('UPDATE permit_extensions SET date_from=?,date_to=?,time_from=?,time_to=?,signature=? WHERE id=? AND document_id=?').run(from,to,timeFrom,timeTo,signature,Number(id),Number(documentId)).changes)throw new Error('시험 연장 기록을 찾을 수 없습니다.');result=Number(id);}
+      else result=this.db.prepare('INSERT INTO permit_extensions(document_id,date_from,date_to,time_from,time_to,signature) VALUES(?,?,?,?,?,?)').run(Number(documentId),from,to,timeFrom,timeTo,signature).lastInsertRowid;
+      this.db.exec('COMMIT');return result;
+    }catch(error){this.db.exec('ROLLBACK');throw error;}
   }
-  deletePermitExtension(documentId,id){this.permitExtensions(documentId);if(!this.db.prepare('DELETE FROM permit_extensions WHERE id=? AND document_id=?').run(Number(id),Number(documentId)).changes)throw new Error('시험 연장 기록을 찾을 수 없습니다.');}
+  deletePermitExtension(documentId,id,onAuthorize=()=>{}){this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();this.permitExtensions(documentId);if(!this.db.prepare('DELETE FROM permit_extensions WHERE id=? AND document_id=?').run(Number(id),Number(documentId)).changes)throw new Error('시험 연장 기록을 찾을 수 없습니다.');this.db.exec('COMMIT');}catch(error){this.db.exec('ROLLBACK');throw error;}}
   riskActivities(documentId){const doc=this.document(documentId);if(!doc||doc.type!=='risk')throw new Error('위험성평가를 확인해 주세요.');return this.db.prepare('SELECT a.*,EXISTS(SELECT 1 FROM risk_activity_signatures s WHERE s.activity_id=a.id) AS has_signature FROM risk_activities a WHERE a.document_id=? ORDER BY a.date DESC,a.id DESC').all(Number(documentId));}
   riskActivitySignature(documentId,id){return this.db.prepare('SELECT s.signature,s.created_at FROM risk_activity_signatures s JOIN risk_activities a ON a.id=s.activity_id JOIN documents d ON d.id=a.document_id WHERE d.id=? AND d.type=\'risk\' AND a.id=?').get(Number(documentId),Number(id))||null;}
   saveRiskActivitySignature(documentId,id,signature){const activity=this.db.prepare("SELECT a.* FROM risk_activities a JOIN documents d ON d.id=a.document_id WHERE d.id=? AND d.type='risk' AND a.id=? AND a.kind='weekly' AND a.entry_mode='manual'").get(Number(documentId),Number(id));if(!activity||!activity.period_from||!activity.period_to||!activity.place||!activity.host||!activity.content||!JSON.parse(activity.worker_snapshot).length)throw new Error('직접 작성한 주간 점검의 필수 내용을 확인해 주세요.');const bytes=signatureBytes(signature);this.db.prepare('INSERT INTO risk_activity_signatures(activity_id,signature) VALUES(?,?) ON CONFLICT(activity_id) DO UPDATE SET signature=excluded.signature,created_at=CURRENT_TIMESTAMP').run(activity.id,bytes);}
