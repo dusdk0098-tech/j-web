@@ -234,6 +234,13 @@ const server = http.createServer(async (req, res) => {
       const key=workerKey(workerToken),session=workerSessions.get(key);if(!session||session.expires<=Date.now()){workerSessions.delete(key);return json(res,401,{error:'근로자 로그인이 필요합니다.'});}
       return json(res,200,store.workerPpeIssues(session.worker.site_id,session.worker.id));
     }
+    const workerPpeReceipt=url.pathname.match(/^\/api\/worker\/ppe-issues\/(\d+)\/receipt$/);
+    if(workerPpeReceipt){
+      const key=workerKey(workerToken),session=workerSessions.get(key);if(!session||session.expires<=Date.now()){workerSessions.delete(key);return json(res,401,{error:'근로자 로그인이 필요합니다.'});}
+      const id=workerPpeReceipt[1],siteId=session.worker.site_id,workerId=session.worker.id;
+      if(req.method==='POST'){const input=await body(req);store.confirmPpeReceipt(siteId,workerId,id,input.version,input.signature,()=>checkRequestSession(req));return json(res,200,{ok:true});}
+      if(req.method==='GET'){const signature=store.ppeReceipt(siteId,workerId,id);checkRequestSession(req);if(!signature)return json(res,404,{error:'시험 수령 서명을 찾을 수 없습니다.'});res.writeHead(200,{'Content-Type':'application/octet-stream','Content-Disposition':'attachment; filename="test-ppe-receipt.png"','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(signature);}
+    }
     const workerArticleFile=url.pathname.match(/^\/api\/worker\/articles\/(\d+)\/files\/(\d+)$/);
     if(workerArticleFile&&req.method==='GET'){
       const key=workerKey(workerToken),session=workerSessions.get(key);if(!session||session.expires<=Date.now()){workerSessions.delete(key);return json(res,401,{error:'근로자 로그인이 필요합니다.'});}
@@ -646,9 +653,11 @@ const server = http.createServer(async (req, res) => {
       if(req.method==='GET')return json(res,200,store.ppeIssues(url.searchParams.get('siteId'),url.searchParams.get('month')));
       if(req.method==='POST')return json(res,201,{id:store.addPpeIssue(await body(req))});
     }
+    const ppeReceipt=url.pathname.match(/^\/api\/ppe-issues\/(\d+)\/receipt$/);
+    if(ppeReceipt&&req.method==='GET'){const signature=store.ppeReceipt(url.searchParams.get('siteId'),null,ppeReceipt[1]);checkRequestSession(req);if(!signature)return json(res,404,{error:'시험 수령 서명을 찾을 수 없습니다.'});res.writeHead(200,{'Content-Type':'application/octet-stream','Content-Disposition':'attachment; filename="test-ppe-receipt.png"','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(signature);}
     const ppeIssue=url.pathname.match(/^\/api\/ppe-issues\/(\d+)$/);
-    if(ppeIssue&&req.method==='PUT'){store.updatePpeIssue(ppeIssue[1],await body(req));return json(res,200,{ok:true});}
-    if(ppeIssue&&req.method==='DELETE'){store.deletePpeIssue(url.searchParams.get('siteId'),ppeIssue[1]);return json(res,200,{ok:true});}
+    if(ppeIssue&&req.method==='PUT'){store.updatePpeIssue(ppeIssue[1],await body(req),()=>checkRequestSession(req));return json(res,200,{ok:true});}
+    if(ppeIssue&&req.method==='DELETE'){store.deletePpeIssue(url.searchParams.get('siteId'),ppeIssue[1],url.searchParams.has('expectedVersion')?url.searchParams.get('expectedVersion'):undefined,()=>checkRequestSession(req));return json(res,200,{ok:true});}
     if (url.pathname === '/api/workers') {
       if (req.method === 'GET') return json(res,200,store.workers(url.searchParams.get('siteId'),url.searchParams.get('q') || '',Object.fromEntries(url.searchParams)));
       if (req.method === 'POST') return json(res,201,store.createWorker(await body(req)));

@@ -76,6 +76,7 @@ export class Store {
       CREATE TABLE IF NOT EXISTS manager_meal_defaults (site_id INTEGER NOT NULL REFERENCES sites(id),kind TEXT NOT NULL,restaurant_id INTEGER NOT NULL REFERENCES restaurants(id),PRIMARY KEY(site_id,kind));
       CREATE TABLE IF NOT EXISTS meal_checks (id INTEGER PRIMARY KEY,site_id INTEGER NOT NULL REFERENCES sites(id),worker_id INTEGER NOT NULL REFERENCES workers(id),date TEXT NOT NULL,kind TEXT NOT NULL,restaurant_id INTEGER NOT NULL REFERENCES restaurants(id),restaurant_name TEXT NOT NULL,price INTEGER NOT NULL,UNIQUE(worker_id,date,kind));
       CREATE TABLE IF NOT EXISTS ppe_issues (id INTEGER PRIMARY KEY,site_id INTEGER NOT NULL REFERENCES sites(id),worker_id INTEGER NOT NULL REFERENCES workers(id),date TEXT NOT NULL,item TEXT NOT NULL,quantity INTEGER NOT NULL CHECK(quantity>0),worker_snapshot TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS ppe_receipts (issue_id INTEGER PRIMARY KEY REFERENCES ppe_issues(id) ON DELETE CASCADE,signature BLOB NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
       CREATE TABLE IF NOT EXISTS wage_records (site_id INTEGER NOT NULL REFERENCES sites(id),worker_id INTEGER NOT NULL REFERENCES workers(id),month TEXT NOT NULL,gross INTEGER NOT NULL,deductions TEXT NOT NULL,PRIMARY KEY(worker_id,month));
       CREATE TABLE IF NOT EXISTS safety_costs (id INTEGER PRIMARY KEY,site_id INTEGER NOT NULL REFERENCES sites(id),category INTEGER NOT NULL,date TEXT NOT NULL,description TEXT NOT NULL,note TEXT NOT NULL,unit_price TEXT NOT NULL,quantity TEXT NOT NULL,unit TEXT NOT NULL,amount TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS safety_cost_photos (id INTEGER PRIMARY KEY,cost_id INTEGER NOT NULL REFERENCES safety_costs(id),name TEXT NOT NULL,data BLOB NOT NULL);
@@ -168,6 +169,8 @@ export class Store {
       this.db.exec('COMMIT');
     }catch(error){this.db.exec('ROLLBACK');throw error;}
     if (!this.db.prepare('PRAGMA table_info(meal_checks)').all().some(c=>c.name==='tax_snapshot')) this.db.exec('ALTER TABLE meal_checks ADD COLUMN tax_snapshot INTEGER CHECK(tax_snapshot IS NULL OR tax_snapshot BETWEEN 0 AND 999999999)');
+    if (!this.db.prepare('PRAGMA table_info(ppe_issues)').all().some(c=>c.name==='version')) this.db.exec("ALTER TABLE ppe_issues ADD COLUMN version TEXT NOT NULL DEFAULT ''");
+    this.db.exec("UPDATE ppe_issues SET version=lower(hex(randomblob(16))) WHERE version=''");
     if (!this.db.prepare('PRAGMA table_info(documents)').all().some(c=>c.name==='approval_cycle_id')) this.db.exec('ALTER TABLE documents ADD COLUMN approval_cycle_id INTEGER');
     if (!this.db.prepare('PRAGMA table_info(workers)').all().some(c=>c.name==='created_date')) this.db.exec('ALTER TABLE workers ADD COLUMN created_date TEXT');
     if (!this.db.prepare('PRAGMA table_info(events)').all().some(c=>c.name==='opinion')) this.db.exec("ALTER TABLE events ADD COLUMN opinion TEXT NOT NULL DEFAULT ''");
@@ -391,12 +394,27 @@ export class Store {
   }
   ppeIssues(siteId,month){
     month=monthValue(month);siteId=Number(siteId);if(!this.db.prepare('SELECT 1 FROM sites WHERE id=?').get(siteId))throw new Error('현장을 선택해 주세요.');
-    const rows=this.db.prepare('SELECT id,date,item,quantity,worker_id,worker_snapshot FROM ppe_issues WHERE site_id=? AND date BETWEEN ? AND ? ORDER BY date DESC,id DESC').all(siteId,`${month}-01`,`${month}-31`).map(({worker_snapshot,...row})=>({...row,worker:JSON.parse(worker_snapshot)}));
+    const rows=this.db.prepare('SELECT p.id,p.date,p.item,p.quantity,p.worker_id,p.worker_snapshot,p.version,r.created_at AS receipt_at FROM ppe_issues p LEFT JOIN ppe_receipts r ON r.issue_id=p.id WHERE p.site_id=? AND p.date BETWEEN ? AND ? ORDER BY p.date DESC,p.id DESC').all(siteId,`${month}-01`,`${month}-31`).map(({worker_snapshot,...row})=>({...row,worker:JSON.parse(worker_snapshot)}));
     const totals=this.db.prepare('SELECT item,SUM(quantity) AS quantity FROM ppe_issues WHERE site_id=? AND date BETWEEN ? AND ? GROUP BY item ORDER BY item').all(siteId,`${month}-01`,`${month}-31`);return {rows,totals};
   }
   workerPpeIssues(siteId,workerId){
     siteId=Number(siteId);workerId=Number(workerId);if(!this.db.prepare('SELECT 1 FROM workers WHERE id=? AND site_id=?').get(workerId,siteId))throw new Error('선택한 현장의 출입자를 확인해 주세요.');
-    return this.db.prepare('SELECT id,date,item,quantity FROM ppe_issues WHERE site_id=? AND worker_id=? ORDER BY date DESC,id DESC').all(siteId,workerId);
+    return this.db.prepare('SELECT p.id,p.date,p.item,p.quantity,p.version,r.created_at AS receipt_at FROM ppe_issues p LEFT JOIN ppe_receipts r ON r.issue_id=p.id WHERE p.site_id=? AND p.worker_id=? ORDER BY p.date DESC,p.id DESC').all(siteId,workerId);
+  }
+  ppeReceipt(siteId,workerId,id){
+    return this.db.prepare('SELECT r.signature FROM ppe_receipts r JOIN ppe_issues p ON p.id=r.issue_id WHERE p.site_id=? AND p.id=? AND (? IS NULL OR p.worker_id=?)').get(Number(siteId),Number(id),workerId===null?null:Number(workerId),workerId===null?null:Number(workerId))?.signature||null;
+  }
+  confirmPpeReceipt(siteId,workerId,id,version,signature,onAuthorize=()=>{}){
+    if(typeof version!=='string'||!/^[0-9a-f]{32}$/.test(version))throw new Error('지급 내역을 다시 확인해 주세요.');
+    const bytes=signatureBytes(signature);
+    this.db.exec('BEGIN IMMEDIATE');try{
+      onAuthorize();
+      const issue=this.db.prepare('SELECT p.version,r.issue_id AS receipt FROM ppe_issues p LEFT JOIN ppe_receipts r ON r.issue_id=p.id WHERE p.site_id=? AND p.worker_id=? AND p.id=?').get(Number(siteId),Number(workerId),Number(id));
+      if(!issue||issue.version!==version||issue.receipt)throw new Error('지급 내역이 변경되었거나 이미 확인되었습니다. 다시 조회해 주세요.');
+      this.db.prepare('INSERT INTO ppe_receipts(issue_id,signature) VALUES(?,?)').run(Number(id),bytes);
+      this.db.prepare('UPDATE ppe_issues SET version=lower(hex(randomblob(16))) WHERE id=?').run(Number(id));
+      this.db.exec('COMMIT');
+    }catch(error){this.db.exec('ROLLBACK');throw error;}
   }
   workerFiles(siteId,workerId){
     siteId=Number(siteId);workerId=Number(workerId);if(!this.db.prepare('SELECT 1 FROM workers WHERE id=? AND site_id=?').get(workerId,siteId))throw new Error('선택한 현장의 출입자를 확인해 주세요.');
@@ -414,19 +432,33 @@ export class Store {
   addPpeIssue(input){
     const siteId=Number(input.siteId),workerId=Number(input.workerId),{date,item,quantity}=ppeValues(input);
     const worker=this.db.prepare('SELECT name,category,company,occupation FROM workers WHERE id=? AND site_id=?').get(workerId,siteId);if(!worker)throw new Error('선택한 현장의 출입자를 확인해 주세요.');
-    return this.db.prepare('INSERT INTO ppe_issues(site_id,worker_id,date,item,quantity,worker_snapshot) VALUES(?,?,?,?,?,?)').run(siteId,workerId,date,item,quantity,JSON.stringify(worker)).lastInsertRowid;
+    return this.db.prepare('INSERT INTO ppe_issues(site_id,worker_id,date,item,quantity,worker_snapshot,version) VALUES(?,?,?,?,?,?,lower(hex(randomblob(16))))').run(siteId,workerId,date,item,quantity,JSON.stringify(worker)).lastInsertRowid;
   }
   addPpeIssues(input,onAuthorize=()=>{}){
     if(!input||!Array.isArray(input.items)||!input.items.length||input.items.length>20)throw new Error('보호구를 1개부터 20개까지 선택해 주세요.');
     const items=input.items.map(item=>ppeValues({...input,item}));if(new Set(items.map(item=>item.item)).size!==items.length)throw new Error('중복된 보호구가 있습니다.');
     this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();const ids=items.map(item=>this.addPpeIssue({...input,...item}));this.db.exec('COMMIT');return ids;}catch(error){this.db.exec('ROLLBACK');throw error;}
   }
-  updatePpeIssue(id,input){
+  updatePpeIssue(id,input,onAuthorize=()=>{}){
     const {date,item,quantity}=ppeValues(input);
-    if(!this.db.prepare('UPDATE ppe_issues SET date=?,item=?,quantity=? WHERE id=? AND site_id=?').run(date,item,quantity,Number(id),Number(input.siteId)).changes)throw new Error('선택한 현장의 지급 기록을 확인해 주세요.');
+    this.db.exec('BEGIN IMMEDIATE');try{
+      onAuthorize();
+      const current=this.db.prepare('SELECT p.date,p.item,p.quantity,p.version,r.issue_id AS receipt FROM ppe_issues p LEFT JOIN ppe_receipts r ON r.issue_id=p.id WHERE p.id=? AND p.site_id=?').get(Number(id),Number(input.siteId));
+      if(!current)throw new Error('선택한 현장의 지급 기록을 확인해 주세요.');
+      if((input.expectedVersion!==undefined&&input.expectedVersion!==current.version)||(current.receipt&&input.expectedVersion!==current.version))throw new Error('지급 기록이 변경되었습니다. 다시 조회해 주세요.');
+      if(current.date!==date||current.item!==item||current.quantity!==quantity){this.db.prepare('DELETE FROM ppe_receipts WHERE issue_id=?').run(Number(id));this.db.prepare('UPDATE ppe_issues SET date=?,item=?,quantity=?,version=lower(hex(randomblob(16))) WHERE id=?').run(date,item,quantity,Number(id));}
+      this.db.exec('COMMIT');
+    }catch(error){this.db.exec('ROLLBACK');throw error;}
   }
-  deletePpeIssue(siteId,id){
-    if(!this.db.prepare('DELETE FROM ppe_issues WHERE id=? AND site_id=?').run(Number(id),Number(siteId)).changes)throw new Error('선택한 현장의 지급 기록을 확인해 주세요.');
+  deletePpeIssue(siteId,id,expectedVersion,onAuthorize=()=>{}){
+    this.db.exec('BEGIN IMMEDIATE');try{
+      onAuthorize();
+      const current=this.db.prepare('SELECT p.version,r.issue_id AS receipt FROM ppe_issues p LEFT JOIN ppe_receipts r ON r.issue_id=p.id WHERE p.id=? AND p.site_id=?').get(Number(id),Number(siteId));
+      if(!current)throw new Error('선택한 현장의 지급 기록을 확인해 주세요.');
+      if((expectedVersion!==undefined&&expectedVersion!==current.version)||(current.receipt&&expectedVersion!==current.version))throw new Error('지급 기록이 변경되었습니다. 다시 조회해 주세요.');
+      this.db.prepare('DELETE FROM ppe_issues WHERE id=?').run(Number(id));
+      this.db.exec('COMMIT');
+    }catch(error){this.db.exec('ROLLBACK');throw error;}
   }
   addSiteOccupation(siteId,name){
     siteId=Number(siteId);if(!this.db.prepare('SELECT 1 FROM sites WHERE id=?').get(siteId))throw new Error('현장을 선택해 주세요.');
@@ -1280,7 +1312,7 @@ export class Store {
   }
   weeklyActivity(siteId,start){
     start=dateValue(start);siteId=Number(siteId);if(!this.db.prepare('SELECT 1 FROM sites WHERE id=?').get(siteId))throw new Error('현장을 선택해 주세요.');
-    const day=new Date(`${start}T00:00:00Z`),dates=Array.from({length:7},(_,i)=>{const value=new Date(day.getTime()+i*86400000).toISOString().slice(0,10);return dateValue(value);}),end=dates[6],rows=dates.map(date=>({date,attendance:0,attendanceCategories:[],attendanceOccupations:[],documents:{},noticeReads:0,trainingChecks:0,trainingByType:{tbm:0,education:0},workerChecks:0,managerChecks:0,managerDaysOff:0,hazardReports:0,ppeIssues:[],checklists:[]})),byDate=new Map(rows.map(row=>[row.date,row]));
+    const day=new Date(`${start}T00:00:00Z`),dates=Array.from({length:7},(_,i)=>{const value=new Date(day.getTime()+i*86400000).toISOString().slice(0,10);return dateValue(value);}),end=dates[6],rows=dates.map(date=>({date,attendance:0,attendanceCategories:[],attendanceOccupations:[],documents:{},noticeReads:0,trainingChecks:0,trainingByType:{tbm:0,education:0},workerChecks:0,managerChecks:0,managerDaysOff:0,hazardReports:0,ppeIssues:[],ppeReceipts:{confirmed:0,total:0},checklists:[]})),byDate=new Map(rows.map(row=>[row.date,row]));
     for(const row of this.db.prepare('SELECT a.date,COUNT(*) AS n FROM attendance a JOIN workers w ON w.id=a.worker_id WHERE w.site_id=? AND a.present=1 AND a.date BETWEEN ? AND ? GROUP BY a.date').all(siteId,start,end))byDate.get(row.date).attendance=row.n;
     for(const row of this.db.prepare("SELECT a.date,COALESCE(a.category_snapshot,'기록 없음') AS category,COALESCE(a.occupation_snapshot,'기록 없음') AS occupation,COUNT(*) AS n FROM attendance a JOIN workers w ON w.id=a.worker_id WHERE w.site_id=? AND a.present=1 AND a.date BETWEEN ? AND ? GROUP BY a.date,category,occupation").all(siteId,start,end)){
       const day=byDate.get(row.date);
@@ -1292,6 +1324,7 @@ export class Store {
     for(const row of this.db.prepare("SELECT date(created_at,'localtime') AS day,COUNT(*) AS n FROM hazard_reports WHERE site_id=? AND date(created_at,'localtime') BETWEEN ? AND ? GROUP BY day").all(siteId,start,end))byDate.get(row.day).hazardReports=row.n;
     for(const row of this.db.prepare("SELECT date,type,COUNT(*) AS n FROM documents WHERE site_id=? AND date BETWEEN ? AND ? AND type<>'office' GROUP BY date,type").all(siteId,start,end))byDate.get(row.date).documents[row.type]=row.n;
     for(const row of this.db.prepare('SELECT date,item,SUM(quantity) AS quantity FROM ppe_issues WHERE site_id=? AND date BETWEEN ? AND ? GROUP BY date,item ORDER BY date,item').all(siteId,start,end))byDate.get(row.date).ppeIssues.push({item:row.item,quantity:row.quantity});
+    for(const row of this.db.prepare('SELECT p.date,COUNT(*) AS total,COUNT(r.issue_id) AS confirmed FROM ppe_issues p LEFT JOIN ppe_receipts r ON r.issue_id=p.id WHERE p.site_id=? AND p.date BETWEEN ? AND ? GROUP BY p.date').all(siteId,start,end))byDate.get(row.date).ppeReceipts={confirmed:row.confirmed,total:row.total};
     for(const row of this.db.prepare("SELECT id,date,title,status FROM documents WHERE site_id=? AND type='checklist' AND date BETWEEN ? AND ? ORDER BY date,id").all(siteId,start,end))byDate.get(row.date).checklists.push({id:row.id,title:row.title,status:row.status});
     for(const row of this.db.prepare("SELECT d.date,COUNT(*) AS n FROM worker_notice_reads c JOIN documents d ON d.id=c.document_id JOIN workers w ON w.id=c.worker_id AND w.site_id=d.site_id WHERE d.site_id=? AND d.date BETWEEN ? AND ? AND d.type='notice' AND d.status='approved' GROUP BY d.date").all(siteId,start,end))byDate.get(row.date).noticeReads=row.n;
     for(const row of this.db.prepare("SELECT d.date,d.type,COUNT(*) AS n FROM worker_training_checks c JOIN documents d ON d.id=c.document_id JOIN workers w ON w.id=c.worker_id AND w.site_id=d.site_id WHERE d.site_id=? AND d.date BETWEEN ? AND ? AND d.type IN ('tbm','education') AND d.status='approved' GROUP BY d.date,d.type").all(siteId,start,end)){const day=byDate.get(row.date);day.trainingByType[row.type]=row.n;day.trainingChecks+=row.n;}
