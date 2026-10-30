@@ -804,7 +804,7 @@ const server = http.createServer(async (req, res) => {
       }
     }
     const riskSignature=url.pathname.match(/^\/api\/documents\/(\d+)\/risk-activities\/(\d+)\/signature$/);
-    if(riskSignature){const [,docId,activityId]=riskSignature;if(req.method==='POST'){const input=await body(req);store.saveRiskActivitySignature(docId,activityId,input.signature);return json(res,200,{ok:true});}if(req.method==='GET'){const saved=store.riskActivitySignature(docId,activityId);if(!saved)return json(res,404,{error:'시험 서명을 찾을 수 없습니다.'});res.writeHead(200,{'Content-Type':'image/png','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(saved.signature);}}
+    if(riskSignature){const [,docId,activityId]=riskSignature;if(req.method==='POST'){const input=await body(req);store.saveRiskActivitySignature(docId,activityId,input.signature,()=>checkRequestSession(req));return json(res,200,{ok:true});}if(req.method==='GET'){const saved=store.riskActivitySignature(docId,activityId);if(!saved)return json(res,404,{error:'시험 서명을 찾을 수 없습니다.'});res.writeHead(200,{'Content-Type':'image/png','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(saved.signature);}}
     const riskPhotos=url.pathname.match(/^\/api\/documents\/(\d+)\/risk-activities\/(\d+)\/photos(?:\/(\d+))?$/);
     if(riskPhotos){const [,docId,activityId,photoId]=riskPhotos;
       if(!photoId&&req.method==='GET')return json(res,200,store.riskActivityPhotos(docId,activityId));
@@ -819,7 +819,7 @@ const server = http.createServer(async (req, res) => {
     const riskImprovement=url.pathname.match(/^\/api\/documents\/(\d+)\/risk-improvement$/);
     if(riskImprovement&&req.method==='PUT')return json(res,200,store.updateRiskImprovement(riskImprovement[1],await body(req)));
     const riskActivity=url.pathname.match(/^\/api\/documents\/(\d+)\/risk-activities(?:\/(\d+))?$/);
-    if(riskActivity){const [,id,activityId]=riskActivity;if(!activityId&&req.method==='GET')return json(res,200,store.riskActivities(id));if(!activityId&&req.method==='POST')return json(res,201,{id:store.saveRiskActivity(id,await body(req))});if(activityId&&req.method==='PUT')return json(res,200,{id:store.saveRiskActivity(id,await body(req),activityId)});if(activityId&&req.method==='DELETE'){store.deleteRiskActivity(id,activityId);return json(res,200,{ok:true});}}
+    if(riskActivity){const [,id,activityId]=riskActivity;if(!activityId&&req.method==='GET')return json(res,200,store.riskActivities(id));if(!activityId&&req.method==='POST')return json(res,201,{id:store.saveRiskActivity(id,await body(req),null,()=>checkRequestSession(req))});if(activityId&&req.method==='PUT')return json(res,200,{id:store.saveRiskActivity(id,await body(req),activityId,()=>checkRequestSession(req))});if(activityId&&req.method==='DELETE'){store.deleteRiskActivity(id,activityId);return json(res,200,{ok:true});}}
     if(url.pathname==='/api/documents/batch-approve'&&req.method==='POST'){const input=await body(req);return json(res,200,store.approveDocuments(input.siteId,input.ids,input.signature,()=>checkRequestSession(req)));}
     const previousApproval=url.pathname.match(/^\/api\/documents\/(\d+)\/previous-approval-line$/);
     if(previousApproval&&req.method==='GET')return json(res,200,store.previousApprovalLine(previousApproval[1]));
