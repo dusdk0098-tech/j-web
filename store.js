@@ -1277,6 +1277,7 @@ export class Store {
   liveReviewerLinks(doc){
     if(doc.type==='risk')return {type:'risk',activities:this.riskActivities(doc.id).map(activity=>({...activity,worker_snapshot:JSON.parse(activity.worker_snapshot||'[]'),files:this.riskActivityPhotos(doc.id,activity.id)}))};
     if(doc.type==='permit')return {type:'permit',checks:this.permitChecks(doc.id),extensions:this.permitExtensions(doc.id)};
+    if(doc.type==='cost'&&Array.isArray(JSON.parse(doc.details||'{}').rows))return {type:'cost',photos:this.safetyCostReportPhotos(doc.id)};
     if(doc.type==='joint_inspection')return {type:'joint',authorSignature:!!this.jointSignature(doc.id)};
     if(doc.type==='office'){const details=JSON.parse(doc.details||'{}'),referenceId=details.referenceDocId||details.referenceId||0,reference=referenceId?(details.referenceDocId?this.officeLinkedDocument(doc.site_id,referenceId):this.officeReference(doc.site_id,referenceId)):null;if(referenceId&&!reference)throw new Error(details.referenceDocId?'연결된 업무 문서가 변경되었습니다. 다시 확인해 주세요.':'연결된 품의서가 변경되었습니다. 다시 확인해 주세요.');return {type:'office',authorSignature:!!this.meetingSignature(doc.id),referenceRecipients:this.officeReferences(doc.id),reference:reference?{id:reference.id,title:reference.title,date:reference.date,body:reference.body,files:this.attachments(reference.id)}:null};}
     if(['work_council','safety_meeting','inspection'].includes(doc.type))return {type:'meeting',authorSignature:!!this.meetingSignature(doc.id)};
@@ -1289,6 +1290,7 @@ export class Store {
   }
   liveReviewerLinkedFile(doc,kind,parentId,fileId){
     if(kind==='risk'&&doc.type==='risk')return this.riskActivityPhoto(doc.id,parentId,fileId);
+    if(kind==='cost-photo'&&doc.type==='cost'){const photo=this.safetyCostReportPhoto(doc.id,fileId);return photo&&photo.cost_id===Number(parentId)?photo:null;}
     if(kind==='office-reference'&&doc.type==='office'){const details=JSON.parse(doc.details||'{}'),ref=details.referenceDocId||details.referenceId,file=ref===Number(parentId)&&(details.referenceDocId?this.officeLinkedDocument(doc.site_id,ref):this.officeReference(doc.site_id,ref))&&this.attachment(fileId);return file&&file.document_id===ref?file:null;}
     if(doc.type!=='work_plan')return null;const details=JSON.parse(doc.details||'{}'),parent=Number(parentId);
     if(kind==='equipment'&&(details.equipmentIds||[]).includes(parent))return this.equipmentAttachment(doc.site_id,parent,fileId);
@@ -1319,6 +1321,7 @@ export class Store {
       for(const check of linked.checks)if(check.has_signature)save('equipment-check-signature',check.id,0,{data:this.liveReviewerLinkedSignature(doc,'equipment-check',check.id)});
     }
     if(linked?.type==='risk')for(const activity of linked.activities){for(const file of activity.files)save('risk',activity.id,file.id,this.liveReviewerLinkedFile(doc,'risk',activity.id,file.id));if(activity.has_signature)save('risk-activity-signature',activity.id,0,{data:this.liveReviewerLinkedSignature(doc,'risk-activity',activity.id)});}
+    if(linked?.type==='cost')for(const photo of linked.photos)save('cost-photo',photo.cost_id,photo.id,this.liveReviewerLinkedFile(doc,'cost-photo',photo.cost_id,photo.id));
     if(linked?.type==='permit')for(const extension of linked.extensions)save('permit-signature',extension.id,0,{data:this.liveReviewerLinkedSignature(doc,'permit',extension.id)});
     if(linked?.type==='training')for(const worker of linked.signedWorkers)save('training-signature',worker.id,0,{data:this.liveReviewerLinkedSignature(doc,'training',worker.id)});
     if(linked?.type==='office'&&linked.reference)for(const file of linked.reference.files)save('office-reference',linked.reference.id,file.id,this.liveReviewerLinkedFile(doc,'office-reference',linked.reference.id,file.id));

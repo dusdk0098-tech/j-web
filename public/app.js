@@ -462,6 +462,7 @@ function capturedFiles(cycle){
   if(linked?.type==='plan'){for(const item of linked.equipment)for(const file of item.files)add('equipment',item.info.id,file.id,file.name);for(const item of linked.rigging)for(const file of item.files)add('rigging',item.info.id,file.id,file.name);if(linked.place)for(const file of linked.place.files)add('place',linked.place.info.id,file.id,file.name);}
   if(linked?.type==='plan')for(const check of linked.checks)if(check.has_signature)add('equipment-check-signature',check.id,0,`${check.date} 시험 점검 서명`);
   if(linked?.type==='risk')for(const item of linked.activities){for(const file of item.files)add('risk',item.id,file.id,file.name);if(item.has_signature)add('risk-activity-signature',item.id,0,'주간 점검 시험 서명');}
+  if(linked?.type==='cost')for(const photo of linked.photos)add('cost-photo',photo.cost_id,photo.id,`사용내역 증빙 · ${photo.name}`);
   if(linked?.type==='office'&&linked.reference)for(const file of linked.reference.files)add('office-reference',linked.reference.id,file.id,`참조 문서 · ${file.name}`);
   if(linked?.type==='permit')for(const item of linked.extensions)add('permit-signature',item.id,0,`${item.date_from} 시험 연장 서명`);
   if(linked?.type==='training')for(const worker of linked.signedWorkers)add('training-signature',worker.id,0,`${worker.name} 당일 시험 서명`);
