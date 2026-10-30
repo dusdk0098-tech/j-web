@@ -266,7 +266,7 @@ const server = http.createServer(async (req, res) => {
     if(url.pathname==='/api/worker/meetings'&&['GET','POST'].includes(req.method)){
       const key=workerKey(workerToken),session=workerSessions.get(key);if(!session||session.expires<=Date.now()){workerSessions.delete(key);return json(res,401,{error:'근로자 로그인이 필요합니다.'});}
       if(req.method==='GET')return json(res,200,store.workerMeetings(session.worker.id));
-      const input=await body(req);store.confirmWorkerMeeting(session.worker.id,input.documentId,input.signature);return json(res,200,{ok:true});
+      const input=await body(req);store.confirmWorkerMeeting(session.worker.id,input.documentId,input.signature,()=>checkRequestSession(req));return json(res,200,{ok:true});
     }
     if(url.pathname==='/api/worker/self-check' && ['GET','POST'].includes(req.method)){
       const key=workerKey(workerToken),session=workerSessions.get(key);
@@ -289,7 +289,7 @@ const server = http.createServer(async (req, res) => {
       if(!session || session.expires<=Date.now()){workerSessions.delete(key);return json(res,401,{error:'근로자 로그인이 필요합니다.'});}
       const input=req.method==='POST'?await body(req):null,now=new Date(),date=new Date(now.getTime()-now.getTimezoneOffset()*60000).toISOString().slice(0,10);
       if(req.method==='GET')return json(res,200,store.workerTraining(session.worker.id,date));
-      store.confirmWorkerTraining(session.worker.id,input.documentId,date,input.rightsConfirmed,input.signature);return json(res,200,{ok:true});
+      store.confirmWorkerTraining(session.worker.id,input.documentId,date,input.rightsConfirmed,input.signature,()=>checkRequestSession(req));return json(res,200,{ok:true});
     }
     if(url.pathname==='/api/worker/hazard-reports' && ['GET','POST'].includes(req.method)){
       const key=workerKey(workerToken),session=workerSessions.get(key);if(!session||session.expires<=Date.now()){workerSessions.delete(key);return json(res,401,{error:'근로자 로그인이 필요합니다.'});}

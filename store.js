@@ -751,9 +751,8 @@ export class Store {
     return rows.map(row=>{const details=JSON.parse(row.details);return {...row,details:{kind:details.kind||'',place:details.place||'',timeFrom:details.timeFrom||'',timeTo:details.timeTo||'',host:details.host||'',decisions:details.decisions||'',discussion:details.discussion||'',remarks:details.remarks||''},selected:(details.workerSnapshot||[]).some(person=>person.id===Number(workerId))};}).filter(row=>row.selected).map(({selected,...row})=>({...row,files:this.attachments(row.id).map(({id,name,size})=>({id,name,size}))}));
   }
   workerMeetingAttachment(workerId,documentId,fileId){if(!this.workerMeetings(workerId).some(row=>row.id===Number(documentId)))return null;const file=this.attachment(fileId);return file?.document_id===Number(documentId)?file:null;}
-  confirmWorkerMeeting(workerId,documentId,signature){
-    if(!Number.isSafeInteger(documentId)||!this.workerMeetings(workerId).some(row=>row.id===documentId))throw new Error('지정된 승인 회의를 확인해 주세요.');
-    const bytes=signatureBytes(signature);this.db.prepare('INSERT OR IGNORE INTO worker_meeting_checks(document_id,worker_id,signature) VALUES(?,?,?)').run(documentId,Number(workerId),bytes);
+  confirmWorkerMeeting(workerId,documentId,signature,onAuthorize=()=>{}){
+    this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();if(!Number.isSafeInteger(documentId)||!this.workerMeetings(workerId).some(row=>row.id===documentId))throw new Error('지정된 승인 회의를 확인해 주세요.');const bytes=signatureBytes(signature);this.db.prepare('INSERT OR IGNORE INTO worker_meeting_checks(document_id,worker_id,signature) VALUES(?,?,?)').run(documentId,Number(workerId),bytes);this.db.exec('COMMIT');}catch(error){this.db.exec('ROLLBACK');throw error;}
   }
   meetingChecks(documentId){
     const doc=this.document(documentId);if(!doc||!['work_council','safety_meeting'].includes(doc.type))throw new Error('회의 문서를 확인해 주세요.');
@@ -787,13 +786,9 @@ export class Store {
   documentTrainingSignature(documentId,workerId){
     return this.db.prepare("SELECT c.signature FROM documents d JOIN workers w ON w.site_id=d.site_id JOIN worker_daily_training c ON c.worker_id=w.id AND c.date=d.date AND c.kind=d.type WHERE d.id=? AND w.id=? AND d.type IN ('tbm','education') AND c.signature IS NOT NULL AND (NOT EXISTS (SELECT 1 FROM training_target_config t WHERE t.document_id=d.id) OR EXISTS (SELECT 1 FROM training_targets t WHERE t.document_id=d.id AND t.worker_id=w.id))").get(Number(documentId),Number(workerId))?.signature||null;
   }
-  confirmWorkerTraining(workerId,documentId,date,rightsConfirmed,signature) {
+  confirmWorkerTraining(workerId,documentId,date,rightsConfirmed,signature,onAuthorize=()=>{}) {
     date=dateValue(date);
-    const doc=this.db.prepare("SELECT d.id FROM workers w JOIN documents d ON d.site_id=w.site_id WHERE w.id=? AND d.id=? AND d.type IN ('tbm','education') AND d.status='approved' AND d.date=? AND (NOT EXISTS (SELECT 1 FROM training_target_config t WHERE t.document_id=d.id) OR EXISTS (SELECT 1 FROM training_targets t WHERE t.document_id=d.id AND t.worker_id=w.id))").get(Number(workerId),Number(documentId),date);
-    if(!doc)throw new Error('오늘 참여할 교육 문서를 확인해 주세요.');
-    if(rightsConfirmed!==true)throw new Error('권리와 의무를 확인해 주세요.');
-    const bytes=signature===undefined?null:signatureBytes(signature);
-    this.db.prepare("INSERT INTO worker_training_checks(worker_id,document_id,rights_ack,signature) VALUES(?,?,'demo-v1',?) ON CONFLICT(worker_id,document_id) DO UPDATE SET rights_ack=CASE WHEN excluded.signature IS NOT NULL THEN COALESCE(worker_training_checks.rights_ack,excluded.rights_ack) ELSE worker_training_checks.rights_ack END,signature=COALESCE(worker_training_checks.signature,excluded.signature)").run(Number(workerId),doc.id,bytes);
+    this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();const doc=this.db.prepare("SELECT d.id FROM workers w JOIN documents d ON d.site_id=w.site_id WHERE w.id=? AND d.id=? AND d.type IN ('tbm','education') AND d.status='approved' AND d.date=? AND (NOT EXISTS (SELECT 1 FROM training_target_config t WHERE t.document_id=d.id) OR EXISTS (SELECT 1 FROM training_targets t WHERE t.document_id=d.id AND t.worker_id=w.id))").get(Number(workerId),Number(documentId),date);if(!doc)throw new Error('오늘 참여할 교육 문서를 확인해 주세요.');if(rightsConfirmed!==true)throw new Error('권리와 의무를 확인해 주세요.');const bytes=signature===undefined?null:signatureBytes(signature);this.db.prepare("INSERT INTO worker_training_checks(worker_id,document_id,rights_ack,signature) VALUES(?,?,'demo-v1',?) ON CONFLICT(worker_id,document_id) DO UPDATE SET rights_ack=CASE WHEN excluded.signature IS NOT NULL THEN COALESCE(worker_training_checks.rights_ack,excluded.rights_ack) ELSE worker_training_checks.rights_ack END,signature=COALESCE(worker_training_checks.signature,excluded.signature)").run(Number(workerId),doc.id,bytes);this.db.exec('COMMIT');}catch(error){this.db.exec('ROLLBACK');throw error;}
   }
   confirmWorkerNotice(workerId,documentId,signature,date,expectedVersion,onAuthorize=()=>{}) {
     date=dateValue(date);
