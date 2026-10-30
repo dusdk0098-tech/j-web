@@ -74,6 +74,24 @@ const server = http.createServer(async (req, res) => {
       if(url.pathname==='/api/reviewer/logout'&&req.method==='POST'){reviewerSessions.delete(key);res.setHeader('Set-Cookie',`jweb_reviewer=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0${secureCookie}`);return json(res,200,{ok:true});}
       req.checkSession=()=>reviewerSessions.get(key)===session&&session.expires>Date.now()&&store.reviewer(session.id)?null:{status:401,error:'결재자 로그인이 필요합니다.'};
       if(url.pathname==='/api/reviewer/session'&&req.method==='GET')return json(res,200,{reviewer});
+      if(url.pathname==='/api/reviewer/personal-supervisor'&&req.method==='GET')return json(res,200,personalNotes.supervisor(reviewer.site_id));
+      if(url.pathname==='/api/reviewer/personal-notes'){
+        if(req.method==='GET')return json(res,200,personalNotes.list(reviewer.site_id,url.searchParams.get('from')||'',url.searchParams.get('to')||'',url.searchParams.get('q')||'',reviewer));
+        if(req.method==='POST'){const input=await body(req);return json(res,201,personalNotes.create({...input,siteId:reviewer.site_id},()=>checkRequestSession(req),reviewer));}
+      }
+      const reviewerPersonalFile=url.pathname.match(/^\/api\/reviewer\/personal-notes\/(\d+)\/files(?:\/(\d+))?$/);
+      if(reviewerPersonalFile){
+        const [,id,fileId]=reviewerPersonalFile,siteId=reviewer.site_id;
+        if(!fileId&&req.method==='POST'){const chunks=[];let size=0;for await(const chunk of req){size+=chunk.length;if(size>2*1024*1024)throw Error('파일은 2MB 이하여야 합니다.');chunks.push(chunk);}checkRequestSession(req);let name;try{name=decodeURIComponent(req.headers['x-file-name']||'');}catch{throw Error('파일 이름을 확인해 주세요.');}return json(res,201,personalNotes.addFile(siteId,id,url.searchParams.get('version'),name,Buffer.concat(chunks),()=>checkRequestSession(req),reviewer));}
+        if(fileId&&req.method==='GET'){const file=personalNotes.file(siteId,id,fileId,reviewer);if(!file)return json(res,404,{error:'첨부파일을 찾을 수 없습니다.'});const name=encodeURIComponent(file.name).replace(/[!'()*]/g,c=>`%${c.charCodeAt(0).toString(16).toUpperCase()}`);res.writeHead(200,{'Content-Type':'application/octet-stream','Content-Disposition':`attachment; filename="attachment"; filename*=UTF-8''${name}`,'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(file.data);}
+        if(fileId&&req.method==='DELETE'){const input=await body(req);personalNotes.removeFile(siteId,id,fileId,input.version,()=>checkRequestSession(req),reviewer);return json(res,200,{ok:true});}
+      }
+      const reviewerPersonal=url.pathname.match(/^\/api\/reviewer\/personal-notes\/(\d+)(?:\/(check))?$/);
+      if(reviewerPersonal){const [,id,action]=reviewerPersonal;
+        if(!action&&req.method==='PUT'){const input=await body(req);return json(res,200,personalNotes.update(reviewer.site_id,id,input,()=>checkRequestSession(req),reviewer));}
+        if(!action&&req.method==='DELETE'){const input=await body(req);personalNotes.remove(reviewer.site_id,id,input.version,()=>checkRequestSession(req),reviewer);return json(res,200,{ok:true});}
+        if(action==='check'&&req.method==='POST'){const input=await body(req);return json(res,200,personalNotes.check(reviewer.site_id,id,input.version,()=>checkRequestSession(req),reviewer));}
+      }
       if(url.pathname==='/api/reviewer/documents'&&req.method==='GET')return json(res,200,store.reviewerDocuments(reviewer.id));
       if(url.pathname==='/api/reviewer/references'&&req.method==='GET')return json(res,200,store.officeReferenceDocuments(reviewer.id));
       const reference=url.pathname.match(/^\/api\/reviewer\/references\/(\d+)(?:\/(attachments\/(\d+)|linked\/office-reference\/(\d+)\/(\d+)|signatures\/author\/0))?$/);
@@ -286,6 +304,10 @@ const server = http.createServer(async (req, res) => {
       const path = url.pathname === '/' ? '/index.html' : url.pathname === '/join' ? '/join.html' : url.pathname === '/login' ? '/login.html' : url.pathname === '/review' ? '/review.html' : url.pathname;
       res.writeHead(200, {'Content-Type':mime[extname(path)],'X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer','Content-Security-Policy':"default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; object-src 'none'; frame-ancestors 'none'"});
       return res.end(readFileSync(join(root,'public',path.slice(1))));
+    }
+    if(url.pathname==='/api/personal-supervisor'){
+      if(req.method==='GET')return json(res,200,personalNotes.supervisor(url.searchParams.get('siteId')));
+      if(req.method==='PUT'){const input=await body(req);return json(res,200,personalNotes.setSupervisor(input.siteId,input.reviewerId,()=>checkRequestSession(req)));}
     }
     if(url.pathname==='/api/personal-notes'){
       if(req.method==='GET')return json(res,200,personalNotes.list(url.searchParams.get('siteId'),url.searchParams.get('from')||'',url.searchParams.get('to')||'',url.searchParams.get('q')||''));
