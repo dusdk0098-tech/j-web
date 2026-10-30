@@ -9,6 +9,16 @@ import { once } from 'node:events';
 import { DatabaseSync } from 'node:sqlite';
 import { Store } from '../store.js';
 
+test('신고 검색은 현장과 현지 날짜 기간 및 검색어를 함께 적용한다',()=>{
+  const store=new Store(':memory:');try{
+    const a=store.createSite({name:'가상 A'}),b=store.createSite({name:'가상 B'}),add=(site,title,date)=>{const id=store.createHazardReport(site.id,{title,body:'가상 내용',reporter:'가상 신고자'});store.db.prepare("UPDATE hazard_reports SET created_at=datetime(?,'utc') WHERE id=?").run(`${date} 12:00:00`,id);return id;};
+    const first=add(a,'가상 위험','2026-10-28'),last=add(a,'가상 위험','2026-10-30');add(a,'다른 내용','2026-10-29');add(b,'가상 위험','2026-10-29');
+    assert.deepEqual(store.hazardReports(a.id,'가상 위험','2026-10-28','2026-10-30').map(row=>row.id),[last,first]);
+    assert.deepEqual(store.hazardReports(a.id,'가상 위험','2026-10-29','2026-10-30').map(row=>row.date),['2026-10-30']);
+    assert.throws(()=>store.hazardReports(a.id,'','2026-02-30',''),/날짜/);assert.throws(()=>store.hazardReports(a.id,'','2026-10-30','2026-10-28'),/시작일/);
+  }finally{store.close();}
+});
+
 test('이전 신고 데이터는 답변 테이블 추가 후에도 보존된다',()=>{
   const dir=mkdtempSync(join(tmpdir(),'jweb-hazard-legacy-')),file=join(dir,'test.sqlite');let store;
   try{store=new Store(file);const site=store.createSite({name:'가상 현장'}),id=store.createHazardReport(site.id,{title:'가상 신고',body:'가상 내용',reporter:'가상 신고자'});store.close();store=null;const legacy=new DatabaseSync(file);legacy.exec('DROP TABLE hazard_report_replies');legacy.close();store=new Store(file);const row=store.hazardReports(site.id)[0];assert.equal(row.id,id);assert.equal(row.body,'가상 내용');assert.deepEqual(row.replies,[]);store.addHazardReply(site.id,id,{body:'가상 답변'});assert.equal(store.hazardReports(site.id)[0].replies[0].body,'가상 답변');}finally{if(store)store.close();rmSync(dir,{recursive:true,force:true});}
@@ -22,6 +32,8 @@ test('신고 답변은 현장과 신고자에게만 보이며 재시작과 삭�
     let admin=await adminLogin();const a=await (await call('/api/sites','POST',{name:'가상 A'},admin)).json(),b=await (await call('/api/sites','POST',{name:'가상 B'},admin)).json(),invite=async site=>new URL((await (await call(`/api/sites/${site.id}/invitation`,'POST',{},admin)).json()).link).searchParams.get('token'),ta=await invite(a),tb=await invite(b);
     const worker=async(token,id)=>{const password='virtual-password-123',input={token,name:id,category:'직영',company:'가상 업체',occupation:'가상 직종',loginId:id,password,acknowledged:true,profile:{birthDate:'2000-01-01',phone:'010-0000-0000'}};assert.equal((await call('/api/join','POST',input)).status,201);const login=await call('/api/worker/login','POST',{token,loginId:id,password});return login.headers.get('set-cookie').split(';')[0];},one=await worker(ta,'hazard_one'),two=await worker(ta,'hazard_two'),other=await worker(tb,'hazard_other');
     const report=async cookie=>{const res=await call('/api/worker/hazard-reports','POST',{title:'가상 신고',body:'가상 내용'},cookie);assert.equal(res.status,201);return (await res.json()).id;},id=await report(one),otherId=await report(two),path=`/api/sites/${a.id}/hazard-reports/${id}/replies`;
+    assert.equal((await call(`/api/sites/${a.id}/hazard-reports?from=2026-10-30&to=2026-10-28`,'GET',undefined,admin)).status,400);assert.equal((await call(`/api/sites/${a.id}/hazard-reports?from=2026-10-28`)).status,401);assert.deepEqual(await (await call(`/api/sites/${b.id}/hazard-reports?from=2000-01-01&to=2999-12-31`,'GET',undefined,admin)).json(),[]);
+    assert.deepEqual((await (await call(`/api/sites/${a.id}/hazard-reports?from=2000-01-01&to=2999-12-31&q=${encodeURIComponent('가상 신고')}`,'GET',undefined,admin)).json()).map(row=>row.id),[otherId,id]);assert.deepEqual(await (await call(`/api/sites/${a.id}/hazard-reports?from=2000-01-01&to=2000-01-02`,'GET',undefined,admin)).json(),[]);
     assert.equal((await call(path,'POST',{body:'가상 답변'})).status,401);assert.equal((await call(path,'POST',{body:'가상 답변'},one)).status,401);assert.equal((await call(`/api/sites/${b.id}/hazard-reports/${id}/replies`,'POST',{body:'가상 답변'},admin)).status,400);for(const body of ['', '가'.repeat(2001)])assert.equal((await call(path,'POST',{body},admin)).status,400);
     const first=await (await call(path,'POST',{body:'첫 답변'},admin)).json(),second=await (await call(path,'POST',{body:'<script>가상 답변</script>'},admin)).json(),mine=await (await call('/api/worker/hazard-reports','GET',undefined,one)).json();assert.deepEqual(mine[0].replies.map(r=>r.body),['첫 답변','<script>가상 답변</script>']);assert.deepEqual((await (await call('/api/worker/hazard-reports','GET',undefined,two)).json())[0].replies,[]);assert.deepEqual(await (await call('/api/worker/hazard-reports','GET',undefined,other)).json(),[]);
     assert.equal((await call(`/api/sites/${a.id}/hazard-reports/${otherId}/replies/${first.id}`,'DELETE',undefined,admin)).status,400);assert.equal((await call(`${path}/${first.id}`,'DELETE',undefined,one)).status,401);assert.equal((await call(`${path}/${first.id}`,'DELETE',undefined,admin)).status,200);

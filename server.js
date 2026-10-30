@@ -381,7 +381,7 @@ const server = http.createServer(async (req, res) => {
     if(hazardStatus&&req.method==='PUT'){store.updateHazardReport(hazardStatus[1],hazardStatus[2],await body(req));return json(res,200,{ok:true});}
     const hazardReports=url.pathname.match(/^\/api\/sites\/(\d+)\/hazard-reports(?:\/(\d+)\/photo)?$/);
     if(hazardReports){const [,siteId,id]=hazardReports;
-      if(!id&&req.method==='GET')return json(res,200,store.hazardReports(siteId,url.searchParams.get('q')||''));
+      if(!id&&req.method==='GET')return json(res,200,store.hazardReports(siteId,url.searchParams.get('q')||'',url.searchParams.get('from')||'',url.searchParams.get('to')||''));
       if(!id&&req.method==='POST')return json(res,201,{id:store.createHazardReport(siteId,await body(req,2805000))});
       if(id&&req.method==='GET'){const photo=store.hazardReportPhoto(siteId,id);if(!photo)return json(res,404,{error:'사진을 찾을 수 없습니다.'});res.writeHead(200,{'Content-Type':'application/octet-stream','Content-Disposition':'attachment; filename="test-hazard-photo"','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(photo);}
     }
