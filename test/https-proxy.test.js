@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { tmpdir,networkInterfaces } from 'node:os';
 import { join, resolve, sep } from 'node:path';
 import { createServer as reservePort } from 'node:net';
 import { request as httpsRequest } from 'node:https';
@@ -15,6 +15,36 @@ test('중계는 인증서나 올바른 주소가 없으면 시작하지 않는�
   assert.notEqual(spawnSync(process.execPath,['https-proxy.js'],{cwd:process.cwd(),env,stdio:'ignore'}).status,0);
   assert.notEqual(spawnSync(process.execPath,['https-proxy.js'],{cwd:process.cwd(),env:{...env,JWEB_PUBLIC_ORIGIN:'http://localhost:8443'},stdio:'ignore'}).status,0);
   assert.notEqual(spawnSync(process.execPath,['https-proxy.js'],{cwd:process.cwd(),env:{...env,JWEB_PROXY_BIND:'invalid'},stdio:'ignore'}).status,0);
+});
+
+test('중계는 주소·기간·개인키가 맞지 않는 인증서로 시작하지 않는다',async t=>{
+  if(spawnSync('openssl',['version'],{stdio:'ignore'}).status!==0){t.skip('OpenSSL이 없어 인증서 시험을 건너뜁니다.');return;}
+  const dir=mkdtempSync(join(tmpdir(),'jweb-tls-host-')),keyPath=join(dir,'key.pem'),certPath=join(dir,'cert.pem');
+  try{
+    assert.equal(spawnSync('openssl',['req','-x509','-newkey','rsa:2048','-keyout',keyPath,'-out',certPath,'-days','1','-nodes','-subj','/CN=localhost','-addext','subjectAltName=DNS:localhost,IP:127.0.0.1'],{stdio:'ignore'}).status,0);
+    const backend=reservePort(),proxy=reservePort();await new Promise(resolve=>backend.listen(0,'127.0.0.1',resolve));await new Promise(resolve=>proxy.listen(0,'127.0.0.1',resolve));const backendPort=backend.address().port,proxyPort=proxy.address().port;await new Promise(resolve=>backend.close(resolve));await new Promise(resolve=>proxy.close(resolve));
+    for(const host of ['wrong.test','127.0.0.2']){
+      const result=spawnSync(process.execPath,['https-proxy.js'],{cwd:process.cwd(),env:{...process.env,PORT:String(backendPort),JWEB_PUBLIC_ORIGIN:`https://${host}:${proxyPort}`,JWEB_PROXY_BIND:'127.0.0.1',JWEB_TLS_CERT:certPath,JWEB_TLS_KEY:keyPath},encoding:'utf8',timeout:2000});
+      assert.notEqual(result.error?.code,'ETIMEDOUT','주소에 맞지 않는 인증서로 중계가 시작되었습니다.');assert.notEqual(result.status,0);assert.match(result.stderr,/인증서.*주소/);
+    }
+    const env={...process.env,PORT:String(backendPort),JWEB_PUBLIC_ORIGIN:`https://localhost:${proxyPort}`,JWEB_PROXY_BIND:'127.0.0.1',JWEB_TLS_CERT:certPath,JWEB_TLS_KEY:keyPath},clock=encodeURIComponent('Date.now=()=>4102444800000'),expired=spawnSync(process.execPath,['--import',`data:text/javascript,${clock}`,'https-proxy.js'],{cwd:process.cwd(),env,encoding:'utf8',timeout:2000});assert.notEqual(expired.error?.code,'ETIMEDOUT');assert.notEqual(expired.status,0);assert.match(expired.stderr,/유효 기간/);
+    const otherKey=join(dir,'other.pem');assert.equal(spawnSync('openssl',['genpkey','-algorithm','RSA','-pkeyopt','rsa_keygen_bits:2048','-out',otherKey],{stdio:'ignore'}).status,0);const wrongKey=spawnSync(process.execPath,['https-proxy.js'],{cwd:process.cwd(),env:{...env,JWEB_TLS_KEY:otherKey},encoding:'utf8',timeout:2000});assert.notEqual(wrongKey.error?.code,'ETIMEDOUT');assert.notEqual(wrongKey.status,0);assert.match(wrongKey.stderr,/인증서.*개인키/);
+  }finally{assert.ok(resolve(dir).startsWith(resolve(tmpdir())+sep));rmSync(dir,{recursive:true,force:true});}
+});
+
+test('네트워크 IP의 HTTPS 중계에서 가상 QR 가입과 로그인이 이어진다',{timeout:30000},async t=>{
+  if(spawnSync('openssl',['version'],{stdio:'ignore'}).status!==0){t.skip('OpenSSL이 없어 IP 연결 시험을 건너뜁니다.');return;}
+  const address=Object.values(networkInterfaces()).flat().find(item=>item&&item.family==='IPv4'&&!item.internal)?.address;if(!address){t.skip('접속 가능한 IPv4가 없어 IP 연결 시험을 건너뜁니다.');return;}
+  const dir=mkdtempSync(join(tmpdir(),'jweb-tls-ip-')),keyPath=join(dir,'key.pem'),certPath=join(dir,'cert.pem');let child,proxy;
+  try{
+    assert.equal(spawnSync('openssl',['req','-x509','-newkey','rsa:2048','-keyout',keyPath,'-out',certPath,'-days','1','-nodes','-subj','/CN=jweb-test','-addext',`subjectAltName=IP:${address}`],{stdio:'ignore'}).status,0);
+    const cert=readFileSync(certPath),backendReservation=reservePort(),proxyReservation=reservePort();await new Promise(resolve=>backendReservation.listen(0,'127.0.0.1',resolve));await new Promise(resolve=>proxyReservation.listen(0,'127.0.0.1',resolve));const backendPort=backendReservation.address().port,proxyPort=proxyReservation.address().port,origin=`https://${address}:${proxyPort}`;await new Promise(resolve=>backendReservation.close(resolve));await new Promise(resolve=>proxyReservation.close(resolve));
+    child=spawn(process.execPath,['server.js'],{cwd:process.cwd(),env:{...process.env,PORT:String(backendPort),JWEB_DATA_DIR:dir,JWEB_ADMIN_PASSWORD:'test-password-12345',JWEB_PUBLIC_ORIGIN:origin},stdio:['ignore','pipe','pipe']});await Promise.race([once(child.stdout,'data'),once(child,'exit').then(()=>{throw Error('시험 서버가 종료됐습니다.');})]);
+    proxy=spawn(process.execPath,['https-proxy.js'],{cwd:process.cwd(),env:{...process.env,PORT:String(backendPort),JWEB_PUBLIC_ORIGIN:origin,JWEB_PROXY_BIND:address,JWEB_TLS_CERT:certPath,JWEB_TLS_KEY:keyPath},stdio:['ignore','pipe','pipe']});await Promise.race([once(proxy.stdout,'data'),once(proxy,'exit').then(()=>{throw Error('시험 중계가 종료됐습니다.');})]);
+    const send=(path,method='GET',data=null,cookie='')=>new Promise((resolve,reject)=>{const payload=data===null?null:JSON.stringify(data),headers={origin,...(cookie?{cookie}:{}),...(payload?{'content-type':'application/json'}:{})},req=httpsRequest({hostname:address,port:proxyPort,ca:cert,path,method,headers},res=>{const chunks=[];res.on('data',chunk=>chunks.push(chunk));res.on('end',()=>resolve({status:res.statusCode,headers:res.headers,body:Buffer.concat(chunks).toString()}));});req.on('error',reject);if(payload)req.write(payload);req.end();});
+    const login=await send('/api/login','POST',{password:'test-password-12345'});assert.equal(login.status,200);assert.match(login.headers['set-cookie'][0],/; Secure/);const cookie=login.headers['set-cookie'][0].split(';')[0],site=JSON.parse((await send('/api/sites','POST',{name:'가상 현장'},cookie)).body),invite=JSON.parse((await send(`/api/sites/${site.id}/invitation`,'POST',{},cookie)).body),url=new URL(invite.link),png=PNG.sync.read(Buffer.from(invite.image.split(',')[1],'base64'));
+    assert.equal(url.origin,origin);assert.equal(jsQR(new Uint8ClampedArray(png.data),png.width,png.height)?.data,invite.link);assert.equal((await send('/join.js')).status,200);const token=url.searchParams.get('token'),registration={token,name:'가상 근로자',category:'직영',company:'가상 업체',occupation:'가상 직종',loginId:'ip_virtual_worker',password:'virtual-password-123',acknowledged:true,profile:{birthDate:'2000-01-01',phone:'010-0000-0000'}};assert.equal((await send('/api/join','POST',registration)).status,201);const worker=await send('/api/worker/login','POST',{token,loginId:registration.loginId,password:registration.password});assert.equal(worker.status,200);assert.match(worker.headers['set-cookie'][0],/; Secure/);assert.equal((await send('/api/worker/session','GET',null,worker.headers['set-cookie'][0].split(';')[0])).status,200);
+  }finally{if(child&&child.exitCode===null&&child.signalCode===null){const exited=once(child,'exit');child.kill();await exited;}if(proxy&&proxy.exitCode===null&&proxy.signalCode===null){const exited=once(proxy,'exit');proxy.kill();await exited;}assert.ok(resolve(dir).startsWith(resolve(tmpdir())+sep));rmSync(dir,{recursive:true,force:true});}
 });
 
 test('로컬 HTTPS 중계로 가상 QR 가입과 로그인이 이어진다', async t => {
