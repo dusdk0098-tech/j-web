@@ -383,7 +383,7 @@ const server = http.createServer(async (req, res) => {
     if(hazardReports){const [,siteId,id]=hazardReports;
       if(!id&&req.method==='GET')return json(res,200,store.hazardReports(siteId,url.searchParams.get('q')||'',url.searchParams.get('from')||'',url.searchParams.get('to')||''));
       if(!id&&req.method==='POST')return json(res,201,{id:store.createHazardReport(siteId,await body(req,2805000))});
-      if(id&&req.method==='GET'){const photo=store.hazardReportPhoto(siteId,id);if(!photo)return json(res,404,{error:'사진을 찾을 수 없습니다.'});res.writeHead(200,{'Content-Type':'application/octet-stream','Content-Disposition':'attachment; filename="test-hazard-photo"','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(photo);}
+      if(id&&req.method==='GET'){const photo=store.hazardReportPhoto(siteId,id);if(!photo)return json(res,404,{error:'사진을 찾을 수 없습니다.'});const bytes=Buffer.from(photo),preview=url.searchParams.get('preview')==='1',type=bytes.subarray(0,8).equals(Buffer.from('89504e470d0a1a0a','hex'))?'image/png':bytes.subarray(0,3).equals(Buffer.from('ffd8ff','hex'))?'image/jpeg':null;if(preview&&!type)return json(res,415,{error:'미리 볼 수 없는 사진입니다.'});res.writeHead(200,{'Content-Type':preview?type:'application/octet-stream',...(preview?{}:{'Content-Disposition':'attachment; filename="test-hazard-photo"'}),'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(bytes);}
     }
     if(siteStops && req.method==='GET')return json(res,200,store.workStops(siteStops[1],url.searchParams.get('q')||''));
     const stopResponse=url.pathname.match(/^\/api\/sites\/(\d+)\/work-stops\/(\d+)$/);
