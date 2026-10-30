@@ -1279,7 +1279,7 @@ export class Store {
     if(doc.type==='permit')return {type:'permit',checks:this.permitChecks(doc.id),extensions:this.permitExtensions(doc.id)};
     if(doc.type==='joint_inspection')return {type:'joint',authorSignature:!!this.jointSignature(doc.id)};
     if(doc.type==='office'){const details=JSON.parse(doc.details||'{}'),referenceId=details.referenceDocId||details.referenceId||0,reference=referenceId?(details.referenceDocId?this.officeLinkedDocument(doc.site_id,referenceId):this.officeReference(doc.site_id,referenceId)):null;if(referenceId&&!reference)throw new Error(details.referenceDocId?'연결된 업무 문서가 변경되었습니다. 다시 확인해 주세요.':'연결된 품의서가 변경되었습니다. 다시 확인해 주세요.');return {type:'office',authorSignature:!!this.meetingSignature(doc.id),referenceRecipients:this.officeReferences(doc.id),reference:reference?{id:reference.id,title:reference.title,date:reference.date,body:reference.body,files:this.attachments(reference.id)}:null};}
-    if(['work_council','safety_meeting'].includes(doc.type))return {type:'meeting',authorSignature:!!this.meetingSignature(doc.id)};
+    if(['work_council','safety_meeting','inspection'].includes(doc.type))return {type:'meeting',authorSignature:!!this.meetingSignature(doc.id)};
     if(['tbm','education'].includes(doc.type)){const targets=this.trainingTargets(doc.id);return {type:'training',authorSignature:doc.type==='tbm'&&!!this.tbmSignature(doc.id),configured:targets.configured,workers:targets.workers.filter(worker=>!targets.configured||worker.selected),signedWorkers:targets.signedWorkers,checks:this.trainingChecks(doc.id)};}
     if(doc.type!=='work_plan')return null;const details=JSON.parse(doc.details||'{}'),equipmentIds=details.equipmentIds||[],riggingIds=details.riggingIds||[],snapshots=Array.isArray(details.equipmentSnapshot)?details.equipmentSnapshot:null;
     const equipment=this.equipment(doc.site_id).filter(item=>equipmentIds.includes(item.id)).map(item=>{const snapshot=snapshots?.find(row=>row.id===item.id);return {info:snapshot||item,snapshot:!!snapshot,files:this.equipmentAttachments(doc.site_id,item.id)};});
@@ -1302,7 +1302,7 @@ export class Store {
     if(kind==='training'&&['tbm','education'].includes(doc.type))return this.documentTrainingSignature(doc.id,id);
     if(kind==='author'&&doc.type==='tbm'&&Number(id)===0)return this.tbmSignature(doc.id)?.signature||null;
     if(kind==='author'&&doc.type==='joint_inspection'&&Number(id)===0)return this.jointSignature(doc.id)?.signature||null;
-    if(kind==='author'&&['work_council','safety_meeting','office'].includes(doc.type)&&Number(id)===0)return this.meetingSignature(doc.id)?.signature||null;
+    if(kind==='author'&&['work_council','safety_meeting','office','inspection'].includes(doc.type)&&Number(id)===0)return this.meetingSignature(doc.id)?.signature||null;
     if(kind==='equipment-check'&&doc.type==='work_plan')return this.equipmentCheckSignature(doc.id,id);
     return null;
   }
@@ -1453,10 +1453,10 @@ export class Store {
   saveTbmSignature(id,signature,onAuthorize=()=>{}){return this.saveAuthorSignature(id,signature,'tbm',onAuthorize);}
   jointSignature(id){const doc=this.document(id);if(!doc||doc.type!=='joint_inspection')throw new Error('합동 점검 문서를 확인해 주세요.');return this.db.prepare('SELECT signature,created_at FROM joint_inspection_signatures WHERE document_id=?').get(Number(id))||null;}
   saveJointSignature(id,signature,onAuthorize=()=>{}){return this.saveAuthorSignature(id,signature,'joint_inspection',onAuthorize);}
-  meetingSignature(id){const doc=this.document(id);if(!doc||!['work_council','safety_meeting','office'].includes(doc.type))throw new Error('회의 또는 업무 문서를 확인해 주세요.');return this.db.prepare('SELECT signature,created_at FROM meeting_signatures WHERE document_id=?').get(Number(id))||null;}
+  meetingSignature(id){const doc=this.document(id);if(!doc||!['work_council','safety_meeting','office','inspection'].includes(doc.type))throw new Error('회의 또는 업무 문서를 확인해 주세요.');return this.db.prepare('SELECT signature,created_at FROM meeting_signatures WHERE document_id=?').get(Number(id))||null;}
   saveMeetingSignature(id,signature,onAuthorize=()=>{}){return this.saveAuthorSignature(id,signature,'meeting',onAuthorize);}
   saveAuthorSignature(id,signature,kind,onAuthorize){
-    const configs={checklist:['checklist_signatures',['checklist'],'체크리스트'],tbm:['tbm_signatures',['tbm'],'TBM 문서'],joint_inspection:['joint_inspection_signatures',['joint_inspection'],'합동 점검'],meeting:['meeting_signatures',['work_council','safety_meeting','office'],'회의 또는 업무 문서']},config=configs[kind];if(!config)throw new Error('서명 종류를 확인해 주세요.');
+    const configs={checklist:['checklist_signatures',['checklist'],'체크리스트'],tbm:['tbm_signatures',['tbm'],'TBM 문서'],joint_inspection:['joint_inspection_signatures',['joint_inspection'],'합동 점검'],meeting:['meeting_signatures',['work_council','safety_meeting','office','inspection'],'회의 또는 업무 문서']},config=configs[kind];if(!config)throw new Error('서명 종류를 확인해 주세요.');
     this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();const doc=this.document(id);if(!doc||!config[1].includes(doc.type)||!['draft','rejected'].includes(doc.status))throw new Error(`수정 가능한 ${config[2]}를 확인해 주세요.`);const bytes=signatureBytes(signature);this.db.prepare(`INSERT INTO ${config[0]}(document_id,signature) VALUES(?,?) ON CONFLICT(document_id) DO UPDATE SET signature=excluded.signature,created_at=CURRENT_TIMESTAMP`).run(Number(id),bytes);this.db.exec('COMMIT');}catch(error){this.db.exec('ROLLBACK');throw error;}
   }
   attachment(id) {return this.db.prepare('SELECT * FROM attachments WHERE id=?').get(Number(id));}
@@ -1480,7 +1480,7 @@ export class Store {
     if(!['general','plan_diagram','morning_hazard_photo'].includes(category)||category==='plan_diagram'&&doc.type!=='work_plan'||category==='morning_hazard_photo'&&(doc.type!=='checklist'||JSON.parse(doc.details).kind!=='morning'))throw new Error('첨부 구분을 확인해 주세요.');
     if(['plan_diagram','morning_hazard_photo'].includes(category)){const bytes=Buffer.from(data);if(!bytes.subarray(0,8).equals(Buffer.from('89504e470d0a1a0a','hex'))&&!bytes.subarray(0,3).equals(Buffer.from('ffd8ff','hex')))throw new Error('시험 이미지는 PNG 또는 JPEG를 선택해 주세요.');}
     if (this.attachments(id).length>=20) throw new Error('첨부파일은 문서당 20개까지 가능합니다.');
-    const attachmentId=this.db.prepare('INSERT INTO attachments(document_id,name,data,category) VALUES(?,?,?,?)').run(Number(id),name,data,category).lastInsertRowid;if(doc.type==='checklist')this.db.prepare('DELETE FROM checklist_signatures WHERE document_id=?').run(Number(id));if(doc.type==='tbm')this.db.prepare('DELETE FROM tbm_signatures WHERE document_id=?').run(Number(id));if(doc.type==='joint_inspection')this.db.prepare('DELETE FROM joint_inspection_signatures WHERE document_id=?').run(Number(id));if(['work_council','safety_meeting','office'].includes(doc.type))this.db.prepare('DELETE FROM meeting_signatures WHERE document_id=?').run(Number(id));this.db.exec('COMMIT');return attachmentId;}catch(error){this.db.exec('ROLLBACK');throw error;}
+    const attachmentId=this.db.prepare('INSERT INTO attachments(document_id,name,data,category) VALUES(?,?,?,?)').run(Number(id),name,data,category).lastInsertRowid;if(doc.type==='checklist')this.db.prepare('DELETE FROM checklist_signatures WHERE document_id=?').run(Number(id));if(doc.type==='tbm')this.db.prepare('DELETE FROM tbm_signatures WHERE document_id=?').run(Number(id));if(doc.type==='joint_inspection')this.db.prepare('DELETE FROM joint_inspection_signatures WHERE document_id=?').run(Number(id));if(['work_council','safety_meeting','office','inspection'].includes(doc.type))this.db.prepare('DELETE FROM meeting_signatures WHERE document_id=?').run(Number(id));this.db.exec('COMMIT');return attachmentId;}catch(error){this.db.exec('ROLLBACK');throw error;}
   }
   deleteAttachment(id,onAuthorize=()=>{}) {
     this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();
@@ -1488,7 +1488,7 @@ export class Store {
     if(!attachment) throw new Error('첨부파일을 찾을 수 없습니다.');
     const doc=this.document(attachment.document_id);
     if(!doc || !['draft','rejected'].includes(doc.status)) throw new Error('임시저장 또는 반려된 문서의 첨부파일만 삭제할 수 있습니다.');
-    this.db.prepare('DELETE FROM attachments WHERE id=?').run(Number(id));if(doc.type==='checklist')this.db.prepare('DELETE FROM checklist_signatures WHERE document_id=?').run(doc.id);if(doc.type==='tbm')this.db.prepare('DELETE FROM tbm_signatures WHERE document_id=?').run(doc.id);if(doc.type==='joint_inspection')this.db.prepare('DELETE FROM joint_inspection_signatures WHERE document_id=?').run(doc.id);if(['work_council','safety_meeting','office'].includes(doc.type))this.db.prepare('DELETE FROM meeting_signatures WHERE document_id=?').run(doc.id);this.db.exec('COMMIT');}catch(error){this.db.exec('ROLLBACK');throw error;}
+    this.db.prepare('DELETE FROM attachments WHERE id=?').run(Number(id));if(doc.type==='checklist')this.db.prepare('DELETE FROM checklist_signatures WHERE document_id=?').run(doc.id);if(doc.type==='tbm')this.db.prepare('DELETE FROM tbm_signatures WHERE document_id=?').run(doc.id);if(doc.type==='joint_inspection')this.db.prepare('DELETE FROM joint_inspection_signatures WHERE document_id=?').run(doc.id);if(['work_council','safety_meeting','office','inspection'].includes(doc.type))this.db.prepare('DELETE FROM meeting_signatures WHERE document_id=?').run(doc.id);this.db.exec('COMMIT');}catch(error){this.db.exec('ROLLBACK');throw error;}
   }
   updateDocument(id, input, onAuthorize=()=>{}) {
     this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();
@@ -1517,7 +1517,7 @@ export class Store {
       if(current.date===d.date){if(previous)d.details.attendanceSnapshot=previous;}
       else d.details.attendanceSnapshot={present:this.attendance(d.siteId,d.date).filter(row=>row.present).length,capturedAt:new Date().toISOString()};
     }
-    this.db.prepare('UPDATE documents SET title=?,date=?,body=?,details=?,updated_at=CURRENT_TIMESTAMP WHERE id=?').run(d.title,d.date,d.body,JSON.stringify(d.details),Number(id));if(d.type==='checklist')this.db.prepare('DELETE FROM checklist_signatures WHERE document_id=?').run(Number(id));if(d.type==='tbm')this.db.prepare('DELETE FROM tbm_signatures WHERE document_id=?').run(Number(id));if(d.type==='joint_inspection')this.db.prepare('DELETE FROM joint_inspection_signatures WHERE document_id=?').run(Number(id));if(['work_council','safety_meeting','office'].includes(d.type))this.db.prepare('DELETE FROM meeting_signatures WHERE document_id=?').run(Number(id));const result=this.document(id);this.db.exec('COMMIT');return result;}catch(error){this.db.exec('ROLLBACK');throw error;}
+    this.db.prepare('UPDATE documents SET title=?,date=?,body=?,details=?,updated_at=CURRENT_TIMESTAMP WHERE id=?').run(d.title,d.date,d.body,JSON.stringify(d.details),Number(id));if(d.type==='checklist')this.db.prepare('DELETE FROM checklist_signatures WHERE document_id=?').run(Number(id));if(d.type==='tbm')this.db.prepare('DELETE FROM tbm_signatures WHERE document_id=?').run(Number(id));if(d.type==='joint_inspection')this.db.prepare('DELETE FROM joint_inspection_signatures WHERE document_id=?').run(Number(id));if(['work_council','safety_meeting','office','inspection'].includes(d.type))this.db.prepare('DELETE FROM meeting_signatures WHERE document_id=?').run(Number(id));const result=this.document(id);this.db.exec('COMMIT');return result;}catch(error){this.db.exec('ROLLBACK');throw error;}
   }
   updateRiskImprovement(documentId,input){
     const doc=this.document(documentId);
