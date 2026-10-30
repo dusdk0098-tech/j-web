@@ -1,0 +1,37 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtempSync,rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { createServer } from 'node:net';
+import { spawn } from 'node:child_process';
+import { once } from 'node:events';
+import { DatabaseSync } from 'node:sqlite';
+
+test('이름과 생년월일 로그인은 현장·암호·중복 계정과 실패 제한을 확인한다',{timeout:30000},async()=>{
+  const dir=mkdtempSync(join(tmpdir(),'jweb-worker-identity-')),reservation=createServer();await new Promise(resolve=>reservation.listen(0,'127.0.0.1',resolve));const port=reservation.address().port;await new Promise(resolve=>reservation.close(resolve));
+  const child=spawn(process.execPath,['server.js'],{cwd:process.cwd(),env:{...process.env,PORT:String(port),JWEB_DATA_DIR:dir,JWEB_ADMIN_PASSWORD:'virtual-admin-password'},stdio:['ignore','pipe','pipe']});
+  try{
+    await Promise.race([once(child.stdout,'data'),once(child,'exit').then(()=>{throw Error('시험 서버가 종료됐습니다.');})]);const base=`http://127.0.0.1:${port}`,send=(path,method='GET',data,cookie)=>fetch(base+path,{method,headers:{...(data===undefined?{}:{'content-type':'application/json'}),...(cookie?{cookie}:{})},...(data===undefined?{}:{body:JSON.stringify(data)})});
+    const admin=(await send('/api/login','POST',{password:'virtual-admin-password'})).headers.get('set-cookie').split(';')[0];
+    const makeSite=async name=>{const site=await (await send('/api/sites','POST',{name},admin)).json(),invite=await (await send(`/api/sites/${site.id}/invitation`,'POST',{},admin)).json(),token=new URL(invite.link).searchParams.get('token'),siteKey=(await (await send(`/api/join?token=${token}`)).json()).siteKey;return {site,token,siteKey};};
+    const a=await makeSite('가상 현장 A'),b=await makeSite('가상 현장 B'),register=async(site,loginId,name='가상 근로자',birthDate='2000-01-01')=>{const input={token:site.token,name,category:'직영',company:'가상 업체',occupation:'가상 직종',loginId,password:'virtual-password-123',acknowledged:true,profile:{birthDate,phone:'010-0000-0000'}};assert.equal((await send('/api/join','POST',input)).status,201);return input;};
+    const first=await register(a,'identity_first'),other=await register(b,'identity_other'),identity=(site,name='가상 근로자',birthDigits='000101',password=first.password)=>({siteKey:site.siteKey,method:'identity',name,birthDigits,password}),login=data=>send('/api/worker/login','POST',data);
+    for(const input of [identity(a,'없는 근로자'),identity(a,'가상 근로자','000102'),identity(a,'가상 근로자','000101','wrong-password')]){const result=await login(input);assert.equal(result.status,401);assert.equal(result.headers.get('set-cookie'),null);assert.deepEqual(await result.json(),{error:'가입 링크 또는 로그인 정보를 확인해 주세요.'});}
+    const success=await login(identity(a,' 가상 근로자 '));assert.equal(success.status,200);const cookie=success.headers.get('set-cookie').split(';')[0],worker=(await success.json()).worker;assert.equal(worker.site_id,a.site.id);assert.equal((await send('/api/worker/session','GET',undefined,cookie)).status,200);
+    const crossSite=await login(identity(b));assert.equal(crossSite.status,200);assert.equal((await crossSite.json()).worker.site_id,b.site.id);
+    await register(a,'identity_duplicate','가상 근로자','1900-01-01');assert.equal((await login(identity(a))).status,401);assert.equal((await login({siteKey:a.siteKey,loginId:first.loginId,password:first.password})).status,200);assert.equal((await login(identity(b))).status,200);
+    const limited=await register(a,'identity_limited','제한 가상 근로자','1990-02-03');for(let i=0;i<5;i++){assert.equal((await login({siteKey:a.siteKey,loginId:limited.loginId,password:'wrong'})).status,401);assert.equal((await login(identity(a,limited.name,'900203','wrong'))).status,401);}assert.equal((await login(identity(a,limited.name,'900203',limited.password))).status,429);assert.equal((await login({token:a.token,loginId:limited.loginId,password:limited.password})).status,429);
+    const workers=await (await send(`/api/workers?siteId=${a.site.id}`,'GET',undefined,admin)).json(),target=workers.find(row=>row.name===limited.name);assert.equal((await send(`/api/workers/${target.id}/password`,'PUT',{siteId:a.site.id,password:'replacement-password-123'},admin)).status,200);assert.equal((await login(identity(a,limited.name,'900203','replacement-password-123'))).status,200);assert.equal(other.name,first.name);
+  }finally{if(child.exitCode===null){const exited=once(child,'exit');child.kill();await exited;}rmSync(dir,{recursive:true,force:true});}
+});
+
+test('이름 확인 뒤 저장 대기 중 이름이 바뀌면 로그인과 출역을 만들지 않는다',{timeout:30000},async()=>{
+  const dir=mkdtempSync(join(tmpdir(),'jweb-worker-identity-race-')),reservation=createServer();await new Promise(resolve=>reservation.listen(0,'127.0.0.1',resolve));const port=reservation.address().port;await new Promise(resolve=>reservation.close(resolve));
+  const source=pathToFileURL(join(process.cwd(),'store.js')).href,trace=`import {Store} from ${JSON.stringify(source)};const original=Store.prototype.recordWorkerLogin;Store.prototype.recordWorkerLogin=function(...args){process.stdout.write('IDENTITY_SAVE\\n');return original.apply(this,args)};`,child=spawn(process.execPath,['--import',`data:text/javascript,${encodeURIComponent(trace)}`,'server.js'],{cwd:process.cwd(),env:{...process.env,PORT:String(port),JWEB_DATA_DIR:dir,JWEB_ADMIN_PASSWORD:'virtual-admin-password'},stdio:['ignore','pipe','pipe']});let db,locked=false;
+  try{
+    await Promise.race([once(child.stdout,'data'),once(child,'exit').then(()=>{throw Error('시험 서버가 종료됐습니다.');})]);const base=`http://127.0.0.1:${port}`,send=(path,method='GET',data,cookie)=>fetch(base+path,{method,headers:{...(data===undefined?{}:{'content-type':'application/json'}),...(cookie?{cookie}:{})},...(data===undefined?{}:{body:JSON.stringify(data)})}),admin=(await send('/api/login','POST',{password:'virtual-admin-password'})).headers.get('set-cookie').split(';')[0],site=await (await send('/api/sites','POST',{name:'가상 현장'},admin)).json(),invite=await (await send(`/api/sites/${site.id}/invitation`,'POST',{},admin)).json(),token=new URL(invite.link).searchParams.get('token'),person={token,name:'가상 근로자',category:'직영',company:'가상 업체',occupation:'가상 직종',loginId:'race_identity',password:'virtual-password-123',acknowledged:true,profile:{birthDate:'2000-01-01',phone:'010-0000-0000'}};assert.equal((await send('/api/join','POST',person)).status,201);const worker=(await (await send(`/api/workers?siteId=${site.id}`,'GET',undefined,admin)).json())[0];
+    db=new DatabaseSync(join(dir,'jweb.sqlite'));db.exec('PRAGMA busy_timeout=3000');db.exec('BEGIN IMMEDIATE');locked=true;const started=once(child.stdout,'data'),pending=send('/api/worker/login','POST',{token,method:'identity',name:person.name,birthDigits:'000101',password:person.password});pending.catch(()=>{});assert.match(String((await started)[0]),/IDENTITY_SAVE/);db.prepare('UPDATE workers SET name=? WHERE id=?').run('변경된 가상 이름',worker.id);db.exec('COMMIT');locked=false;const response=await pending;assert.equal(response.status,401);assert.equal(response.headers.get('set-cookie'),null);assert.equal(db.prepare('SELECT COUNT(*) AS n FROM worker_sessions WHERE worker_id=?').get(worker.id).n,0);assert.equal(db.prepare('SELECT COUNT(*) AS n FROM attendance WHERE worker_id=?').get(worker.id).n,0);
+  }finally{if(db){if(locked)db.exec('ROLLBACK');db.close();}if(child.exitCode===null){const exited=once(child,'exit');child.kill();await exited;}rmSync(dir,{recursive:true,force:true});}
+});

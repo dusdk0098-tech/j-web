@@ -1156,10 +1156,14 @@ export class Store {
     const account=this.db.prepare('SELECT login_id FROM worker_accounts WHERE site_id=? AND worker_id=?').get(Number(siteId),Number(workerId));if(!account)throw new Error('선택한 현장의 시험 계정을 확인해 주세요.');
     const salt=randomBytes(16),hash=scryptSync(password,salt,32);this.db.prepare('UPDATE worker_accounts SET salt=?,password_hash=? WHERE site_id=? AND worker_id=?').run(salt,hash,Number(siteId),Number(workerId));return account.login_id;
   }
+  workerLoginIdentity(siteId,name,birthDigits){
+    if(typeof name!=='string'||!name.trim()||name.length>200||/[\x00-\x1f\x7f]/.test(name)||typeof birthDigits!=='string'||!/^\d{6}$/.test(birthDigits))return null;
+    const rows=this.db.prepare("SELECT a.worker_id,a.login_id FROM workers w JOIN worker_accounts a ON a.worker_id=w.id AND a.site_id=w.site_id JOIN join_acknowledgements j ON j.worker_id=w.id WHERE w.site_id=? AND w.name=? AND replace(substr(json_extract(j.profile,'$.birthDate'),3),'-','')=? LIMIT 2").all(Number(siteId),name.trim(),birthDigits);return rows.length===1?rows[0]:null;
+  }
   authenticateWorker(token,loginId,password,siteKey=null,withCredential=false) {
     const site=siteKey?this.siteFromAccess(siteKey):this.invitation(token);
-    if(!site || typeof loginId!=='string' || !/^[a-zA-Z0-9_]{3,40}$/.test(loginId) || typeof password!=='string' || password.length>256)return null;
-    const account=this.db.prepare('SELECT worker_id,salt,password_hash FROM worker_accounts WHERE site_id=? AND login_id=?').get(site.id,loginId);
+    if(!site || typeof password!=='string' || password.length>256)return null;
+    const account=typeof loginId==='string'&&/^[a-zA-Z0-9_]{3,40}$/.test(loginId)?this.db.prepare('SELECT worker_id,salt,password_hash FROM worker_accounts WHERE site_id=? AND login_id=?').get(site.id,loginId):null;
     // 계정이 없어도 같은 암호 계산을 해서 응답 시간으로 아이디 존재를 알 수 없게 한다.
     const hash=scryptSync(password,account?.salt||Buffer.alloc(16),32);
     if(!timingSafeEqual(hash,account?.password_hash||Buffer.alloc(32))||!account)return null;
