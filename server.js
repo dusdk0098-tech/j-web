@@ -532,6 +532,7 @@ const server = http.createServer(async (req, res) => {
     }
     const company=url.pathname.match(/^\/api\/companies\/(\d+)$/);
     if(company && req.method==='PUT')return json(res,200,store.updateCompany(company[1],await body(req)));
+    if(url.pathname==='/api/ppe-issues/batch'&&req.method==='POST'){const input=await body(req);return json(res,201,{ids:store.addPpeIssues(input,()=>checkRequestSession(req))});}
     if(url.pathname==='/api/ppe-issues'){
       if(req.method==='GET')return json(res,200,store.ppeIssues(url.searchParams.get('siteId'),url.searchParams.get('month')));
       if(req.method==='POST')return json(res,201,{id:store.addPpeIssue(await body(req))});

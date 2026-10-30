@@ -378,6 +378,11 @@ export class Store {
     const worker=this.db.prepare('SELECT name,category,company,occupation FROM workers WHERE id=? AND site_id=?').get(workerId,siteId);if(!worker)throw new Error('선택한 현장의 출입자를 확인해 주세요.');
     return this.db.prepare('INSERT INTO ppe_issues(site_id,worker_id,date,item,quantity,worker_snapshot) VALUES(?,?,?,?,?,?)').run(siteId,workerId,date,item,quantity,JSON.stringify(worker)).lastInsertRowid;
   }
+  addPpeIssues(input,onAuthorize=()=>{}){
+    if(!input||!Array.isArray(input.items)||!input.items.length||input.items.length>20)throw new Error('보호구를 1개부터 20개까지 선택해 주세요.');
+    const items=input.items.map(item=>ppeValues({...input,item}));if(new Set(items.map(item=>item.item)).size!==items.length)throw new Error('중복된 보호구가 있습니다.');
+    this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();const ids=items.map(item=>this.addPpeIssue({...input,...item}));this.db.exec('COMMIT');return ids;}catch(error){this.db.exec('ROLLBACK');throw error;}
+  }
   updatePpeIssue(id,input){
     const {date,item,quantity}=ppeValues(input);
     if(!this.db.prepare('UPDATE ppe_issues SET date=?,item=?,quantity=? WHERE id=? AND site_id=?').run(date,item,quantity,Number(id),Number(input.siteId)).changes)throw new Error('선택한 현장의 지급 기록을 확인해 주세요.');
