@@ -466,7 +466,7 @@ function capturedFiles(cycle){
   if(linked?.type==='office'&&linked.reference)for(const file of linked.reference.files)add('office-reference',linked.reference.id,file.id,`참조 문서 · ${file.name}`);
   if(linked?.type==='permit')for(const item of linked.extensions)add('permit-signature',item.id,0,`${item.date_from} 시험 연장 서명`);
   if(linked?.type==='training')for(const worker of linked.signedWorkers)add('training-signature',worker.id,0,`${worker.name} 당일 시험 서명`);
-  if(['training','joint','meeting','office','cost'].includes(linked?.type)&&linked.authorSignature)add('author-signature',0,0,'작성자 시험 서명');
+  if(['training','joint','meeting','office','cost','checklist'].includes(linked?.type)&&linked.authorSignature)add('author-signature',0,0,'작성자 시험 서명');
   return entries.length?`<ul>${entries.join('')}</ul>`:'<p>보존된 시험 파일 없음</p>';
 }
 async function renderDetail(){

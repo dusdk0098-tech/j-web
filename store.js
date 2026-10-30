@@ -1274,6 +1274,7 @@ export class Store {
   liveReviewerLinks(doc){
     if(doc.type==='risk')return {type:'risk',activities:this.riskActivities(doc.id).map(activity=>({...activity,worker_snapshot:JSON.parse(activity.worker_snapshot||'[]'),files:this.riskActivityPhotos(doc.id,activity.id)}))};
     if(doc.type==='permit')return {type:'permit',checks:this.permitChecks(doc.id),extensions:this.permitExtensions(doc.id)};
+    if(doc.type==='checklist')return {type:'checklist',authorSignature:!!this.checklistSignature(doc.id)};
     if(doc.type==='cost')return {type:'cost',photos:Array.isArray(JSON.parse(doc.details||'{}').rows)?this.safetyCostReportPhotos(doc.id):[],authorSignature:!!this.meetingSignature(doc.id)};
     if(doc.type==='joint_inspection')return {type:'joint',authorSignature:!!this.jointSignature(doc.id)};
     if(doc.type==='office'){const details=JSON.parse(doc.details||'{}'),referenceId=details.referenceDocId||details.referenceId||0,reference=referenceId?(details.referenceDocId?this.officeLinkedDocument(doc.site_id,referenceId):this.officeReference(doc.site_id,referenceId)):null;if(referenceId&&!reference)throw new Error(details.referenceDocId?'연결된 업무 문서가 변경되었습니다. 다시 확인해 주세요.':'연결된 품의서가 변경되었습니다. 다시 확인해 주세요.');return {type:'office',authorSignature:!!this.meetingSignature(doc.id),referenceRecipients:this.officeReferences(doc.id),reference:reference?{id:reference.id,title:reference.title,date:reference.date,body:reference.body,files:this.attachments(reference.id)}:null};}
@@ -1301,6 +1302,7 @@ export class Store {
     if(kind==='training'&&['tbm','education'].includes(doc.type))return this.documentTrainingSignature(doc.id,id);
     if(kind==='author'&&doc.type==='tbm'&&Number(id)===0)return this.tbmSignature(doc.id)?.signature||null;
     if(kind==='author'&&doc.type==='joint_inspection'&&Number(id)===0)return this.jointSignature(doc.id)?.signature||null;
+    if(kind==='author'&&doc.type==='checklist'&&Number(id)===0)return this.checklistSignature(doc.id)?.signature||null;
     if(kind==='author'&&['work_council','safety_meeting','office','inspection','safety_log','patrol','cost'].includes(doc.type)&&Number(id)===0)return this.meetingSignature(doc.id)?.signature||null;
     if(kind==='equipment-check'&&doc.type==='work_plan')return this.equipmentCheckSignature(doc.id,id);
     return null;
@@ -1322,7 +1324,7 @@ export class Store {
     if(linked?.type==='permit')for(const extension of linked.extensions)save('permit-signature',extension.id,0,{data:this.liveReviewerLinkedSignature(doc,'permit',extension.id)});
     if(linked?.type==='training')for(const worker of linked.signedWorkers)save('training-signature',worker.id,0,{data:this.liveReviewerLinkedSignature(doc,'training',worker.id)});
     if(linked?.type==='office'&&linked.reference)for(const file of linked.reference.files)save('office-reference',linked.reference.id,file.id,this.liveReviewerLinkedFile(doc,'office-reference',linked.reference.id,file.id));
-    if(['training','joint','meeting','office','cost'].includes(linked?.type)&&linked.authorSignature)save('author-signature',0,0,{data:this.liveReviewerLinkedSignature(doc,'author',0)});
+    if(['training','joint','meeting','office','cost','checklist'].includes(linked?.type)&&linked.authorSignature)save('author-signature',0,0,{data:this.liveReviewerLinkedSignature(doc,'author',0)});
     this.db.prepare('UPDATE documents SET approval_cycle_id=? WHERE id=?').run(cycle,doc.id);return cycle;
   }
   approvalCycle(documentId,cycleId){const row=this.db.prepare('SELECT id,document_id,document_json,attachments_json,linked_json,created_at FROM approval_cycles WHERE id=? AND document_id=?').get(Number(cycleId),Number(documentId));return row?{id:row.id,documentId:row.document_id,createdAt:row.created_at,document:JSON.parse(row.document_json),attachments:JSON.parse(row.attachments_json),linked:JSON.parse(row.linked_json)}:null;}
