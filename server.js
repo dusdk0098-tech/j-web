@@ -3,6 +3,7 @@ import { readFileSync, mkdirSync } from 'node:fs';
 import { dirname, extname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Store } from './store.js';
+import { PersonalNotes } from './personal-notes.js';
 import { types } from './domain.js';
 import QRCode from 'qrcode';
 import { issueAccessQr,issueInvitationQr } from './qr-issue.js';
@@ -23,6 +24,7 @@ const dataDir = process.env.JWEB_DATA_DIR || join(root, 'data');
 const auth=new LocalAuth(process.env.JWEB_ADMIN_PASSWORD);
 mkdirSync(dataDir, { recursive: true });
 const store = new Store(join(dataDir, 'jweb.sqlite'));
+const personalNotes = new PersonalNotes(store.db);
 const workerSessions=new WorkerSessions(store.db);
 const reviewerSessions=new ReviewerSessions(store.db),reviewerAccountFailures=new Map();let reviewerFailures=[];
 let workerFailures=[];
@@ -284,6 +286,24 @@ const server = http.createServer(async (req, res) => {
       const path = url.pathname === '/' ? '/index.html' : url.pathname === '/join' ? '/join.html' : url.pathname === '/login' ? '/login.html' : url.pathname === '/review' ? '/review.html' : url.pathname;
       res.writeHead(200, {'Content-Type':mime[extname(path)],'X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer','Content-Security-Policy':"default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; object-src 'none'; frame-ancestors 'none'"});
       return res.end(readFileSync(join(root,'public',path.slice(1))));
+    }
+    if(url.pathname==='/api/personal-notes'){
+      if(req.method==='GET')return json(res,200,personalNotes.list(url.searchParams.get('siteId'),url.searchParams.get('from')||'',url.searchParams.get('to')||'',url.searchParams.get('q')||''));
+      if(req.method==='POST'){const input=await body(req);return json(res,201,personalNotes.create(input,()=>checkRequestSession(req)));}
+    }
+    const personalFile=url.pathname.match(/^\/api\/personal-notes\/(\d+)\/files(?:\/(\d+))?$/);
+    if(personalFile){
+      const [,id,fileId]=personalFile,siteId=url.searchParams.get('siteId');
+      if(!fileId&&req.method==='POST'){const chunks=[];let size=0;for await(const chunk of req){size+=chunk.length;if(size>2*1024*1024)throw Error('파일은 2MB 이하여야 합니다.');chunks.push(chunk);}checkRequestSession(req);let name;try{name=decodeURIComponent(req.headers['x-file-name']||'');}catch{throw Error('파일 이름을 확인해 주세요.');}return json(res,201,personalNotes.addFile(siteId,id,url.searchParams.get('version'),name,Buffer.concat(chunks),()=>checkRequestSession(req)));}
+      if(fileId&&req.method==='GET'){const file=personalNotes.file(siteId,id,fileId);if(!file)return json(res,404,{error:'첨부파일을 찾을 수 없습니다.'});const name=encodeURIComponent(file.name).replace(/[!'()*]/g,c=>`%${c.charCodeAt(0).toString(16).toUpperCase()}`);res.writeHead(200,{'Content-Type':'application/octet-stream','Content-Disposition':`attachment; filename="attachment"; filename*=UTF-8''${name}`,'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(file.data);}
+      if(fileId&&req.method==='DELETE'){const input=await body(req);personalNotes.removeFile(siteId,id,fileId,input.version,()=>checkRequestSession(req));return json(res,200,{ok:true});}
+    }
+    const personalNote=url.pathname.match(/^\/api\/personal-notes\/(\d+)(?:\/(check))?$/);
+    if(personalNote){
+      const [,id,action]=personalNote;
+      if(!action&&req.method==='PUT'){const input=await body(req);return json(res,200,personalNotes.update(input.siteId,id,input,()=>checkRequestSession(req)));}
+      if(!action&&req.method==='DELETE'){const input=await body(req);personalNotes.remove(input.siteId,id,input.version,()=>checkRequestSession(req));return json(res,200,{ok:true});}
+      if(action==='check'&&req.method==='POST'){const input=await body(req);return json(res,200,personalNotes.check(input.siteId,id,input.version,()=>checkRequestSession(req)));}
     }
     if (url.pathname === '/api/types' && req.method === 'GET') return json(res,200,types);
     if(url.pathname==='/api/reviewers'){if(req.method==='GET')return json(res,200,store.reviewers(url.searchParams.get('siteId')));if(req.method==='POST')return json(res,201,store.createReviewer(await body(req)));}
