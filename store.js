@@ -1165,6 +1165,15 @@ export class Store {
     const documents=this.db.prepare("SELECT id,type,title,body,details,status FROM documents WHERE site_id=? AND date=? AND type IN ('notice','tbm','education','inspection','patrol','daily_report') ORDER BY id DESC").all(Number(siteId),date);
     return {present:this.attendance(siteId,date).filter(row=>row.present).length,documents};
   }
+  monthlySiteActivity(month){
+    month=monthValue(month);const first=new Date(`${month}-01T00:00:00Z`),last=new Date(Date.UTC(Number(month.slice(0,4)),Number(month.slice(5,7)),0)),start=new Date(first.getTime()-first.getUTCDay()*86400000),weeks=[];
+    for(let time=start.getTime();time<=last.getTime();time+=7*86400000){const a=new Date(time),b=new Date(time+6*86400000);if(a.getUTCFullYear()>9999||b.getUTCFullYear()>9999)throw new Error('조회할 월을 확인해 주세요.');weeks.push({start:a.toISOString().slice(0,10),end:b.toISOString().slice(0,10)});}
+    this.db.exec('BEGIN');try{const sites=this.sites().map(site=>({id:site.id,name:site.name,weeks:weeks.map(()=>({attendance:0,documents:0}))})),byId=new Map(sites.map(site=>[site.id,site])),apply=(row,key)=>{const site=byId.get(row.site_id),index=Math.floor((Date.parse(`${row.date}T00:00:00Z`)-start.getTime())/(7*86400000));if(site&&site.weeks[index])site.weeks[index][key]+=row.n;},from=weeks[0].start,to=weeks.at(-1).end;
+      for(const row of this.db.prepare('SELECT w.site_id,a.date,COUNT(*) AS n FROM attendance a JOIN workers w ON w.id=a.worker_id WHERE a.present=1 AND a.date BETWEEN ? AND ? GROUP BY w.site_id,a.date').all(from,to))apply(row,'attendance');
+      for(const row of this.db.prepare("SELECT site_id,date,COUNT(*) AS n FROM documents WHERE type<>'office' AND date BETWEEN ? AND ? GROUP BY site_id,date").all(from,to))apply(row,'documents');
+      this.db.exec('COMMIT');return {month,weeks,sites};
+    }catch(error){this.db.exec('ROLLBACK');throw error;}
+  }
   weeklyActivity(siteId,start){
     start=dateValue(start);siteId=Number(siteId);if(!this.db.prepare('SELECT 1 FROM sites WHERE id=?').get(siteId))throw new Error('현장을 선택해 주세요.');
     const day=new Date(`${start}T00:00:00Z`),dates=Array.from({length:7},(_,i)=>{const value=new Date(day.getTime()+i*86400000).toISOString().slice(0,10);return dateValue(value);}),end=dates[6],rows=dates.map(date=>({date,attendance:0,attendanceCategories:[],attendanceOccupations:[],documents:{},noticeReads:0,trainingChecks:0,trainingByType:{tbm:0,education:0},workerChecks:0,managerChecks:0,managerDaysOff:0,hazardReports:0,ppeIssues:[],checklists:[]})),byDate=new Map(rows.map(row=>[row.date,row]));

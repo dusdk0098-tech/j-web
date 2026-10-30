@@ -22,6 +22,7 @@ const state = { page:'dashboard', siteId:null, types:{}, type:'', riskKind:'', r
 const labels = {dashboard:'현장 현황','manager-check':'관리자 자가점검',workers:'출입자 관리',companies:'협력사 관리',equipment:'기계·장비',rigging:'줄걸이·체결장구','work-places':'작업장소','safety-costs':'산업안전보건관리비',attendance:'출역 관리',stops:'작업중지 요청',documents:'안전 문서',approval:'미결재 문서',statistics:'안전 활동 통계'};
 labels['hazards']='의견제안 및 위험신고';
 labels['incident-guide']='사고 대응 안내';
+labels['site-activity']='전체 현장 주간 활동';
 labels['restaurants']='식대 기본설정';
 labels['meal-checks']='식대 체크';
 labels['meal-statement']='식대 명세서';
@@ -40,6 +41,7 @@ labels['personal-notes']='개인업무 일지';
 labels['common-work']='공통업무';
 document.querySelector('[data-page=stops]').insertAdjacentHTML('afterend','<button data-page="hazards">의견제안 및 위험신고</button>');
 document.querySelector('[data-page=hazards]').insertAdjacentHTML('afterend','<button data-page="incident-guide">사고 대응 안내</button>');
+document.querySelector('[data-page=statistics]').insertAdjacentHTML('afterend','<button data-page="site-activity">전체 현장 주간 활동</button>');
 document.querySelector('[data-page=attendance]').insertAdjacentHTML('afterend','<button data-page="restaurants">식대 기본설정</button>');
 document.querySelector('[data-page=restaurants]').insertAdjacentHTML('afterend','<button data-page="meal-checks">식대 체크</button>');
 document.querySelector('[data-page=meal-checks]').insertAdjacentHTML('afterend','<button data-page="wages">가상 노임</button>');
@@ -800,6 +802,13 @@ async function render(){
     content.innerHTML=`<section class="panel"><h2>사고 대응 안내</h2><p>사고 정도에 따라 현장의 대응 절차와 관계 기관의 최신 안내를 확인하세요. 실제 신고와 알림 전송은 이 화면에서 처리되지 않습니다.</p><p><a href="https://www.csi.go.kr/por/about_acd_001.do" target="_blank" rel="noopener noreferrer">건설사고 신고 절차 · 건설공사 안전관리종합정보망</a></p><p><a href="https://law.go.kr/LSW/lsLinkCommonInfo.do?chrClsCd=010202&amp;lspttninfSeq=154171" target="_blank" rel="noopener noreferrer">산업재해 발생 보고 규정 · 국가법령정보센터</a></p><p>적용 대상과 신고 방법은 사고 상황과 현행 규정을 확인하세요.</p>${['경상','중상','사망'].map(severity=>`<details><summary>${severity} 사고</summary><p>현장의 대응 절차와 위의 공식 신고 안내를 확인한 뒤 필요한 기록을 작성하세요.</p><button type="button" data-incident-report="${severity}">가상 재해 보고서 작성</button></details>`).join('')}<p><button type="button" id="incident-report-list">가상 재해 보고서 목록</button></p><p class="muted">공사 중단 알림 전송 기능은 연결되지 않았습니다.</p></section>`;
     content.querySelectorAll('[data-incident-report]').forEach(button=>button.onclick=()=>editDocument(null,{severity:button.dataset.incidentReport},'incident').catch(showError));
     $('#incident-report-list').onclick=()=>{state.page='documents';state.type='incident';state.detail=null;state.query='';state.documentFrom='';state.documentTo='';render().catch(showError);};return;
+  }
+  if(state.page==='site-activity'){
+    const month=state.siteActivityMonth||today().slice(0,7);content.innerHTML=`<section class="panel"><h2>전체 현장 주간 활동</h2><p>선택한 달과 겹치는 일요일부터 토요일까지의 가상 출역 인일과 안전 문서 건수입니다. 월 밖 날짜도 포함하며 문서는 모든 상태를 집계합니다. 점수와 등급은 산출하지 않습니다.</p><label>월 <input type="month" id="site-activity-month" value="${esc(month)}"></label> <button type="button" id="site-activity-search">조회</button><div id="site-activity-result" role="status">불러오는 중</div></section>`;
+    $('#site-activity-search').onclick=()=>{state.siteActivityMonth=$('#site-activity-month').value;render().catch(showError);};
+    const result=await api(`/api/monthly-site-activity?${new URLSearchParams({month})}`);if(state.page!=='site-activity'||(state.siteActivityMonth||today().slice(0,7))!==month)return;
+    const target=$('#site-activity-result');target.innerHTML=result.sites.length?`<div class="table-wrap"><table><thead><tr><th>현장</th>${result.weeks.map(week=>`<th>${esc(week.start)} ~ ${esc(week.end)}</th>`).join('')}</tr></thead><tbody>${result.sites.map(site=>`<tr><th>${esc(site.name)}</th>${site.weeks.map((week,index)=>`<td><button type="button" data-site-week="${site.id}" data-week-index="${index}" aria-label="${esc(site.name)} ${esc(result.weeks[index].start)} 주간 활동">출역 ${week.attendance} · 문서 ${week.documents}</button></td>`).join('')}</tr>`).join('')}</tbody></table></div>`:'<p>현장이 없습니다.</p>';
+    target.querySelectorAll('[data-site-week]').forEach(button=>button.onclick=async()=>{const siteId=Number(button.dataset.siteWeek),start=result.weeks[Number(button.dataset.weekIndex)]?.start;if(!start||!result.sites.some(site=>site.id===siteId))return;state.siteId=siteId;state.page='statistics';state.detail=null;state.statisticsMonth=start.slice(0,7);state.statisticsDay='';try{await render();if(state.page!=='statistics'||state.siteId!==siteId)return;const input=$('#weekly-start'),load=$('#weekly-load');if(input&&load){input.value=start;load.click();input.scrollIntoView({block:'center'});}}catch(error){showError(error);}});return;
   }
   if(state.page==='hazards'){
     const siteId=state.siteId,reports=await api(`/api/sites/${siteId}/hazard-reports?q=${encodeURIComponent(state.query)}`);
