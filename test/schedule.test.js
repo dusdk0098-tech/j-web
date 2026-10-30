@@ -9,6 +9,14 @@ import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { DatabaseSync } from 'node:sqlite';
 import { Store } from '../store.js';
+import { scheduleMonthDays } from '../public/schedule.js';
+
+test('일정 달력은 선택 가능한 날짜와 요일을 정확히 만든다',()=>{
+  const leap=scheduleMonthDays('2024-02'),ordinary=scheduleMonthDays('2026-02');
+  assert.equal(leap.firstWeekday,4);assert.equal(leap.days.length,29);assert.equal(leap.days[0],'2024-02-01');assert.equal(leap.days.at(-1),'2024-02-29');
+  assert.equal(ordinary.firstWeekday,0);assert.equal(ordinary.days.length,28);assert.equal(ordinary.days.at(-1),'2026-02-28');assert.equal(scheduleMonthDays('9999-12').days.at(-1),'9999-12-31');
+  for(const value of ['0999-01','2026-00','2026-13','2026-1','2026-02-01',null])assert.throws(()=>scheduleMonthDays(value),/월/);
+});
 
 test('일정 대상자는 현장별로 보존하고 이전 화면 수정에서 지워지지 않는다',()=>{
   const dir=mkdtempSync(join(tmpdir(),'jweb-schedule-target-')),file=join(dir,'test.sqlite');let store=new Store(file);try{

@@ -4,6 +4,8 @@
 @media print{body:has(dialog[open] .self-check-print)>:not(dialog){display:none!important}body:has(dialog[open] .self-check-print) dialog{position:static;display:block;max-width:none;width:100%;box-shadow:none}.self-check-print a{display:none}}
 .block-calendar{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:6px;margin:16px 0}.block-calendar button{padding:8px 2px;border:1px solid #c8d3e4;border-radius:4px;background:white;color:#234985}.block-calendar button[aria-pressed=true]{background:#fbe9e7;color:#8b302a;border-color:#d89c95}
 .schedule-calendar>div{min-width:0;border:1px solid #e0e6ef;padding:4px;min-height:60px}.schedule-calendar button{display:block;width:100%;overflow-wrap:anywhere;text-align:left;margin-top:4px}
+.schedule-calendar .schedule-day{display:flex;align-items:center;justify-content:space-between;min-height:44px;margin-top:0;padding:4px}
+@media print{.schedule-calendar .schedule-day{display:flex!important;min-height:0;padding:0;border:0}.schedule-calendar .schedule-day span{display:none}}
 .plan-diagram{max-width:100%;height:auto}
 #signature, .signature-pad { display:block; max-width:100%; border:1px solid #7c8a95; background:#fff; touch-action:none; }
 @media print{.batch-controls{display:none!important}.batch-document{break-after:page}.batch-document:last-child{break-after:auto}}
