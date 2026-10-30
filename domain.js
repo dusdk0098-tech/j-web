@@ -1,4 +1,5 @@
 import { riskScaleOptions, riskScore } from './public/risk-scale.js';
+import { quantityTenths } from './public/daily-quantities.js';
 
 export const types = {
   notice: '유해·위험 공지', tbm: 'TBM', education: '안전 교육 서류',
@@ -193,7 +194,12 @@ export function recordInput(input) {
       if (!Array.isArray(rows) || rows.length>100) throw new Error('작업일보 항목을 확인해 주세요.');
       details[key]=rows.map(row=>{
         if (!row || typeof row!=='object' || Array.isArray(row) || typeof row.name!=='string' || !row.name.trim() || row.name.length>200 || typeof row.quantity!=='string' || row.quantity.length>100) throw new Error('인력·장비·자재의 항목과 수량을 확인해 주세요.');
-        return {name:row.name.trim(),quantity:row.quantity.trim()};
+        const result={name:row.name.trim(),quantity:row.quantity.trim()};
+        if(['previous','day','unit','specification'].some(field=>row[field]!==undefined)){
+          for(const field of ['previous','day']){const value=row[field]??'';if(typeof value!=='string'||(value!==''&&quantityTenths(value)===null))throw new Error('전일 누계와 당일 수량은 0 이상의 소수 첫째 자리까지 입력해 주세요.');result[field]=value;}
+          for(const field of ['unit','specification']){const value=row[field]??'';if(typeof value!=='string'||value.length>30)throw new Error('자재 규격과 단위를 확인해 주세요.');result[field]=value.trim();}
+        }
+        return result;
       });
     }
     const progress = value.progress ?? '';

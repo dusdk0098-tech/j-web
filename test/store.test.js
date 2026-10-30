@@ -1085,6 +1085,17 @@ test('작업일보의 구조화된 항목을 저장하고 수정하며 공정률
   } finally {s.close();}
 });
 
+test('작업일보 전일·당일 수량과 자재 규격을 보존하고 잘못된 변경을 거절한다',()=>{
+  const s=new Store(':memory:');try{
+    const site=s.createSite({name:'가상 현장'}),old={name:'기존 자재',quantity:'2포대'},material={name:'시험 자재',quantity:'',previous:'1.1',day:'0.2',unit:'개',specification:'가상 규격'},input={siteId:site.id,type:'daily_report',title:'가상 일보',date:'2026-10-30',details:{materials:[old,material]}};
+    const doc=s.createDocument(input);assert.deepEqual(JSON.parse(doc.details).materials,[old,material]);
+    for(const invalid of ['-1','1.22','문자','100000000'])assert.throws(()=>s.updateDocument(doc.id,{...input,details:{materials:[{...material,day:invalid}]}}),/수량/);
+    assert.throws(()=>s.updateDocument(doc.id,{...input,details:{materials:[{...material,unit:'가'.repeat(31)}]}}),/규격/);
+    assert.deepEqual(JSON.parse(s.document(doc.id).details).materials,[old,material]);
+    const updated=s.updateDocument(doc.id,{...input,details:{materials:[old,{...material,previous:'',day:'0'}]}});assert.equal(JSON.parse(updated.details).materials[1].previous,'');
+  }finally{s.close();}
+});
+
 test('이전 위험성평가는 현장, 날짜, 종류, 척도와 결재 상태를 제한한다',()=>{
   const s=new Store(':memory:');
   try {
