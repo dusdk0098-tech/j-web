@@ -11,6 +11,16 @@ import { Store } from '../store.js';
 
 const png=new PNG({width:1,height:1});png.data[3]=255;const signature=`data:image/png;base64,${PNG.sync.write(png).toString('base64')}`;
 
+test('업무 문서 결재자 9명과 참조자 10명을 제한하고 순차 처리한다',()=>{
+  const s=new Store(':memory:');try{
+    const site=s.createSite({name:'가상 현장'}),people=Array.from({length:11},(_,i)=>s.createReviewer({siteId:site.id,loginId:`office_limit_${i}`,name:`가상 ${i}`,password:'virtual-password-123'})),ids=people.map(person=>person.id),doc=s.createDocument({siteId:site.id,type:'office',title:'가상 업무 문서',date:'2026-10-30',details:{kind:'품의서'}}),normal=s.createDocument({siteId:site.id,type:'tbm',title:'가상 안전 문서',date:'2026-10-30'});
+    s.setApprovalLine(doc.id,ids.slice(0,9));assert.throws(()=>s.setApprovalLine(doc.id,ids.slice(0,10)),/결재자/);assert.deepEqual(s.approvalLine(doc.id).map(row=>row.reviewer_id),ids.slice(0,9));s.setApprovalLine(normal.id,ids.slice(0,4));assert.throws(()=>s.setApprovalLine(normal.id,ids.slice(0,5)),/결재자/);assert.equal(s.approvalLine(normal.id).length,4);
+    s.setOfficeReferences(doc.id,ids.slice(0,10));assert.throws(()=>s.setOfficeReferences(doc.id,ids),/참조자/);assert.equal(s.officeReferences(doc.id).length,10);s.saveMeetingSignature(doc.id,signature);assert.throws(()=>s.setApprovalLine(doc.id,[ids[0]],()=>{throw Error('세션 만료');}),/세션 만료/);assert.throws(()=>s.setOfficeReferences(doc.id,[ids[0]],()=>{throw Error('세션 만료');}),/세션 만료/);assert.equal(s.approvalLine(doc.id).length,9);assert.equal(s.officeReferences(doc.id).length,10);assert.ok(s.meetingSignature(doc.id));
+    s.transition(doc.id,'submit');for(let i=0;i<9;i++){assert.equal(s.reviewerDocument(ids[i],doc.id)?.id,doc.id);if(i<8)assert.equal(s.reviewerDocument(ids[i+1],doc.id),null);s.reviewerTransition(doc.id,ids[i],'approve','가상 의견',signature);}assert.equal(s.document(doc.id).status,'approved');assert.equal(s.approvalLine(doc.id).filter(row=>row.state==='approved').length,9);
+    const legacy=s.createDocument({siteId:site.id,type:'office',title:'이전 가상 문서',date:'2026-10-30',details:{kind:'품의서'}}),insert=s.db.prepare('INSERT INTO office_reference_recipients(document_id,reviewer_id) VALUES(?,?)');for(const id of ids)insert.run(legacy.id,id);assert.throws(()=>s.setOfficeReferences(legacy.id,ids),/참조자/);assert.equal(s.officeReferences(legacy.id).length,11);
+  }finally{s.close();}
+});
+
 test('가상 업무 문서는 작성자 서명과 결재자를 확인하고 요청 사본을 보존한다',()=>{
   const s=new Store(':memory:');try{
     const site=s.createSite({name:'가상 현장'}),other=s.createSite({name:'다른 현장'}),reviewer=s.createReviewer({siteId:site.id,loginId:'office_review',name:'가상 결재자',password:'virtual-password-123'}),foreign=s.createReviewer({siteId:other.id,loginId:'other_review',name:'다른 결재자',password:'virtual-password-123'}),input={siteId:site.id,type:'office',title:'가상 품의',date:'2026-10-30',body:'가상 내용',details:{kind:'품의서'}};
