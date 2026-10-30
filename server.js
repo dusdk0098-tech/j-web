@@ -522,10 +522,10 @@ const server = http.createServer(async (req, res) => {
     if(boardPost&&req.method==='DELETE'){const input=await body(req);store.deleteBoardPost(input.kind,boardPost[1]);return json(res,200,{ok:true});}
     if(url.pathname==='/api/schedules'){
       if(req.method==='GET')return json(res,200,store.schedules(url.searchParams.get('siteId'),url.searchParams.get('month'),url.searchParams.get('q')||''));
-      if(req.method==='POST')return json(res,201,store.saveSchedule(await body(req)));
+      if(req.method==='POST')return json(res,201,store.saveSchedule(await body(req),null,()=>checkRequestSession(req)));
     }
     const schedule=url.pathname.match(/^\/api\/schedules\/(\d+)$/);
-    if(schedule&&req.method==='PUT')return json(res,200,store.saveSchedule(await body(req),schedule[1]));
+    if(schedule&&req.method==='PUT')return json(res,200,store.saveSchedule(await body(req),schedule[1],()=>checkRequestSession(req)));
     if(schedule&&req.method==='DELETE'){const input=await body(req);store.deleteSchedule(input.siteId,schedule[1]);return json(res,200,{ok:true});}
     if(url.pathname==='/api/site-articles'){
       if(req.method==='GET')return json(res,200,store.siteArticles(url.searchParams.get('siteId'),url.searchParams.get('category')||'',url.searchParams.get('q')||''));

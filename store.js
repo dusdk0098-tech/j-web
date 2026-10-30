@@ -149,6 +149,8 @@ export class Store {
     this.db.exec('BEGIN IMMEDIATE');try{
       if(!this.db.prepare('PRAGMA table_info(reviewers)').all().some(c=>c.name==='auth_version'))this.db.exec("ALTER TABLE reviewers ADD COLUMN auth_version TEXT NOT NULL DEFAULT ''");
       if(!this.db.prepare('PRAGMA table_info(invitations)').all().some(c=>c.name==='pending'))this.db.exec('ALTER TABLE invitations ADD COLUMN pending INTEGER NOT NULL DEFAULT 0 CHECK(pending IN (0,1))');
+      if(!this.db.prepare('PRAGMA table_info(schedules)').all().some(c=>c.name==='target_id'))this.db.exec('ALTER TABLE schedules ADD COLUMN target_id INTEGER REFERENCES reviewers(id)');
+      if(!this.db.prepare('PRAGMA table_info(schedules)').all().some(c=>c.name==='target_name'))this.db.exec("ALTER TABLE schedules ADD COLUMN target_name TEXT NOT NULL DEFAULT ''");
       this.db.exec("UPDATE reviewers SET auth_version=lower(hex(randomblob(16))) WHERE auth_version=''");
       this.db.exec('COMMIT');
     }catch(error){this.db.exec('ROLLBACK');throw error;}
@@ -245,16 +247,19 @@ export class Store {
   deleteBoardPost(kind,id){if(!['notice','question','general'].includes(kind)||!this.db.prepare('DELETE FROM board_posts WHERE kind=? AND id=?').run(kind,Number(id)).changes)throw new Error('게시글을 찾을 수 없습니다.');}
   schedules(siteId,month,query='') {
     month=monthValue(month);if(typeof query!=='string'||query.length>200)throw new Error('검색어를 확인해 주세요.');
-    return this.db.prepare('SELECT * FROM schedules WHERE site_id=? AND substr(start_date,1,7)<=? AND substr(end_date,1,7)>=? AND instr(content,?)>0 ORDER BY start_date,start_time,id').all(Number(siteId),month,month,query);
+    return this.db.prepare('SELECT * FROM schedules WHERE site_id=? AND substr(start_date,1,7)<=? AND substr(end_date,1,7)>=? AND (instr(content,?)>0 OR instr(target_name,?)>0) ORDER BY start_date,start_time,id').all(Number(siteId),month,month,query,query);
   }
-  saveSchedule(input,id=null){
-    const siteId=Number(input.siteId);if(!this.db.prepare('SELECT 1 FROM sites WHERE id=?').get(siteId))throw new Error('현장을 선택해 주세요.');
+  saveSchedule(input,id=null,onAuthorize=()=>{}){
+    const siteId=Number(input.siteId);
     if(!scheduleTypes.includes(input.kind))throw new Error('일정 구분을 확인해 주세요.');
     const start=dateValue(input.startDate),end=dateValue(input.endDate),startTime=input.startTime??'',endTime=input.endTime??'',content=text(input.content,'일정 내용',200);
     if(![startTime,endTime].every(t=>typeof t==='string'&&(t===''||/^([01]\d|2[0-3]):[0-5]\d$/.test(t)))||start>end||(start===end&&startTime&&endTime&&startTime>endTime))throw new Error('일정 기간과 시간을 확인해 주세요.');
-    if(id===null)id=this.db.prepare('INSERT INTO schedules(site_id,kind,start_date,end_date,start_time,end_time,content) VALUES(?,?,?,?,?,?,?)').run(siteId,input.kind,start,end,startTime,endTime,content).lastInsertRowid;
-    else if(!this.db.prepare('UPDATE schedules SET kind=?,start_date=?,end_date=?,start_time=?,end_time=?,content=? WHERE id=? AND site_id=?').run(input.kind,start,end,startTime,endTime,content,Number(id),siteId).changes)throw new Error('선택한 현장의 일정을 확인해 주세요.');
-    return this.db.prepare('SELECT * FROM schedules WHERE id=? AND site_id=?').get(Number(id),siteId);
+    this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();if(!this.db.prepare('SELECT 1 FROM sites WHERE id=?').get(siteId))throw new Error('현장을 선택해 주세요.');const current=id===null?null:this.db.prepare('SELECT * FROM schedules WHERE id=? AND site_id=?').get(Number(id),siteId);if(id!==null&&!current)throw new Error('선택한 현장의 일정을 확인해 주세요.');
+      const selected=input.targetId===undefined?(current?.target_id||0):input.targetId;if(!Number.isSafeInteger(selected)||selected<0)throw new Error('일정 대상자를 확인해 주세요.');let targetName='';if(selected){const target=this.db.prepare('SELECT id,name,active FROM reviewers WHERE id=? AND site_id=?').get(selected,siteId);if(!target||(!target.active&&selected!==current?.target_id))throw new Error('같은 현장의 시험 대상자를 선택해 주세요.');targetName=selected===current?.target_id?current.target_name:target.name;}
+      if(id===null)id=this.db.prepare('INSERT INTO schedules(site_id,kind,start_date,end_date,start_time,end_time,content,target_id,target_name) VALUES(?,?,?,?,?,?,?,?,?)').run(siteId,input.kind,start,end,startTime,endTime,content,selected||null,targetName).lastInsertRowid;
+      else this.db.prepare('UPDATE schedules SET kind=?,start_date=?,end_date=?,start_time=?,end_time=?,content=?,target_id=?,target_name=? WHERE id=? AND site_id=?').run(input.kind,start,end,startTime,endTime,content,selected||null,targetName,Number(id),siteId);
+      const result=this.db.prepare('SELECT * FROM schedules WHERE id=? AND site_id=?').get(Number(id),siteId);this.db.exec('COMMIT');return result;
+    }catch(error){this.db.exec('ROLLBACK');throw error;}
   }
   deleteSchedule(siteId,id){if(!this.db.prepare('DELETE FROM schedules WHERE site_id=? AND id=?').run(Number(siteId),Number(id)).changes)throw new Error('선택한 현장의 일정을 확인해 주세요.');}
   siteArticles(siteId,category='',query='') {
