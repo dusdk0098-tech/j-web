@@ -5,6 +5,7 @@ import { PNG } from 'pngjs';
 import { scheduleTypes } from './public/schedule.js';
 import { verifyWorkerLocation } from './geo.js';
 import { workerFieldRequirements } from './public/worker-fields.js';
+import { salarySummary } from './public/salary-summary.js';
 
 function workerFields(input){
   const category=text(input.category,'구분'),required=workerFieldRequirements(category),optional=(value,name,needed)=>!needed&&(value==null||typeof value==='string'&&!value.trim())?'':text(value,name);
@@ -17,13 +18,17 @@ function monthValue(month) {
 }
 function wageVersion(row){return createHash('sha256').update(JSON.stringify([row.gross,row.deductions,row.manual_total,row.remark,row.gross_mode??'manual',row.attendance_version??null])).digest('hex');}
 function attendanceWageEstimate(days){
-  const entries=days.map(row=>[row.date,row.daily_rate??null,row.units_hundredths??null,row.salary_kind??null]).sort((a,b)=>a[0].localeCompare(b[0]));
-  const version=createHash('sha256').update(JSON.stringify(entries)).digest('hex'),incomplete=entries.filter(row=>row[1]===null||row[2]===null||row[3]!==null).length;
-  if(!entries.length)return {gross:null,version,days:0,incomplete:0,reason:'출역 기록이 없습니다.'};
-  if(incomplete)return {gross:null,version,days:entries.length,incomplete,reason:'일당 외 급여 또는 일당·공수가 미기록인 출역이 있습니다.'};
-  const gross=entries.reduce((sum,row)=>sum+Math.floor((row[1]*row[2]+50)/100),0);
-  if(!Number.isSafeInteger(gross)||gross>999999999)return {gross:null,version,days:entries.length,incomplete:0,reason:'시험 노임 금액 한도를 초과했습니다.'};
-  return {gross,version,days:entries.length,incomplete:0,reason:null};
+  const entries=days.map(row=>({date:row.date,daily_rate:row.daily_rate??null,units_hundredths:row.units_hundredths??null,salary_kind:row.salary_kind??null,salary_amount:row.salary_amount??null,category:row.category??row.category_snapshot??null})).sort((a,b)=>a.date.localeCompare(b.date));
+  const hasFixed=entries.some(row=>row.salary_kind!==null),yearly=entries.some(row=>row.salary_kind==='yearly');
+  const version=createHash('sha256').update(JSON.stringify(entries.map(row=>[row.date,row.daily_rate,row.units_hundredths,row.salary_kind,...(hasFixed?[row.salary_amount,row.category]:[])]))).digest('hex');
+  const incomplete=entries.filter(row=>hasFixed&&!row.category||(row.salary_kind!==null?row.salary_amount===null:row.daily_rate===null||row.units_hundredths===null)).length;
+  const result={version,days:entries.length,incomplete,yearly};
+  if(!entries.length)return {gross:null,...result,reason:'출역 기록이 없습니다.'};
+  if(incomplete)return {gross:null,...result,reason:'시험 급여·공수 또는 근로 구분이 미기록인 출역이 있습니다.'};
+  const calculation=salarySummary(entries.map(row=>({...row,category:row.category||'직영'}))),gross=calculation.total;
+  if(gross===null)return {gross:null,...result,reason:calculation.reason};
+  if(!Number.isSafeInteger(gross)||gross>999999999)return {gross:null,...result,reason:'시험 노임 금액 한도를 초과했습니다.'};
+  return {gross,...result,reason:null};
 }
 function dailyRateValue(value){if(typeof value!=='string'||!/^$|^\d{1,9}$/.test(value))throw new Error('시험 일당은 0부터 999999999까지 정수로 입력해 주세요.');return value===''?null:Number(value);}
 function ppeValues(input){
@@ -516,7 +521,7 @@ export class Store {
   wageEstimate(siteId,workerId,month){
     siteId=Number(siteId);workerId=Number(workerId);month=monthValue(month);
     if(!this.db.prepare('SELECT 1 FROM workers WHERE id=? AND site_id=?').get(workerId,siteId))throw new Error('선택한 현장의 출입자를 확인해 주세요.');
-    const rows=this.db.prepare('SELECT date,daily_rate,units_hundredths,salary_kind FROM attendance WHERE worker_id=? AND present=1 AND date BETWEEN ? AND ? ORDER BY date').all(workerId,`${month}-01`,`${month}-31`);
+    const rows=this.db.prepare('SELECT date,daily_rate,units_hundredths,salary_kind,salary_amount,category_snapshot AS category FROM attendance WHERE worker_id=? AND present=1 AND date BETWEEN ? AND ? ORDER BY date').all(workerId,`${month}-01`,`${month}-31`);
     return attendanceWageEstimate(rows);
   }
   wageRecords(siteId,month,filters={}) {

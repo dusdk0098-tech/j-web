@@ -4,6 +4,7 @@ import { mkdtempSync,rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join,resolve,sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { createHash } from 'node:crypto';
 import { createServer } from 'node:net';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
@@ -39,6 +40,37 @@ test('출역 기준 노임은 완전한 일당·공수만 적용하고 변경 �
   }finally{s.close();}
 });
 
+test('출역 기준 노임은 월급·연봉을 구분별로 계산하고 금액과 구분 변경을 확인한다',()=>{
+  const s=new Store(':memory:');try{
+    const site=s.createSite({name:'가상 현장'}),worker=s.createWorker(person(site.id)),base={siteId:site.id,workerId:worker.id,month:'2026-10'},day=date=>({siteId:site.id,workerId:worker.id,date});
+    for(const date of ['2026-10-01','2026-10-02']){s.setAttendance({...day(date),present:true});s.setAttendanceSalary({...day(date),kind:'monthly',amount:'3000'});}
+    let estimate=s.wageEstimate(site.id,worker.id,base.month);assert.equal(estimate.gross,3000);assert.equal(estimate.incomplete,0);assert.equal(estimate.yearly,false);
+    const input={...base,gross:'3000',grossMode:'attendance',attendanceVersion:estimate.version,deductions,manualTotal:'20'};s.saveWageRecord(input);
+    let row=s.wageRecords(site.id,base.month)[0];assert.equal(row.gross_status,'current');assert.equal(row.total,20);
+    s.db.prepare('UPDATE attendance SET category_snapshot=? WHERE worker_id=? AND date=?').run('외주',worker.id,'2026-10-02');
+    assert.equal(s.wageRecords(site.id,base.month)[0].gross_status,'changed');
+    s.db.prepare('UPDATE attendance SET category_snapshot=? WHERE worker_id=? AND date=?').run('직영',worker.id,'2026-10-02');
+    assert.equal(s.wageRecords(site.id,base.month)[0].gross_status,'current');
+    s.setAttendanceSalary({...day('2026-10-02'),kind:'monthly',amount:'3100'});
+    estimate=s.wageEstimate(site.id,worker.id,base.month);assert.equal(estimate.gross,null);assert.match(estimate.reason,/불일치/);
+    row=s.wageRecords(site.id,base.month)[0];assert.equal(row.gross,3000);assert.equal(row.gross_status,'changed');assert.equal(row.total,20);
+    assert.throws(()=>s.saveWageRecord({...input,expectedVersion:row.version},true),error=>error.sessionStatus===409);
+    s.setAttendanceSalary({...day('2026-10-01'),kind:'monthly',amount:'3100'});estimate=s.wageEstimate(site.id,worker.id,base.month);assert.equal(estimate.gross,3100);
+    s.saveWageRecord({...input,gross:'3100',attendanceVersion:estimate.version,expectedVersion:row.version},true);row=s.wageRecords(site.id,base.month)[0];assert.equal(row.gross_status,'current');assert.equal(row.total,20);
+    s.setAttendanceSalary({...day('2026-10-02'),kind:'yearly',amount:'12000'});assert.match(s.wageEstimate(site.id,worker.id,base.month).reason,/혼합/);
+    s.db.prepare('UPDATE attendance SET category_snapshot=? WHERE worker_id=? AND date=?').run('외주',worker.id,'2026-10-02');
+    estimate=s.wageEstimate(site.id,worker.id,base.month);assert.equal(estimate.gross,15100);assert.equal(estimate.yearly,true);
+    s.db.prepare('UPDATE attendance SET category_snapshot=NULL WHERE worker_id=? AND date=?').run(worker.id,'2026-10-02');
+    estimate=s.wageEstimate(site.id,worker.id,base.month);assert.equal(estimate.gross,null);assert.equal(estimate.incomplete,1);
+    s.db.prepare('UPDATE attendance SET category_snapshot=? WHERE worker_id=? AND date=?').run('직영',worker.id,'2026-10-02');
+    s.setAttendanceSalary({...day('2026-10-01'),kind:'yearly',amount:'12000'});estimate=s.wageEstimate(site.id,worker.id,base.month);assert.equal(estimate.gross,12000);assert.equal(estimate.yearly,true);
+    s.setAttendanceSalary({...day('2026-10-02'),kind:'other',amount:'0'});assert.equal(s.wageEstimate(site.id,worker.id,base.month).gross,12000);
+    s.setAttendanceSalary({...day('2026-10-02'),kind:'other',amount:'1'});assert.match(s.wageEstimate(site.id,worker.id,base.month).reason,/기타/);
+    s.setAttendanceDailyRate({...day('2026-10-01'),dailyRate:'101'});s.setAttendanceUnits({...day('2026-10-01'),units:'0.5'});s.setAttendance({...day('2026-10-02'),present:false});
+    estimate=s.wageEstimate(site.id,worker.id,base.month);const legacy=createHash('sha256').update(JSON.stringify([['2026-10-01',101,50,null]])).digest('hex');assert.equal(estimate.gross,51);assert.equal(estimate.version,legacy);
+  }finally{s.close();}
+});
+
 test('이전 노임 데이터베이스는 입력 방식 추가 후에도 금액과 공제를 유지한다',()=>{
   const dir=mkdtempSync(join(tmpdir(),'jweb-old-wage-mode-')),file=join(dir,'old.sqlite');let s=new Store(file);
   try{
@@ -65,6 +97,14 @@ test('노임 계산 API와 엑셀은 직접 입력·출역 계산·변경 상태
     assert.equal((await send('/api/wages','PUT',{...input,expectedVersion:row.version},admin)).status,409);
     const latest=await (await send(estimatePath,'GET',null,admin)).json();assert.equal(latest.gross,101);assert.equal((await send('/api/wages','PUT',{...input,gross:'101',attendanceVersion:latest.version,expectedVersion:row.version},admin)).status,200);
     row=(await (await send(`/api/wages?${query}`,'GET',null,admin)).json())[0];assert.equal(row.gross_status,'current');assert.equal(row.total,20);assert.equal(row.net,81);
+    assert.equal((await send('/api/attendance/salary','PUT',{...base,kind:'monthly',amount:'3000'},admin)).status,200);
+    row=(await (await send(`/api/wages?${query}`,'GET',null,admin)).json())[0];assert.equal(row.gross,101);assert.equal(row.gross_status,'changed');
+    const monthly=await (await send(estimatePath,'GET',null,admin)).json();assert.equal(monthly.gross,3000);assert.equal(monthly.yearly,false);
+    assert.equal((await send('/api/wages','PUT',{...input,gross:'3000',attendanceVersion:monthly.version,expectedVersion:row.version},admin)).status,200);
+    row=(await (await send(`/api/wages?${query}`,'GET',null,admin)).json())[0];assert.equal(row.gross_status,'current');assert.equal(row.total,20);assert.equal(row.net,2980);
+    assert.equal((await send('/api/attendance/salary','PUT',{...base,kind:'yearly',amount:'12000'},admin)).status,200);
+    const yearly=await (await send(estimatePath,'GET',null,admin)).json();assert.equal(yearly.gross,12000);assert.equal(yearly.yearly,true);
+    assert.equal((await send('/api/wages','PUT',{...input,gross:'3000',attendanceVersion:monthly.version,expectedVersion:row.version},admin)).status,409);
   }finally{if(child.exitCode===null){const exited=once(child,'exit');child.kill();await exited;}cleanup(dir);}
 });
 
@@ -80,5 +120,13 @@ test('시험 노임 저장이 잠금을 기다리는 동안 출역이 바뀌면 
     db=new DatabaseSync(join(dir,'jweb.sqlite'));db.exec('PRAGMA busy_timeout=3000; BEGIN IMMEDIATE');locked=true;
     const started=once(child.stdout,'data'),pending=send('/api/wages','POST',input,admin);pending.catch(()=>{});assert.match(String((await started)[0]),/WAGE_LOCK/);db.prepare('UPDATE attendance SET units_hundredths=100 WHERE worker_id=? AND date=?').run(worker.id,day.date);db.exec('COMMIT');locked=false;
     assert.equal((await pending).status,409);assert.equal(db.prepare('SELECT count(*) AS n FROM wage_records').get().n,0);
+    assert.equal((await send('/api/attendance/salary','PUT',{...day,kind:'monthly',amount:'3000'},admin)).status,200);
+    for(const [column,value] of [['salary_amount',4000],['category_snapshot','외주']]){
+      const current=await (await send(`/api/wages/estimate?siteId=${site.id}&workerId=${worker.id}&month=2026-10`,'GET',null,admin)).json();
+      const fixed={...input,gross:String(current.gross),attendanceVersion:current.version};
+      db.exec('BEGIN IMMEDIATE');locked=true;const signal=once(child.stdout,'data'),request=send('/api/wages','POST',fixed,admin);request.catch(()=>{});assert.match(String((await signal)[0]),/WAGE_LOCK/);
+      db.prepare(`UPDATE attendance SET ${column}=? WHERE worker_id=? AND date=?`).run(value,worker.id,day.date);db.exec('COMMIT');locked=false;
+      assert.equal((await request).status,409);assert.equal(db.prepare('SELECT count(*) AS n FROM wage_records').get().n,0);
+    }
   }finally{if(db){if(locked)db.exec('ROLLBACK');db.close();}if(child.exitCode===null){const exited=once(child,'exit');child.kill();await exited;}cleanup(dir);}
 });
