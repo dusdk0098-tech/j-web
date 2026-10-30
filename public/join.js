@@ -2,6 +2,7 @@ import { workerSitePath,replaceWorkerSiteAddress } from './worker-link.js';
 import { mountWorkerDocuments } from './worker-documents.js';
 import { mountJoinChoices } from './join-choices.js';
 import { workerFieldRequirements } from './worker-fields.js';
+import { createJoinFlow } from './join-flow.js';
 const params=new URLSearchParams(location.search),token=params.get('token');let siteKey=params.get('site');
 const site=document.querySelector('#join-site'), message=document.querySelector('#join-message'), form=document.querySelector('#join-form');
 const setJoinChoices=mountJoinChoices(form);
@@ -11,6 +12,7 @@ form.querySelector('p').textContent='이 시험 화면은 가상 인적사항·�
 form.setAttribute('autocomplete','off');
 form.insertAdjacentHTML('beforebegin','<form id="worker-login" hidden><h2>이미 가입한 근로자</h2><p>시험 로그인 시 오늘의 출역이 자동 기록될 수 있습니다. 실제 출입 확인으로 사용하지 마세요.</p><div class="fields"><label>시험 아이디<input name="loginId" required pattern="[A-Za-z0-9_]{3,40}" autocomplete="username"></label><label>시험 암호<input name="password" type="password" required minlength="12" maxlength="256" autocomplete="current-password"></label></div><div class="action-row"><button class="primary">로그인</button></div></form>');
 const login=document.querySelector('#worker-login');
+const flow=createJoinFlow(document.querySelector('#worker-choices'),login,form,message);
 let inviteInfo=null;
 function adoptSiteAddress(key){const path=workerSitePath(key);document.querySelector('#worker-path-warning')?.remove();if(!path){const warning=document.createElement('p');warning.id='worker-path-warning';warning.textContent='현장 로그인 주소를 확인하지 못했습니다. 관리자에게 새 QR을 요청하세요.';site.after(warning);return;}siteKey=key;const manifest=document.querySelector('link[rel="manifest"]');if(manifest)manifest.href=`/worker.webmanifest?site=${encodeURIComponent(key)}`;const loginLink=document.querySelector('#worker-site-link');if(loginLink)loginLink.href=path;if(!replaceWorkerSiteAddress(key,history)){const warning=document.createElement('p'),link=document.createElement('a');warning.id='worker-path-warning';warning.textContent='주소가 자동으로 바뀌지 않았습니다. ';link.href=path;link.textContent='현장 로그인 주소 열기';warning.append(link);site.after(warning);}}
 function signaturePad(canvas){
@@ -31,7 +33,7 @@ try {
   const response=await fetch(siteKey?`/api/worker/site?key=${encodeURIComponent(siteKey)}`:`/api/join?token=${encodeURIComponent(token || '')}`);
   const data=await response.json();if(!response.ok)throw Error(data.error);inviteInfo=data;
   setJoinChoices(data);
-  site.textContent=`현장: ${data.name}`;login.hidden=false;form.hidden=!!siteKey&&!data.canSignup;
+  site.textContent=`현장: ${data.name}`;flow.open(!siteKey||data.canSignup);
   const homeKey=siteKey||data.siteKey;if(homeKey){const manifest=document.createElement('link');manifest.rel='manifest';manifest.href=`/worker.webmanifest?site=${encodeURIComponent(homeKey)}`;document.head.append(manifest);const tip=document.createElement('p');tip.textContent='가입 또는 로그인 후 주소가 현장 로그인 주소로 바뀌었는지 확인하고 홈 화면에 추가하세요. 인터넷 연결이 필요합니다.';site.after(tip);}
   if(data.siteKey&&!siteKey){const link=document.createElement('a');link.id='worker-site-link';link.href=`/join?site=${encodeURIComponent(data.siteKey)}`;link.textContent='기존 가입자 로그인 주소';site.after(link);}
 } catch(error) {site.textContent='';message.textContent=error.message;}
@@ -41,7 +43,7 @@ form.onsubmit=async event=>{
 };
 async function showWorker(worker){
     const button=login.querySelector('button');
-    login.reset();login.hidden=true;form.hidden=true;message.textContent=`${worker.name}님, ${worker.site_name} 시험 계정으로 로그인했습니다.`;
+    login.reset();flow.hide();message.textContent=`${worker.name}님, ${worker.site_name} 시험 계정으로 로그인했습니다.`;
     const panel=document.createElement('section');panel.innerHTML='<h2>나의 출역 정보</h2><label>조회 월 <input type="month" id="worker-month"></label><p id="worker-attendance" role="status"></p><p>로그인 또는 관리자가 기록한 시험 출역일과 수동 입력한 시험 공수입니다. 실제 근로시간이나 급여 계산이 아닙니다.</p><button type="button" id="worker-logout">로그아웃</button>';message.after(panel);
     const month=panel.querySelector('#worker-month'),output=panel.querySelector('#worker-attendance');
     const now=new Date();month.value=`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
@@ -116,7 +118,7 @@ async function showWorker(worker){
     const loadHazards=async()=>{const response=await fetch('/api/worker/hazard-reports'),rows=await response.json();if(!response.ok)throw Error(rows.error);hazardList.replaceChildren();if(!rows.length){hazardList.textContent='저장된 시험 신고가 없습니다.';return;}for(const row of rows){const item=document.createElement('article'),heading=document.createElement('h3'),body=document.createElement('p'),result=document.createElement('p');heading.textContent=`${({received:'접수',reviewing:'검토 중',resolved:'조치 완료'})[row.status]||'상태 미확인'} · ${row.title}`;body.textContent=row.body;result.textContent=row.response?`가상 조치 내용: ${row.response}`:'가상 조치 내용 없음';item.append(heading,body,result);for(const reply of row.replies){const answer=document.createElement('p');answer.textContent=`가상 답변 · ${reply.created_at} (UTC): ${reply.body}`;item.append(answer);}if(row.has_photo){const image=document.createElement('img');image.src=`/api/worker/hazard-reports/${row.id}/photo`;image.alt='내 가상 신고 사진';image.className='worker-hazard-photo';item.append(image);}hazardList.append(item);}};
     try{await loadHazards();}catch(error){hazardStatus.textContent=error.message;}
     hazardForm.onsubmit=async event=>{event.preventDefault();const button=hazardForm.querySelector('button');button.disabled=true;try{const data=Object.fromEntries(new FormData(hazardForm)),file=hazardForm.elements.photo.files[0];delete data.photo;if(file){if(file.size>2*1024*1024||!['image/png','image/jpeg'].includes(file.type))throw Error('2MB 이하의 PNG 또는 JPEG를 선택해 주세요.');data.photo=await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=()=>reject(Error('사진을 읽지 못했습니다.'));reader.readAsDataURL(file);});}const response=await fetch('/api/worker/hazard-reports',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)}),result=await response.json();if(!response.ok)throw Error(result.error);hazardForm.reset();hazardStatus.textContent='시험 신고를 저장했습니다. 알림은 발송되지 않았습니다.';await loadHazards();}catch(error){hazardStatus.textContent=error.message;}finally{button.disabled=false;}};
-    const logout=panel.querySelector('#worker-logout');logout.onclick=async()=>{logout.disabled=true;try{const response=await fetch('/api/worker/logout',{method:'POST'});if(!response.ok)throw Error('로그아웃에 실패했습니다.');panel.remove();login.hidden=false;button.disabled=true;form.hidden=true;message.textContent='로그아웃했습니다.';if(siteKey){const infoResponse=await fetch(`/api/worker/site?key=${encodeURIComponent(siteKey)}`),info=await infoResponse.json();if(!infoResponse.ok)throw Error(info.error);inviteInfo=info;setJoinChoices(info);form.hidden=!info.canSignup;}}catch(error){message.textContent=error.message;}finally{button.disabled=false;logout.disabled=false;}};
+    const logout=panel.querySelector('#worker-logout');logout.onclick=async()=>{logout.disabled=true;try{const response=await fetch('/api/worker/logout',{method:'POST'});if(!response.ok)throw Error('로그아웃에 실패했습니다.');panel.remove();button.disabled=true;message.textContent='로그아웃했습니다.';flow.open(false);if(siteKey){const infoResponse=await fetch(`/api/worker/site?key=${encodeURIComponent(siteKey)}`),info=await infoResponse.json();if(!infoResponse.ok)throw Error(info.error);inviteInfo=info;setJoinChoices(info);flow.open(info.canSignup);}}catch(error){message.textContent=error.message;}finally{button.disabled=false;logout.disabled=false;}};
 }
 login.onsubmit=async event=>{
   event.preventDefault();const button=login.querySelector('button');button.disabled=true;

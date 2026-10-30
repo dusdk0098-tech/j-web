@@ -17,3 +17,5 @@
 .training-roster-signature{max-width:130px;max-height:48px;object-fit:contain}
 @media print{.training-target-controls,.training-roster-download{display:none!important}.training-roster .table-wrap{overflow:visible}.training-roster table{min-width:0;width:100%;table-layout:fixed}.training-roster th,.training-roster td{overflow-wrap:anywhere}.training-roster tr{break-inside:avoid}.training-roster thead{display:table-header-group}}
 @media print{.notice-roster-download{display:none!important}.notice-roster .table-wrap{overflow:visible}.notice-roster table{min-width:0;width:100%;table-layout:fixed}.notice-roster th,.notice-roster td{overflow-wrap:anywhere}.notice-roster tr{break-inside:avoid}.notice-roster thead{display:table-header-group}}
+#worker-choices:not([hidden]){display:flex;gap:8px;flex-wrap:wrap;margin-top:20px}
+#join-form [hidden]{display:none!important}
