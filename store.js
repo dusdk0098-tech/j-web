@@ -554,6 +554,17 @@ export class Store {
   }
   workPlaces(siteId){return this.db.prepare('SELECT * FROM work_places WHERE site_id=? ORDER BY name,id').all(Number(siteId));}
   rigging(siteId){return this.db.prepare('SELECT * FROM rigging WHERE site_id=? ORDER BY name,id').all(Number(siteId));}
+  riggingCopySource(siteId,id){
+    const source=this.db.prepare('SELECT * FROM rigging WHERE site_id=? AND id=?').get(Number(siteId),Number(id));if(!source)throw new Error('선택한 현장의 장구를 확인해 주세요.');
+    const photos=this.db.prepare('SELECT id,name,data FROM rigging_photos WHERE rigging_id=? ORDER BY id').all(source.id),hash=createHash('sha256').update(JSON.stringify(source));
+    for(const photo of photos){hash.update(JSON.stringify([photo.id,photo.name,photo.data.length]));hash.update(photo.data);}
+    return {source,photoCount:photos.length,version:hash.digest('hex')};
+  }
+  copyRigging(siteId,id,input,onAuthorize=()=>{}){
+    siteId=Number(siteId);if(!input||typeof input.version!=='string'||!/^[0-9a-f]{64}$/.test(input.version))throw new Error('장구 복사 정보를 확인해 주세요.');
+    const kind=text(input.kind,'종류'),name=text(input.name,'별칭');
+    this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();const {source,version}=this.riggingCopySource(siteId,id);if(version!==input.version)throw Object.assign(new Error('원본 장구가 변경되었습니다. 다시 조회해 주세요.'),{sessionStatus:409});const newId=this.db.prepare('INSERT INTO rigging(site_id,category,kind,name,details) VALUES(?,?,?,?,?)').run(siteId,source.category,kind,name,source.details).lastInsertRowid;this.db.prepare('INSERT INTO rigging_photos(rigging_id,name,data) SELECT ?,name,data FROM rigging_photos WHERE rigging_id=? ORDER BY id').run(newId,source.id);const result=this.db.prepare('SELECT * FROM rigging WHERE id=?').get(newId);this.db.exec('COMMIT');return result;}catch(error){this.db.exec('ROLLBACK');throw error;}
+  }
   riggingPhotos(siteId,id){if(!this.db.prepare('SELECT 1 FROM rigging WHERE id=? AND site_id=?').get(Number(id),Number(siteId)))throw new Error('선택한 현장의 장구를 확인해 주세요.');return this.db.prepare('SELECT id,name,length(data) AS size FROM rigging_photos WHERE rigging_id=? ORDER BY id').all(Number(id));}
   addRiggingPhoto(siteId,id,name,data){
     const existing=this.riggingPhotos(siteId,id);

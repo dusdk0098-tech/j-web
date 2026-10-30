@@ -416,6 +416,9 @@ const server = http.createServer(async (req, res) => {
       if(req.method==='GET')return json(res,200,store.workPlaces(url.searchParams.get('siteId')));
       if(req.method==='POST')return json(res,201,store.createWorkPlace(await body(req)));
     }
+    const riggingCopy=url.pathname.match(/^\/api\/rigging\/(\d+)\/copy$/);
+    if(riggingCopy&&req.method==='GET')return json(res,200,store.riggingCopySource(url.searchParams.get('siteId'),riggingCopy[1]));
+    if(riggingCopy&&req.method==='POST'){const input=await body(req);return json(res,201,store.copyRigging(input.siteId,riggingCopy[1],input,()=>checkRequestSession(req)));}
     if(url.pathname==='/api/rigging'){
       if(req.method==='GET')return json(res,200,store.rigging(url.searchParams.get('siteId')));
       if(req.method==='POST')return json(res,201,store.createRigging(await body(req)));
