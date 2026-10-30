@@ -625,7 +625,7 @@ const server = http.createServer(async (req, res) => {
       if(req.method==='DELETE'){store.deleteBasicCategory(siteId,basicCategory[1],await body(req,2097152));return json(res,200,{ok:true});}
     }
     if (url.pathname === '/api/companies') {
-      if(req.method==='GET')return json(res,200,store.companies(url.searchParams.get('siteId')));
+      if(req.method==='GET'){const siteId=url.searchParams.get('siteId'),companies=store.companies(siteId);if(url.searchParams.get('withUsage')!=='1')return json(res,200,companies);const usage=store.companyUsage(siteId);return json(res,200,companies.map(company=>({...company,in_use:usage.ids.has(company.id)||usage.names.has(company.name)})));}
       if(req.method==='POST')return json(res,201,store.createCompany(await body(req)));
     }
     if(url.pathname==='/api/safety-costs'){
@@ -647,7 +647,8 @@ const server = http.createServer(async (req, res) => {
       const photo=store.safetyCostReportPhoto(id,photoId);if(!photo)return json(res,404,{error:'사진을 찾을 수 없습니다.'});const name=encodeURIComponent(photo.name).replace(/[!'()*]/g,c=>`%${c.charCodeAt(0).toString(16).toUpperCase()}`);res.writeHead(200,{'Content-Type':'application/octet-stream','Content-Disposition':`attachment; filename="photo"; filename*=UTF-8''${name}`,'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(photo.data);
     }
     const company=url.pathname.match(/^\/api\/companies\/(\d+)$/);
-    if(company && req.method==='PUT')return json(res,200,store.updateCompany(company[1],await body(req)));
+    if(company && req.method==='PUT'){const input=await body(req);return json(res,200,store.updateCompany(company[1],input,()=>checkRequestSession(req)));}
+    if(company && req.method==='DELETE'){const input=await body(req);store.archiveCompany(company[1],input,()=>checkRequestSession(req));return json(res,200,{ok:true});}
     if(url.pathname==='/api/ppe-issues/batch'&&req.method==='POST'){const input=await body(req);return json(res,201,{ids:store.addPpeIssues(input,()=>checkRequestSession(req))});}
     if(url.pathname==='/api/ppe-issues'){
       if(req.method==='GET')return json(res,200,store.ppeIssues(url.searchParams.get('siteId'),url.searchParams.get('month')));
@@ -711,7 +712,7 @@ const server = http.createServer(async (req, res) => {
     if(url.pathname==='/api/office-approval-default'&&req.method==='GET'){const result=store.officeApprovalDefault(url.searchParams.get('siteId'),url.searchParams.get('kind'),url.searchParams.get('otherKind')||'');checkRequestSession(req);return json(res,200,result);}
     if (url.pathname === '/api/documents') {
       if (req.method === 'GET') return json(res,200,store.documents(url.searchParams.get('siteId'),url.searchParams.get('type') || '',url.searchParams.get('q') || '',url.searchParams.get('from') || '',url.searchParams.get('to') || '',url.searchParams.get('riskKind') || '',url.searchParams.get('riskContractorId') || ''));
-      if (req.method === 'POST') {const input=await body(req,220000);return json(res,201,input.officeSetup===undefined?store.createDocument(input):store.createOfficeDraft(input,()=>checkRequestSession(req)));}
+      if (req.method === 'POST') {const input=await body(req,220000);return json(res,201,input.officeSetup===undefined?store.createAuthorizedDocument(input,()=>checkRequestSession(req)):store.createOfficeDraft(input,()=>checkRequestSession(req)));}
     }
     const copyWorkPlan=url.pathname.match(/^\/api\/documents\/(\d+)\/copy-work-plan$/);
     if(copyWorkPlan&&req.method==='POST')return json(res,201,store.copyWorkPlan(copyWorkPlan[1],await body(req)));

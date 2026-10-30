@@ -68,6 +68,7 @@ export class Store {
       CREATE TABLE IF NOT EXISTS site_photos (id INTEGER PRIMARY KEY,site_id INTEGER NOT NULL REFERENCES sites(id),name TEXT NOT NULL,date TEXT NOT NULL,description TEXT NOT NULL DEFAULT '',data BLOB NOT NULL);
       CREATE TABLE IF NOT EXISTS site_article_files (id INTEGER PRIMARY KEY,article_id INTEGER NOT NULL REFERENCES site_articles(id),name TEXT NOT NULL,data BLOB NOT NULL);
       CREATE TABLE IF NOT EXISTS companies (id INTEGER PRIMARY KEY, site_id INTEGER NOT NULL REFERENCES sites(id), name TEXT NOT NULL, trade TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS archived_companies (company_id INTEGER PRIMARY KEY REFERENCES companies(id),created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
       CREATE TABLE IF NOT EXISTS site_occupations (id INTEGER PRIMARY KEY,site_id INTEGER NOT NULL REFERENCES sites(id),name TEXT NOT NULL,UNIQUE(site_id,name));
       CREATE TABLE IF NOT EXISTS basic_categories (id INTEGER PRIMARY KEY AUTOINCREMENT,site_id INTEGER NOT NULL REFERENCES sites(id),parent_id INTEGER REFERENCES basic_categories(id),name TEXT NOT NULL,description TEXT NOT NULL DEFAULT '',position INTEGER NOT NULL);
       CREATE UNIQUE INDEX IF NOT EXISTS basic_category_name ON basic_categories(site_id,COALESCE(parent_id,0),name);
@@ -331,7 +332,20 @@ export class Store {
     return this.db.prepare('SELECT * FROM sites WHERE id=?').get(id);
   }
   companies(siteId) {
-    return this.db.prepare('SELECT * FROM companies WHERE site_id=? ORDER BY name,id').all(Number(siteId));
+    return this.db.prepare('SELECT c.* FROM companies c WHERE c.site_id=? AND NOT EXISTS(SELECT 1 FROM archived_companies a WHERE a.company_id=c.id) ORDER BY c.name,c.id').all(Number(siteId));
+  }
+  companyUsage(siteId){
+    const ids=new Set(),names=new Set(this.db.prepare('SELECT DISTINCT company FROM workers WHERE site_id=?').all(Number(siteId)).map(row=>row.company));
+    const rows=this.db.prepare(`SELECT DISTINCT j.key,j.type,j.atom FROM documents d,json_tree(CASE WHEN json_valid(d.details) THEN d.details ELSE '{}' END) j
+      WHERE d.site_id=? AND ((j.key IN ('companyId','contractorId','company_id','contractor_id') AND j.type IN ('integer','text')) OR (j.key IN ('company','contractor','companyName','company_name') AND j.type='text'))`).all(Number(siteId));
+    for(const row of rows){
+      if(['companyId','contractorId','company_id','contractor_id'].includes(row.key)){if(row.type==='integer'||/^[1-9]\d*$/.test(row.atom)){const id=Number(row.atom);if(Number.isSafeInteger(id)&&id>0)ids.add(id);}}
+      else names.add(row.atom);
+    }
+    return {ids,names};
+  }
+  companyInUse(siteId,id,name){
+    const usage=this.companyUsage(siteId);return usage.ids.has(Number(id))||usage.names.has(name);
   }
   siteOccupations(siteId){return this.db.prepare('SELECT id,name FROM site_occupations WHERE site_id=? ORDER BY name,id').all(Number(siteId));}
   basicCategories(siteId){
@@ -807,11 +821,29 @@ export class Store {
     const id=this.db.prepare('INSERT INTO companies(site_id,name,trade) VALUES(?,?,?)').run(siteId,text(input.name,'회사명'),text(input.trade,'공종')).lastInsertRowid;
     return this.db.prepare('SELECT * FROM companies WHERE id=?').get(id);
   }
-  updateCompany(id,input) {
+  updateCompany(id,input,onAuthorize=()=>{}) {
     const siteId=Number(input.siteId);
-    if(!this.db.prepare('SELECT id FROM companies WHERE id=? AND site_id=?').get(Number(id),siteId))throw new Error('선택한 현장의 협력사를 확인해 주세요.');
-    this.db.prepare('UPDATE companies SET name=?,trade=? WHERE id=? AND site_id=?').run(text(input.name,'회사명'),text(input.trade,'공종'),Number(id),siteId);
-    return this.db.prepare('SELECT * FROM companies WHERE id=? AND site_id=?').get(Number(id),siteId);
+    const name=text(input.name,'회사명'),trade=text(input.trade,'공종');
+    this.db.exec('BEGIN IMMEDIATE');try{
+      onAuthorize();
+      if(!this.companies(siteId).some(company=>company.id===Number(id)))throw new Error('선택한 현장의 협력사를 확인해 주세요.');
+      this.db.prepare('UPDATE companies SET name=?,trade=? WHERE id=? AND site_id=?').run(name,trade,Number(id),siteId);
+      const result=this.db.prepare('SELECT * FROM companies WHERE id=? AND site_id=?').get(Number(id),siteId);
+      this.db.exec('COMMIT');return result;
+    }catch(error){this.db.exec('ROLLBACK');throw error;}
+  }
+  archiveCompany(id,input,onAuthorize=()=>{}){
+    const siteId=Number(input?.siteId);
+    if(typeof input?.expectedName!=='string'||typeof input?.expectedTrade!=='string')throw new Error('협력사 정보를 다시 확인해 주세요.');
+    this.db.exec('BEGIN IMMEDIATE');try{
+      onAuthorize();
+      const company=this.companies(siteId).find(item=>item.id===Number(id));
+      if(!company)throw new Error('선택한 현장의 협력사를 확인해 주세요.');
+      if(company.name!==input.expectedName||company.trade!==input.expectedTrade)throw new Error('협력사 정보가 변경되었습니다. 다시 조회해 주세요.');
+      if(this.companyInUse(siteId,id,company.name))throw new Error('출입자 또는 문서에서 사용 중인 협력사는 삭제할 수 없습니다.');
+      this.db.prepare('INSERT INTO archived_companies(company_id) VALUES(?)').run(Number(id));
+      this.db.exec('COMMIT');
+    }catch(error){this.db.exec('ROLLBACK');throw error;}
   }
   createWorker(input) {
     const siteId = Number(input.siteId);
@@ -1270,7 +1302,7 @@ export class Store {
     siteId=Number(siteId);if(!this.db.prepare('SELECT 1 FROM sites WHERE id=?').get(siteId))throw new Error('현장을 선택해 주세요.');
     if((riskKind||riskContractorId)&&type!=='risk')throw new Error('위험성평가 검색 조건을 확인해 주세요.');
     if(riskKind&&!['initial','regular','occasional','continuous'].includes(riskKind))throw new Error('평가 종류를 확인해 주세요.');
-    if(riskContractorId&&(!/^[1-9]\d*$/.test(String(riskContractorId))||!Number.isSafeInteger(Number(riskContractorId))||!this.db.prepare('SELECT 1 FROM companies WHERE id=? AND site_id=?').get(Number(riskContractorId),siteId)))throw new Error('같은 현장의 협력사를 선택해 주세요.');
+    if(riskContractorId&&(!/^[1-9]\d*$/.test(String(riskContractorId))||!Number.isSafeInteger(Number(riskContractorId))||!this.companies(siteId).some(company=>company.id===Number(riskContractorId))))throw new Error('같은 현장의 협력사를 선택해 주세요.');
     const rows=this.db.prepare("SELECT documents.*,EXISTS(SELECT 1 FROM approval_steps WHERE document_id=documents.id) AS has_approval_line,COALESCE((SELECT source_document_id FROM work_plan_copies WHERE document_id=documents.id),(SELECT source_document_id FROM office_document_copies WHERE document_id=documents.id)) AS copied_from FROM documents WHERE (site_id=? OR (type='basic' AND status='approved' AND json_extract(details,'$.shared')=1)) AND (?='' OR type=?) AND (title LIKE ? OR body LIKE ? OR details LIKE ?) AND (?='' OR date>=?) AND (?='' OR date<=?) ORDER BY date DESC,id DESC").all(siteId,type,type,...Array(3).fill(`%${query}%`),from,from,to,to);
     if(!riskKind&&!riskContractorId)return rows;
     return rows.filter(doc=>{const details=JSON.parse(doc.details);if(riskKind&&details.kind!==riskKind)return false;if(!riskContractorId)return true;return [details,...(Array.isArray(details.items)?details.items:[]),...(Array.isArray(details.musculoskeletalItems)?details.musculoskeletalItems:[])].some(item=>item&&item.contractorId===Number(riskContractorId));});
@@ -1500,6 +1532,9 @@ export class Store {
     const id = this.db.prepare('INSERT INTO documents(site_id,type,title,date,body,details) VALUES(?,?,?,?,?,?)').run(d.siteId,d.type,d.title,d.date,d.body,JSON.stringify(d.details)).lastInsertRowid;
     return this.document(id);
   }
+  createAuthorizedDocument(input,onAuthorize=()=>{}){
+    this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();const doc=this.createDocument(input);this.db.exec('COMMIT');return doc;}catch(error){this.db.exec('ROLLBACK');throw error;}
+  }
   document(id) { const doc=this.db.prepare('SELECT documents.*,COALESCE((SELECT source_document_id FROM work_plan_copies WHERE document_id=documents.id),(SELECT source_document_id FROM office_document_copies WHERE document_id=documents.id)) AS copied_from,(SELECT version FROM basic_document_versions WHERE document_id=documents.id) AS basic_version,COALESCE((SELECT MAX(id) FROM notice_edits WHERE document_id=documents.id),0) AS notice_version FROM documents WHERE id=?').get(Number(id));if(doc&&doc.type!=='basic')delete doc.basic_version;if(doc&&doc.type!=='notice')delete doc.notice_version;return doc; }
   officeReference(siteId,id){const ref=this.document(id);return ref&&ref.site_id===Number(siteId)&&ref.type==='office'&&JSON.parse(ref.details).kind==='품의서'?ref:null;}
   officeLinkedDocument(siteId,id){const ref=this.document(id);return ref&&ref.site_id===Number(siteId)&&ref.type==='office'?ref:null;}
@@ -1713,7 +1748,7 @@ export class Store {
   }
   validateRiskContractors(doc){
     if(doc.type!=='risk')return;
-    const find=this.db.prepare('SELECT name FROM companies WHERE id=? AND site_id=?');
+    const find=this.db.prepare('SELECT c.name FROM companies c WHERE c.id=? AND c.site_id=? AND NOT EXISTS(SELECT 1 FROM archived_companies a WHERE a.company_id=c.id)');
     for(const row of [...(Array.isArray(doc.details.items)?doc.details.items:[doc.details]),...(doc.details.musculoskeletalItems||[])])if(row.contractorId){const company=find.get(row.contractorId,doc.siteId);if(!company)throw new Error('같은 현장의 협력사를 선택해 주세요.');row.contractor=company.name;}
   }
   validatePlanEquipment(doc) {
@@ -1742,7 +1777,7 @@ export class Store {
   validateInstructionRecipient(doc){
     if(doc.type!=='instruction')return;
     if(!doc.details.companyId){if(doc.details.recipientId)throw new Error('수신 협력사를 먼저 선택해 주세요.');return;}
-    const company=this.db.prepare('SELECT name,trade FROM companies WHERE id=? AND site_id=?').get(doc.details.companyId,doc.siteId);
+    const company=this.db.prepare('SELECT c.name,c.trade FROM companies c WHERE c.id=? AND c.site_id=? AND NOT EXISTS(SELECT 1 FROM archived_companies a WHERE a.company_id=c.id)').get(doc.details.companyId,doc.siteId);
     if(!company)throw new Error('같은 현장의 협력사를 선택해 주세요.');
     doc.details.companyName=company.name;doc.details.companyTrade=company.trade;
     if(doc.details.recipientId){const worker=this.db.prepare('SELECT name FROM workers WHERE id=? AND site_id=? AND company=?').get(doc.details.recipientId,doc.siteId,company.name);if(!worker)throw new Error('선택한 현장과 협력사의 담당자를 확인해 주세요.');doc.details.recipient=worker.name;}

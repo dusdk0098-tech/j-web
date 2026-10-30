@@ -1013,11 +1013,12 @@ async function render(){
     $('#restaurant-add').onclick=()=>edit(null);content.querySelectorAll('[data-restaurant]').forEach(b=>b.onclick=()=>edit(items.find(r=>r.id===Number(b.dataset.restaurant))));return;
   }
   if(state.page==='companies'){
-    const companies=await api(`/api/companies?siteId=${state.siteId}`);
-    content.innerHTML=`<section class="panel"><div class="panel-head"><h2>협력사 관리</h2><button class="primary" id="new-company">협력사 등록</button></div>${companies.length?`<div class="table-wrap"><table><thead><tr><th>회사명</th><th>공종</th><th>관리</th></tr></thead><tbody>${companies.map(c=>`<tr><td>${esc(c.name)}</td><td>${esc(c.trade)}</td><td><button class="small" data-company="${c.id}">수정</button></td></tr>`).join('')}</tbody></table></div>`:'<div class="empty">등록된 협력사가 없습니다.</div>'}<p class="muted">시험용 목록입니다. 출입자 소속과 연결되지는 않습니다.</p></section>`;
-    const edit=c=>showDialog(c?'협력사 수정':'협력사 등록',`<div class="fields">${field('name','회사명',c?.name||'')}${field('trade','공종',c?.trade||'')}</div>`,d=>api(c?`/api/companies/${c.id}`:'/api/companies',{method:c?'PUT':'POST',body:JSON.stringify({...d,siteId:state.siteId})}));
+    const siteId=state.siteId,companies=await api(`/api/companies?siteId=${siteId}&withUsage=1`);if(state.page!=='companies'||state.siteId!==siteId)return;
+    content.innerHTML=`<section class="panel"><div class="panel-head"><h2>협력사 관리</h2><button class="primary" id="new-company">협력사 등록</button></div>${companies.length?`<div class="table-wrap"><table><thead><tr><th>회사명</th><th>공종</th><th>관리</th></tr></thead><tbody>${companies.map(c=>`<tr><td>${esc(c.name)}</td><td>${esc(c.trade)}</td><td><button class="small" data-company="${c.id}">수정</button> <button class="small" data-remove-company="${c.id}" ${c.in_use?"disabled":""}>${c.in_use?"삭제 불가":"삭제"}</button></td></tr>`).join('')}</tbody></table></div>`:'<div class="empty">등록된 협력사가 없습니다.</div>'}<p class="muted">사용 중인 이름이나 문서에 연결된 협력사는 삭제할 수 없습니다. 목록에서 제거해도 기존 기록은 보존됩니다.</p></section>`;
+    const edit=c=>showDialog(c?'협력사 수정':'협력사 등록',`<div class="fields">${field('name','회사명',c?.name||'')}${field('trade','공종',c?.trade||'')}</div>`,d=>{if(state.siteId!==siteId)throw Error('현장이 변경되었습니다. 다시 선택해 주세요.');return api(c?`/api/companies/${c.id}`:'/api/companies',{method:c?'PUT':'POST',body:JSON.stringify({...d,siteId})});});
     $('#new-company').onclick=()=>edit(null);
     document.querySelectorAll('[data-company]').forEach(b=>b.onclick=()=>edit(companies.find(c=>c.id===Number(b.dataset.company))));
+    document.querySelectorAll('[data-remove-company]').forEach(button=>button.onclick=async()=>{const company=companies.find(item=>item.id===Number(button.dataset.removeCompany));if(!company||!confirm('이 협력사를 등록 목록에서 삭제할까요?'))return;button.disabled=true;try{if(state.siteId!==siteId||state.page!=='companies')throw Error('현장이 변경되었습니다. 다시 조회해 주세요.');await api(`/api/companies/${company.id}`,{method:'DELETE',body:JSON.stringify({siteId,expectedName:company.name,expectedTrade:company.trade})});flash('협력사를 등록 목록에서 삭제했습니다.');await render();}catch(error){showError(error);if(button.isConnected)button.disabled=false;}});
     return;
   }
   if(state.page==='attendance'){
