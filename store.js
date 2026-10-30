@@ -249,6 +249,10 @@ export class Store {
     month=monthValue(month);if(typeof query!=='string'||query.length>200)throw new Error('검색어를 확인해 주세요.');
     return this.db.prepare('SELECT * FROM schedules WHERE site_id=? AND substr(start_date,1,7)<=? AND substr(end_date,1,7)>=? AND (instr(content,?)>0 OR instr(target_name,?)>0) ORDER BY start_date,start_time,id').all(Number(siteId),month,month,query,query);
   }
+  reviewerSchedules(reviewerId,month,query=''){
+    month=monthValue(month);if(typeof query!=='string'||query.length>200)throw new Error('검색어를 확인해 주세요.');
+    return this.db.prepare('SELECT s.id,s.kind,s.start_date,s.end_date,s.start_time,s.end_time,s.content FROM schedules s JOIN reviewers r ON r.id=s.target_id AND r.site_id=s.site_id AND r.active=1 WHERE r.id=? AND substr(s.start_date,1,7)<=? AND substr(s.end_date,1,7)>=? AND instr(s.content,?)>0 ORDER BY s.start_date,s.start_time,s.id').all(Number(reviewerId),month,month,query);
+  }
   saveSchedule(input,id=null,onAuthorize=()=>{}){
     const siteId=Number(input.siteId);
     if(!scheduleTypes.includes(input.kind))throw new Error('일정 구분을 확인해 주세요.');

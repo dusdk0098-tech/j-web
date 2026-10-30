@@ -92,6 +92,7 @@ const server = http.createServer(async (req, res) => {
       req.checkSession=()=>reviewerSessions.get(key)===session&&session.expires>Date.now()&&store.reviewer(session.id)?null:{status:401,error:'결재자 로그인이 필요합니다.'};
       if(await handleCommonWork(req,res,url,'/api/reviewer/common-work',reviewer))return;
       if(url.pathname==='/api/reviewer/session'&&req.method==='GET')return json(res,200,{reviewer});
+      if(url.pathname==='/api/reviewer/schedules'&&req.method==='GET'){const result=store.reviewerSchedules(reviewer.id,url.searchParams.get('month'),url.searchParams.get('q')||'');checkRequestSession(req);return json(res,200,result);}
       if(url.pathname==='/api/reviewer/personal-supervisor'&&req.method==='GET')return json(res,200,personalNotes.supervisor(reviewer.site_id));
       if(url.pathname==='/api/reviewer/personal-notes'){
         if(req.method==='GET')return json(res,200,personalNotes.list(reviewer.site_id,url.searchParams.get('from')||'',url.searchParams.get('to')||'',url.searchParams.get('q')||'',reviewer));
