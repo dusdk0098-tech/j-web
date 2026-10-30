@@ -190,6 +190,14 @@ const server = http.createServer(async (req, res) => {
     if(url.pathname==='/api/worker/documents'&&['GET','POST'].includes(req.method)){
       const session=workerSessions.get(workerKey(workerToken));if(!session||session.expires<=Date.now())return json(res,401,{error:'근로자 로그인이 필요합니다.'});if(req.method==='GET')return json(res,200,store.workerDocuments(session.worker.site_id,session.worker.id));const input=await body(req,120000),failure=workerSessionError(workerToken,session);if(failure)return json(res,failure.status,{error:failure.error});return json(res,201,store.createWorkerDocument(session.worker.site_id,session.worker.id,input,()=>checkRequestSession(req)));
     }
+    const workerPlanSignature=url.pathname.match(/^\/api\/worker\/documents\/(\d+)\/author-signature(?:\/(image))?$/);
+    if(workerPlanSignature){
+      const session=workerSessions.get(workerKey(workerToken));if(!session||session.expires<=Date.now())return json(res,401,{error:'근로자 로그인이 필요합니다.'});
+      const [,id,image]=workerPlanSignature,siteId=session.worker.site_id,workerId=session.worker.id,authorize=()=>{checkRequestSession(req);const doc=store.workerDocument(siteId,workerId,id);if(doc.type!=='work_plan')throw new Error('작업계획서를 확인해 주세요.');return doc;};
+      const doc=authorize();
+      if(req.method==='POST'&&!image){const input=await body(req);store.saveMeetingSignature(id,input.signature,authorize,input.expectedVersion);return json(res,200,{ok:true});}
+      if(req.method==='GET'){const info=store.planSignatureInfo(doc);if(!image){authorize();return json(res,200,info);}const saved=store.meetingSignature(id);authorize();if(!saved)return json(res,404,{error:'시험 서명을 찾을 수 없습니다.'});res.writeHead(200,{'Content-Type':'image/png','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(saved.signature);}
+    }
     const workerDocument=url.pathname.match(/^\/api\/worker\/documents\/(\d+)(?:\/(transition|attachments)(?:\/(\d+))?)?$/);
     if(workerDocument){
       const session=workerSessions.get(workerKey(workerToken));if(!session||session.expires<=Date.now())return json(res,401,{error:'근로자 로그인이 필요합니다.'});const [,id,part,fileId]=workerDocument,siteId=session.worker.site_id,workerId=session.worker.id,doc=store.workerDocument(siteId,workerId,id);
@@ -728,7 +736,7 @@ const server = http.createServer(async (req, res) => {
     const jointSignature=url.pathname.match(/^\/api\/documents\/(\d+)\/joint-signature(?:\/(image))?$/);
     if(jointSignature){const [,id,image]=jointSignature;if(req.method==='POST'&&!image){const input=await body(req);store.saveJointSignature(id,input.signature,()=>checkRequestSession(req));return json(res,200,{ok:true});}if(req.method==='GET'){const saved=store.jointSignature(id);if(!image)return json(res,200,{hasSignature:!!saved,createdAt:saved?.created_at||null});if(!saved)return json(res,404,{error:'시험 서명을 찾을 수 없습니다.'});res.writeHead(200,{'Content-Type':'image/png','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(saved.signature);}}
     const meetingSignature=url.pathname.match(/^\/api\/documents\/(\d+)\/meeting-signature(?:\/(image))?$/);
-    if(meetingSignature){const [,id,image]=meetingSignature;if(req.method==='POST'&&!image){const input=await body(req);store.saveMeetingSignature(id,input.signature,()=>checkRequestSession(req));return json(res,200,{ok:true});}if(req.method==='GET'){const saved=store.meetingSignature(id);if(!image)return json(res,200,{hasSignature:!!saved,createdAt:saved?.created_at||null});if(!saved)return json(res,404,{error:'시험 서명을 찾을 수 없습니다.'});res.writeHead(200,{'Content-Type':'image/png','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(saved.signature);}}
+    if(meetingSignature){const [,id,image]=meetingSignature;if(req.method==='POST'&&!image){const input=await body(req);store.saveMeetingSignature(id,input.signature,()=>checkRequestSession(req),input.expectedVersion);return json(res,200,{ok:true});}if(req.method==='GET'){const saved=store.meetingSignature(id),doc=store.document(id);if(!image)return json(res,200,doc.type==='work_plan'?store.planSignatureInfo(doc):{hasSignature:!!saved,createdAt:saved?.created_at||null});if(!saved)return json(res,404,{error:'시험 서명을 찾을 수 없습니다.'});res.writeHead(200,{'Content-Type':'image/png','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(saved.signature);}}
     const attachList=url.pathname.match(/^\/api\/documents\/(\d+)\/attachments$/);
     if(attachList){
       if(req.method==='GET') return json(res,200,store.attachments(attachList[1]));

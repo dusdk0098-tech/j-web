@@ -57,7 +57,7 @@ async function showWorker(worker){
     month.onchange=load;await load();if(!panel.isConnected)return;
     try{
       const response=await fetch('/api/worker/permissions'),permissions=await response.json();if(!response.ok)throw Error(permissions.error);if(!panel.isConnected)return;
-      if(permissions.some(permission=>['risk','work_plan'].includes(permission)))await mountWorkerDocuments(panel,permissions);if(!panel.isConnected)return;
+      if(permissions.some(permission=>['risk','work_plan'].includes(permission)))await mountWorkerDocuments(panel,permissions,signaturePad);if(!panel.isConnected)return;
       if(permissions.includes('attendance')){
         const section=document.createElement('section');section.innerHTML='<h2>현장 출역 관리 시험 권한</h2><p>가상 출역만 변경하세요. 변경한 담당자는 기록됩니다.</p><label>날짜 <input type="date" required></label><button type="button">조회</button><div aria-live="polite"></div>';panel.append(section);
         const date=section.querySelector('input'),list=section.querySelector('[aria-live]');date.value=new Date(Date.now()-new Date().getTimezoneOffset()*60000).toISOString().slice(0,10);

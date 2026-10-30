@@ -107,6 +107,7 @@ export class Store {
       CREATE TABLE IF NOT EXISTS tbm_signatures (document_id INTEGER PRIMARY KEY REFERENCES documents(id),signature BLOB NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
       CREATE TABLE IF NOT EXISTS joint_inspection_signatures (document_id INTEGER PRIMARY KEY REFERENCES documents(id),signature BLOB NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
       CREATE TABLE IF NOT EXISTS meeting_signatures (document_id INTEGER PRIMARY KEY REFERENCES documents(id),signature BLOB NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+      CREATE TABLE IF NOT EXISTS plan_signature_versions (document_id INTEGER PRIMARY KEY REFERENCES documents(id),version TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS worker_meeting_checks (document_id INTEGER NOT NULL REFERENCES documents(id),worker_id INTEGER NOT NULL REFERENCES workers(id),signature BLOB NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(document_id,worker_id));
       CREATE TABLE IF NOT EXISTS worker_notice_reads (worker_id INTEGER NOT NULL REFERENCES workers(id),document_id INTEGER NOT NULL REFERENCES documents(id),read_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(worker_id,document_id));
       CREATE TABLE IF NOT EXISTS worker_self_checks (worker_id INTEGER NOT NULL REFERENCES workers(id),date TEXT NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(worker_id,date));
@@ -1284,7 +1285,7 @@ export class Store {
     const equipment=this.equipment(doc.site_id).filter(item=>equipmentIds.includes(item.id)).map(item=>{const snapshot=snapshots?.find(row=>row.id===item.id);return {info:snapshot||item,snapshot:!!snapshot,files:this.equipmentAttachments(doc.site_id,item.id)};});
     const rigging=this.rigging(doc.site_id).filter(item=>riggingIds.includes(item.id)).map(item=>({info:{...item,details:JSON.parse(item.details)},files:this.riggingPhotos(doc.site_id,item.id)}));
     const place=this.workPlaces(doc.site_id).find(item=>item.id===details.workPlaceId);
-    return {type:'plan',equipment,rigging,place:place?{info:{...place,details:JSON.parse(place.details)},files:this.workPlacePhotos(doc.site_id,place.id)}:null,checks:this.equipmentChecks(doc.id).map(check=>({...check,items:JSON.parse(check.items),equipment_snapshot:check.equipment_snapshot?JSON.parse(check.equipment_snapshot):null}))};
+    return {type:'plan',equipment,rigging,place:place?{info:{...place,details:JSON.parse(place.details)},files:this.workPlacePhotos(doc.site_id,place.id)}:null,checks:this.equipmentChecks(doc.id).map(check=>({...check,items:JSON.parse(check.items),equipment_snapshot:check.equipment_snapshot?JSON.parse(check.equipment_snapshot):null})),authorSignature:!!this.meetingSignature(doc.id)};
   }
   liveReviewerLinkedFile(doc,kind,parentId,fileId){
     if(kind==='risk'&&doc.type==='risk')return this.riskActivityPhoto(doc.id,parentId,fileId);
@@ -1303,7 +1304,7 @@ export class Store {
     if(kind==='author'&&doc.type==='tbm'&&Number(id)===0)return this.tbmSignature(doc.id)?.signature||null;
     if(kind==='author'&&doc.type==='joint_inspection'&&Number(id)===0)return this.jointSignature(doc.id)?.signature||null;
     if(kind==='author'&&doc.type==='checklist'&&Number(id)===0)return this.checklistSignature(doc.id)?.signature||null;
-    if(kind==='author'&&['work_council','safety_meeting','office','inspection','safety_log','patrol','cost'].includes(doc.type)&&Number(id)===0)return this.meetingSignature(doc.id)?.signature||null;
+    if(kind==='author'&&['work_council','safety_meeting','office','inspection','safety_log','patrol','cost','work_plan'].includes(doc.type)&&Number(id)===0)return this.meetingSignature(doc.id)?.signature||null;
     if(kind==='equipment-check'&&doc.type==='work_plan')return this.equipmentCheckSignature(doc.id,id);
     return null;
   }
@@ -1324,7 +1325,7 @@ export class Store {
     if(linked?.type==='permit')for(const extension of linked.extensions)save('permit-signature',extension.id,0,{data:this.liveReviewerLinkedSignature(doc,'permit',extension.id)});
     if(linked?.type==='training')for(const worker of linked.signedWorkers)save('training-signature',worker.id,0,{data:this.liveReviewerLinkedSignature(doc,'training',worker.id)});
     if(linked?.type==='office'&&linked.reference)for(const file of linked.reference.files)save('office-reference',linked.reference.id,file.id,this.liveReviewerLinkedFile(doc,'office-reference',linked.reference.id,file.id));
-    if(['training','joint','meeting','office','cost','checklist'].includes(linked?.type)&&linked.authorSignature)save('author-signature',0,0,{data:this.liveReviewerLinkedSignature(doc,'author',0)});
+    if(['training','joint','meeting','office','cost','checklist','plan'].includes(linked?.type)&&linked.authorSignature)save('author-signature',0,0,{data:this.liveReviewerLinkedSignature(doc,'author',0)});
     this.db.prepare('UPDATE documents SET approval_cycle_id=? WHERE id=?').run(cycle,doc.id);return cycle;
   }
   approvalCycle(documentId,cycleId){const row=this.db.prepare('SELECT id,document_id,document_json,attachments_json,linked_json,created_at FROM approval_cycles WHERE id=? AND document_id=?').get(Number(cycleId),Number(documentId));return row?{id:row.id,documentId:row.document_id,createdAt:row.created_at,document:JSON.parse(row.document_json),attachments:JSON.parse(row.attachments_json),linked:JSON.parse(row.linked_json)}:null;}
@@ -1455,11 +1456,23 @@ export class Store {
   saveTbmSignature(id,signature,onAuthorize=()=>{}){return this.saveAuthorSignature(id,signature,'tbm',onAuthorize);}
   jointSignature(id){const doc=this.document(id);if(!doc||doc.type!=='joint_inspection')throw new Error('합동 점검 문서를 확인해 주세요.');return this.db.prepare('SELECT signature,created_at FROM joint_inspection_signatures WHERE document_id=?').get(Number(id))||null;}
   saveJointSignature(id,signature,onAuthorize=()=>{}){return this.saveAuthorSignature(id,signature,'joint_inspection',onAuthorize);}
-  meetingSignature(id){const doc=this.document(id);if(!doc||!['work_council','safety_meeting','office','inspection','safety_log','patrol','cost'].includes(doc.type))throw new Error('회의 또는 업무 문서를 확인해 주세요.');return this.db.prepare('SELECT signature,created_at FROM meeting_signatures WHERE document_id=?').get(Number(id))||null;}
-  saveMeetingSignature(id,signature,onAuthorize=()=>{}){return this.saveAuthorSignature(id,signature,'meeting',onAuthorize);}
-  saveAuthorSignature(id,signature,kind,onAuthorize){
-    const configs={checklist:['checklist_signatures',['checklist'],'체크리스트'],tbm:['tbm_signatures',['tbm'],'TBM 문서'],joint_inspection:['joint_inspection_signatures',['joint_inspection'],'합동 점검'],meeting:['meeting_signatures',['work_council','safety_meeting','office','inspection','safety_log','patrol','cost'],'회의 또는 업무 문서']},config=configs[kind];if(!config)throw new Error('서명 종류를 확인해 주세요.');
-    this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();const doc=this.document(id);if(!doc||!config[1].includes(doc.type)||!['draft','rejected'].includes(doc.status))throw new Error(`수정 가능한 ${config[2]}를 확인해 주세요.`);const bytes=signatureBytes(signature);this.db.prepare(`INSERT INTO ${config[0]}(document_id,signature) VALUES(?,?) ON CONFLICT(document_id) DO UPDATE SET signature=excluded.signature,created_at=CURRENT_TIMESTAMP`).run(Number(id),bytes);this.db.exec('COMMIT');}catch(error){this.db.exec('ROLLBACK');throw error;}
+  meetingSignature(id){const doc=this.document(id);if(!doc||!['work_council','safety_meeting','office','inspection','safety_log','patrol','cost','work_plan'].includes(doc.type))throw new Error('회의 또는 업무 문서를 확인해 주세요.');return this.db.prepare('SELECT signature,created_at FROM meeting_signatures WHERE document_id=?').get(Number(id))||null;}
+  planSignatureVersion(doc){
+    const details=JSON.parse(doc.details||'{}');delete details.equipmentSnapshot;
+    const linked=this.liveReviewerLinks({...doc,details:JSON.stringify(details)});delete linked.authorSignature;
+    const attachments=this.attachments(doc.id),hash=createHash('sha256').update(JSON.stringify({site:doc.site_id,title:doc.title,date:doc.date,body:doc.body,details,attachments,linked}));
+    for(const file of attachments)hash.update(this.attachment(file.id).data);
+    for(const item of linked.equipment)for(const file of item.files)hash.update(this.liveReviewerLinkedFile(doc,'equipment',item.info.id,file.id).data);
+    for(const item of linked.rigging)for(const file of item.files)hash.update(this.liveReviewerLinkedFile(doc,'rigging',item.info.id,file.id).data);
+    if(linked.place)for(const file of linked.place.files)hash.update(this.liveReviewerLinkedFile(doc,'place',linked.place.info.id,file.id).data);
+    for(const check of linked.checks)if(check.has_signature)hash.update(this.equipmentCheckSignature(doc.id,check.id));
+    return hash.digest('hex');
+  }
+  planSignatureInfo(doc){const saved=this.meetingSignature(doc.id),version=this.planSignatureVersion(doc),previous=this.db.prepare('SELECT version FROM plan_signature_versions WHERE document_id=?').get(doc.id)?.version;return {hasSignature:!!saved,createdAt:saved?.created_at||null,version,stale:!!saved&&['draft','rejected'].includes(doc.status)&&previous!==version};}
+  saveMeetingSignature(id,signature,onAuthorize=()=>{},expectedVersion){return this.saveAuthorSignature(id,signature,'meeting',onAuthorize,expectedVersion);}
+  saveAuthorSignature(id,signature,kind,onAuthorize,expectedVersion){
+    const configs={checklist:['checklist_signatures',['checklist'],'체크리스트'],tbm:['tbm_signatures',['tbm'],'TBM 문서'],joint_inspection:['joint_inspection_signatures',['joint_inspection'],'합동 점검'],meeting:['meeting_signatures',['work_council','safety_meeting','office','inspection','safety_log','patrol','cost','work_plan'],'회의 또는 업무 문서']},config=configs[kind];if(!config)throw new Error('서명 종류를 확인해 주세요.');
+    this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();const doc=this.document(id);if(!doc||!config[1].includes(doc.type)||!['draft','rejected'].includes(doc.status))throw new Error(`수정 가능한 ${config[2]}를 확인해 주세요.`);if(doc.type==='work_plan'){const version=this.planSignatureVersion(doc);if(expectedVersion!==version)throw Object.assign(new Error('계획서나 연결 자료가 변경되었습니다. 다시 확인해 주세요.'),{sessionStatus:409});this.db.prepare('INSERT INTO plan_signature_versions(document_id,version) VALUES(?,?) ON CONFLICT(document_id) DO UPDATE SET version=excluded.version').run(doc.id,version);}const bytes=signatureBytes(signature);this.db.prepare(`INSERT INTO ${config[0]}(document_id,signature) VALUES(?,?) ON CONFLICT(document_id) DO UPDATE SET signature=excluded.signature,created_at=CURRENT_TIMESTAMP`).run(Number(id),bytes);this.db.exec('COMMIT');}catch(error){this.db.exec('ROLLBACK');throw error;}
   }
   attachment(id) {return this.db.prepare('SELECT * FROM attachments WHERE id=?').get(Number(id));}
   copyNoticeAttachments(id,sourceId){
@@ -1482,7 +1495,7 @@ export class Store {
     if(!['general','plan_diagram','morning_hazard_photo'].includes(category)||category==='plan_diagram'&&doc.type!=='work_plan'||category==='morning_hazard_photo'&&(doc.type!=='checklist'||JSON.parse(doc.details).kind!=='morning'))throw new Error('첨부 구분을 확인해 주세요.');
     if(['plan_diagram','morning_hazard_photo'].includes(category)){const bytes=Buffer.from(data);if(!bytes.subarray(0,8).equals(Buffer.from('89504e470d0a1a0a','hex'))&&!bytes.subarray(0,3).equals(Buffer.from('ffd8ff','hex')))throw new Error('시험 이미지는 PNG 또는 JPEG를 선택해 주세요.');}
     if (this.attachments(id).length>=20) throw new Error('첨부파일은 문서당 20개까지 가능합니다.');
-    const attachmentId=this.db.prepare('INSERT INTO attachments(document_id,name,data,category) VALUES(?,?,?,?)').run(Number(id),name,data,category).lastInsertRowid;if(doc.type==='checklist')this.db.prepare('DELETE FROM checklist_signatures WHERE document_id=?').run(Number(id));if(doc.type==='tbm')this.db.prepare('DELETE FROM tbm_signatures WHERE document_id=?').run(Number(id));if(doc.type==='joint_inspection')this.db.prepare('DELETE FROM joint_inspection_signatures WHERE document_id=?').run(Number(id));if(['work_council','safety_meeting','office','inspection','safety_log','patrol','cost'].includes(doc.type))this.db.prepare('DELETE FROM meeting_signatures WHERE document_id=?').run(Number(id));this.db.exec('COMMIT');return attachmentId;}catch(error){this.db.exec('ROLLBACK');throw error;}
+    const attachmentId=this.db.prepare('INSERT INTO attachments(document_id,name,data,category) VALUES(?,?,?,?)').run(Number(id),name,data,category).lastInsertRowid;if(doc.type==='checklist')this.db.prepare('DELETE FROM checklist_signatures WHERE document_id=?').run(Number(id));if(doc.type==='tbm')this.db.prepare('DELETE FROM tbm_signatures WHERE document_id=?').run(Number(id));if(doc.type==='joint_inspection')this.db.prepare('DELETE FROM joint_inspection_signatures WHERE document_id=?').run(Number(id));if(['work_council','safety_meeting','office','inspection','safety_log','patrol','cost','work_plan'].includes(doc.type))this.db.prepare('DELETE FROM meeting_signatures WHERE document_id=?').run(Number(id));if(doc.type==='work_plan')this.db.prepare('DELETE FROM plan_signature_versions WHERE document_id=?').run(Number(id));this.db.exec('COMMIT');return attachmentId;}catch(error){this.db.exec('ROLLBACK');throw error;}
   }
   deleteAttachment(id,onAuthorize=()=>{}) {
     this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();
@@ -1490,7 +1503,7 @@ export class Store {
     if(!attachment) throw new Error('첨부파일을 찾을 수 없습니다.');
     const doc=this.document(attachment.document_id);
     if(!doc || !['draft','rejected'].includes(doc.status)) throw new Error('임시저장 또는 반려된 문서의 첨부파일만 삭제할 수 있습니다.');
-    this.db.prepare('DELETE FROM attachments WHERE id=?').run(Number(id));if(doc.type==='checklist')this.db.prepare('DELETE FROM checklist_signatures WHERE document_id=?').run(doc.id);if(doc.type==='tbm')this.db.prepare('DELETE FROM tbm_signatures WHERE document_id=?').run(doc.id);if(doc.type==='joint_inspection')this.db.prepare('DELETE FROM joint_inspection_signatures WHERE document_id=?').run(doc.id);if(['work_council','safety_meeting','office','inspection','safety_log','patrol','cost'].includes(doc.type))this.db.prepare('DELETE FROM meeting_signatures WHERE document_id=?').run(doc.id);this.db.exec('COMMIT');}catch(error){this.db.exec('ROLLBACK');throw error;}
+    this.db.prepare('DELETE FROM attachments WHERE id=?').run(Number(id));if(doc.type==='checklist')this.db.prepare('DELETE FROM checklist_signatures WHERE document_id=?').run(doc.id);if(doc.type==='tbm')this.db.prepare('DELETE FROM tbm_signatures WHERE document_id=?').run(doc.id);if(doc.type==='joint_inspection')this.db.prepare('DELETE FROM joint_inspection_signatures WHERE document_id=?').run(doc.id);if(['work_council','safety_meeting','office','inspection','safety_log','patrol','cost','work_plan'].includes(doc.type))this.db.prepare('DELETE FROM meeting_signatures WHERE document_id=?').run(doc.id);if(doc.type==='work_plan')this.db.prepare('DELETE FROM plan_signature_versions WHERE document_id=?').run(doc.id);this.db.exec('COMMIT');}catch(error){this.db.exec('ROLLBACK');throw error;}
   }
   updateDocument(id, input, onAuthorize=()=>{}) {
     this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();
@@ -1519,7 +1532,7 @@ export class Store {
       if(current.date===d.date){if(previous)d.details.attendanceSnapshot=previous;}
       else d.details.attendanceSnapshot={present:this.attendance(d.siteId,d.date).filter(row=>row.present).length,capturedAt:new Date().toISOString()};
     }
-    this.db.prepare('UPDATE documents SET title=?,date=?,body=?,details=?,updated_at=CURRENT_TIMESTAMP WHERE id=?').run(d.title,d.date,d.body,JSON.stringify(d.details),Number(id));if(d.type==='checklist')this.db.prepare('DELETE FROM checklist_signatures WHERE document_id=?').run(Number(id));if(d.type==='tbm')this.db.prepare('DELETE FROM tbm_signatures WHERE document_id=?').run(Number(id));if(d.type==='joint_inspection')this.db.prepare('DELETE FROM joint_inspection_signatures WHERE document_id=?').run(Number(id));if(['work_council','safety_meeting','office','inspection','safety_log','patrol','cost'].includes(d.type))this.db.prepare('DELETE FROM meeting_signatures WHERE document_id=?').run(Number(id));const result=this.document(id);this.db.exec('COMMIT');return result;}catch(error){this.db.exec('ROLLBACK');throw error;}
+    this.db.prepare('UPDATE documents SET title=?,date=?,body=?,details=?,updated_at=CURRENT_TIMESTAMP WHERE id=?').run(d.title,d.date,d.body,JSON.stringify(d.details),Number(id));if(d.type==='checklist')this.db.prepare('DELETE FROM checklist_signatures WHERE document_id=?').run(Number(id));if(d.type==='tbm')this.db.prepare('DELETE FROM tbm_signatures WHERE document_id=?').run(Number(id));if(d.type==='joint_inspection')this.db.prepare('DELETE FROM joint_inspection_signatures WHERE document_id=?').run(Number(id));if(['work_council','safety_meeting','office','inspection','safety_log','patrol','cost','work_plan'].includes(d.type))this.db.prepare('DELETE FROM meeting_signatures WHERE document_id=?').run(Number(id));if(d.type==='work_plan')this.db.prepare('DELETE FROM plan_signature_versions WHERE document_id=?').run(Number(id));const result=this.document(id);this.db.exec('COMMIT');return result;}catch(error){this.db.exec('ROLLBACK');throw error;}
   }
   updateRiskImprovement(documentId,input){
     const doc=this.document(documentId);
@@ -1606,6 +1619,7 @@ export class Store {
       if(action==='submit'&&line.length)this.db.prepare("UPDATE approval_steps SET state='pending' WHERE document_id=?").run(Number(id));
       if(reviewer)this.db.prepare('UPDATE approval_steps SET state=? WHERE document_id=? AND position=?').run(action==='approve'?'approved':'rejected',Number(id),reviewer.position);
       if(doc.type==='work_plan'&&action==='submit'){
+        if(this.planSignatureInfo(doc).stale)throw Object.assign(new Error('서명 이후 계획서나 연결 자료가 변경되었습니다. 다시 서명해 주세요.'),{sessionStatus:409});
         const details=JSON.parse(doc.details),get=this.db.prepare('SELECT id,kind,model,capacity,manufacturer,registration,details FROM equipment WHERE id=? AND site_id=?');
         if(details.equipmentIds!==undefined){details.equipmentSnapshot=details.equipmentIds.map(equipmentId=>{const item=get.get(equipmentId,doc.site_id);if(!item)throw new Error('같은 현장의 장비를 확인해 주세요.');return item;});this.db.prepare('UPDATE documents SET details=? WHERE id=?').run(JSON.stringify(details),Number(id));}
       }
