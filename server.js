@@ -459,6 +459,9 @@ const server = http.createServer(async (req, res) => {
         res.writeHead(200,{'Content-Type':'application/octet-stream','Content-Disposition':`attachment; filename="photo"; filename*=UTF-8''${name}`,'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(photo.data);
       }
     }
+    const equipmentCopy=url.pathname.match(/^\/api\/equipment\/(\d+)\/copy$/);
+    if(equipmentCopy&&req.method==='GET')return json(res,200,store.equipmentCopySource(url.searchParams.get('siteId'),equipmentCopy[1]));
+    if(equipmentCopy&&req.method==='POST'){const input=await body(req);return json(res,201,store.copyEquipment(input.siteId,equipmentCopy[1],input,()=>checkRequestSession(req)));}
     if(url.pathname==='/api/equipment'){
       if(req.method==='GET')return json(res,200,store.equipment(url.searchParams.get('siteId')));
       if(req.method==='POST')return json(res,201,store.createEquipment(await body(req)));

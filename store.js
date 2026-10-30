@@ -541,6 +541,17 @@ export class Store {
     }catch(error){this.db.exec('ROLLBACK');throw error;}
   }
   equipment(siteId) {return this.db.prepare('SELECT * FROM equipment WHERE site_id=? ORDER BY kind,model,id').all(Number(siteId));}
+  equipmentCopySource(siteId,id){
+    const source=this.db.prepare('SELECT * FROM equipment WHERE site_id=? AND id=?').get(Number(siteId),Number(id));if(!source)throw new Error('선택한 현장의 장비를 확인해 주세요.');
+    const files=this.db.prepare('SELECT id,category,name,data FROM equipment_attachments WHERE equipment_id=? ORDER BY id').all(source.id),hash=createHash('sha256').update(JSON.stringify(source));
+    for(const file of files){hash.update(JSON.stringify([file.id,file.category,file.name,file.data.length]));hash.update(file.data);}
+    return {source,attachmentCount:files.length,version:hash.digest('hex')};
+  }
+  copyEquipment(siteId,id,input,onAuthorize=()=>{}){
+    siteId=Number(siteId);if(!input||typeof input.version!=='string'||!/^[0-9a-f]{64}$/.test(input.version))throw new Error('장비 복사 정보를 확인해 주세요.');
+    const kind=text(input.kind,'장비 종류'),model=text(input.model,'형식');if(typeof input.registration!=='string'||input.registration.length>200)throw new Error('등록번호를 확인해 주세요.');
+    this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();const {source,version}=this.equipmentCopySource(siteId,id);if(version!==input.version)throw Object.assign(new Error('원본 장비가 변경되었습니다. 다시 조회해 주세요.'),{sessionStatus:409});const newId=this.db.prepare('INSERT INTO equipment(site_id,kind,model,capacity,manufacturer,registration,details) VALUES(?,?,?,?,?,?,?)').run(siteId,kind,model,source.capacity,source.manufacturer,input.registration.trim(),source.details).lastInsertRowid;this.db.prepare('INSERT INTO equipment_attachments(equipment_id,category,name,data) SELECT ?,category,name,data FROM equipment_attachments WHERE equipment_id=? ORDER BY id').run(newId,source.id);const result=this.db.prepare('SELECT * FROM equipment WHERE id=?').get(newId);this.db.exec('COMMIT');return result;}catch(error){this.db.exec('ROLLBACK');throw error;}
+  }
   workPlaces(siteId){return this.db.prepare('SELECT * FROM work_places WHERE site_id=? ORDER BY name,id').all(Number(siteId));}
   rigging(siteId){return this.db.prepare('SELECT * FROM rigging WHERE site_id=? ORDER BY name,id').all(Number(siteId));}
   riggingPhotos(siteId,id){if(!this.db.prepare('SELECT 1 FROM rigging WHERE id=? AND site_id=?').get(Number(id),Number(siteId)))throw new Error('선택한 현장의 장구를 확인해 주세요.');return this.db.prepare('SELECT id,name,length(data) AS size FROM rigging_photos WHERE rigging_id=? ORDER BY id').all(Number(id));}
