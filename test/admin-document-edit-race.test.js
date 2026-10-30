@@ -1,0 +1,20 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtempSync,rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { createServer } from 'node:net';
+import { spawn } from 'node:child_process';
+import { once } from 'node:events';
+import { DatabaseSync } from 'node:sqlite';
+
+test('관리자 문서 수정이 저장 대기 중 결재 상태가 바뀌면 내용을 바꾸지 않는다',{timeout:30000},async()=>{
+  const dir=mkdtempSync(join(tmpdir(),'jweb-admin-edit-race-')),reservation=createServer();await new Promise(resolve=>reservation.listen(0,'127.0.0.1',resolve));const port=reservation.address().port;await new Promise(resolve=>reservation.close(resolve));
+  const source=pathToFileURL(join(process.cwd(),'store.js')).href,trace=`import {Store} from ${JSON.stringify(source)};const original=Store.prototype.updateDocument;Store.prototype.updateDocument=function(...args){const db=this.db,exec=db.exec;db.exec=function(sql){if(sql==='BEGIN IMMEDIATE')process.stdout.write('ADMIN_EDIT\\n');return exec.call(this,sql)};try{return original.apply(this,args)}finally{db.exec=exec}};`,child=spawn(process.execPath,['--import',`data:text/javascript,${encodeURIComponent(trace)}`,'server.js'],{cwd:process.cwd(),env:{...process.env,PORT:String(port),JWEB_DATA_DIR:dir,JWEB_ADMIN_PASSWORD:'test-password-12345'},stdio:['ignore','pipe','pipe']});let db,locked=false;
+  try{
+    await Promise.race([once(child.stdout,'data'),once(child,'exit').then(()=>{throw Error('시험 서버가 종료됐습니다.');})]);const base=`http://127.0.0.1:${port}`,send=(path,method='GET',data,cookie)=>fetch(base+path,{method,headers:{...(data?{'content-type':'application/json'}:{}),...(cookie?{cookie}:{})},...(data?{body:JSON.stringify(data)}:{})}),admin=(await send('/api/login','POST',{password:'test-password-12345'})).headers.get('set-cookie').split(';')[0],site=await (await send('/api/sites','POST',{name:'가상 현장'},admin)).json(),input={siteId:site.id,type:'risk',title:'가상 평가',date:'2026-10-30',body:'기존 내용'},doc=await (await send('/api/documents','POST',input,admin)).json(),url=`/api/documents/${doc.id}`;db=new DatabaseSync(join(dir,'jweb.sqlite'));db.exec('PRAGMA busy_timeout=3000');db.exec('BEGIN IMMEDIATE');locked=true;
+    const started=once(child.stdout,'data'),pending=send(url,'PUT',{...input,title:'늦은 수정'},admin);pending.catch(()=>{});assert.match(String((await started)[0]),/ADMIN_EDIT/);db.prepare("UPDATE documents SET status='pending' WHERE id=?").run(doc.id);db.exec('COMMIT');locked=false;assert.equal((await pending).status,400);const stored=db.prepare('SELECT title,status FROM documents WHERE id=?').get(doc.id);assert.deepEqual({...stored},{title:'가상 평가',status:'pending'});db.prepare("UPDATE documents SET status='draft' WHERE id=?").run(doc.id);assert.equal((await send(url,'PUT',{...input,title:'정상 수정'},admin)).status,200);assert.equal(db.prepare('SELECT title FROM documents WHERE id=?').get(doc.id).title,'정상 수정');
+    const answers=Array.from({length:9},()=>({answer:'',note:''})),checkInput={siteId:site.id,type:'checklist',title:'가상 점검',date:'2026-10-30',details:{kind:'morning',answers}},check=await (await send('/api/documents','POST',checkInput,admin)).json();db.exec('BEGIN IMMEDIATE');locked=true;const checkStarted=once(child.stdout,'data'),changed=send(`/api/documents/${check.id}`,'PUT',{...checkInput,details:{kind:'rain',answers:answers.slice(0,7)}},admin);changed.catch(()=>{});assert.match(String((await checkStarted)[0]),/ADMIN_EDIT/);db.prepare("INSERT INTO attachments(document_id,name,data,category) VALUES(?,?,?,'morning_hazard_photo')").run(check.id,'가상.png',Buffer.from('89504e470d0a1a0a','hex'));db.exec('COMMIT');locked=false;assert.equal((await changed).status,400);assert.equal(JSON.parse(db.prepare('SELECT details FROM documents WHERE id=?').get(check.id).details).kind,'morning');assert.equal(db.prepare('SELECT count(*) AS n FROM attachments WHERE document_id=?').get(check.id).n,1);
+  }finally{if(db){if(locked)db.exec('ROLLBACK');db.close();}if(child.exitCode===null){const exited=once(child,'exit');child.kill();await exited;}rmSync(dir,{recursive:true,force:true});}
+});
