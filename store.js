@@ -1279,6 +1279,29 @@ export class Store {
     if(!Array.isArray(ids)||ids.length>10||ids.some(x=>!Number.isSafeInteger(x)||x<1)||new Set(ids).size!==ids.length)throw new Error('참조자를 확인해 주세요.');
     this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();const doc=this.document(id);if(!doc||doc.type!=='office'||!['draft','rejected'].includes(doc.status))throw new Error('수정 가능한 업무 문서를 확인해 주세요.');const exists=this.db.prepare('SELECT 1 FROM reviewers WHERE id=? AND site_id=? AND active=1');if(ids.some(reviewer=>!exists.get(reviewer,doc.site_id)))throw new Error('같은 현장의 활성 참조자를 선택해 주세요.');this.db.prepare('DELETE FROM office_reference_recipients WHERE document_id=?').run(Number(id));const add=this.db.prepare('INSERT INTO office_reference_recipients(document_id,reviewer_id) VALUES(?,?)');for(const reviewer of ids)add.run(Number(id),reviewer);this.db.prepare('DELETE FROM meeting_signatures WHERE document_id=?').run(Number(id));this.db.exec('COMMIT');return this.officeReferences(id);}catch(error){this.db.exec('ROLLBACK');throw error;}
   }
+  changeOfficeReferenceAccess(id,input,onAuthorize=()=>{}){
+    const valid=ids=>Array.isArray(ids)&&ids.length<=1000&&ids.every(value=>Number.isSafeInteger(value)&&value>0)&&new Set(ids).size===ids.length;
+    if(!input||!valid(input.reviewerIds)||input.reviewerIds.length>10||!valid(input.expectedReviewerIds)||!Number.isSafeInteger(input.expectedCycleId)||input.expectedCycleId<1)throw new Error('참조자와 요청 회차를 확인해 주세요.');
+    this.db.exec('BEGIN IMMEDIATE');try{
+      onAuthorize();const doc=this.document(id);if(!doc||doc.type!=='office')throw new Error('업무 문서를 확인해 주세요.');
+      const conflict=()=>Object.assign(new Error('참조자 또는 요청 상태가 변경되었습니다. 다시 조회해 주세요.'),{sessionStatus:409});
+      if(!['pending','approved'].includes(doc.status)||doc.approval_cycle_id!==input.expectedCycleId||!this.approvalCycle(doc.id,doc.approval_cycle_id))throw conflict();
+      const current=this.officeReferences(doc.id),currentIds=new Set(current.map(person=>person.id)),expected=new Set(input.expectedReviewerIds);
+      if(currentIds.size!==expected.size||[...currentIds].some(value=>!expected.has(value)))throw conflict();
+      const lookup=this.db.prepare('SELECT id,name,active FROM reviewers WHERE id=? AND site_id=?'),selected=input.reviewerIds.map(value=>lookup.get(value,doc.site_id));
+      if(selected.some(person=>!person||(!person.active&&!currentIds.has(person.id))))throw new Error('같은 현장의 활성 참조자를 선택해 주세요.');
+      const wanted=new Set(input.reviewerIds),added=selected.filter(person=>!currentIds.has(person.id)),removed=current.filter(person=>!wanted.has(person.id));
+      if(added.length||removed.length){
+        this.db.prepare('DELETE FROM office_reference_recipients WHERE document_id=?').run(doc.id);
+        this.db.prepare('DELETE FROM office_reference_cycle_recipients WHERE cycle_id=?').run(doc.approval_cycle_id);
+        const addCurrent=this.db.prepare('INSERT INTO office_reference_recipients(document_id,reviewer_id) VALUES(?,?)'),addCycle=this.db.prepare('INSERT INTO office_reference_cycle_recipients(cycle_id,reviewer_id) VALUES(?,?)');
+        for(const person of selected){addCurrent.run(doc.id,person.id);addCycle.run(doc.approval_cycle_id,person.id);}
+        const describe=people=>people.map(person=>`${person.name} (#${person.id})`).join(', '),opinion=[added.length?`추가: ${describe(added)}`:'',removed.length?`해제: ${describe(removed)}`:''].filter(Boolean).join(' / ');
+        this.db.prepare("INSERT INTO events(document_id,action,from_status,to_status,opinion,approval_cycle_id) VALUES(?,'reference_access',?,?,?,?)").run(doc.id,doc.status,doc.status,opinion,doc.approval_cycle_id);
+      }
+      const result=this.officeReferences(doc.id);this.db.exec('COMMIT');return result;
+    }catch(error){this.db.exec('ROLLBACK');throw error;}
+  }
   officeReferenceDocuments(reviewerId){return this.db.prepare("SELECT d.id,d.site_id,d.type,json_extract(a.document_json,'$.title') AS title,json_extract(a.document_json,'$.date') AS date,d.status FROM documents d JOIN office_reference_recipients o ON o.document_id=d.id JOIN reviewers r ON r.id=o.reviewer_id AND r.site_id=d.site_id JOIN office_reference_cycle_recipients c ON c.cycle_id=d.approval_cycle_id AND c.reviewer_id=r.id JOIN approval_cycles a ON a.id=c.cycle_id AND a.document_id=d.id WHERE r.id=? AND r.active=1 AND d.type='office' AND d.status IN ('pending','approved','rejected') ORDER BY date DESC,d.id DESC").all(Number(reviewerId));}
   officeReferenceDocument(reviewerId,id){return this.officeReferenceDocuments(reviewerId).some(doc=>doc.id===Number(id))?this.document(id):null;}
   priorReviewerEvents(doc,reviewerId){
