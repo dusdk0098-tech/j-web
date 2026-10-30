@@ -771,14 +771,13 @@ export class Store {
   dailyTraining(workerId,date) {
     return this.db.prepare('SELECT kind,created_at,signature IS NOT NULL AS has_signature FROM worker_daily_training WHERE worker_id=? AND date=? ORDER BY kind').all(Number(workerId),dateValue(date));
   }
-  confirmDailyTraining(workerId,date,kinds,rightsConfirmed,signature) {
+  confirmDailyTraining(workerId,date,kinds,rightsConfirmed,signature,onAuthorize=()=>{}) {
     date=dateValue(date);
     if(rightsConfirmed!==true)throw new Error('권리와 의무를 확인해 주세요.');
     if(!Array.isArray(kinds) || !kinds.length || kinds.length>3 || new Set(kinds).size!==kinds.length || kinds.some(k=>!['tbm','education','meeting'].includes(k)))throw new Error('교육 종류를 선택해 주세요.');
-    if(!this.db.prepare('SELECT 1 FROM workers WHERE id=?').get(Number(workerId)))throw new Error('근로자를 확인해 주세요.');
     const bytes=signature===undefined ? null : signatureBytes(signature);
     this.db.exec('BEGIN IMMEDIATE');
-    try{const insert=this.db.prepare('INSERT OR IGNORE INTO worker_daily_training(worker_id,date,kind,signature) VALUES(?,?,?,?)');for(const kind of kinds)insert.run(Number(workerId),date,kind,bytes);this.db.exec('COMMIT');}catch(error){this.db.exec('ROLLBACK');throw error;}
+    try{onAuthorize();if(!this.db.prepare('SELECT 1 FROM workers WHERE id=?').get(Number(workerId)))throw new Error('근로자를 확인해 주세요.');const insert=this.db.prepare('INSERT OR IGNORE INTO worker_daily_training(worker_id,date,kind,signature) VALUES(?,?,?,?)');for(const kind of kinds)insert.run(Number(workerId),date,kind,bytes);this.db.exec('COMMIT');}catch(error){this.db.exec('ROLLBACK');throw error;}
     return this.dailyTraining(workerId,date);
   }
   dailyTrainingSignature(siteId,workerId,date,kind){
