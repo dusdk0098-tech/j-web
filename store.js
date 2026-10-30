@@ -1568,22 +1568,22 @@ export class Store {
     } catch (err) { this.db.exec('ROLLBACK TO document_transition');this.db.exec('RELEASE document_transition');throw err; }
     return this.document(id);
   }
-  publishNotice(id){
+  publishNotice(id,onAuthorize=()=>{}){
+    this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();
     const doc=this.document(id);
     if(!doc||doc.type!=='notice'||doc.status!=='draft')throw new Error('임시저장된 공지를 확인해 주세요.');
     if(this.approvalLine(id).length)throw new Error('지정된 시험 결재선을 먼저 해제해 주세요.');
     if(!doc.body.trim())throw new Error('공지 내용을 입력해 주세요.');
-    this.db.exec('SAVEPOINT publish_notice');
-    try{this.db.prepare("UPDATE documents SET status='approved',updated_at=CURRENT_TIMESTAMP WHERE id=?").run(doc.id);this.db.prepare("INSERT INTO events(document_id,action,from_status,to_status) VALUES(?,'publish','draft','approved')").run(doc.id);this.db.exec('RELEASE publish_notice');}catch(error){this.db.exec('ROLLBACK TO publish_notice');this.db.exec('RELEASE publish_notice');throw error;}
-    return this.document(id);
+    this.db.prepare("UPDATE documents SET status='approved',updated_at=CURRENT_TIMESTAMP WHERE id=?").run(doc.id);this.db.prepare("INSERT INTO events(document_id,action,from_status,to_status) VALUES(?,'publish','draft','approved')").run(doc.id);const result=this.document(id);this.db.exec('COMMIT');return result;}catch(error){this.db.exec('ROLLBACK');throw error;}
   }
+  managedTransition(id,input,onAuthorize=()=>{}){this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();const result=input.action==='approve'?this.approveDocument(id,input.opinion,input.signature):this.transition(id,input.action,input.opinion);this.db.exec('COMMIT');return result;}catch(error){this.db.exec('ROLLBACK');throw error;}}
   approveDocument(id,opinion,signature){return this.transition(id,'approve',opinion,signatureBytes(signature));}
   reviewerTransition(id,reviewerId,action,opinion,signature,onAuthorize=null){this.db.exec('BEGIN IMMEDIATE');try{if(onAuthorize)onAuthorize();if(!['approve','reject'].includes(action)||!this.reviewerDocument(reviewerId,id))throw new Error('현재 차례의 결재자를 확인해 주세요.');const result=this.transition(id,action,opinion,action==='approve'?signatureBytes(signature):null,Number(reviewerId));this.db.exec('COMMIT');return result;}catch(error){this.db.exec('ROLLBACK');throw error;}}
-  approveDocuments(siteId,ids,signature){
+  approveDocuments(siteId,ids,signature,onAuthorize=()=>{}){
     if(!Number.isSafeInteger(siteId)||siteId<1||!Array.isArray(ids)||!ids.length||ids.length>100||ids.some(id=>!Number.isSafeInteger(id)||id<1)||new Set(ids).size!==ids.length)throw new Error('선택한 시험 문서를 확인해 주세요.');
     const bytes=signatureBytes(signature);
     this.db.exec('BEGIN IMMEDIATE');
-    try{
+    try{onAuthorize();
       for(const id of ids){const doc=this.document(id);if(!doc||doc.site_id!==siteId||doc.status!=='pending')throw new Error('선택한 현장의 결재 대기 문서를 확인해 주세요.');}
       for(const id of ids)this.transition(id,'approve','',bytes);
       this.db.exec('COMMIT');

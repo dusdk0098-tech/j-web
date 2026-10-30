@@ -766,7 +766,7 @@ const server = http.createServer(async (req, res) => {
     if(riskImprovement&&req.method==='PUT')return json(res,200,store.updateRiskImprovement(riskImprovement[1],await body(req)));
     const riskActivity=url.pathname.match(/^\/api\/documents\/(\d+)\/risk-activities(?:\/(\d+))?$/);
     if(riskActivity){const [,id,activityId]=riskActivity;if(!activityId&&req.method==='GET')return json(res,200,store.riskActivities(id));if(!activityId&&req.method==='POST')return json(res,201,{id:store.saveRiskActivity(id,await body(req))});if(activityId&&req.method==='PUT')return json(res,200,{id:store.saveRiskActivity(id,await body(req),activityId)});if(activityId&&req.method==='DELETE'){store.deleteRiskActivity(id,activityId);return json(res,200,{ok:true});}}
-    if(url.pathname==='/api/documents/batch-approve'&&req.method==='POST'){const input=await body(req);return json(res,200,store.approveDocuments(input.siteId,input.ids,input.signature));}
+    if(url.pathname==='/api/documents/batch-approve'&&req.method==='POST'){const input=await body(req);return json(res,200,store.approveDocuments(input.siteId,input.ids,input.signature,()=>checkRequestSession(req)));}
     const previousApproval=url.pathname.match(/^\/api\/documents\/(\d+)\/previous-approval-line$/);
     if(previousApproval&&req.method==='GET')return json(res,200,store.previousApprovalLine(previousApproval[1]));
     const approvalLine=url.pathname.match(/^\/api\/documents\/(\d+)\/approval-line$/);
@@ -795,7 +795,7 @@ const server = http.createServer(async (req, res) => {
     if (match) {
       const [,id,part] = match;
       if (req.method === 'GET' && part === 'events') return json(res,200,store.events(id));
-      if (req.method === 'POST' && part === 'publish-notice') return json(res,200,store.publishNotice(id));
+      if (req.method === 'POST' && part === 'publish-notice') return json(res,200,store.publishNotice(id,()=>checkRequestSession(req)));
       if (req.method === 'POST' && part === 'copy-notice-files') {const input=await body(req);return json(res,200,store.copyNoticeAttachments(id,input.sourceId));}
       if (req.method === 'GET' && part === 'notice-reads') return json(res,200,store.noticeReads(id));
       if (req.method === 'GET' && part === 'training-checks') return json(res,200,store.trainingChecks(id));
@@ -804,7 +804,7 @@ const server = http.createServer(async (req, res) => {
       if (req.method === 'GET' && !part) { const d=store.document(id); return d ? json(res,200,d) : json(res,404,{error:'문서를 찾을 수 없습니다.'}); }
       if (req.method === 'PUT' && !part) {const input=await body(req);return json(res,200,store.updateDocument(id,input,()=>checkRequestSession(req)));}
       if (req.method === 'DELETE' && !part) {const input=await body(req);store.deleteBasicDocument(input.siteId,id,input.expectedVersion);return json(res,200,{ok:true});}
-      if (req.method === 'POST' && part === 'transition') {const input=await body(req);return json(res,200,input.action==='approve'?store.approveDocument(id,input.opinion,input.signature):store.transition(id,input.action,input.opinion));}
+      if (req.method === 'POST' && part === 'transition') {const input=await body(req);return json(res,200,store.managedTransition(id,input,()=>checkRequestSession(req)));}
     }
     return json(res,404,{error:'요청한 경로가 없습니다.'});
   } catch (e) { if(e.code==='ERR_SQLITE_ERROR'&&Number.isInteger(e.errcode)&&[5,6].includes(e.errcode&255))return json(res,503,{error:'데이터베이스가 사용 중입니다. 잠시 후 다시 시도해 주세요.'});return json(res,[401,403,409].includes(e.sessionStatus)?e.sessionStatus:400,{error:e.message || '요청을 처리하지 못했습니다.'}); }
