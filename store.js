@@ -99,6 +99,7 @@ export class Store {
       CREATE TABLE IF NOT EXISTS office_document_copies (document_id INTEGER PRIMARY KEY REFERENCES documents(id),source_document_id INTEGER NOT NULL REFERENCES documents(id));
       CREATE TABLE IF NOT EXISTS office_reference_recipients (document_id INTEGER NOT NULL REFERENCES documents(id),reviewer_id INTEGER NOT NULL REFERENCES reviewers(id),PRIMARY KEY(document_id,reviewer_id));
       CREATE TABLE IF NOT EXISTS reviewers (id INTEGER PRIMARY KEY,site_id INTEGER NOT NULL REFERENCES sites(id),login_id TEXT NOT NULL UNIQUE,name TEXT NOT NULL,salt BLOB NOT NULL,password_hash BLOB NOT NULL,active INTEGER NOT NULL DEFAULT 1 CHECK(active IN (0,1)));
+      CREATE TABLE IF NOT EXISTS reviewer_final_approvals (reviewer_id INTEGER PRIMARY KEY REFERENCES reviewers(id));
       CREATE TABLE IF NOT EXISTS reviewer_sessions (token_hash TEXT PRIMARY KEY,reviewer_id INTEGER NOT NULL REFERENCES reviewers(id),expires INTEGER NOT NULL,credential_hash BLOB NOT NULL);
       CREATE TABLE IF NOT EXISTS approval_steps (document_id INTEGER NOT NULL REFERENCES documents(id),position INTEGER NOT NULL,reviewer_id INTEGER NOT NULL REFERENCES reviewers(id),state TEXT NOT NULL DEFAULT 'pending' CHECK(state IN ('pending','approved','rejected')),PRIMARY KEY(document_id,position),UNIQUE(document_id,reviewer_id));
       CREATE TABLE IF NOT EXISTS approval_cycles (id INTEGER PRIMARY KEY,document_id INTEGER NOT NULL REFERENCES documents(id),document_json TEXT NOT NULL,attachments_json TEXT NOT NULL,linked_json TEXT NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
@@ -1235,8 +1236,20 @@ export class Store {
     for(const row of this.db.prepare("SELECT d.date,d.type,COUNT(*) AS n FROM worker_training_checks c JOIN documents d ON d.id=c.document_id JOIN workers w ON w.id=c.worker_id AND w.site_id=d.site_id WHERE d.site_id=? AND d.date BETWEEN ? AND ? AND d.type IN ('tbm','education') AND d.status='approved' GROUP BY d.date,d.type").all(siteId,start,end)){const day=byDate.get(row.date);day.trainingByType[row.type]=row.n;day.trainingChecks+=row.n;}
     return rows;
   }
-  reviewers(siteId){return this.db.prepare('SELECT id,site_id,login_id,name,active FROM reviewers WHERE site_id=? ORDER BY name,id').all(Number(siteId));}
+  reviewers(siteId){return this.db.prepare('SELECT r.id,r.site_id,r.login_id,r.name,r.active,EXISTS(SELECT 1 FROM reviewer_final_approvals f WHERE f.reviewer_id=r.id) AS final_approval_enabled FROM reviewers r WHERE r.site_id=? ORDER BY r.name,r.id').all(Number(siteId));}
   reviewer(id){return this.db.prepare('SELECT id,site_id,name FROM reviewers WHERE id=? AND active=1').get(Number(id))||null;}
+  reviewerCanFinalApprove(id){return !!this.db.prepare('SELECT 1 FROM reviewer_final_approvals f JOIN reviewers r ON r.id=f.reviewer_id WHERE r.id=? AND r.active=1').get(Number(id));}
+  setReviewerFinalApproval(siteId,id,input,onAuthorize=()=>{}){
+    if(!input||typeof input.enabled!=='boolean'||typeof input.expectedEnabled!=='boolean')throw new Error('시험 전결 권한을 확인해 주세요.');
+    this.db.exec('BEGIN IMMEDIATE');try{
+      onAuthorize();const account=this.db.prepare('SELECT id,active FROM reviewers WHERE id=? AND site_id=?').get(Number(id),Number(siteId));if(!account)throw new Error('선택한 현장의 시험 결재자를 확인해 주세요.');
+      const current=!!this.db.prepare('SELECT 1 FROM reviewer_final_approvals WHERE reviewer_id=?').get(account.id);
+      if(current!==input.expectedEnabled)throw Object.assign(new Error('시험 전결 권한이 변경되었습니다. 다시 조회해 주세요.'),{sessionStatus:409});
+      if(input.enabled&&!account.active)throw new Error('활성 시험 결재자를 선택해 주세요.');
+      if(input.enabled)this.db.prepare('INSERT OR IGNORE INTO reviewer_final_approvals(reviewer_id) VALUES(?)').run(account.id);else this.db.prepare('DELETE FROM reviewer_final_approvals WHERE reviewer_id=?').run(account.id);
+      this.db.exec('COMMIT');return {enabled:input.enabled};
+    }catch(error){this.db.exec('ROLLBACK');throw error;}
+  }
   createReviewer(input){
     const siteId=Number(input.siteId),name=text(input.name,'결재자 이름');
     if(!Number.isSafeInteger(siteId)||!this.db.prepare('SELECT 1 FROM sites WHERE id=?').get(siteId))throw new Error('현장을 확인해 주세요.');
@@ -1259,7 +1272,7 @@ export class Store {
     const salt=row?.salt||Buffer.alloc(16),candidate=typeof password==='string'&&password.length<=256?password:'',hash=scryptSync(candidate,salt,32),expected=row?.password_hash||Buffer.alloc(32);
     if(!row||!row.active||!timingSafeEqual(hash,expected))return null;const reviewer={id:row.id,site_id:row.site_id,name:row.name};return withCredential?{reviewer,credentialHash:Buffer.from(row.password_hash),authVersion:row.auth_version}:reviewer;
   }
-  approvalLine(id){return this.db.prepare('SELECT s.position,s.reviewer_id,s.state,r.name,r.active FROM approval_steps s JOIN reviewers r ON r.id=s.reviewer_id WHERE s.document_id=? ORDER BY s.position').all(Number(id));}
+  approvalLine(id){return this.db.prepare("SELECT s.position,s.reviewer_id,CASE WHEN s.state='pending' AND d.status='approved' AND EXISTS(SELECT 1 FROM events e JOIN approval_steps signer ON signer.document_id=e.document_id AND signer.reviewer_id=e.reviewer_id WHERE e.document_id=s.document_id AND e.approval_cycle_id=d.approval_cycle_id AND e.action='final_approve' AND signer.position<s.position) THEN 'skipped' ELSE s.state END AS state,r.name,r.active FROM approval_steps s JOIN reviewers r ON r.id=s.reviewer_id JOIN documents d ON d.id=s.document_id WHERE s.document_id=? ORDER BY s.position").all(Number(id));}
   previousApprovalLine(id){
     const doc=this.document(id);if(!doc||!['draft','rejected'].includes(doc.status))throw new Error('수정 가능한 문서를 확인해 주세요.');
     const previous=this.db.prepare('SELECT d.id,d.title,d.date FROM documents d WHERE d.site_id=? AND d.type=? AND d.id<? AND EXISTS (SELECT 1 FROM approval_steps s WHERE s.document_id=d.id) ORDER BY d.id DESC LIMIT 1').get(doc.site_id,doc.type,doc.id);
@@ -1626,12 +1639,13 @@ export class Store {
   transition(id, action, opinion='', signature=null,reviewerId=null) {
     const doc = this.document(id);
     if (!doc) throw new Error('문서를 찾을 수 없습니다.');
-    let next = transitions[doc.status]?.[action];
+    let next = transitions[doc.status]?.[action==='final_approve'?'approve':action];
     if (!next) throw new Error('현재 상태에서 수행할 수 없는 작업입니다.');
+    if(action==='final_approve'&&(!reviewerId||doc.type!=='office'||!this.reviewerCanFinalApprove(reviewerId)))throw new Error('업무 문서의 시험 전결 권한과 현재 결재자를 확인해 주세요.');
     const line=this.approvalLine(id),current=line.find(step=>step.state==='pending');let reviewer=null;
-    if(line.length&&['approve','reject'].includes(action)){
+    if(line.length&&['approve','reject','final_approve'].includes(action)){
       if(!reviewerId||!current||current.reviewer_id!==reviewerId||!current.active)throw new Error('현재 차례의 결재자를 확인해 주세요.');
-      if(action==='approve'&&!this.approvalCycle(doc.id,doc.approval_cycle_id))throw new Error('이전 요청의 자료가 보존되지 않았습니다. 관리자에게 요청 취소 후 다시 요청하도록 알려 주세요.');
+      if(action!=='reject'&&!this.approvalCycle(doc.id,doc.approval_cycle_id))throw new Error('이전 요청의 자료가 보존되지 않았습니다. 관리자에게 요청 취소 후 다시 요청하도록 알려 주세요.');
       reviewer=current;if(action==='approve'&&line.some(step=>step.position>current.position))next='pending';
     }else if(reviewerId)throw new Error('현재 차례의 결재자를 확인해 주세요.');
     if(action==='submit'&&line.some(step=>!step.active))throw new Error('활성 결재자를 확인해 주세요.');
@@ -1653,7 +1667,7 @@ export class Store {
         if(!this.attachments(id).length)throw new Error('기본 서류에 첨부파일을 추가해 주세요.');
       }
       if(action==='submit'&&line.length)this.db.prepare("UPDATE approval_steps SET state='pending' WHERE document_id=?").run(Number(id));
-      if(reviewer)this.db.prepare('UPDATE approval_steps SET state=? WHERE document_id=? AND position=?').run(action==='approve'?'approved':'rejected',Number(id),reviewer.position);
+      if(reviewer)this.db.prepare('UPDATE approval_steps SET state=? WHERE document_id=? AND position=?').run(action==='reject'?'rejected':'approved',Number(id),reviewer.position);
       if(doc.type==='work_plan'&&action==='submit'){
         if(this.planSignatureInfo(doc).stale)throw Object.assign(new Error('서명 이후 계획서나 연결 자료가 변경되었습니다. 다시 서명해 주세요.'),{sessionStatus:409});
         const details=JSON.parse(doc.details),get=this.db.prepare('SELECT id,kind,model,capacity,manufacturer,registration,details FROM equipment WHERE id=? AND site_id=?');
@@ -1680,7 +1694,7 @@ export class Store {
     if(typeof opinion!=='string'||!opinion.trim()||opinion.length>2000)throw new Error('시험 의견을 입력해 주세요.');
     this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();const doc=this.reviewerDocument(reviewerId,id),reviewer=this.reviewer(reviewerId);if(!doc||doc.type!=='office'||!reviewer||!this.approvalCycle(doc.id,doc.approval_cycle_id))throw new Error('현재 차례의 업무 문서를 확인해 주세요.');this.db.prepare("INSERT INTO events(document_id,action,from_status,to_status,opinion,reviewer_id,reviewer_name,approval_cycle_id) VALUES(?,'comment','pending','pending',?,?,?,?)").run(doc.id,opinion.trim(),reviewer.id,reviewer.name,doc.approval_cycle_id);this.db.exec('COMMIT');}catch(error){this.db.exec('ROLLBACK');throw error;}
   }
-  reviewerTransition(id,reviewerId,action,opinion,signature,onAuthorize=null){this.db.exec('BEGIN IMMEDIATE');try{if(onAuthorize)onAuthorize();if(!['approve','reject'].includes(action)||!this.reviewerDocument(reviewerId,id))throw new Error('현재 차례의 결재자를 확인해 주세요.');const result=this.transition(id,action,opinion,action==='approve'?signatureBytes(signature):null,Number(reviewerId));this.db.exec('COMMIT');return result;}catch(error){this.db.exec('ROLLBACK');throw error;}}
+  reviewerTransition(id,reviewerId,action,opinion,signature,onAuthorize=null){this.db.exec('BEGIN IMMEDIATE');try{if(onAuthorize)onAuthorize();if(!['approve','reject','final_approve'].includes(action)||!this.reviewerDocument(reviewerId,id))throw new Error('현재 차례의 결재자를 확인해 주세요.');const result=this.transition(id,action,opinion,action==='reject'?null:signatureBytes(signature),Number(reviewerId));this.db.exec('COMMIT');return result;}catch(error){this.db.exec('ROLLBACK');throw error;}}
   approveDocuments(siteId,ids,signature,onAuthorize=()=>{}){
     if(!Number.isSafeInteger(siteId)||siteId<1||!Array.isArray(ids)||!ids.length||ids.length>100||ids.some(id=>!Number.isSafeInteger(id)||id<1)||new Set(ids).size!==ids.length)throw new Error('선택한 시험 문서를 확인해 주세요.');
     const bytes=signatureBytes(signature);
