@@ -1,6 +1,6 @@
 import { riskScaleOptions, riskScore, copyRiskItem, copyRiskImprovement, groupRiskItems } from './risk-scale.js';
 import { selectBatchDocuments } from './batch-print.js';
-import { siteQrSession } from './site-qr.js';
+import { siteQrSession, printSiteQr } from './site-qr.js';
 import { selectTbmSources, mergeTbmSource } from './tbm-sources.js';
 import { trainingGroups, trainingRoster, filterEducationReport } from './training-groups.js';
 import { summarizeSiteAttendance } from './site-statistics.js';
@@ -89,15 +89,15 @@ $('#site-qr').onclick=async event=>{
     if(state.siteId!==session.siteId){flash('현장이 변경되어 QR 창을 열지 않았습니다. 선택한 현장에서 다시 열어 주세요.');return;}
     $('#dialog-title').textContent='현장 접속 QR';
     $('#dialog-error').textContent='';
-    $('#dialog-body').innerHTML=`<div class="qr"><h3>${esc(session.siteName)}</h3><h4>현장 접속</h4><img id="login-qr-image" alt="현장 접속 QR 코드" src="${esc(access.image)}"><p>현장 접속 주소</p><p class="qr-address" id="login-qr-address">${esc(access.link)}</p><button type="button" id="rotate-login-qr" class="outline">현장 QR 교체</button><p class="muted">기존 가입자는 이 주소로 로그인합니다. 신규 가입은 아래에서 열 수 있습니다. 휴대전화 접속에는 별도 HTTPS 연결이 필요합니다.</p><button type="button" id="issue-invite" class="outline">별도 가입 QR 발급</button><p class="muted">새로 발급해도 기존 별도 가입 QR은 만료되거나 모두 중지할 때까지 유효합니다.</p><div id="invite-result"></div><button type="button" id="revoke-qr" class="outline">이 현장의 가입 QR 모두 중지</button></div>`;
+    $('#dialog-body').innerHTML=`<div class="qr"><h3 class="qr-site-name">${esc(session.siteName)}</h3><h4 class="qr-access-title">현장 접속</h4><img id="login-qr-image" alt="현장 접속 QR 코드" src="${esc(access.image)}"><p class="qr-access-label">현장 접속 주소</p><p class="qr-address" id="login-qr-address">${esc(access.link)}</p><button type="button" id="rotate-login-qr" class="outline">현장 QR 교체</button><p class="muted">기존 가입자는 이 주소로 로그인합니다. 신규 가입은 아래에서 열 수 있습니다. 휴대전화 접속에는 별도 HTTPS 연결이 필요합니다.</p><button type="button" id="issue-invite" class="outline">별도 가입 QR 발급</button><p class="muted">새로 발급해도 기존 별도 가입 QR은 만료되거나 모두 중지할 때까지 유효합니다.</p><div id="invite-result"></div><button type="button" id="revoke-qr" class="outline">이 현장의 가입 QR 모두 중지</button></div>`;
     $('#rotate-login-qr').insertAdjacentHTML('afterend',' <button type="button" id="enable-site-signup" class="outline">현장 QR에서 가입 열기</button><p id="site-signup-status" role="status"></p>');
     const signupStatus=$('#site-signup-status'),inviteResult=$('#invite-result'),loginImage=$('#login-qr-image'),loginAddress=$('#login-qr-address'),showSignupStatus=until=>{signupStatus.textContent=until?`현장 QR 가입 가능: ${new Date(until).toLocaleString('ko-KR')}까지. 이 주소를 가진 사람은 가입할 수 있습니다.`:'현장 QR 가입이 닫혀 있습니다.';};showSignupStatus(access.registrationExpiresAt);
     $('#enable-site-signup').onclick=async()=>{try{const result=await session.openRegistration();showSignupStatus(result.expiresAt);}catch(e){showError(e);}};
-    $('#issue-invite').onclick=async event=>{const button=event.currentTarget;button.disabled=true;try{const invite=await session.invite(),expires=new Date(invite.expiresAt).toLocaleString('ko-KR');if(inviteResult.isConnected&&dialog.open)inviteResult.innerHTML=`<h4>별도 신규 가입</h4><img alt="별도 가입 QR 코드" src="${esc(invite.image)}"><p>가입 주소</p><p class="qr-address">${esc(invite.link)}</p><p>유효기간: ${esc(expires)}까지</p>`;}catch(e){showError(e);}finally{button.disabled=false;}};
+    $('#issue-invite').onclick=async event=>{const button=event.currentTarget;button.disabled=true;try{const invite=await session.invite(),expires=new Date(invite.expiresAt).toLocaleString('ko-KR');if(inviteResult.isConnected&&dialog.open){inviteResult.innerHTML=`<h4>별도 신규 가입</h4><img id="invite-qr-image" alt="별도 가입 QR 코드" src="${esc(invite.image)}"><p>가입 주소</p><p class="qr-address">${esc(invite.link)}</p><p>유효기간: ${esc(expires)}까지</p><button type="button" id="print-invite-qr" class="outline">가입 QR 인쇄</button>`;$('#print-invite-qr').onclick=()=>{try{printSiteQr(dialog,'invite');}catch(error){$('#dialog-error').textContent=error.message;}};}}catch(e){showError(e);}finally{button.disabled=false;}};
     $('#rotate-login-qr').onclick=async()=>{if(!confirm('기존 로그인 주소가 중지됩니다. 새 QR을 다시 전달해야 합니다. 교체할까요?'))return;try{const result=await session.rotate();if(loginImage.isConnected&&dialog.open){loginImage.src=result.image;loginAddress.textContent=result.link;}flash(`${session.siteName}의 현장 QR을 교체했습니다. 기존 로그인 세션은 유지됩니다.`);}catch(e){showError(e);}};
     $('#revoke-qr').onclick=async()=>{if(!confirm('이 현장에서 발급된 모든 가입 QR을 중지할까요?'))return;try{await session.revoke();if(inviteResult.isConnected&&dialog.open)dialog.close();flash(`${session.siteName}의 가입 QR을 중지했습니다.`);}catch(e){showError(e);}};
-    $('#dialog-form button[type=submit]').textContent='인쇄';
-    $('#dialog-form').onsubmit=e=>{e.preventDefault();window.print();}; dialog.showModal();
+    $('#dialog-form button[type=submit]').textContent='현장 QR 인쇄';
+    dialog.dataset.qrPrint='access';$('#dialog-form').onsubmit=e=>{e.preventDefault();try{printSiteQr(dialog,'access');}catch(error){$('#dialog-error').textContent=error.message;}}; dialog.showModal();
   } catch(e){showError(e);} finally {button.disabled=false;}
 };
 function options() {return Object.entries(state.types).filter(([id])=>state.page==='approval'||id!=='office').map(([id,name])=>`<option value="${id}" ${id===state.type?'selected':''}>${esc(name)}</option>`).join('');}
