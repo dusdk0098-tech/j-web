@@ -21,6 +21,7 @@ const content = $('#content'), siteSelect = $('#site-select'), dialog = $('#dial
 const state = { page:'dashboard', siteId:null, types:{}, type:'', riskKind:'', riskContractorId:'', query:'', detail:null, attendanceDate:null, attendanceMonth:null, reportFrom:null, reportTo:null, reportGroup:'worker', workerFilters:{}, documentFrom:'', documentTo:'', statisticsMonth:null, statisticsDay:'' };
 const labels = {dashboard:'현장 현황','manager-check':'관리자 자가점검',workers:'출입자 관리',companies:'협력사 관리',equipment:'기계·장비',rigging:'줄걸이·체결장구','work-places':'작업장소','safety-costs':'산업안전보건관리비',attendance:'출역 관리',stops:'작업중지 요청',documents:'안전 문서',approval:'미결재 문서',statistics:'안전 활동 통계'};
 labels['hazards']='의견제안 및 위험신고';
+labels['incident-guide']='사고 대응 안내';
 labels['restaurants']='식대 기본설정';
 labels['meal-checks']='식대 체크';
 labels['meal-statement']='식대 명세서';
@@ -38,6 +39,7 @@ labels['office-documents']='업무 문서';
 labels['personal-notes']='개인업무 일지';
 labels['common-work']='공통업무';
 document.querySelector('[data-page=stops]').insertAdjacentHTML('afterend','<button data-page="hazards">의견제안 및 위험신고</button>');
+document.querySelector('[data-page=hazards]').insertAdjacentHTML('afterend','<button data-page="incident-guide">사고 대응 안내</button>');
 document.querySelector('[data-page=attendance]').insertAdjacentHTML('afterend','<button data-page="restaurants">식대 기본설정</button>');
 document.querySelector('[data-page=restaurants]').insertAdjacentHTML('afterend','<button data-page="meal-checks">식대 체크</button>');
 document.querySelector('[data-page=meal-checks]').insertAdjacentHTML('afterend','<button data-page="wages">가상 노임</button>');
@@ -188,14 +190,13 @@ const placeChoices={reinforcementChoices:['철판설치','지반개량','양질�
 const placeChoiceLabels={reinforcementChoices:'보강',obstacleChoices:'지장물',equipmentProtection:'장비보호',obstacleProtection:'지장물보호',workerProtection:'근로자보호'};
 function placeSummary(d){return ['work','route'].map(key=>{const a=d[key];return `<section><h4>${key==='work'?'작업장':'운행경로'}</h4><p>${esc(a.terrain)} · ${esc(a.ground)} ${esc(a.groundExtra||'')} · 배수 ${esc(a.drainage)}</p>${Object.entries(placeChoiceLabels).map(([name,label])=>`<p>${label}: ${esc(Array.isArray(a[name])?(a[name].join(', ')||'선택 없음'):'미기록')}${name.endsWith('Protection')?` ${esc(a[name+'Extra']||'')}`:''}</p>`).join('')}<p>기타 보강: ${esc(a.reinforcement||'미입력')} · 기타 지장물: ${esc(a.obstacles||'미입력')} · 기타 보호: ${esc(a.protection||'미입력')}</p></section>`;}).join('')+(d.additional?.length?`<section><h4>추가정보</h4>${d.additional.map(row=>`<p>${esc(row.label)}: ${esc(row.value)}</p>`).join('')}</section>`:'');}
 const patrolItems=['안전교육 실시','작업계획 및 허가 이행','보호구 지급과 착용','TBM 실시','안전표지와 위험구역 출입 통제','작업장 정리 및 안전통로','대피통로·유도표시·조도','작업환경 및 분진','작업시설 안전조치','도로·차량 안전','위험성평가 이행','근로자 위험성평가 교육','추락 예방','낙하 예방','전도 예방','가시설 붕괴 예방','굴착·옹벽 안전','데크플레이트 안전','장비 작업구역 출입 통제','신호수·유도자 배치','인화성·가연성 물질 관리','소화기와 흡연 관리','전기설비 감전 예방','용접기 및 배선 관리','건설기계 안전','공구의 방호장치','드릴 손잡이','유해위험물과 MSDS','자재 적치 관리','안전통로와 위험장소 출입','작업자 안전수칙 준수','휴게시설과 휴식','위생시설','기계설비 방호','전기설비 방호'];
-async function editDocument(doc=null) {
-  const siteId=state.siteId;let equipment,places,rigging,companies,workers,categoryRows,muscleEditor;
+async function editDocument(doc=null,initialDetails={},initialType=null) {
+  const siteId=state.siteId,page=state.page,currentType=doc?.type || initialType || (state.page==='office-documents'?'office':state.type || 'tbm');let equipment,places,rigging,companies,workers,categoryRows,muscleEditor;
   try{[equipment,places,rigging,companies,workers,categoryRows]=await Promise.all([api(`/api/equipment?siteId=${siteId}`),api(`/api/work-places?siteId=${siteId}`),api(`/api/rigging?siteId=${siteId}`),api(`/api/companies?siteId=${siteId}`),api(`/api/workers?siteId=${siteId}`),api(`/api/basic-categories?siteId=${siteId}`)]);}catch(error){showError(error);return;}
-  if(state.siteId!==siteId)return;
-  const currentType=doc?.type || (state.page==='office-documents'?'office':state.type || 'tbm');
-  const officeRefs=currentType==='office'?(await api(`/api/documents?${new URLSearchParams({siteId:String(siteId),type:'office'})}`)).filter(item=>item.id!==doc?.id&&item.site_id===siteId&&JSON.parse(item.details).kind==='품의서'):[];if(state.siteId!==siteId)return;
+  if(state.siteId!==siteId||state.page!==page)return;
+  const officeRefs=currentType==='office'?(await api(`/api/documents?${new URLSearchParams({siteId:String(siteId),type:'office'})}`)).filter(item=>item.id!==doc?.id&&item.site_id===siteId&&JSON.parse(item.details).kind==='품의서'):[];if(state.siteId!==siteId||state.page!==page)return;
   const typeSelect=Object.entries(state.types).filter(([id])=>currentType==='office'?id==='office':id!=='office').map(([id,name])=>`<option value="${id}" ${id===currentType?'selected':''}>${esc(name)}</option>`).join('');
-  const details=doc?.details ? JSON.parse(doc.details) : {};
+  const details=doc?.details ? JSON.parse(doc.details) : initialDetails;
   showDialog(doc?'문서 수정':'문서 작성',`<div class="fields"><label>문서 유형<select name="type" ${doc?'disabled':''}>${typeSelect}</select></label>${field('title','제목',doc?.title||'')}${field('date','작성일',doc?.date||today(),'date')}<label>내용<textarea name="body">${esc(doc?.body||'')}</textarea></label><div id="daily-fields" class="fields"></div></div>`,async data=>{
     if(doc)data.type=doc.type;
     if(data.type==='office')data.details={kind:data.officeKind,otherKind:data.officeOther||'',referenceId:data.officeKind==='경비청구'?Number(data.officeReference||0):0};
@@ -794,6 +795,11 @@ async function render(){
     if(requests.length)[...content.querySelector('table').tBodies[0].rows].forEach((row,index)=>{const stop=requests[index],button=document.createElement('button');button.type='button';button.textContent='시험 요청 삭제';button.onclick=async()=>{if(!confirm('시험 요청과 첨부 사진, 조치 내용을 삭제할까요?'))return;button.disabled=true;try{await api(`/api/sites/${siteId}/work-stops/${stop.id}`,{method:'DELETE',body:JSON.stringify({previousResponse:stop.response})});flash('시험 요청을 삭제했습니다.');await render();}catch(error){button.disabled=false;showError(error);}};row.lastElementChild.append(' ',button);});
     $('#stop-search').onclick=()=>{state.query=$('#stop-query').value.trim();render().catch(showError);};
     return;
+  }
+  if(state.page==='incident-guide'){
+    content.innerHTML=`<section class="panel"><h2>사고 대응 안내</h2><p>사고 정도에 따라 현장의 대응 절차와 관계 기관의 최신 안내를 확인하세요. 실제 신고와 알림 전송은 이 화면에서 처리되지 않습니다.</p><p><a href="https://www.csi.go.kr/por/about_acd_001.do" target="_blank" rel="noopener noreferrer">건설사고 신고 절차 · 건설공사 안전관리종합정보망</a></p><p><a href="https://law.go.kr/LSW/lsLinkCommonInfo.do?chrClsCd=010202&amp;lspttninfSeq=154171" target="_blank" rel="noopener noreferrer">산업재해 발생 보고 규정 · 국가법령정보센터</a></p><p>적용 대상과 신고 방법은 사고 상황과 현행 규정을 확인하세요.</p>${['경상','중상','사망'].map(severity=>`<details><summary>${severity} 사고</summary><p>현장의 대응 절차와 위의 공식 신고 안내를 확인한 뒤 필요한 기록을 작성하세요.</p><button type="button" data-incident-report="${severity}">가상 재해 보고서 작성</button></details>`).join('')}<p><button type="button" id="incident-report-list">가상 재해 보고서 목록</button></p><p class="muted">공사 중단 알림 전송 기능은 연결되지 않았습니다.</p></section>`;
+    content.querySelectorAll('[data-incident-report]').forEach(button=>button.onclick=()=>editDocument(null,{severity:button.dataset.incidentReport},'incident').catch(showError));
+    $('#incident-report-list').onclick=()=>{state.page='documents';state.type='incident';state.detail=null;state.query='';state.documentFrom='';state.documentTo='';render().catch(showError);};return;
   }
   if(state.page==='hazards'){
     const siteId=state.siteId,reports=await api(`/api/sites/${siteId}/hazard-reports?q=${encodeURIComponent(state.query)}`);
