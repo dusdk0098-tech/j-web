@@ -184,8 +184,8 @@ const server = http.createServer(async (req, res) => {
       if(!part&&req.method==='GET')return json(res,200,doc);if(!part&&req.method==='PUT'){const input=await body(req,120000),failure=workerSessionError(workerToken,session);if(failure)return json(res,failure.status,{error:failure.error});return json(res,200,store.updateWorkerDocument(siteId,workerId,id,input,()=>checkRequestSession(req)));}
       if(part==='transition'&&req.method==='POST'&&!fileId){const input=await body(req),failure=workerSessionError(workerToken,session);if(failure)return json(res,failure.status,{error:failure.error});return json(res,200,store.transitionWorkerDocument(siteId,workerId,id,input.action,()=>checkRequestSession(req)));}
       if(part==='attachments'&&!fileId&&req.method==='GET')return json(res,200,store.attachments(id));
-      if(part==='attachments'&&!fileId&&req.method==='POST'){const chunks=[];let size=0;for await(const chunk of req){size+=chunk.length;if(size>2*1024*1024)throw new Error('파일은 2MB 이하여야 합니다.');chunks.push(chunk);}checkRequestSession(req);let name;try{name=decodeURIComponent(req.headers['x-file-name']||'');}catch{throw new Error('파일 이름을 확인해 주세요.');}const failure=workerSessionError(workerToken,session);if(failure)return json(res,failure.status,{error:failure.error});store.workerDocument(siteId,workerId,id);return json(res,201,{id:store.addAttachment(id,name,Buffer.concat(chunks),url.searchParams.get('category')||'general')});}
-      if(part==='attachments'&&fileId&&['GET','DELETE'].includes(req.method)){const file=store.attachment(fileId);if(!file||file.document_id!==doc.id)return json(res,404,{error:'첨부파일을 찾을 수 없습니다.'});if(req.method==='DELETE'){store.deleteAttachment(fileId);return json(res,200,{ok:true});}const name=encodeURIComponent(file.name).replace(/[!'()*]/g,c=>`%${c.charCodeAt(0).toString(16).toUpperCase()}`);res.writeHead(200,{'Content-Type':'application/octet-stream','Content-Disposition':`attachment; filename="file"; filename*=UTF-8''${name}`,'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(file.data);}
+      if(part==='attachments'&&!fileId&&req.method==='POST'){const chunks=[];let size=0;for await(const chunk of req){size+=chunk.length;if(size>2*1024*1024)throw new Error('파일은 2MB 이하여야 합니다.');chunks.push(chunk);}checkRequestSession(req);let name;try{name=decodeURIComponent(req.headers['x-file-name']||'');}catch{throw new Error('파일 이름을 확인해 주세요.');}const failure=workerSessionError(workerToken,session);if(failure)return json(res,failure.status,{error:failure.error});store.workerDocument(siteId,workerId,id);return json(res,201,{id:store.addAttachment(id,name,Buffer.concat(chunks),url.searchParams.get('category')||'general',()=>{checkRequestSession(req);store.workerDocument(siteId,workerId,id);})});}
+      if(part==='attachments'&&fileId&&['GET','DELETE'].includes(req.method)){const file=store.attachment(fileId);if(!file||file.document_id!==doc.id)return json(res,404,{error:'첨부파일을 찾을 수 없습니다.'});if(req.method==='DELETE'){store.deleteAttachment(fileId,()=>{checkRequestSession(req);store.workerDocument(siteId,workerId,id);const current=store.attachment(fileId);if(!current||current.document_id!==Number(id))throw new Error('첨부파일을 찾을 수 없습니다.');});return json(res,200,{ok:true});}const name=encodeURIComponent(file.name).replace(/[!'()*]/g,c=>`%${c.charCodeAt(0).toString(16).toUpperCase()}`);res.writeHead(200,{'Content-Type':'application/octet-stream','Content-Disposition':`attachment; filename="file"; filename*=UTF-8''${name}`,'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(file.data);}
     }
     if(url.pathname==='/api/worker/managed-attendance'&&['GET','PUT'].includes(req.method)){
       const session=workerSessions.get(workerKey(workerToken));if(!session||session.expires<=Date.now())return json(res,401,{error:'근로자 로그인이 필요합니다.'});const {site_id:siteId,id:workerId}=session.worker;
@@ -723,7 +723,7 @@ const server = http.createServer(async (req, res) => {
         const chunks=[];let size=0;
         for await(const chunk of req){size+=chunk.length;if(size>2*1024*1024)throw new Error('파일은 2MB 이하여야 합니다.');chunks.push(chunk);}checkRequestSession(req);
         let name;try{name=decodeURIComponent(req.headers['x-file-name'] || '');}catch{throw new Error('파일 이름을 확인해 주세요.');}
-        const id=store.addAttachment(attachList[1],name,Buffer.concat(chunks),url.searchParams.get('category')||'general');return json(res,201,{id});
+        const id=store.addAttachment(attachList[1],name,Buffer.concat(chunks),url.searchParams.get('category')||'general',()=>checkRequestSession(req));return json(res,201,{id});
       }
     }
     const checklistPhoto=url.pathname.match(/^\/api\/documents\/(\d+)\/checklist-photos\/(\d+)$/);
@@ -742,7 +742,7 @@ const server = http.createServer(async (req, res) => {
     }
     const attach=url.pathname.match(/^\/api\/attachments\/(\d+)$/);
     if(attach){
-      if(req.method==='DELETE'){store.deleteAttachment(attach[1]);return json(res,200,{ok:true});}
+      if(req.method==='DELETE'){store.deleteAttachment(attach[1],()=>checkRequestSession(req));return json(res,200,{ok:true});}
       if(req.method==='GET'){
         const file=store.attachment(attach[1]);if(!file)return json(res,404,{error:'첨부파일을 찾을 수 없습니다.'});
         const name=encodeURIComponent(file.name).replace(/[!'()*]/g,c=>`%${c.charCodeAt(0).toString(16).toUpperCase()}`);

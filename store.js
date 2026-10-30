@@ -1426,7 +1426,8 @@ export class Store {
     try{this.db.prepare("INSERT INTO attachments(document_id,name,data,category) SELECT ?,name,data,'general' FROM attachments WHERE document_id=? ORDER BY id").run(target.id,source.id);this.db.exec('RELEASE copy_notice_attachments');}catch(error){this.db.exec('ROLLBACK TO copy_notice_attachments');this.db.exec('RELEASE copy_notice_attachments');throw error;}
     return {copied:files.length};
   }
-  addAttachment(id,name,data,category='general') {
+  addAttachment(id,name,data,category='general',onAuthorize=()=>{}) {
+    this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();
     const doc=this.document(id);
     if (!doc || !['draft','rejected'].includes(doc.status)) throw new Error('임시저장 또는 반려된 문서에만 첨부할 수 있습니다.');
     if (typeof name!=='string' || !name.trim() || name.length>200 || /[\\/\x00-\x1f\x7f]/.test(name)) throw new Error('파일 이름을 확인해 주세요.');
@@ -1434,14 +1435,15 @@ export class Store {
     if(!['general','plan_diagram','morning_hazard_photo'].includes(category)||category==='plan_diagram'&&doc.type!=='work_plan'||category==='morning_hazard_photo'&&(doc.type!=='checklist'||JSON.parse(doc.details).kind!=='morning'))throw new Error('첨부 구분을 확인해 주세요.');
     if(['plan_diagram','morning_hazard_photo'].includes(category)){const bytes=Buffer.from(data);if(!bytes.subarray(0,8).equals(Buffer.from('89504e470d0a1a0a','hex'))&&!bytes.subarray(0,3).equals(Buffer.from('ffd8ff','hex')))throw new Error('시험 이미지는 PNG 또는 JPEG를 선택해 주세요.');}
     if (this.attachments(id).length>=20) throw new Error('첨부파일은 문서당 20개까지 가능합니다.');
-    this.db.exec('BEGIN IMMEDIATE');try{const attachmentId=this.db.prepare('INSERT INTO attachments(document_id,name,data,category) VALUES(?,?,?,?)').run(Number(id),name,data,category).lastInsertRowid;if(doc.type==='checklist')this.db.prepare('DELETE FROM checklist_signatures WHERE document_id=?').run(Number(id));if(doc.type==='tbm')this.db.prepare('DELETE FROM tbm_signatures WHERE document_id=?').run(Number(id));if(doc.type==='joint_inspection')this.db.prepare('DELETE FROM joint_inspection_signatures WHERE document_id=?').run(Number(id));if(['work_council','safety_meeting','office'].includes(doc.type))this.db.prepare('DELETE FROM meeting_signatures WHERE document_id=?').run(Number(id));this.db.exec('COMMIT');return attachmentId;}catch(error){this.db.exec('ROLLBACK');throw error;}
+    const attachmentId=this.db.prepare('INSERT INTO attachments(document_id,name,data,category) VALUES(?,?,?,?)').run(Number(id),name,data,category).lastInsertRowid;if(doc.type==='checklist')this.db.prepare('DELETE FROM checklist_signatures WHERE document_id=?').run(Number(id));if(doc.type==='tbm')this.db.prepare('DELETE FROM tbm_signatures WHERE document_id=?').run(Number(id));if(doc.type==='joint_inspection')this.db.prepare('DELETE FROM joint_inspection_signatures WHERE document_id=?').run(Number(id));if(['work_council','safety_meeting','office'].includes(doc.type))this.db.prepare('DELETE FROM meeting_signatures WHERE document_id=?').run(Number(id));this.db.exec('COMMIT');return attachmentId;}catch(error){this.db.exec('ROLLBACK');throw error;}
   }
-  deleteAttachment(id) {
+  deleteAttachment(id,onAuthorize=()=>{}) {
+    this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();
     const attachment=this.attachment(id);
     if(!attachment) throw new Error('첨부파일을 찾을 수 없습니다.');
     const doc=this.document(attachment.document_id);
     if(!doc || !['draft','rejected'].includes(doc.status)) throw new Error('임시저장 또는 반려된 문서의 첨부파일만 삭제할 수 있습니다.');
-    this.db.exec('BEGIN IMMEDIATE');try{this.db.prepare('DELETE FROM attachments WHERE id=?').run(Number(id));if(doc.type==='checklist')this.db.prepare('DELETE FROM checklist_signatures WHERE document_id=?').run(doc.id);if(doc.type==='tbm')this.db.prepare('DELETE FROM tbm_signatures WHERE document_id=?').run(doc.id);if(doc.type==='joint_inspection')this.db.prepare('DELETE FROM joint_inspection_signatures WHERE document_id=?').run(doc.id);if(['work_council','safety_meeting','office'].includes(doc.type))this.db.prepare('DELETE FROM meeting_signatures WHERE document_id=?').run(doc.id);this.db.exec('COMMIT');}catch(error){this.db.exec('ROLLBACK');throw error;}
+    this.db.prepare('DELETE FROM attachments WHERE id=?').run(Number(id));if(doc.type==='checklist')this.db.prepare('DELETE FROM checklist_signatures WHERE document_id=?').run(doc.id);if(doc.type==='tbm')this.db.prepare('DELETE FROM tbm_signatures WHERE document_id=?').run(doc.id);if(doc.type==='joint_inspection')this.db.prepare('DELETE FROM joint_inspection_signatures WHERE document_id=?').run(doc.id);if(['work_council','safety_meeting','office'].includes(doc.type))this.db.prepare('DELETE FROM meeting_signatures WHERE document_id=?').run(doc.id);this.db.exec('COMMIT');}catch(error){this.db.exec('ROLLBACK');throw error;}
   }
   updateDocument(id, input, onAuthorize=()=>{}) {
     const current = this.document(id);
