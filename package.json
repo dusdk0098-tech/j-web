@@ -7,6 +7,8 @@
   "scripts": {
     "start": "node server.js",
     "proxy": "node https-proxy.js",
+    "backup": "node db-copy.js backup",
+    "restore": "node db-copy.js restore",
     "test": "node --test"
   },
   "engines": {
