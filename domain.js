@@ -161,6 +161,10 @@ export function recordInput(input) {
   if(type==='permit'){
     const value=input.details??{};if(!value||typeof value!=='object'||Array.isArray(value))throw new Error('작업허가서 항목을 확인해 주세요.');
     if(value.kinds!==undefined){if(!Array.isArray(value.kinds)||value.kinds.some(kind=>!permitKinds.includes(kind))||new Set(value.kinds).size!==value.kinds.length)throw new Error('위험작업 종류를 확인해 주세요.');details.kinds=value.kinds;}
+    if(value.safetyMeasures!==undefined){
+      if(!Array.isArray(value.safetyMeasures)||value.safetyMeasures.length>100)throw new Error('안전대책 항목을 확인해 주세요.');
+      details.safetyMeasures=value.safetyMeasures.map(row=>{if(!row||typeof row!=='object'||Array.isArray(row))throw new Error('안전대책 항목을 확인해 주세요.');const item={};for(const key of ['accidentType','hazard','measure']){if(typeof row[key]!=='string'||row[key].length>2000)throw new Error('안전대책 항목을 확인해 주세요.');item[key]=row[key].trim();}if(!item.accidentType&&!item.hazard&&!item.measure)throw new Error('안전대책 내용을 입력해 주세요.');return item;});
+    }
     for(const key of ['company','personnel','place','work']){if(value[key]!==undefined){if(typeof value[key]!=='string'||value[key].length>2000)throw new Error('작업허가서 항목을 확인해 주세요.');details[key]=value[key].trim();}}
     for(const key of ['periodFrom','periodTo']){if(value[key]!==undefined){if(typeof value[key]!=='string')throw new Error('작업기간을 확인해 주세요.');details[key]=value[key]?dateValue(value[key]):'';}}
     if(details.periodFrom&&details.periodTo&&details.periodFrom>details.periodTo)throw new Error('작업기간을 확인해 주세요.');
