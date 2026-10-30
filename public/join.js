@@ -1,9 +1,12 @@
 import { workerSitePath,replaceWorkerSiteAddress } from './worker-link.js';
 import { mountWorkerDocuments } from './worker-documents.js';
 import { mountJoinChoices } from './join-choices.js';
+import { workerFieldRequirements } from './worker-fields.js';
 const params=new URLSearchParams(location.search),token=params.get('token');let siteKey=params.get('site');
 const site=document.querySelector('#join-site'), message=document.querySelector('#join-message'), form=document.querySelector('#join-form');
 const setJoinChoices=mountJoinChoices(form);
+function updateWorkerRequirements(){const requirements=workerFieldRequirements(form.elements.category.value);for(const field of ['company','occupation'])form.elements[field].required=requirements[field];}
+form.elements.category.onchange=updateWorkerRequirements;updateWorkerRequirements();
 form.querySelector('p').textContent='이 시험 화면은 가상 인적사항·아이디·보호구 선택·서명 이미지와 암호의 해시를 이 컴퓨터의 시험 데이터베이스에 저장합니다. 실제 개인정보와 실제 암호 대신 가상 정보를 입력하세요.';
 form.setAttribute('autocomplete','off');
 form.insertAdjacentHTML('beforebegin','<form id="worker-login" hidden><h2>이미 가입한 근로자</h2><p>시험 로그인 시 오늘의 출역이 자동 기록될 수 있습니다. 실제 출입 확인으로 사용하지 마세요.</p><div class="fields"><label>시험 아이디<input name="loginId" required pattern="[A-Za-z0-9_]{3,40}" autocomplete="username"></label><label>시험 암호<input name="password" type="password" required minlength="12" maxlength="256" autocomplete="current-password"></label></div><div class="action-row"><button class="primary">로그인</button></div></form>');
@@ -34,7 +37,7 @@ try {
 } catch(error) {site.textContent='';message.textContent=error.message;}
 form.onsubmit=async event=>{
   event.preventDefault();const submit=form.querySelector('button[type=submit], button:not([type])');submit.disabled=true;
-  try {const equipment=[...form.querySelectorAll('[name=equipment]:checked')].map(input=>input.value),profile=Object.fromEntries(['birthDate','phone','emergencyName','emergencyPhone','address','nationality','bloodType','healthStatus','pledge'].map(key=>[key,form.elements[key].value])),response=await fetch('/api/join',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...Object.fromEntries(new FormData(form)),profile,equipment,signature:joinPad.value(),acknowledged:form.elements.acknowledged.checked,token,siteKey})});const data=await response.json();if(!response.ok)throw Error(data.error);adoptSiteAddress(data.siteKey);form.reset();joinPad.clear();form.hidden=true;message.textContent='시험 등록이 완료되었습니다. 위에서 로그인하세요.';}catch(error){message.textContent=error.message;}finally{submit.disabled=false;}
+  try {const equipment=[...form.querySelectorAll('[name=equipment]:checked')].map(input=>input.value),profile=Object.fromEntries(['birthDate','phone','emergencyName','emergencyPhone','address','nationality','bloodType','healthStatus','pledge'].map(key=>[key,form.elements[key].value])),response=await fetch('/api/join',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...Object.fromEntries(new FormData(form)),profile,equipment,signature:joinPad.value(),acknowledged:form.elements.acknowledged.checked,token,siteKey})});const data=await response.json();if(!response.ok)throw Error(data.error);adoptSiteAddress(data.siteKey);form.reset();updateWorkerRequirements();joinPad.clear();form.hidden=true;message.textContent='시험 등록이 완료되었습니다. 위에서 로그인하세요.';}catch(error){message.textContent=error.message;}finally{submit.disabled=false;}
 };
 async function showWorker(worker){
     const button=login.querySelector('button');

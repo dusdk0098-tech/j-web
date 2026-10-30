@@ -3,6 +3,12 @@ import { createHash, randomBytes, scryptSync, timingSafeEqual } from 'node:crypt
 import { dateValue, recordInput, text, transitions } from './domain.js';
 import { PNG } from 'pngjs';
 import { scheduleTypes } from './public/schedule.js';
+import { workerFieldRequirements } from './public/worker-fields.js';
+
+function workerFields(input){
+  const category=text(input.category,'구분'),required=workerFieldRequirements(category),optional=(value,name,needed)=>!needed&&(value==null||typeof value==='string'&&!value.trim())?'':text(value,name);
+  return {name:text(input.name,'이름'),category,company:optional(input.company,'소속',required.company),occupation:optional(input.occupation,'직종',required.occupation)};
+}
 
 function monthValue(month) {
   if(typeof month!=='string' || !/^\d{4}-(0[1-9]|1[0-2])$/.test(month) || Number(month.slice(0,4))<1000)throw new Error('조회할 월을 확인해 주세요.');
@@ -656,13 +662,13 @@ export class Store {
     const siteId = Number(input.siteId);
     if (!this.db.prepare('SELECT id FROM sites WHERE id=?').get(siteId)) throw new Error('현장을 선택해 주세요.');
     const now=new Date(),date=new Date(now.getTime()-now.getTimezoneOffset()*60000).toISOString().slice(0,10);
-    const id = this.db.prepare('INSERT INTO workers(site_id,name,category,company,occupation,created_date) VALUES(?,?,?,?,?,?)').run(siteId, text(input.name, '이름'), text(input.category, '구분'), text(input.company, '소속'), text(input.occupation, '직종'),date).lastInsertRowid;
+    const fields=workerFields(input),id = this.db.prepare('INSERT INTO workers(site_id,name,category,company,occupation,created_date) VALUES(?,?,?,?,?,?)').run(siteId,fields.name,fields.category,fields.company,fields.occupation,date).lastInsertRowid;
     return this.db.prepare('SELECT * FROM workers WHERE id=?').get(id);
   }
   updateWorker(id,input) {
     const siteId=Number(input.siteId);
     if(!this.db.prepare('SELECT id FROM workers WHERE id=? AND site_id=?').get(Number(id),siteId))throw new Error('선택한 현장의 출입자를 확인해 주세요.');
-    this.db.prepare('UPDATE workers SET name=?,category=?,company=?,occupation=? WHERE id=? AND site_id=?').run(text(input.name,'이름'),text(input.category,'구분'),text(input.company,'소속'),text(input.occupation,'직종'),Number(id),siteId);
+    const fields=workerFields(input);this.db.prepare('UPDATE workers SET name=?,category=?,company=?,occupation=? WHERE id=? AND site_id=?').run(fields.name,fields.category,fields.company,fields.occupation,Number(id),siteId);
     return this.db.prepare('SELECT * FROM workers WHERE id=? AND site_id=?').get(Number(id),siteId);
   }
   workers(siteId, query = '', filters = {}) {

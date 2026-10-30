@@ -6,6 +6,7 @@ import { trainingGroups, trainingRoster, filterEducationReport } from './trainin
 import { summarizeSiteAttendance } from './site-statistics.js';
 import { dateRangePreset } from './date-range.js';
 import { dailyQuantities,displayTenths } from './daily-quantities.js';
+import { workerFieldRequirements } from './worker-fields.js';
 import { restaurantPrice } from './restaurant-price.js';
 import { salarySummary, salaryDay, groupWageRecords } from './salary-summary.js';
 import { attendanceMealChange } from './attendance-meals.js';
@@ -108,6 +109,7 @@ async function editWorker(worker=null){
     showDialog(worker?'출입자 정보 수정':'출입자 등록',`<div class="fields">${field('name','이름',worker?.name||'')}${field('category','구분',worker?.category||'직영')}${field('company','소속',worker?.company||'')}${field('occupation','직종',worker?.occupation||'')}</div><datalist id="worker-companies">${companies.map(c=>`<option value="${esc(c.name)}"></option>`).join('')}</datalist>`,d=>api(worker?`/api/workers/${worker.id}`:'/api/workers',{method:worker?'PUT':'POST',body:JSON.stringify({...d,siteId})}));
     $('#dialog-form input[name=company]').setAttribute('list','worker-companies');
     const list=document.createElement('datalist');list.id='worker-occupations';for(const occupation of occupations){const option=document.createElement('option');option.value=occupation.name;list.append(option);}$('#dialog-body').append(list);$('#dialog-form input[name=occupation]').setAttribute('list',list.id);
+    const category=$('#dialog-form input[name=category]'),update=()=>{const requirements=workerFieldRequirements(category.value.trim());for(const name of ['company','occupation'])$(`#dialog-form input[name=${name}]`).required=requirements[name];};category.oninput=update;update();
   }catch(error){showError(error);}
 }
 async function showWorkerPermissions(worker){

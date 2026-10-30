@@ -20,9 +20,10 @@
       <form id="join-form" hidden>
         <p>이 시험 화면은 이름·구분·소속·직종을 이 컴퓨터의 시험 데이터베이스에 저장합니다. 실제 개인정보 대신 가상 정보를 입력하세요.</p>
         <label><input type="checkbox" name="acknowledged" required> 시험 안내를 확인했습니다.</label>
+        <p>협력업체는 소속과 직종이 필요합니다. 직영은 소속을, 근로를 제공하지 않는 사람은 소속과 직종을 생략할 수 있습니다.</p>
         <div class="fields">
           <label>이름<input name="name" required maxlength="200"></label>
-          <label>구분<select name="category"><option>직영</option><option>협력업체 근로자</option><option>협력업체 관리자</option><option>기타 출입자</option></select></label>
+          <label>구분<select name="category"><option>직영</option><option>협력업체 근로자</option><option>협력업체 관리자</option><option>근로를 제공하지 않는 사람</option><option>기타 출입자</option></select></label>
           <label>소속<input name="company" required maxlength="200"></label>
           <label>직종<input name="occupation" required maxlength="200"></label>
         </div>
