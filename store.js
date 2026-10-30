@@ -954,12 +954,11 @@ export class Store {
     return this.db.prepare('SELECT d.* FROM documents d JOIN worker_authored_documents a ON a.document_id=d.id WHERE d.site_id=? AND a.worker_id=? ORDER BY d.date DESC,d.id DESC').all(Number(siteId),Number(workerId)).filter(doc=>permissions.includes(doc.type));
   }
   workerDocument(siteId,workerId,id){const doc=this.workerDocuments(siteId,workerId).find(item=>item.id===Number(id));if(!doc)throw new Error('권한이 있는 본인 작성 문서를 확인해 주세요.');return doc;}
-  createWorkerDocument(siteId,workerId,input){
-    if(!['risk','work_plan'].includes(input.type)||!this.workerPermissions(siteId,workerId).includes(input.type))throw new Error('문서 작성 시험 권한이 필요합니다.');
-    this.db.exec('BEGIN IMMEDIATE');try{const doc=this.createDocument({...input,siteId:Number(siteId)});this.db.prepare('INSERT INTO worker_authored_documents(document_id,worker_id) VALUES(?,?)').run(doc.id,Number(workerId));this.db.exec('COMMIT');return doc;}catch(error){this.db.exec('ROLLBACK');throw error;}
+  createWorkerDocument(siteId,workerId,input,onAuthorize=()=>{}){
+    this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();if(!['risk','work_plan'].includes(input.type)||!this.workerPermissions(siteId,workerId).includes(input.type))throw new Error('문서 작성 시험 권한이 필요합니다.');const doc=this.createDocument({...input,siteId:Number(siteId)});this.db.prepare('INSERT INTO worker_authored_documents(document_id,worker_id) VALUES(?,?)').run(doc.id,Number(workerId));this.db.exec('COMMIT');return doc;}catch(error){this.db.exec('ROLLBACK');throw error;}
   }
-  updateWorkerDocument(siteId,workerId,id,input){const doc=this.workerDocument(siteId,workerId,id);return this.updateDocument(doc.id,{...input,siteId:Number(siteId),type:doc.type});}
-  transitionWorkerDocument(siteId,workerId,id,action){const doc=this.workerDocument(siteId,workerId,id);if(!['submit','withdraw','revise'].includes(action))throw new Error('허용된 문서 상태 변경을 확인해 주세요.');return this.transition(doc.id,action);}
+  updateWorkerDocument(siteId,workerId,id,input,onAuthorize=()=>{}){const doc=this.workerDocument(siteId,workerId,id);return this.updateDocument(doc.id,{...input,siteId:Number(siteId),type:doc.type},()=>{onAuthorize();const current=this.workerDocument(siteId,workerId,id);if(['status','title','date','body','details','updated_at'].some(key=>current[key]!==doc[key]))throw new Error('문서가 변경되었습니다. 다시 조회해 주세요.');});}
+  transitionWorkerDocument(siteId,workerId,id,action,onAuthorize=()=>{}){this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();const doc=this.workerDocument(siteId,workerId,id);if(!['submit','withdraw','revise'].includes(action))throw new Error('허용된 문서 상태 변경을 확인해 주세요.');const result=this.transition(doc.id,action);this.db.exec('COMMIT');return result;}catch(error){this.db.exec('ROLLBACK');throw error;}}
   workerDocumentOptions(siteId,workerId,type){
     if(!['risk','work_plan'].includes(type)||!this.workerPermissions(siteId,workerId).includes(type))throw new Error('문서 작성 시험 권한이 필요합니다.');
     const companies=this.companies(siteId).map(({id,name,trade})=>({id,name,trade}));if(type==='risk')return {companies};
@@ -1444,7 +1443,7 @@ export class Store {
     if(!doc || !['draft','rejected'].includes(doc.status)) throw new Error('임시저장 또는 반려된 문서의 첨부파일만 삭제할 수 있습니다.');
     this.db.exec('BEGIN IMMEDIATE');try{this.db.prepare('DELETE FROM attachments WHERE id=?').run(Number(id));if(doc.type==='checklist')this.db.prepare('DELETE FROM checklist_signatures WHERE document_id=?').run(doc.id);if(doc.type==='tbm')this.db.prepare('DELETE FROM tbm_signatures WHERE document_id=?').run(doc.id);if(doc.type==='joint_inspection')this.db.prepare('DELETE FROM joint_inspection_signatures WHERE document_id=?').run(doc.id);if(['work_council','safety_meeting','office'].includes(doc.type))this.db.prepare('DELETE FROM meeting_signatures WHERE document_id=?').run(doc.id);this.db.exec('COMMIT');}catch(error){this.db.exec('ROLLBACK');throw error;}
   }
-  updateDocument(id, input) {
+  updateDocument(id, input, onAuthorize=()=>{}) {
     const current = this.document(id);
     if (!current) throw new Error('문서를 찾을 수 없습니다.');
     if(current.type==='cost' && Array.isArray(JSON.parse(current.details).rows))throw new Error('월간 사용내역서는 보존된 내역을 변경할 수 없습니다. 새 문서를 작성해 주세요.');
@@ -1469,7 +1468,7 @@ export class Store {
       if(current.date===d.date){if(previous)d.details.attendanceSnapshot=previous;}
       else d.details.attendanceSnapshot={present:this.attendance(d.siteId,d.date).filter(row=>row.present).length,capturedAt:new Date().toISOString()};
     }
-    this.db.exec('BEGIN IMMEDIATE');try{this.db.prepare('UPDATE documents SET title=?,date=?,body=?,details=?,updated_at=CURRENT_TIMESTAMP WHERE id=?').run(d.title,d.date,d.body,JSON.stringify(d.details),Number(id));if(d.type==='checklist')this.db.prepare('DELETE FROM checklist_signatures WHERE document_id=?').run(Number(id));if(d.type==='tbm')this.db.prepare('DELETE FROM tbm_signatures WHERE document_id=?').run(Number(id));if(d.type==='joint_inspection')this.db.prepare('DELETE FROM joint_inspection_signatures WHERE document_id=?').run(Number(id));if(['work_council','safety_meeting','office'].includes(d.type))this.db.prepare('DELETE FROM meeting_signatures WHERE document_id=?').run(Number(id));this.db.exec('COMMIT');}catch(error){this.db.exec('ROLLBACK');throw error;}
+    this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();this.db.prepare('UPDATE documents SET title=?,date=?,body=?,details=?,updated_at=CURRENT_TIMESTAMP WHERE id=?').run(d.title,d.date,d.body,JSON.stringify(d.details),Number(id));if(d.type==='checklist')this.db.prepare('DELETE FROM checklist_signatures WHERE document_id=?').run(Number(id));if(d.type==='tbm')this.db.prepare('DELETE FROM tbm_signatures WHERE document_id=?').run(Number(id));if(d.type==='joint_inspection')this.db.prepare('DELETE FROM joint_inspection_signatures WHERE document_id=?').run(Number(id));if(['work_council','safety_meeting','office'].includes(d.type))this.db.prepare('DELETE FROM meeting_signatures WHERE document_id=?').run(Number(id));this.db.exec('COMMIT');}catch(error){this.db.exec('ROLLBACK');throw error;}
     return this.document(id);
   }
   updateRiskImprovement(documentId,input){
