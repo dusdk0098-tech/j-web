@@ -1393,7 +1393,7 @@ export class Store {
     if(!doc||!worker||doc.site_id!==worker.site_id||doc.type!=='instruction'||doc.status!=='approved'||JSON.parse(doc.details).recipientId!==Number(workerId)||this.instructionResult(id)?.source!=='worker')throw new Error('본인의 시험 조치 기록을 확인해 주세요.');
     return this.instructionPhotos(id);
   }
-  addWorkerInstructionPhoto(workerId,id,phase,name,data){this.workerInstructionPhotos(workerId,id);return this.addInstructionPhoto(id,phase,name,data);}
+  addWorkerInstructionPhoto(workerId,id,phase,name,data,onAuthorize=()=>{}){this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();this.workerInstructionPhotos(workerId,id);const result=this.addInstructionPhoto(id,phase,name,data);this.db.exec('COMMIT');return result;}catch(error){this.db.exec('ROLLBACK');throw error;}}
   instructionPhotos(id){if(!this.instructionResult(id))throw new Error('시험 조치 기록을 먼저 저장해 주세요.');return this.db.prepare('SELECT id,phase,name,length(data) AS size FROM instruction_photos WHERE document_id=? ORDER BY id').all(Number(id));}
   addInstructionPhoto(id,phase,name,data){
     const existing=this.instructionPhotos(id);if(!['before','after'].includes(phase))throw new Error('사진 구분을 확인해 주세요.');
