@@ -1269,7 +1269,7 @@ export class Store {
   officeReferenceDocument(reviewerId,id){return this.officeReferenceDocuments(reviewerId).some(doc=>doc.id===Number(id))?this.document(id):null;}
   priorReviewerEvents(doc,reviewerId){
     if(!doc.approval_cycle_id)return [];
-    return this.db.prepare("SELECT e.id,e.reviewer_name,e.opinion,e.created_at,e.signature IS NOT NULL AS has_signature FROM events e JOIN approval_steps prior ON prior.document_id=e.document_id AND prior.reviewer_id=e.reviewer_id AND prior.state='approved' JOIN approval_steps current ON current.document_id=e.document_id AND current.reviewer_id=? AND current.state='pending' AND prior.position<current.position WHERE e.document_id=? AND e.approval_cycle_id=? AND e.action='approve' ORDER BY prior.position,e.id").all(Number(reviewerId),doc.id,doc.approval_cycle_id);
+    return this.db.prepare("SELECT e.id,e.action,e.reviewer_name,e.opinion,e.created_at,e.signature IS NOT NULL AS has_signature FROM events e JOIN approval_steps prior ON prior.document_id=e.document_id AND prior.reviewer_id=e.reviewer_id JOIN approval_steps current ON current.document_id=e.document_id AND current.reviewer_id=? AND current.state='pending' WHERE e.document_id=? AND e.approval_cycle_id=? AND ((prior.state='approved' AND prior.position<current.position) OR (prior.reviewer_id=current.reviewer_id AND e.action='comment')) AND (e.action='approve' OR (e.action='comment' AND ?='office')) ORDER BY prior.position,e.id").all(Number(reviewerId),doc.id,doc.approval_cycle_id,doc.type);
   }
   liveReviewerLinks(doc){
     if(doc.type==='risk')return {type:'risk',activities:this.riskActivities(doc.id).map(activity=>({...activity,worker_snapshot:JSON.parse(activity.worker_snapshot||'[]'),files:this.riskActivityPhotos(doc.id,activity.id)}))};
@@ -1624,6 +1624,10 @@ export class Store {
   }
   managedTransition(id,input,onAuthorize=()=>{}){this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();const result=input.action==='approve'?this.approveDocument(id,input.opinion,input.signature):this.transition(id,input.action,input.opinion);this.db.exec('COMMIT');return result;}catch(error){this.db.exec('ROLLBACK');throw error;}}
   approveDocument(id,opinion,signature){return this.transition(id,'approve',opinion,signatureBytes(signature));}
+  reviewerComment(id,reviewerId,opinion,onAuthorize=()=>{}){
+    if(typeof opinion!=='string'||!opinion.trim()||opinion.length>2000)throw new Error('시험 의견을 입력해 주세요.');
+    this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();const doc=this.reviewerDocument(reviewerId,id),reviewer=this.reviewer(reviewerId);if(!doc||doc.type!=='office'||!reviewer||!this.approvalCycle(doc.id,doc.approval_cycle_id))throw new Error('현재 차례의 업무 문서를 확인해 주세요.');this.db.prepare("INSERT INTO events(document_id,action,from_status,to_status,opinion,reviewer_id,reviewer_name,approval_cycle_id) VALUES(?,'comment','pending','pending',?,?,?,?)").run(doc.id,opinion.trim(),reviewer.id,reviewer.name,doc.approval_cycle_id);this.db.exec('COMMIT');}catch(error){this.db.exec('ROLLBACK');throw error;}
+  }
   reviewerTransition(id,reviewerId,action,opinion,signature,onAuthorize=null){this.db.exec('BEGIN IMMEDIATE');try{if(onAuthorize)onAuthorize();if(!['approve','reject'].includes(action)||!this.reviewerDocument(reviewerId,id))throw new Error('현재 차례의 결재자를 확인해 주세요.');const result=this.transition(id,action,opinion,action==='approve'?signatureBytes(signature):null,Number(reviewerId));this.db.exec('COMMIT');return result;}catch(error){this.db.exec('ROLLBACK');throw error;}}
   approveDocuments(siteId,ids,signature,onAuthorize=()=>{}){
     if(!Number.isSafeInteger(siteId)||siteId<1||!Array.isArray(ids)||!ids.length||ids.length>100||ids.some(id=>!Number.isSafeInteger(id)||id<1)||new Set(ids).size!==ids.length)throw new Error('선택한 시험 문서를 확인해 주세요.');
