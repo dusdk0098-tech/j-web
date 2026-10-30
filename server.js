@@ -37,7 +37,7 @@ const workerKey=raw=>typeof raw==='string' && /^[\w-]{43}$/.test(raw)?createHash
 function workerSessionError(raw,expected){const now=new Date(),session=workerSessions.get(workerKey(raw));if(session!==expected||!session||session.expires<=now.getTime())return {status:401,error:'근로자 로그인이 필요합니다.'};const date=new Date(now.getTime()-now.getTimezoneOffset()*60000).toISOString().slice(0,10);return store.workerAccessBlocked(session.worker.site_id,date)?{status:403,error:'해당 현장은 오늘 근로자 접속이 차단되었습니다.'}:null;}
 delete process.env.JWEB_ADMIN_PASSWORD;
 const mime = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg':'image/svg+xml', '.png':'image/png' };
-const assets = new Set(['/','/app.js','/office-template.js','/common-work-view.js','/rich-text.js','/messages-view.js','/board-view.js','/schedule.js','/batch-print.js','/date-range.js','/daily-quantities.js','/risk-scale.js','/musculoskeletal.js','/worker-link.js','/worker-location.js','/remember-worker.js','/worker-documents.js','/worker-loads.js','/join-choices.js','/join-flow.js','/worker-fields.js','/site-qr.js','/tbm-sources.js','/training-groups.js','/site-statistics.js','/restaurant-price.js','/salary-summary.js','/attendance-meals.js','/joint-examples.js','/safety-log-sources.js','/style.css','/jweb-icon.svg','/jweb-icon-192.png','/jweb-icon-512.png','/join','/join.js','/login','/login.js','/review','/review.js']);
+const assets = new Set(['/','/app.js','/office-template.js','/common-work-view.js','/rich-text.js','/rich-editor.js','/messages-view.js','/board-view.js','/schedule.js','/batch-print.js','/date-range.js','/daily-quantities.js','/risk-scale.js','/musculoskeletal.js','/worker-link.js','/worker-location.js','/remember-worker.js','/worker-documents.js','/worker-loads.js','/join-choices.js','/join-flow.js','/worker-fields.js','/site-qr.js','/tbm-sources.js','/training-groups.js','/site-statistics.js','/restaurant-price.js','/salary-summary.js','/attendance-meals.js','/joint-examples.js','/safety-log-sources.js','/style.css','/jweb-icon.svg','/jweb-icon-192.png','/jweb-icon-512.png','/join','/join.js','/login','/login.js','/review','/review.js']);
 const json = (res, code, value) => { res.writeHead(code, {'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}); res.end(JSON.stringify(value)); };
 function checkRequestSession(req){const failure=req.checkSession?.();if(failure)throw Object.assign(new Error(failure.error),{sessionStatus:failure.status});}
 async function body(req,max=65536) {
@@ -701,7 +701,7 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === '/api/attendance/delegated-events' && req.method === 'GET') return json(res,200,store.delegatedAttendanceEvents(url.searchParams.get('siteId'),url.searchParams.get('date')));
     if (url.pathname === '/api/documents') {
       if (req.method === 'GET') return json(res,200,store.documents(url.searchParams.get('siteId'),url.searchParams.get('type') || '',url.searchParams.get('q') || '',url.searchParams.get('from') || '',url.searchParams.get('to') || '',url.searchParams.get('riskKind') || '',url.searchParams.get('riskContractorId') || ''));
-      if (req.method === 'POST') return json(res,201,store.createDocument(await body(req)));
+      if (req.method === 'POST') return json(res,201,store.createDocument(await body(req,150000)));
     }
     const copyWorkPlan=url.pathname.match(/^\/api\/documents\/(\d+)\/copy-work-plan$/);
     if(copyWorkPlan&&req.method==='POST')return json(res,201,store.copyWorkPlan(copyWorkPlan[1],await body(req)));
@@ -846,7 +846,7 @@ const server = http.createServer(async (req, res) => {
       if (req.method === 'GET' && part === 'training-targets') return json(res,200,store.trainingTargets(id));
       if (req.method === 'PUT' && part === 'training-targets') {const input=await body(req);store.setTrainingTargets(id,input.workerIds);return json(res,200,{ok:true});}
       if (req.method === 'GET' && !part) { const d=store.document(id); return d ? json(res,200,d) : json(res,404,{error:'문서를 찾을 수 없습니다.'}); }
-      if (req.method === 'PUT' && !part) {const input=await body(req);return json(res,200,store.updateDocument(id,input,()=>checkRequestSession(req)));}
+      if (req.method === 'PUT' && !part) {const input=await body(req,150000);return json(res,200,store.updateDocument(id,input,()=>checkRequestSession(req)));}
       if (req.method === 'DELETE' && !part) {const input=await body(req);store.deleteBasicDocument(input.siteId,id,input.expectedVersion);return json(res,200,{ok:true});}
       if (req.method === 'POST' && part === 'transition') {const input=await body(req);return json(res,200,store.managedTransition(id,input,()=>checkRequestSession(req)));}
     }
