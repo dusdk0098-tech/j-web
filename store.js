@@ -130,7 +130,10 @@ export class Store {
       CREATE TABLE IF NOT EXISTS risk_activity_signatures (activity_id INTEGER PRIMARY KEY REFERENCES risk_activities(id) ON DELETE CASCADE,signature BLOB NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
       CREATE TABLE IF NOT EXISTS hazard_reports (id INTEGER PRIMARY KEY,site_id INTEGER NOT NULL REFERENCES sites(id),title TEXT NOT NULL,body TEXT NOT NULL,reporter TEXT NOT NULL,photo BLOB,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
       CREATE TABLE IF NOT EXISTS hazard_report_replies (id INTEGER PRIMARY KEY,report_id INTEGER NOT NULL REFERENCES hazard_reports(id),body TEXT NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
-      CREATE INDEX IF NOT EXISTS hazard_report_replies_report ON hazard_report_replies(report_id,id);`);
+      CREATE INDEX IF NOT EXISTS hazard_report_replies_report ON hazard_report_replies(report_id,id);
+      CREATE TABLE IF NOT EXISTS notice_edits (id INTEGER PRIMARY KEY,document_id INTEGER NOT NULL REFERENCES documents(id),previous_title TEXT NOT NULL,previous_body TEXT NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+      CREATE INDEX IF NOT EXISTS notice_edits_document ON notice_edits(document_id,id);
+      CREATE TABLE IF NOT EXISTS notice_edit_reads (edit_id INTEGER NOT NULL REFERENCES notice_edits(id),worker_id INTEGER NOT NULL REFERENCES workers(id),read_at TEXT NOT NULL,signature BLOB,PRIMARY KEY(edit_id,worker_id));`);
     if (!this.db.prepare('PRAGMA table_info(documents)').all().some(c=>c.name==='details')) this.db.exec("ALTER TABLE documents ADD COLUMN details TEXT NOT NULL DEFAULT '{}'");
     this.db.exec(`CREATE TRIGGER IF NOT EXISTS basic_category_insert BEFORE INSERT ON documents WHEN NEW.type='basic' AND COALESCE(json_extract(NEW.details,'$.categoryId'),0)>0 AND NOT EXISTS(SELECT 1 FROM basic_categories WHERE id=json_extract(NEW.details,'$.categoryId') AND site_id=NEW.site_id) BEGIN SELECT RAISE(ABORT,'기본 서류 분류를 확인해 주세요.'); END;
       CREATE TRIGGER IF NOT EXISTS basic_category_update BEFORE UPDATE OF details,site_id,type ON documents WHEN NEW.type='basic' AND COALESCE(json_extract(NEW.details,'$.categoryId'),0)>0 AND NOT EXISTS(SELECT 1 FROM basic_categories WHERE id=json_extract(NEW.details,'$.categoryId') AND site_id=NEW.site_id) BEGIN SELECT RAISE(ABORT,'기본 서류 분류를 확인해 주세요.'); END;`);
@@ -698,7 +701,7 @@ export class Store {
   workerAttendanceUnits(workerId,month){month=monthValue(month);return this.db.prepare('SELECT date,units_hundredths FROM attendance WHERE worker_id=? AND present=1 AND date BETWEEN ? AND ? ORDER BY date').all(Number(workerId),`${month}-01`,`${month}-31`);}
   workerNotices(workerId,date) {
     date=dateValue(date);
-    return this.db.prepare("SELECT d.id,d.title,d.body,d.date,r.read_at FROM workers w JOIN documents d ON d.site_id=w.site_id LEFT JOIN worker_notice_reads r ON r.document_id=d.id AND r.worker_id=w.id WHERE w.id=? AND d.type='notice' AND d.status='approved' AND d.date=? ORDER BY d.id DESC").all(Number(workerId),date).map(notice=>({...notice,files:this.attachments(notice.id).map(({id,name,size})=>({id,name,size}))}));
+    return this.db.prepare("SELECT d.id,d.title,d.body,d.date,r.read_at,COALESCE((SELECT MAX(id) FROM notice_edits WHERE document_id=d.id),0) AS version FROM workers w JOIN documents d ON d.site_id=w.site_id LEFT JOIN worker_notice_reads r ON r.document_id=d.id AND r.worker_id=w.id WHERE w.id=? AND d.type='notice' AND d.status='approved' AND d.date=? ORDER BY d.id DESC").all(Number(workerId),date).map(notice=>({...notice,files:this.attachments(notice.id).map(({id,name,size})=>({id,name,size}))}));
   }
   workerNoticeFile(workerId,documentId,fileId,date){
     date=dateValue(date);
@@ -754,12 +757,10 @@ export class Store {
     const bytes=signature===undefined?null:signatureBytes(signature);
     this.db.prepare("INSERT INTO worker_training_checks(worker_id,document_id,rights_ack,signature) VALUES(?,?,'demo-v1',?) ON CONFLICT(worker_id,document_id) DO UPDATE SET rights_ack=CASE WHEN excluded.signature IS NOT NULL THEN COALESCE(worker_training_checks.rights_ack,excluded.rights_ack) ELSE worker_training_checks.rights_ack END,signature=COALESCE(worker_training_checks.signature,excluded.signature)").run(Number(workerId),doc.id,bytes);
   }
-  confirmWorkerNotice(workerId,documentId,signature,date) {
+  confirmWorkerNotice(workerId,documentId,signature,date,expectedVersion,onAuthorize=()=>{}) {
     date=dateValue(date);
-    const doc=this.db.prepare("SELECT d.id FROM workers w JOIN documents d ON d.site_id=w.site_id WHERE w.id=? AND d.id=? AND d.type='notice' AND d.status='approved' AND d.date=?").get(Number(workerId),Number(documentId),date);
-    if(!doc)throw new Error('확인할 공지를 찾을 수 없습니다.');
     const bytes=signatureBytes(signature);
-    this.db.prepare('INSERT OR IGNORE INTO worker_notice_reads(worker_id,document_id,signature) VALUES(?,?,?)').run(Number(workerId),doc.id,bytes);
+    this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();const doc=this.db.prepare("SELECT d.id,COALESCE((SELECT MAX(id) FROM notice_edits WHERE document_id=d.id),0) AS version FROM workers w JOIN documents d ON d.site_id=w.site_id WHERE w.id=? AND d.id=? AND d.type='notice' AND d.status='approved' AND d.date=?").get(Number(workerId),Number(documentId),date);if(!doc)throw new Error('확인할 공지를 찾을 수 없습니다.');if((expectedVersion!==undefined||doc.version!==0)&&(!Number.isSafeInteger(expectedVersion)||expectedVersion!==doc.version))throw Object.assign(new Error('공지가 변경되었습니다. 새 내용을 확인하고 다시 서명해 주세요.'),{sessionStatus:409});this.db.prepare('INSERT OR IGNORE INTO worker_notice_reads(worker_id,document_id,signature) VALUES(?,?,?)').run(Number(workerId),doc.id,bytes);this.db.exec('COMMIT');}catch(error){this.db.exec('ROLLBACK');throw error;}
   }
   noticeReads(documentId) {
     const doc=this.document(documentId);
@@ -768,6 +769,12 @@ export class Store {
   }
   noticeSignature(documentId,workerId) {
     return this.db.prepare("SELECT r.signature FROM worker_notice_reads r JOIN documents d ON d.id=r.document_id JOIN workers w ON w.id=r.worker_id AND w.site_id=d.site_id WHERE d.id=? AND d.type='notice' AND w.id=? AND r.signature IS NOT NULL").get(Number(documentId),Number(workerId))?.signature || null;
+  }
+  noticeEditHistory(documentId){const doc=this.document(documentId);if(!doc||doc.type!=='notice')throw new Error('유해·위험 공지를 확인해 주세요.');const reads=this.db.prepare('SELECT w.id,w.name,w.company,r.read_at,r.signature IS NOT NULL AS has_signature FROM notice_edit_reads r JOIN workers w ON w.id=r.worker_id WHERE r.edit_id=? AND w.site_id=? ORDER BY r.read_at,w.id');return this.db.prepare('SELECT id,previous_title,previous_body,created_at FROM notice_edits WHERE document_id=? ORDER BY id DESC').all(Number(documentId)).map(edit=>({...edit,reads:reads.all(edit.id,doc.site_id)}));}
+  noticeEditSignature(documentId,editId,workerId){return this.db.prepare("SELECT r.signature FROM notice_edit_reads r JOIN notice_edits e ON e.id=r.edit_id JOIN documents d ON d.id=e.document_id JOIN workers w ON w.id=r.worker_id AND w.site_id=d.site_id WHERE d.id=? AND d.type='notice' AND e.id=? AND w.id=? AND r.signature IS NOT NULL").get(Number(documentId),Number(editId),Number(workerId))?.signature||null;}
+  editPublishedNotice(documentId,input,date,onAuthorize=()=>{}){
+    date=dateValue(date);if(!input||!Number.isSafeInteger(input.siteId)||!Number.isSafeInteger(input.expectedVersion)||input.expectedVersion<0)throw new Error('공지와 이전 내용을 확인해 주세요.');const title=text(input.title,'제목');if(typeof input.body!=='string'||!input.body.trim()||input.body.length>20000)throw new Error('공지 내용을 확인해 주세요.');const body=input.body;
+    this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();const doc=this.document(documentId);if(!doc||doc.type!=='notice'||doc.site_id!==input.siteId||doc.status!=='approved'||doc.date!==date||!this.db.prepare("SELECT 1 FROM events WHERE document_id=? AND action='publish'").get(Number(documentId)))throw new Error('오늘 직접 게시한 공지를 확인해 주세요.');if(doc.notice_version!==input.expectedVersion)throw Object.assign(new Error('공지에 다른 변경이 있습니다. 다시 조회해 주세요.'),{sessionStatus:409});if(doc.title!==title||doc.body!==body){const edit=this.db.prepare('INSERT INTO notice_edits(document_id,previous_title,previous_body) VALUES(?,?,?)').run(doc.id,doc.title,doc.body).lastInsertRowid;this.db.prepare('INSERT INTO notice_edit_reads(edit_id,worker_id,read_at,signature) SELECT ?,worker_id,read_at,signature FROM worker_notice_reads WHERE document_id=?').run(edit,doc.id);this.db.prepare('DELETE FROM worker_notice_reads WHERE document_id=?').run(doc.id);this.db.prepare('UPDATE documents SET title=?,body=?,updated_at=CURRENT_TIMESTAMP WHERE id=?').run(title,body,doc.id);this.db.prepare("INSERT INTO events(document_id,action,from_status,to_status) VALUES(?,'edit','approved','approved')").run(doc.id);}this.db.exec('COMMIT');return this.document(doc.id);}catch(error){this.db.exec('ROLLBACK');throw error;}
   }
   trainingChecks(documentId) {
     const doc=this.document(documentId);
@@ -1258,7 +1265,7 @@ export class Store {
     const id = this.db.prepare('INSERT INTO documents(site_id,type,title,date,body,details) VALUES(?,?,?,?,?,?)').run(d.siteId,d.type,d.title,d.date,d.body,JSON.stringify(d.details)).lastInsertRowid;
     return this.document(id);
   }
-  document(id) { const doc=this.db.prepare('SELECT documents.*,COALESCE((SELECT source_document_id FROM work_plan_copies WHERE document_id=documents.id),(SELECT source_document_id FROM office_document_copies WHERE document_id=documents.id)) AS copied_from,(SELECT version FROM basic_document_versions WHERE document_id=documents.id) AS basic_version FROM documents WHERE id=?').get(Number(id));if(doc&&doc.type!=='basic')delete doc.basic_version;return doc; }
+  document(id) { const doc=this.db.prepare('SELECT documents.*,COALESCE((SELECT source_document_id FROM work_plan_copies WHERE document_id=documents.id),(SELECT source_document_id FROM office_document_copies WHERE document_id=documents.id)) AS copied_from,(SELECT version FROM basic_document_versions WHERE document_id=documents.id) AS basic_version,COALESCE((SELECT MAX(id) FROM notice_edits WHERE document_id=documents.id),0) AS notice_version FROM documents WHERE id=?').get(Number(id));if(doc&&doc.type!=='basic')delete doc.basic_version;if(doc&&doc.type!=='notice')delete doc.notice_version;return doc; }
   officeReference(siteId,id){const ref=this.document(id);return ref&&ref.site_id===Number(siteId)&&ref.type==='office'&&JSON.parse(ref.details).kind==='품의서'?ref:null;}
   validateOfficeReference(doc){if(doc.type==='office'&&doc.details.referenceId&&!this.officeReference(doc.siteId,doc.details.referenceId))throw new Error('같은 현장의 품의서를 선택해 주세요.');}
   copyOfficeDocument(id,input){

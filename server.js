@@ -273,7 +273,7 @@ const server = http.createServer(async (req, res) => {
     if(workerNotice && req.method==='POST'){
       const key=workerKey(workerToken),session=workerSessions.get(key);
       if(!session || session.expires<=Date.now()){workerSessions.delete(key);return json(res,401,{error:'근로자 로그인이 필요합니다.'});}
-      const input=await body(req),now=new Date(),date=new Date(now.getTime()-now.getTimezoneOffset()*60000).toISOString().slice(0,10);store.confirmWorkerNotice(session.worker.id,workerNotice[1],input.signature,date);return json(res,200,{ok:true});
+      const input=await body(req),now=new Date(),date=new Date(now.getTime()-now.getTimezoneOffset()*60000).toISOString().slice(0,10);store.confirmWorkerNotice(session.worker.id,workerNotice[1],input.signature,date,input.version,()=>{checkRequestSession(req);const current=new Date();if(new Date(current.getTime()-current.getTimezoneOffset()*60000).toISOString().slice(0,10)!==date)throw Object.assign(new Error('날짜가 변경되었습니다. 공지를 다시 확인해 주세요.'),{sessionStatus:409});});return json(res,200,{ok:true});
     }
     if(url.pathname==='/api/worker/logout' && req.method==='POST'){
       workerSessions.delete(workerKey(workerToken));res.setHeader('Set-Cookie',`jweb_worker=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0${secureCookie}`);return json(res,200,{ok:true});
@@ -708,6 +708,11 @@ const server = http.createServer(async (req, res) => {
     if(trainingCheckSignature&&req.method==='GET'){const signature=store.trainingCheckSignature(trainingCheckSignature[1],trainingCheckSignature[2]);if(!signature)return json(res,404,{error:'시험 서명을 찾을 수 없습니다.'});res.writeHead(200,{'Content-Type':'image/png','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(signature);}
     const documentTrainingSignature=url.pathname.match(/^\/api\/documents\/(\d+)\/training-signatures\/(\d+)$/);
     if(documentTrainingSignature&&req.method==='GET'){const signature=store.documentTrainingSignature(documentTrainingSignature[1],documentTrainingSignature[2]);if(!signature)return json(res,404,{error:'시험 서명을 찾을 수 없습니다.'});res.writeHead(200,{'Content-Type':'image/png','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(signature);}
+    const noticeEditSignature=url.pathname.match(/^\/api\/documents\/(\d+)\/notice-edits\/(\d+)\/reads\/(\d+)\/signature$/);
+    if(noticeEditSignature&&req.method==='GET'){const signature=store.noticeEditSignature(noticeEditSignature[1],noticeEditSignature[2],noticeEditSignature[3]);if(!signature)return json(res,404,{error:'시험 서명을 찾을 수 없습니다.'});const preview=url.searchParams.get('preview')==='1';res.writeHead(200,{'Content-Type':preview?'image/png':'application/octet-stream',...(preview?{}:{'Content-Disposition':'attachment; filename="test-notice-signature.png"'}),'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(signature);}
+    const noticeEdits=url.pathname.match(/^\/api\/documents\/(\d+)\/notice-edits$/);
+    if(noticeEdits&&req.method==='GET')return json(res,200,store.noticeEditHistory(noticeEdits[1]));
+    if(noticeEdits&&req.method==='PUT'){const input=await body(req),now=new Date(),date=new Date(now.getTime()-now.getTimezoneOffset()*60000).toISOString().slice(0,10);return json(res,200,store.editPublishedNotice(noticeEdits[1],input,date,()=>{checkRequestSession(req);const current=new Date();if(new Date(current.getTime()-current.getTimezoneOffset()*60000).toISOString().slice(0,10)!==date)throw Object.assign(new Error('날짜가 변경되었습니다. 공지를 다시 확인해 주세요.'),{sessionStatus:409});}));}
     const match = url.pathname.match(/^\/api\/documents\/(\d+)(?:\/(events|transition|publish-notice|copy-notice-files|notice-reads|training-checks|training-targets))?$/);
     const noticeSignature=url.pathname.match(/^\/api\/documents\/(\d+)\/notice-reads\/(\d+)\/signature$/);
     if(noticeSignature && req.method==='GET'){
@@ -729,7 +734,7 @@ const server = http.createServer(async (req, res) => {
       if (req.method === 'POST' && part === 'transition') {const input=await body(req);return json(res,200,input.action==='approve'?store.approveDocument(id,input.opinion,input.signature):store.transition(id,input.action,input.opinion));}
     }
     return json(res,404,{error:'요청한 경로가 없습니다.'});
-  } catch (e) { if(e.code==='ERR_SQLITE_ERROR'&&Number.isInteger(e.errcode)&&[5,6].includes(e.errcode&255))return json(res,503,{error:'데이터베이스가 사용 중입니다. 잠시 후 다시 시도해 주세요.'});return json(res,[401,403].includes(e.sessionStatus)?e.sessionStatus:400,{error:e.message || '요청을 처리하지 못했습니다.'}); }
+  } catch (e) { if(e.code==='ERR_SQLITE_ERROR'&&Number.isInteger(e.errcode)&&[5,6].includes(e.errcode&255))return json(res,503,{error:'데이터베이스가 사용 중입니다. 잠시 후 다시 시도해 주세요.'});return json(res,[401,403,409].includes(e.sessionStatus)?e.sessionStatus:400,{error:e.message || '요청을 처리하지 못했습니다.'}); }
 });
 const port = Number(process.env.PORT || 4173);
 server.listen(port, '127.0.0.1', () => console.log(`J웹: http://127.0.0.1:${port} (관리자 로그인 활성)`));

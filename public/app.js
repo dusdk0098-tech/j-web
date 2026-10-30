@@ -589,7 +589,11 @@ async function renderDetail(){
     }
   }
   if(doc.type==='notice'){
-    const reads=await api(`/api/documents/${doc.id}/notice-reads`);
+    const [reads,edits]=await Promise.all([api(`/api/documents/${doc.id}/notice-reads`),api(`/api/documents/${doc.id}/notice-edits`)]);
+    if(doc.status==='approved'&&doc.date===today()&&events.some(event=>event.action==='publish')){
+      const button=document.createElement('button');button.type='button';button.className='outline';button.textContent='오늘 게시한 공지 수정';button.onclick=()=>showDialog('가상 공지 수정',`<p>내용을 바꾸면 이전 확인과 서명은 수정 이력에 보존되며 변경된 공지는 다시 확인해야 합니다.</p><div class="fields">${field('title','제목',doc.title)}<label>공지 내용<textarea name="body" maxlength="20000" required>${esc(doc.body)}</textarea></label></div>`,data=>api(`/api/documents/${doc.id}/notice-edits`,{method:'PUT',body:JSON.stringify({...data,siteId:doc.site_id,expectedVersion:doc.notice_version})}));content.querySelector('.action-row').append(button);
+    }
+    if(edits.length)content.insertAdjacentHTML('beforeend',`<section class="panel"><h2>가상 공지 수정 이력</h2>${edits.map(edit=>`<article><h3>${esc(edit.previous_title)}</h3><p>변경 시각: ${esc(edit.created_at)} (UTC)</p><p class="detail-body">${esc(edit.previous_body)}</p><p>이전 내용 확인 ${edit.reads.length}명</p>${edit.reads.map(read=>`<p>${esc(read.name)} · ${esc(read.company)} · ${esc(read.read_at)} (UTC) ${read.has_signature?`<a href="/api/documents/${doc.id}/notice-edits/${edit.id}/reads/${read.id}/signature">시험 서명 다운로드</a>`:'서명 없음'}</p>`).join('')}</article>`).join('')}</section>`);
     content.insertAdjacentHTML('beforeend',`<section class="panel notice-roster"><h2>가상 공지 확인 명단</h2><p>공지일: ${esc(doc.date)} · 시험 확인 ${reads.length}명</p><p class="muted">직종은 공지일 출역 기록이며, 이름·소속은 현재 정보입니다. 시험 서명은 본인 확인이나 실제 확인의 증거가 아닙니다.</p>${reads.length?`<div class="table-wrap"><table><thead><tr><th>번호</th><th>직종</th><th>이름</th><th>소속</th><th>확인 시각 (UTC)</th><th>시험 서명</th></tr></thead><tbody>${reads.map((r,i)=>`<tr><td>${i+1}</td><td>${esc(r.attendance_occupation||'기록 없음')}</td><td>${esc(r.name)}</td><td>${esc(r.company)}</td><td>${esc(r.read_at)}</td><td>${r.has_signature?`<img class="training-roster-signature" src="/api/documents/${doc.id}/notice-reads/${r.id}/signature?preview=1" alt="${esc(r.name)}의 공지 시험 서명"> <a class="notice-roster-download" href="/api/documents/${doc.id}/notice-reads/${r.id}/signature">다운로드</a>`:'없음'}</td></tr>`).join('')}</tbody></table></div>`:'<p>확인 기록이 없습니다.</p>'}</section>`);
   }
   if(['tbm','education'].includes(doc.type)){
