@@ -15,6 +15,7 @@ import { jointExamples } from './joint-examples.js';
 import { mergeSafetyLogSources } from './safety-log-sources.js';
 import { mountMusculoskeletal } from './musculoskeletal.js';
 import { scheduleTypes } from './schedule.js';
+import { leaveExamples,officeTemplate } from './office-template.js';
 
 const $ = (s) => document.querySelector(s);
 const content = $('#content'), siteSelect = $('#site-select'), dialog = $('#dialog'), notice = $('#notice');
@@ -239,6 +240,8 @@ async function editDocument(doc=null,initialDetails={},initialType=null) {
     $('#daily-fields').innerHTML=fields?Object.entries(fields).map(([key,label])=>field(key,label,details[key]||'','text',false)).join(''):'';
     if(select.value==='office'){
       const selectedReference=details.referenceDocId||details.referenceId||0;$('#daily-fields').innerHTML=`<label>문서 구분<select name="officeKind" required><option value="">선택하세요</option>${['품의서','경비청구','휴가신청서','사고발생보고서','기타'].map(kind=>`<option ${details.kind===kind?'selected':''}>${esc(kind)}</option>`).join('')}</select></label>${field('officeOther','기타 구분',details.otherKind||'','text',false)}<label>참조 업무 문서<select name="officeReference"><option value="">선택 안 함</option>${selectedReference&&!officeRefs.some(ref=>ref.id===selectedReference)?`<option value="${selectedReference}" selected>이전 연결을 다시 확인하세요</option>`:''}${officeRefs.map(ref=>`<option value="${ref.id}" ${selectedReference===ref.id?'selected':''}>${esc(ref.date)} · ${esc(JSON.parse(ref.details).kind)} · ${esc(ref.title)}</option>`).join('')}</select></label><p class="muted">같은 현장의 업무 문서 한 건을 선택합니다. 내용과 첨부는 결재 요청 당시 사본으로 결재자에게 제공됩니다. 실제 알림은 지원하지 않습니다.</p>`;
+      const fields=$('#daily-fields'),kind=fields.querySelector('[name=officeKind]');fields.insertAdjacentHTML('beforeend',`<div id="office-example" hidden><label id="office-leave-label">가상 신청 예시<select id="office-leave-example">${Object.entries(leaveExamples).map(([value,label])=>`<option value="${value}">${esc(label)}</option>`).join('')}</select></label><button type="button" id="office-apply-example">빈 내용에 예시 적용</button><p class="muted">기존 내용은 바꾸지 않습니다. 가상 예시를 확인하고 필요한 내용을 직접 입력하세요.</p><p id="office-example-status" role="status"></p></div>`);
+      const box=fields.querySelector('#office-example'),leave=fields.querySelector('#office-leave-label'),status=fields.querySelector('#office-example-status'),showExample=()=>{box.hidden=!['품의서','휴가신청서'].includes(kind.value);leave.hidden=kind.value!=='휴가신청서';status.textContent='';};kind.addEventListener('change',showExample);showExample();fields.querySelector('#office-apply-example').onclick=()=>{const form=$('#dialog-form'),title=form.elements.title,body=form.elements.body;try{const result=officeTemplate(kind.value,fields.querySelector('#office-leave-example').value,title.value,body.value);title.value=result.title;body.value=result.body;status.textContent='가상 예시를 적용했습니다. 내용을 직접 확인해 주세요.';body.focus();}catch(error){status.textContent=error.message;}};
     }
     if(select.value==='tbm'){
       const container=$('#daily-fields');
