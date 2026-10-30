@@ -37,8 +37,8 @@ export function recordInput(input) {
   let details = {};
   if(type==='office'){
     const value=input.details;if(!value||typeof value!=='object'||Array.isArray(value)||!['품의서','경비청구','휴가신청서','사고발생보고서','기타'].includes(value.kind))throw new Error('업무 문서 구분을 확인해 주세요.');
-    const referenceId=value.referenceId??0;if(!Number.isSafeInteger(referenceId)||referenceId<0||(referenceId&&value.kind!=='경비청구'))throw new Error('연결할 품의서를 확인해 주세요.');
-    details.kind=value.kind;details.otherKind=value.kind==='기타'?text(value.otherKind,'기타 구분'):'';details.referenceId=referenceId;
+    const referenceId=value.referenceId??0,referenceDocId=value.referenceDocId??0;if(!Number.isSafeInteger(referenceId)||referenceId<0||(referenceId&&value.kind!=='경비청구'))throw new Error('연결할 품의서를 확인해 주세요.');if(!Number.isSafeInteger(referenceDocId)||referenceDocId<0||(referenceId&&referenceDocId))throw new Error('연결할 업무 문서를 확인해 주세요.');
+    details.kind=value.kind;details.otherKind=value.kind==='기타'?text(value.otherKind,'기타 구분'):'';details.referenceId=referenceId;details.referenceDocId=referenceDocId;
   }
   if(type==='checklist'){
     const value=input.details??{};if(!value||typeof value!=='object'||Array.isArray(value))throw new Error('체크리스트를 확인해 주세요.');const kind=value.kind??'';if(!['','rain','wind','thaw','heat','cold','wet_season','heavy_rain','electrical','fire','formwork','falling','confined','excavation','semiannual','morning','afternoon','evening'].includes(kind))throw new Error('체크리스트 종류를 확인해 주세요.');details.kind=kind;

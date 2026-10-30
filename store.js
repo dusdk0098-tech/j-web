@@ -1247,7 +1247,7 @@ export class Store {
     if(doc.type==='risk')return {type:'risk',activities:this.riskActivities(doc.id).map(activity=>({...activity,worker_snapshot:JSON.parse(activity.worker_snapshot||'[]'),files:this.riskActivityPhotos(doc.id,activity.id)}))};
     if(doc.type==='permit')return {type:'permit',checks:this.permitChecks(doc.id),extensions:this.permitExtensions(doc.id)};
     if(doc.type==='joint_inspection')return {type:'joint',authorSignature:!!this.jointSignature(doc.id)};
-    if(doc.type==='office'){const referenceId=JSON.parse(doc.details||'{}').referenceId||0,reference=referenceId?this.officeReference(doc.site_id,referenceId):null;if(referenceId&&!reference)throw new Error('연결된 품의서가 변경되었습니다. 다시 확인해 주세요.');return {type:'office',authorSignature:!!this.meetingSignature(doc.id),referenceRecipients:this.officeReferences(doc.id),reference:reference?{id:reference.id,title:reference.title,date:reference.date,body:reference.body,files:this.attachments(reference.id)}:null};}
+    if(doc.type==='office'){const details=JSON.parse(doc.details||'{}'),referenceId=details.referenceDocId||details.referenceId||0,reference=referenceId?(details.referenceDocId?this.officeLinkedDocument(doc.site_id,referenceId):this.officeReference(doc.site_id,referenceId)):null;if(referenceId&&!reference)throw new Error(details.referenceDocId?'연결된 업무 문서가 변경되었습니다. 다시 확인해 주세요.':'연결된 품의서가 변경되었습니다. 다시 확인해 주세요.');return {type:'office',authorSignature:!!this.meetingSignature(doc.id),referenceRecipients:this.officeReferences(doc.id),reference:reference?{id:reference.id,title:reference.title,date:reference.date,body:reference.body,files:this.attachments(reference.id)}:null};}
     if(['work_council','safety_meeting'].includes(doc.type))return {type:'meeting',authorSignature:!!this.meetingSignature(doc.id)};
     if(['tbm','education'].includes(doc.type)){const targets=this.trainingTargets(doc.id);return {type:'training',authorSignature:doc.type==='tbm'&&!!this.tbmSignature(doc.id),configured:targets.configured,workers:targets.workers.filter(worker=>!targets.configured||worker.selected),signedWorkers:targets.signedWorkers,checks:this.trainingChecks(doc.id)};}
     if(doc.type!=='work_plan')return null;const details=JSON.parse(doc.details||'{}'),equipmentIds=details.equipmentIds||[],riggingIds=details.riggingIds||[],snapshots=Array.isArray(details.equipmentSnapshot)?details.equipmentSnapshot:null;
@@ -1258,7 +1258,7 @@ export class Store {
   }
   liveReviewerLinkedFile(doc,kind,parentId,fileId){
     if(kind==='risk'&&doc.type==='risk')return this.riskActivityPhoto(doc.id,parentId,fileId);
-    if(kind==='office-reference'&&doc.type==='office'){const ref=JSON.parse(doc.details||'{}').referenceId,file=ref===Number(parentId)&&this.officeReference(doc.site_id,ref)&&this.attachment(fileId);return file&&file.document_id===ref?file:null;}
+    if(kind==='office-reference'&&doc.type==='office'){const details=JSON.parse(doc.details||'{}'),ref=details.referenceDocId||details.referenceId,file=ref===Number(parentId)&&(details.referenceDocId?this.officeLinkedDocument(doc.site_id,ref):this.officeReference(doc.site_id,ref))&&this.attachment(fileId);return file&&file.document_id===ref?file:null;}
     if(doc.type!=='work_plan')return null;const details=JSON.parse(doc.details||'{}'),parent=Number(parentId);
     if(kind==='equipment'&&(details.equipmentIds||[]).includes(parent))return this.equipmentAttachment(doc.site_id,parent,fileId);
     if(kind==='rigging'&&(details.riggingIds||[]).includes(parent))return this.riggingPhoto(doc.site_id,parent,fileId);
@@ -1315,7 +1315,8 @@ export class Store {
   }
   document(id) { const doc=this.db.prepare('SELECT documents.*,COALESCE((SELECT source_document_id FROM work_plan_copies WHERE document_id=documents.id),(SELECT source_document_id FROM office_document_copies WHERE document_id=documents.id)) AS copied_from,(SELECT version FROM basic_document_versions WHERE document_id=documents.id) AS basic_version,COALESCE((SELECT MAX(id) FROM notice_edits WHERE document_id=documents.id),0) AS notice_version FROM documents WHERE id=?').get(Number(id));if(doc&&doc.type!=='basic')delete doc.basic_version;if(doc&&doc.type!=='notice')delete doc.notice_version;return doc; }
   officeReference(siteId,id){const ref=this.document(id);return ref&&ref.site_id===Number(siteId)&&ref.type==='office'&&JSON.parse(ref.details).kind==='품의서'?ref:null;}
-  validateOfficeReference(doc){if(doc.type==='office'&&doc.details.referenceId&&!this.officeReference(doc.siteId,doc.details.referenceId))throw new Error('같은 현장의 품의서를 선택해 주세요.');}
+  officeLinkedDocument(siteId,id){const ref=this.document(id);return ref&&ref.site_id===Number(siteId)&&ref.type==='office'?ref:null;}
+  validateOfficeReference(doc,currentId=0){if(doc.type!=='office')return;if(doc.details.referenceId&&!this.officeReference(doc.siteId,doc.details.referenceId))throw new Error('같은 현장의 품의서를 선택해 주세요.');if(doc.details.referenceDocId&&(doc.details.referenceDocId===Number(currentId)||!this.officeLinkedDocument(doc.siteId,doc.details.referenceDocId)))throw new Error('같은 현장의 다른 업무 문서를 선택해 주세요.');}
   copyOfficeDocument(id,input){
     this.db.exec('BEGIN IMMEDIATE');try{const source=this.document(id);if(!source||source.type!=='office'||source.site_id!==Number(input.siteId))throw new Error('같은 현장의 업무 문서를 확인해 주세요.');const copy=this.createDocument({siteId:source.site_id,type:'office',title:input.title,date:input.date,body:source.body,details:JSON.parse(source.details)});this.db.prepare('INSERT INTO office_document_copies(document_id,source_document_id) VALUES(?,?)').run(copy.id,source.id);this.db.exec('COMMIT');return this.document(copy.id);}catch(error){this.db.exec('ROLLBACK');throw error;}
   }
@@ -1466,6 +1467,7 @@ export class Store {
     if(current.type==='permit'&&(input.details===undefined||input.details&&typeof input.details==='object'&&!Array.isArray(input.details))){const previous=JSON.parse(current.details),details={...input.details};if(details.safetyMeasures===undefined&&previous.safetyMeasures!==undefined)details.safetyMeasures=previous.safetyMeasures;input={...input,details};}
     if(current.type==='basic'&&JSON.parse(current.details).categoryId>0&&input.details?.categoryId===undefined)throw new Error('기본 서류 분류를 보존하려면 화면을 새로고침해 주세요.');
     if(current.type==='office'&&JSON.parse(current.details).referenceId>0&&input.details?.referenceId===undefined)throw new Error('참조 품의서를 보존하려면 화면을 새로고침해 주세요.');
+    if(current.type==='office'&&JSON.parse(current.details).referenceDocId>0&&input.details?.referenceDocId===undefined)throw new Error('참조 문서를 보존하려면 화면을 새로고침해 주세요.');
     const d = recordInput(input);
     if (d.siteId !== current.site_id || d.type !== current.type) throw new Error('문서의 현장과 유형은 변경할 수 없습니다.');
     this.validateBasicCategory(d);
@@ -1474,7 +1476,7 @@ export class Store {
     this.validateSafetyMeeting(d,current);
     this.validateInstructionRecipient(d);
     this.validateRiskContractors(d);
-    this.validateOfficeReference(d);
+    this.validateOfficeReference(d,id);
     if(d.type==='safety_log'){
       const previous=JSON.parse(current.details).attendanceSnapshot;
       if(current.date===d.date){if(previous)d.details.attendanceSnapshot=previous;}
