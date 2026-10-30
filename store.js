@@ -1130,9 +1130,9 @@ export class Store {
     const site=siteKey?this.siteFromAccess(siteKey):this.invitation(token);
     if(!site || typeof loginId!=='string' || !/^[a-zA-Z0-9_]{3,40}$/.test(loginId) || typeof password!=='string' || password.length>256)return null;
     const account=this.db.prepare('SELECT worker_id,salt,password_hash FROM worker_accounts WHERE site_id=? AND login_id=?').get(site.id,loginId);
-    if(!account)return null;
-    const hash=scryptSync(password,account.salt,32);
-    if(!timingSafeEqual(hash,account.password_hash))return null;
+    // 계정이 없어도 같은 암호 계산을 해서 응답 시간으로 아이디 존재를 알 수 없게 한다.
+    const hash=scryptSync(password,account?.salt||Buffer.alloc(16),32);
+    if(!timingSafeEqual(hash,account?.password_hash||Buffer.alloc(32))||!account)return null;
     const worker=this.db.prepare('SELECT workers.id,workers.name,workers.site_id,sites.name AS site_name FROM workers JOIN sites ON sites.id=workers.site_id WHERE workers.id=?').get(account.worker_id);return withCredential&&worker?{worker,credentialHash:Buffer.from(account.password_hash)}:worker;
   }
   documents(siteId, type = '', query = '', from = '', to = '', riskKind = '', riskContractorId = '') {
