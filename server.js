@@ -561,8 +561,8 @@ const server = http.createServer(async (req, res) => {
     }
     if(url.pathname==='/api/wages'){
       if(req.method==='GET')return json(res,200,store.wageRecords(url.searchParams.get('siteId'),url.searchParams.get('month'),Object.fromEntries(url.searchParams)));
-      if(req.method==='POST'){store.saveWageRecord(await body(req));return json(res,200,{ok:true});}
-      if(req.method==='PUT'){store.saveWageRecord(await body(req),true);return json(res,200,{ok:true});}
+      if(req.method==='POST'){store.saveWageRecord(await body(req),false,()=>checkRequestSession(req));return json(res,200,{ok:true});}
+      if(req.method==='PUT'){store.saveWageRecord(await body(req),true,()=>checkRequestSession(req));return json(res,200,{ok:true});}
     }
     if(url.pathname==='/api/meal-checks/month'&&req.method==='GET')return json(res,200,store.monthlyMealChecks(url.searchParams.get('siteId'),url.searchParams.get('month')));
     if(url.pathname==='/api/meal-checks/statement'&&req.method==='GET')return json(res,200,store.mealStatement(url.searchParams.get('siteId'),url.searchParams.get('month')));

@@ -12,5 +12,6 @@ export function wageSpreadsheet(records,month,daily) {
   const [year,number]=month.split('-').map(Number),days=new Date(Date.UTC(year,number,0)).getUTCDate(),byWorker=new Map(daily.map(row=>[row.worker_id,new Map(row.days.map(day=>[day.date,day]))]));if(records.some(record=>!byWorker.has(record.worker_id)))throw new Error('날짜별 출역 정보를 확인해 주세요.');for(let day=1;day<=days;day++){const date=`${month}-${String(day).padStart(2,'0')}`;rows[0].push(`${day}일 공수`,`${day}일 시험 계산액`);records.forEach((record,i)=>{const entry=byWorker.get(record.worker_id).get(date);rows[i+1].push(!entry?'미출역':entry.units_hundredths===null?'미기록':entry.units_hundredths/100,!entry?'미출역':entry.estimated_pay===null?'미기록':entry.estimated_pay);});}
   for(let day=1;day<=days;day++){const date=`${month}-${String(day).padStart(2,'0')}`;rows[0].push(`${day}일 시험 급여 종류`,`${day}일 시험 급여 금액`);records.forEach((record,i)=>{const value=salaryDay(byWorker.get(record.worker_id).get(date));rows[i+1].push(value.kind,value.amount);});}
   rows[0].push('기록 당시 가상 생년월일','가상 비고');records.forEach((record,i)=>rows[i+1].push(record.birth_date_snapshot??'미기록',record.remark??'미기록'));
+  rows[0].push('항목별 공제 합계','공제 합계 적용 방식');records.forEach((record,i)=>rows[i+1].push(record.detail_total,record.manual_total===null?'항목 합계':'직접 입력'));
   return writeExcelFile(rows,{sheet:'가상 노임'}).toBuffer();
 }
