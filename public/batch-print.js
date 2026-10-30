@@ -5,3 +5,9 @@ export function selectBatchDocuments(documents,selectedIds) {
   if(ids.some(id=>!Number.isSafeInteger(id)||!available.has(id))||new Set(ids).size!==ids.length)throw new Error('선택한 문서를 다시 확인해 주세요.');
   return ids;
 }
+
+export function selectBatchItems(documents,reports,documentIds,reportIds) {
+  if(!Array.isArray(documentIds)||!Array.isArray(reportIds)||documentIds.length+reportIds.length===0)throw new Error('미리 볼 문서를 선택해 주세요.');
+  if(documentIds.length+reportIds.length>20)throw new Error('한 번에 문서 20개까지 선택할 수 있습니다.');
+  return {documents:documentIds.length?selectBatchDocuments(documents,documentIds):[],reports:reportIds.length?selectBatchDocuments(reports,reportIds):[]};
+}
