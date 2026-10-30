@@ -553,6 +553,16 @@ export class Store {
     this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();const {source,version}=this.equipmentCopySource(siteId,id);if(version!==input.version)throw Object.assign(new Error('원본 장비가 변경되었습니다. 다시 조회해 주세요.'),{sessionStatus:409});const newId=this.db.prepare('INSERT INTO equipment(site_id,kind,model,capacity,manufacturer,registration,details) VALUES(?,?,?,?,?,?,?)').run(siteId,kind,model,source.capacity,source.manufacturer,input.registration.trim(),source.details).lastInsertRowid;this.db.prepare('INSERT INTO equipment_attachments(equipment_id,category,name,data) SELECT ?,category,name,data FROM equipment_attachments WHERE equipment_id=? ORDER BY id').run(newId,source.id);const result=this.db.prepare('SELECT * FROM equipment WHERE id=?').get(newId);this.db.exec('COMMIT');return result;}catch(error){this.db.exec('ROLLBACK');throw error;}
   }
   workPlaces(siteId){return this.db.prepare('SELECT * FROM work_places WHERE site_id=? ORDER BY name,id').all(Number(siteId));}
+  workPlaceCopySource(siteId,id){
+    const source=this.db.prepare('SELECT * FROM work_places WHERE site_id=? AND id=?').get(Number(siteId),Number(id));if(!source)throw new Error('선택한 현장의 작업장소를 확인해 주세요.');
+    const photos=this.db.prepare('SELECT id,name,data FROM work_place_photos WHERE place_id=? ORDER BY id').all(source.id),hash=createHash('sha256').update(JSON.stringify(source));
+    for(const photo of photos){hash.update(JSON.stringify([photo.id,photo.name,photo.data.length]));hash.update(photo.data);}
+    return {source,photoCount:photos.length,version:hash.digest('hex')};
+  }
+  copyWorkPlace(siteId,id,input,onAuthorize=()=>{}){
+    siteId=Number(siteId);if(!input||typeof input.version!=='string'||!/^[0-9a-f]{64}$/.test(input.version))throw new Error('작업장소 복사 정보를 확인해 주세요.');const name=text(input.name,'장소 별칭');
+    this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();const {source,version}=this.workPlaceCopySource(siteId,id);if(version!==input.version)throw Object.assign(new Error('원본 작업장소가 변경되었습니다. 다시 조회해 주세요.'),{sessionStatus:409});const newId=this.db.prepare('INSERT INTO work_places(site_id,name,details) VALUES(?,?,?)').run(siteId,name,source.details).lastInsertRowid;this.db.prepare('INSERT INTO work_place_photos(place_id,name,data) SELECT ?,name,data FROM work_place_photos WHERE place_id=? ORDER BY id').run(newId,source.id);const result=this.db.prepare('SELECT * FROM work_places WHERE id=?').get(newId);this.db.exec('COMMIT');return result;}catch(error){this.db.exec('ROLLBACK');throw error;}
+  }
   rigging(siteId){return this.db.prepare('SELECT * FROM rigging WHERE site_id=? ORDER BY name,id').all(Number(siteId));}
   riggingCopySource(siteId,id){
     const source=this.db.prepare('SELECT * FROM rigging WHERE site_id=? AND id=?').get(Number(siteId),Number(id));if(!source)throw new Error('선택한 현장의 장구를 확인해 주세요.');

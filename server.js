@@ -412,6 +412,9 @@ const server = http.createServer(async (req, res) => {
       if (req.method === 'GET') return json(res,200,store.sites());
       if (req.method === 'POST') return json(res,201,store.createSite(await body(req)));
     }
+    const placeCopy=url.pathname.match(/^\/api\/work-places\/(\d+)\/copy$/);
+    if(placeCopy&&req.method==='GET')return json(res,200,store.workPlaceCopySource(url.searchParams.get('siteId'),placeCopy[1]));
+    if(placeCopy&&req.method==='POST'){const input=await body(req);return json(res,201,store.copyWorkPlace(input.siteId,placeCopy[1],input,()=>checkRequestSession(req)));}
     if(url.pathname==='/api/work-places'){
       if(req.method==='GET')return json(res,200,store.workPlaces(url.searchParams.get('siteId')));
       if(req.method==='POST')return json(res,201,store.createWorkPlace(await body(req)));
