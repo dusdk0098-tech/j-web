@@ -1101,6 +1101,8 @@ export class Store {
     const signature=input.signature===undefined?null:signatureBytes(input.signature);
     if(typeof input.loginId!=='string' || !/^[a-zA-Z0-9_]{3,40}$/.test(input.loginId))throw new Error('아이디는 영문, 숫자, 밑줄 3~40자로 입력해 주세요.');
     if(typeof input.password!=='string' || input.password.length<12 || input.password.length>256)throw new Error('암호는 12자 이상 256자 이하여야 합니다.');
+    // 가입 화면의 구분만 허용한다. 현장관리자 등 다른 구분은 관리자만 지정한다.
+    if(!['직영','협력업체 근로자','협력업체 관리자','근로를 제공하지 않는 사람','기타 출입자'].includes(input.category))throw new Error('구분을 확인해 주세요.');
     if(this.db.prepare('SELECT 1 FROM worker_accounts WHERE site_id=? AND login_id=?').get(invite.id,input.loginId))throw new Error('이 현장에 이미 사용 중인 아이디입니다.');
     const salt=randomBytes(16),passwordHash=scryptSync(input.password,salt,32);
     this.db.exec('BEGIN IMMEDIATE');
