@@ -699,10 +699,10 @@ const server = http.createServer(async (req, res) => {
     const equipmentChecks=url.pathname.match(/^\/api\/documents\/(\d+)\/equipment-checks$/);
     if(equipmentChecks){
       if(req.method==='GET')return json(res,200,store.equipmentChecks(equipmentChecks[1]));
-      if(req.method==='POST')return json(res,201,{id:store.addEquipmentCheck(equipmentChecks[1],await body(req))});
+      if(req.method==='POST')return json(res,201,{id:store.addEquipmentCheck(equipmentChecks[1],await body(req),()=>checkRequestSession(req))});
     }
     const equipmentCheck=url.pathname.match(/^\/api\/documents\/(\d+)\/equipment-checks\/(\d+)$/);
-    if(equipmentCheck&&req.method==='DELETE'){store.deleteEquipmentCheck(equipmentCheck[1],equipmentCheck[2]);return json(res,200,{ok:true});}
+    if(equipmentCheck&&req.method==='DELETE'){store.deleteEquipmentCheck(equipmentCheck[1],equipmentCheck[2],()=>checkRequestSession(req));return json(res,200,{ok:true});}
     const equipmentCheckSignature=url.pathname.match(/^\/api\/documents\/(\d+)\/equipment-checks\/(\d+)\/signature$/);
     if(equipmentCheckSignature&&req.method==='GET'){const signature=store.equipmentCheckSignature(equipmentCheckSignature[1],equipmentCheckSignature[2]);if(!signature)return json(res,404,{error:'시험 서명을 찾을 수 없습니다.'});res.writeHead(200,{'Content-Type':'image/png','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(signature);}
     const instructionSignature=url.pathname.match(/^\/api\/documents\/(\d+)\/instruction-signature$/);
