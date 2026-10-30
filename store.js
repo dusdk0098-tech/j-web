@@ -594,7 +594,7 @@ export class Store {
     else this.db.prepare('UPDATE rigging SET category=?,kind=?,name=?,details=? WHERE id=? AND site_id=?').run(input.category,kind,name,JSON.stringify(details),Number(id),siteId);
     return this.db.prepare('SELECT * FROM rigging WHERE id=?').get(id);
   }
-  createWorkPlace(input){
+  createWorkPlace(input,id=null,onAuthorize=()=>{}){
     const siteId=Number(input.siteId);if(!this.db.prepare('SELECT 1 FROM sites WHERE id=?').get(siteId))throw new Error('현장을 선택해 주세요.');
     const details={};for(const area of ['work','route']){
       const source=input[area];if(!source || typeof source!=='object' || Array.isArray(source))throw new Error('작업장과 운행경로 정보를 확인해 주세요.');
@@ -609,8 +609,10 @@ export class Store {
     const additional=input.additional??[];
     if(!Array.isArray(additional)||additional.length>20||additional.some(row=>!row||typeof row!=='object'||Array.isArray(row)||typeof row.label!=='string'||typeof row.value!=='string'||row.label.length>200||row.value.length>2000||!row.label.trim()||!row.value.trim()))throw new Error('추가정보의 항목과 내용을 확인해 주세요.');
     details.additional=additional.map(row=>({label:row.label.trim(),value:row.value.trim()}));
-    const id=this.db.prepare('INSERT INTO work_places(site_id,name,details) VALUES(?,?,?)').run(siteId,text(input.name,'장소 별칭'),JSON.stringify(details)).lastInsertRowid;
-    return this.db.prepare('SELECT * FROM work_places WHERE id=?').get(id);
+    const name=text(input.name,'장소 별칭');
+    if(id===null){id=this.db.prepare('INSERT INTO work_places(site_id,name,details) VALUES(?,?,?)').run(siteId,name,JSON.stringify(details)).lastInsertRowid;return this.db.prepare('SELECT * FROM work_places WHERE id=?').get(id);}
+    if(!input.expected||typeof input.expected.name!=='string'||typeof input.expected.details!=='string')throw new Error('수정할 작업장소를 다시 조회해 주세요.');
+    this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();const current=this.db.prepare('SELECT * FROM work_places WHERE site_id=? AND id=?').get(siteId,Number(id));if(!current)throw new Error('선택한 현장의 작업장소를 확인해 주세요.');if(current.name!==input.expected.name||current.details!==input.expected.details)throw Object.assign(new Error('작업장소가 변경되었습니다. 다시 조회해 주세요.'),{sessionStatus:409});const plans=this.db.prepare("SELECT details FROM documents WHERE site_id=? AND type='work_plan'").all(siteId);if(plans.some(plan=>JSON.parse(plan.details).workPlaceId===Number(id)))throw new Error('계획서에 연결된 작업장소는 수정할 수 없습니다.');this.db.prepare('UPDATE work_places SET name=?,details=? WHERE id=? AND site_id=?').run(name,JSON.stringify(details),Number(id),siteId);const result=this.db.prepare('SELECT * FROM work_places WHERE id=?').get(Number(id));this.db.exec('COMMIT');return result;}catch(error){this.db.exec('ROLLBACK');throw error;}
   }
   workPlacePhotos(siteId,placeId){
     if(!this.db.prepare('SELECT 1 FROM work_places WHERE id=? AND site_id=?').get(Number(placeId),Number(siteId)))throw new Error('선택한 현장의 작업장소를 확인해 주세요.');
