@@ -294,7 +294,7 @@ const server = http.createServer(async (req, res) => {
     if(url.pathname==='/api/worker/hazard-reports' && ['GET','POST'].includes(req.method)){
       const key=workerKey(workerToken),session=workerSessions.get(key);if(!session||session.expires<=Date.now()){workerSessions.delete(key);return json(res,401,{error:'근로자 로그인이 필요합니다.'});}
       if(req.method==='GET')return json(res,200,store.workerHazardReports(session.worker.id));
-      return json(res,201,{id:store.createWorkerHazardReport(session.worker.id,await body(req,2805000))});
+      const input=await body(req,2805000);return json(res,201,{id:store.createWorkerHazardReport(session.worker.id,input,()=>checkRequestSession(req))});
     }
     const workerHazardPhoto=url.pathname.match(/^\/api\/worker\/hazard-reports\/(\d+)\/photo$/);
     if(workerHazardPhoto&&req.method==='GET'){
@@ -305,7 +305,7 @@ const server = http.createServer(async (req, res) => {
     if(url.pathname==='/api/worker/work-stops' && req.method==='POST'){
       const key=workerKey(workerToken),session=workerSessions.get(key);
       if(!session || session.expires<=Date.now()){workerSessions.delete(key);return json(res,401,{error:'근로자 로그인이 필요합니다.'});}
-      store.createWorkStop(session.worker.id,await body(req,2805000));return json(res,201,{ok:true});
+      const input=await body(req,2805000);store.createWorkStop(session.worker.id,input,()=>checkRequestSession(req));return json(res,201,{ok:true});
     }
     const workerNotice=url.pathname.match(/^\/api\/worker\/notices\/(\d+)\/confirm$/);
     if(workerNotice && req.method==='POST'){

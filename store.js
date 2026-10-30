@@ -876,8 +876,9 @@ export class Store {
     date=dateValue(date);
     return this.db.prepare('SELECT c.signature FROM worker_self_checks c JOIN workers w ON w.id=c.worker_id WHERE w.site_id=? AND w.id=? AND c.date=? AND c.signature IS NOT NULL').get(Number(siteId),Number(workerId),date)?.signature || null;
   }
-  createWorkStop(workerId,input) {
+  createWorkStop(workerId,input,onAuthorize=()=>{}) {
     if(typeof input.anonymous!=='boolean')throw new Error('실명 또는 익명을 선택해 주세요.');
+    this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();
     const worker=this.db.prepare('SELECT id,site_id FROM workers WHERE id=?').get(Number(workerId));
     if(!worker)throw new Error('근로자를 확인해 주세요.');
     const place=text(input.place,'장소'),reason=text(input.reason,'사유',2000);
@@ -890,7 +891,7 @@ export class Store {
       if(photo.length>2*1024*1024 || photo.toString('base64')!==match[2])throw new Error('사진 형식 또는 크기를 확인해 주세요.');
       if(match[1]==='png' && !photo.subarray(0,8).equals(Buffer.from('89504e470d0a1a0a','hex')) || match[1]==='jpeg' && !photo.subarray(0,3).equals(Buffer.from('ffd8ff','hex')))throw new Error('사진 형식을 확인해 주세요.');
     }
-    this.db.prepare('INSERT INTO work_stops(site_id,worker_id,place,reason,photo) VALUES(?,?,?,?,?)').run(worker.site_id,input.anonymous?null:worker.id,place,reason,photo);
+    this.db.prepare('INSERT INTO work_stops(site_id,worker_id,place,reason,photo) VALUES(?,?,?,?,?)').run(worker.site_id,input.anonymous?null:worker.id,place,reason,photo);this.db.exec('COMMIT');}catch(error){this.db.exec('ROLLBACK');throw error;}
   }
   workStops(siteId,query='') {
     if(typeof query!=='string'||query.length>200)throw new Error('검색어를 확인해 주세요.');
@@ -912,7 +913,7 @@ export class Store {
     const title=text(input.title,'제목'),body=text(input.body,'내용',2000),reporter=text(input.reporter,'가상 신고자'),photo=photoBytes(input.photo);
     return this.db.prepare('INSERT INTO hazard_reports(site_id,title,body,reporter,photo,worker_id) VALUES(?,?,?,?,?,?)').run(Number(siteId),title,body,reporter,photo,workerId).lastInsertRowid;
   }
-  createWorkerHazardReport(workerId,input){const worker=this.db.prepare('SELECT id,site_id,name FROM workers WHERE id=?').get(Number(workerId));if(!worker)throw new Error('근로자를 확인해 주세요.');return this.createHazardReport(worker.site_id,{...input,reporter:worker.name},worker.id);}
+  createWorkerHazardReport(workerId,input,onAuthorize=()=>{}){this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();const worker=this.db.prepare('SELECT id,site_id,name FROM workers WHERE id=?').get(Number(workerId));if(!worker)throw new Error('근로자를 확인해 주세요.');const result=this.createHazardReport(worker.site_id,{...input,reporter:worker.name},worker.id);this.db.exec('COMMIT');return result;}catch(error){this.db.exec('ROLLBACK');throw error;}}
   workerHazardReports(workerId){const rows=this.db.prepare('SELECT id,title,body,status,response,created_at,photo IS NOT NULL AS has_photo FROM hazard_reports WHERE worker_id=? ORDER BY id DESC').all(Number(workerId)),replies=this.db.prepare('SELECT id,body,created_at FROM hazard_report_replies WHERE report_id=? ORDER BY id');return rows.map(row=>({...row,replies:replies.all(row.id)}));}
   workerHazardPhoto(workerId,id){return this.db.prepare('SELECT photo FROM hazard_reports WHERE worker_id=? AND id=? AND photo IS NOT NULL').get(Number(workerId),Number(id))?.photo||null;}
   hazardReports(siteId,query=''){if(typeof query!=='string'||query.length>200)throw new Error('검색어를 확인해 주세요.');const rows=this.db.prepare('SELECT id,title,body,reporter,status,response,created_at,photo IS NOT NULL AS has_photo FROM hazard_reports WHERE site_id=? AND (instr(title,?)>0 OR instr(body,?)>0) ORDER BY id DESC').all(Number(siteId),query,query),replies=this.db.prepare('SELECT id,body,created_at FROM hazard_report_replies WHERE report_id=? ORDER BY id');return rows.map(row=>({...row,replies:replies.all(row.id)}));}
