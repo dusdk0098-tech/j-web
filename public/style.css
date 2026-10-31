@@ -22,6 +22,8 @@
 .training-roster-signature{max-width:130px;max-height:48px;object-fit:contain}
 @media print{.training-target-controls,.training-roster-download{display:none!important}.training-roster .table-wrap{overflow:visible}.training-roster table{min-width:0;width:100%;table-layout:fixed}.training-roster th,.training-roster td{overflow-wrap:anywhere}.training-roster tr{break-inside:avoid}.training-roster thead{display:table-header-group}}
 @media print{.notice-roster-download{display:none!important}.notice-roster .table-wrap{overflow:visible}.notice-roster table{min-width:0;width:100%;table-layout:fixed}.notice-roster th,.notice-roster td{overflow-wrap:anywhere}.notice-roster tr{break-inside:avoid}.notice-roster thead{display:table-header-group}}
+.common-work-preview{width:min(950px,95vw);max-height:90vh}
+@media print{body:has(dialog.common-work-preview[open])>:not(dialog.common-work-preview){display:none!important}dialog.common-work-preview[open]{position:static;display:block;width:100%;max-width:none;max-height:none;border:0;box-shadow:none}.common-work-print-item{break-after:page}.common-work-print-item:last-child{break-after:auto}}
 #worker-choices:not([hidden]){display:flex;gap:8px;flex-wrap:wrap;margin-top:20px}
 #join-form [hidden]{display:none!important}
 .rich-toolbar{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0}.rich-toolbar button{padding:6px 9px}.rich-editor{min-height:120px;border:1px solid #d0d8e5;border-radius:5px;background:white;padding:10px;font-weight:400;white-space:pre-wrap;overflow-wrap:anywhere}.rich-editor:focus-visible{outline:3px solid #75a7ff;outline-offset:2px}.rich-body{overflow-wrap:anywhere}

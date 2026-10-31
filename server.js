@@ -46,6 +46,7 @@ const mime = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; cha
 const assets = new Set(['/','/app.js','/office-template.js','/common-work-view.js','/rich-text.js','/rich-editor.js','/reviewer-office.js','/reviewer-profile.js','/employment-view.js','/employment-certificate','/employment-certificate.js','/messages-view.js','/board-view.js','/schedule.js','/batch-print.js','/date-range.js','/daily-quantities.js','/risk-scale.js','/musculoskeletal.js','/worker-link.js','/worker-location.js','/remember-worker.js','/worker-documents.js','/worker-loads.js','/join-choices.js','/join-flow.js','/worker-fields.js','/site-qr.js','/tbm-sources.js','/training-groups.js','/site-statistics.js','/restaurant-price.js','/salary-summary.js','/attendance-meals.js','/joint-examples.js','/safety-log-sources.js','/style.css','/jweb-icon.svg','/jweb-icon-192.png','/jweb-icon-512.png','/join','/join.js','/login','/login.js','/review','/review.js']);
 const json = (res, code, value) => { res.writeHead(code, {'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}); res.end(JSON.stringify(value)); };
 assets.add('/client');assets.add('/client.js');
+assets.add('/common-work-print.js');
 function checkRequestSession(req){const failure=req.checkSession?.();if(failure)throw Object.assign(new Error(failure.error),{sessionStatus:failure.status});}
 async function body(req,max=65536) {
   const chunks=[];let size=0;
@@ -56,6 +57,8 @@ async function body(req,max=65536) {
 async function handleCommonWork(req,res,url,prefix,actor=null){
   if(url.pathname!==prefix&&!url.pathname.startsWith(prefix+'/'))return false;
   const site=input=>actor?actor.site_id:input?.siteId||url.searchParams.get('siteId'),authorize=()=>checkRequestSession(req),parts=url.pathname.slice(prefix.length).split('/').filter(Boolean);
+  if(parts.length===1&&parts[0]==='authors'&&req.method==='GET'){const authors=commonWork.authors(site(),actor);checkRequestSession(req);json(res,200,authors);return true;}
+  if(parts.length===1&&parts[0]==='preview'&&req.method==='POST'){const input=await body(req),result=commonWork.preview(site(input),input.items,actor);checkRequestSession(req);json(res,200,result);return true;}
   if(!parts.length&&req.method==='GET'){json(res,200,commonWork.list(site(),Object.fromEntries(url.searchParams),actor));return true;}
   if(!parts.length&&req.method==='POST'){const input=await body(req);json(res,201,commonWork.create(site(input),input,authorize,actor));return true;}
   if(!/^\d+$/.test(parts[0]||'')){json(res,404,{error:'요청한 경로가 없습니다.'});return true;}const id=parts[0];
