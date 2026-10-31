@@ -170,6 +170,7 @@ export function recordInput(input) {
     }
     for(const key of ['company','personnel','place','work']){if(value[key]!==undefined){if(typeof value[key]!=='string'||value[key].length>2000)throw new Error('작업허가서 항목을 확인해 주세요.');details[key]=value[key].trim();}}
     if(value.companyId!==undefined){if(!Number.isSafeInteger(value.companyId)||value.companyId<0)throw new Error('협력사를 확인해 주세요.');details.companyId=value.companyId;}
+    if(value.directWork!==undefined){if(typeof value.directWork!=='boolean')throw new Error('직영 작업 구분을 확인해 주세요.');if(value.directWork){if(details.companyId||details.company)throw new Error('직영 작업에는 별도 협력사를 지정할 수 없습니다.');details.directWork=true;details.companyId=0;details.company='';}}
     for(const key of ['periodFrom','periodTo']){if(value[key]!==undefined){if(typeof value[key]!=='string')throw new Error('작업기간을 확인해 주세요.');details[key]=value[key]?dateValue(value[key]):'';}}
     if(details.periodFrom&&details.periodTo&&details.periodFrom>details.periodTo)throw new Error('작업기간을 확인해 주세요.');
     if(value.timeFrom!==undefined||value.timeTo!==undefined){const from=value.timeFrom??'',to=value.timeTo??'',valid=time=>typeof time==='string'&&/^(?:[01]\d|2[0-3]):(?:00|30)$|^24:00$/.test(time);if(typeof from!=='string'||typeof to!=='string'||(from||to)&&(!valid(from)||!valid(to)||!details.periodFrom||!details.periodTo||details.periodFrom===details.periodTo&&from>to))throw new Error('작업시간을 확인해 주세요.');details.timeFrom=from;details.timeTo=to;}

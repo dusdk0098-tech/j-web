@@ -61,7 +61,7 @@ test('목록에서 사라진 기존 식별자는 재선택 전 저장하지 않�
 
 test('동일 업체명은 공종과 식별자로 구분하고 업체명·공종·과거 표시값은 이스케이프한다',async()=>{
   const attack='<img src=x onerror="가상">',ui=await screen({details:{companyId:99,company:attack},companies:[company(11,attack,'<가상 토목>'),company(12,attack,'<가상 설비>'),company(13,'가상 외부 업체','외부',8)]});
-  assert.doesNotMatch(ui.markup(),/<img|<가상 토목>|<가상 설비>|가상 외부 업체/);assert.match(ui.markup(),/&lt;img src=x onerror=&quot;가상&quot;&gt;/);assert.match(ui.markup(),/&lt;가상 토목&gt; · #11/);assert.match(ui.markup(),/&lt;가상 설비&gt; · #12/);assert.deepEqual(ui.select().options.map(option=>option.value),['0','99','11','12']);ui.choose(12);await ui.save();assert.equal(ui.payload().details.companyId,12);assert.equal(ui.payload().details.company,attack);
+  assert.doesNotMatch(ui.markup(),/<img|<가상 토목>|<가상 설비>|가상 외부 업체/);assert.match(ui.markup(),/&lt;img src=x onerror=&quot;가상&quot;&gt;/);assert.match(ui.markup(),/&lt;가상 토목&gt; · #11/);assert.match(ui.markup(),/&lt;가상 설비&gt; · #12/);assert.deepEqual(ui.select().options.map(option=>option.value),['0','-1','99','11','12']);ui.choose(12);await ui.save();assert.equal(ui.payload().details.companyId,12);assert.equal(ui.payload().details.company,attack);
 });
 
 test('빈 목록은 직접입력을 허용하고 목록 조회 실패는 편집창을 열지 않는다',async()=>{
@@ -72,4 +72,37 @@ test('빈 목록은 직접입력을 허용하고 목록 조회 실패는 편집�
 test('저장 실패는 선택과 직접입력을 보존하며 현장 변경 후에는 전송하지 않는다',async()=>{
   const ui=await screen({details:{company:'가상 수동업체'},failSave:true});ui.choose(12);await ui.save();assert.equal(ui.select().value,'12');assert.equal(ui.input().value,'가상 수동업체');assert.equal(ui.closed(),0);assert.equal(ui.error(),'가상 저장 실패');ui.choose(0);assert.equal(ui.input().disabled,false);
   const moved=await screen();moved.choose(11);moved.state.siteId=8;await moved.save();assert.equal(moved.writes().length,0);assert.match(moved.error(),/현장이 변경/);
+});
+
+test('신규 직영 작업은 업체명 없이 저장하고 기존 직영 문서에서도 선택이 재표시된다',async()=>{
+  const ui=await screen();ui.choose(-1);assert.equal(ui.input().disabled,true);assert.match(ui.status(),/협력사 현장소장은 필수가 아닙니다/);await ui.save();
+  const details=ui.payload().details;assert.equal(details.directWork,true);assert.equal(details.companyId,0);assert.equal(details.company,'');assert.equal(Object.hasOwn(ui.payload(),'company'),false);
+  const reopened=await screen({existing:true,details});assert.equal(reopened.select().value,'-1');assert.equal(reopened.input().disabled,true);await reopened.save();assert.deepEqual(reopened.payload().details,details);
+});
+
+test('직접입력과 등록업체 사이에서 직영 작업을 거쳐도 저장 전 입력과 업체 선택이 유지된다',async()=>{
+  const ui=await screen({existing:true,details:{company:'가상 원래 업체'}});ui.input().value='가상 편집 중 업체';ui.choose(12);ui.choose(-1);assert.equal(ui.input().value,'가상 편집 중 업체');ui.choose(12);await ui.save();assert.equal(ui.payload().details.companyId,12);assert.equal(ui.payload().details.directWork,false);ui.choose(-1);ui.choose(0);assert.equal(ui.input().disabled,false);assert.equal(ui.input().value,'가상 편집 중 업체');await ui.save();assert.equal(ui.payload().details.company,'가상 편집 중 업체');assert.equal(ui.payload().details.directWork,false);
+  const direct=await screen({existing:true,details:{directWork:true,companyId:0,company:''}});direct.choose(11);assert.match(direct.status(),/먼저 문서 상세의 역할 설정에서 협력사 현장소장을 지정/);await direct.save();assert.equal(direct.payload().details.directWork,false);assert.equal(direct.payload().details.companyId,11);direct.choose(0);assert.doesNotMatch(direct.status(),/협력사 현장소장을 지정/);direct.choose(-1);assert.doesNotMatch(direct.status(),/먼저 문서 상세/);
+});
+
+test('기존 직영의 업체 전환 안내는 업체 선택 또는 공백이 아닌 직접입력에만 표시되고 입력·지우기에 갱신된다',async()=>{
+  const ui=await screen({existing:true,details:{directWork:true,companyId:0,company:''}}),warning=/먼저 문서 상세의 역할 설정에서 협력사 현장소장을 지정/;
+  ui.choose(0);assert.doesNotMatch(ui.status(),warning);ui.input().value='가상 새 작업업체';ui.input().oninput();assert.match(ui.status(),warning);ui.input().value='';ui.input().oninput();assert.doesNotMatch(ui.status(),warning);ui.input().value='   ';ui.input().oninput();assert.doesNotMatch(ui.status(),warning);
+  ui.choose(11);assert.match(ui.status(),warning);ui.choose(0);assert.doesNotMatch(ui.status(),warning);ui.input().value='가상 복원 업체';ui.input().oninput();ui.choose(-1);assert.doesNotMatch(ui.status(),warning);ui.choose(0);assert.match(ui.status(),warning);assert.equal(ui.input().value,'가상 복원 업체');ui.input().value='';ui.input().oninput();await ui.save();assert.equal(ui.payload().details.directWork,false);assert.equal(ui.payload().details.companyId,0);assert.equal(ui.payload().details.company,'');
+});
+
+test('직영 표시는 기존 이름이나 빈 업체명의 추정이 아니며 기존 문자열을 바꾸지 않는다',async()=>{
+  for(const company of ['','직영 작업','가상 수동 업체']){const ui=await screen({existing:true,details:{company}});assert.equal(ui.select().value,'0');await ui.save();assert.equal(ui.payload().details.directWork,false);assert.equal(ui.payload().details.company,company);}
+  const ui=await screen({details:{company:'가상 수동 업체'},failSave:true});ui.choose(-1);await ui.save();assert.equal(ui.select().value,'-1');ui.choose(0);assert.equal(ui.input().value,'가상 수동 업체');
+});
+
+test('관리자 결재 당시 사본과 결재자 상세는 내부 키 없이 직영 작업을 표시한다',async()=>{
+  const context={dailyFields:{},riskFields:{},planFields:{},permitFields:{company:'작업업체'}};
+  runInNewContext(source.match(/^const esc = .*$/m)[0]+'\n'+source.slice(source.indexOf('function capturedFields('),source.indexOf('function capturedFiles('))+'\nglobalThis.capture=capturedFields;',context);
+  const details={companyId:0,company:'',directWork:true},snapshot=context.capture({details});assert.match(snapshot,/직영 작업/);assert.doesNotMatch(snapshot,/directWork|추가 항목/);assert.equal(details.company,'');
+  const review=readFileSync(new URL('../public/review.js',import.meta.url),'utf8'),detail={dataset:{},querySelector:()=>null},decision={};
+  const reviewer={detail,$:()=>decision,pad:()=>()=>'',planLinks:()=>'',api:async()=>({document:{type:'permit',title:'가상 직영 문서',date:'2026-10-31',details:JSON.stringify(details)},attachments:[],priorReviews:[],frozen:true})};
+  runInNewContext(review.match(/^const esc=.*$/m)[0]+'\n'+review.slice(review.indexOf('const labels='),review.indexOf('function pad('))+'\n'+review.slice(review.indexOf('async function openReference('),review.indexOf('login.onsubmit='))+'\nglobalThis.open=openDocument;globalThis.fields=displayFields;',reviewer);
+  await reviewer.open(5);assert.match(detail.innerHTML,/직영 작업/);assert.doesNotMatch(detail.innerHTML,/directWork|추가 항목/);
+  for(const render of [context.capture,reviewer.fields]){const normal=render({company:'가상 업체',directWork:false});assert.match(normal,/가상 업체/);assert.doesNotMatch(normal,/직영 작업|directWork|추가 항목/);assert.match(render({company:'가상 이전 업체'}),/가상 이전 업체/);}
 });

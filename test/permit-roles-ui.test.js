@@ -13,10 +13,10 @@ function node(){return {isConnected:true,disabled:false,hidden:false,textContent
   get innerHTML(){return this.html||'';},querySelector(key){const button=this.buttons.find(button=>key===`[${button.key}]`);if(button)return button;if(key==='[data-permit-role-save]')return null;if(!this.children.has(key))this.children.set(key,node());return this.children.get(key);},
   querySelectorAll(key){return key==='select'?this.selects:key==='select,button'?[...this.selects,...this.buttons]:[];}
 };}
-function screen({status='draft',company='',initial=roles(),accounts=[account(1),account(2)],handle,confirm=()=>true}={}){
+function screen({status='draft',company='',directWork,initial=roles(),accounts=[account(1),account(2)],handle,confirm=()=>true}={}){
   const target=node(),genericButton=node(),calls=[];let active=true,saved=0;
   const api=async(path,options)=>{calls.push({path,options});if(handle){const result=handle(path,options,calls.length);if(result!==undefined)return result;}return path.startsWith('/api/reviewers?')?accounts:{version:3,roles:initial,line:[{reviewer_id:1,name:'보존 직원'}]};};
-  const ready=mountPermitRoles({target,doc:{id:4,site_id:7,status,details:JSON.stringify({company})},api,active:()=>active,confirm,onSaved:()=>{saved++;},genericButton});
+  const ready=mountPermitRoles({target,doc:{id:4,site_id:7,status,details:JSON.stringify({company,directWork})},api,active:()=>active,confirm,onSaved:()=>{saved++;},genericButton});
   const fields=()=>target.querySelector('[data-permit-role-fields]');
   return {target,genericButton,calls,ready,fields,status:()=>target.querySelector('[data-permit-role-status]').textContent,saved:()=>saved,save:()=>fields().querySelector('[data-permit-role-save]').onclick(),reload:()=>target.querySelector('[data-permit-role-reload]').onclick(),set(key,value){const select=fields().selects.find(select=>select.dataset.permitRole===key);select.value=String(value??'');select.onchange();},stop(){active=false;},detach(){target.isConnected=false;}};
 }
@@ -42,6 +42,12 @@ test('역할 지정 시 현장소장과 업체의 협력사 현장소장이 필�
   const ui=screen({company:'가상 업체'});await ui.ready;ui.set('coordinator',1);await ui.save();assert.match(ui.status(),/^현장소장/);
   ui.set('siteManager',2);await ui.save();assert.match(ui.status(),/^협력사 현장소장/);assert.equal(ui.calls.filter(call=>call.options).length,0);
   ui.set('coordinator',null);ui.set('siteManager',null);await ui.save();assert.deepEqual(JSON.parse(ui.calls.at(-1).options.body).roles,roles());
+});
+
+test('직영 작업은 협력사 현장소장 없이 역할을 저장하고 이후 업체 전환을 위한 지정도 허용한다',async()=>{
+  const ui=screen({directWork:true});await ui.ready;ui.set('siteManager',1);await ui.save();assert.equal(ui.saved(),1);assert.equal(JSON.parse(ui.calls.at(-1).options.body).roles.contractorLead,null);
+  const prepared=screen({directWork:true});await prepared.ready;prepared.set('siteManager',1);prepared.set('contractorLead',2);await prepared.save();assert.equal(prepared.saved(),1);assert.equal(JSON.parse(prepared.calls.at(-1).options.body).roles.contractorLead,2);
+  const normal=screen({directWork:false,company:'가상 협력사'});await normal.ready;normal.set('siteManager',1);await normal.save();assert.match(normal.status(),/협력사 현장소장/);assert.equal(normal.saved(),0);
 });
 
 test('기존 사용할 수 없는 담당자는 경고하고 다시 선택하기 전에는 저장하지 않는다',async()=>{
@@ -106,6 +112,11 @@ test('실제 관리자 상세의 역할 미저장·저장 중에는 수정 및 �
   const saving=fields.querySelector('[data-permit-role-save]').onclick();assert.equal(edit.disabled,true);assert.equal(submit.disabled,true);wait.reject(Error('버전 충돌'));await saving;assert.equal(submit.disabled,true);
   await ui.content.roleTarget.querySelector('[data-permit-role-reload]').onclick();assert.equal(edit.disabled,false);assert.equal(submit.disabled,false);
   select.value='1';fields.selects[4].value='1';fields.selects[4].onchange();ui.context.permitRoleCleanup();assert.equal(edit.disabled,false);assert.equal(submit.disabled,false);
+});
+
+test('관리자 문서 상세는 업체명 대신 직영 작업을 표시하고 내부 필드는 노출하지 않는다',async()=>{
+  const ui=adminScreen(path=>path==='/api/documents/4'?{id:4,site_id:7,type:'permit',status:'draft',title:'가상 직영 문서',date:'2026-10-31',details:JSON.stringify({directWork:true,companyId:0,company:''})}:undefined);ui.context.permitFields={company:'작업업체'};await ui.ready;
+  assert.match(ui.content.innerHTML,/<strong>작업업체<\/strong> 직영 작업/);assert.doesNotMatch(ui.content.innerHTML,/directWork|추가 항목/);
 });
 
 test('실제 관리자 상세의 늦은 허가서 점검·연장 응답은 이동한 화면을 변경하지 않는다',async()=>{

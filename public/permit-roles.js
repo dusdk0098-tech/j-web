@@ -5,7 +5,7 @@ export function permitRoleSnapshot(linked){
   return `<section><h3>요청 당시 역할별 시험 결재자</h3><p>J웹의 독립 시험 순서이며 같은 직원은 한 번만 결재합니다.</p><dl>${permitRoleLabels.map(([key,label])=>{const role=linked.permitRoles.find(item=>item.key===key);return `<dt>${label}</dt><dd>${esc(role?.reviewer_name||'지정 안 함')}</dd>`;}).join('')}</dl></section>`;
 }
 export async function mountPermitRoles({target,doc,api,active=()=>true,confirm=globalThis.confirm,onSaved=()=>{},onLockChange=()=>{},genericButton}){
-  const editable=['draft','rejected'].includes(doc.status),path=`/api/documents/${doc.id}/permit-roles`,current=()=>target.isConnected&&active();
+  const editable=['draft','rejected'].includes(doc.status),details=JSON.parse(doc.details||'{}'),path=`/api/documents/${doc.id}/permit-roles`,current=()=>target.isConnected&&active();
   let epoch=0,busy=false,dirty=false,blocked=true,version,people=[];
   target.innerHTML='<h2>역할별 시험 결재자</h2><p>J웹의 독립 시험 규칙입니다. 아래 표시 순서대로 결재하며 같은 직원은 한 번만 결재합니다. 역할 저장은 기존 일반 시험 결재선을 대체합니다. 모두 비우면 시험 결재선도 비워집니다.</p><div data-permit-role-fields></div><button type="button" data-permit-role-reload>다시 조회</button><p data-permit-role-status role="status"></p>';
   const fields=target.querySelector('[data-permit-role-fields]'),status=target.querySelector('[data-permit-role-status]'),reload=target.querySelector('[data-permit-role-reload]');
@@ -27,7 +27,7 @@ export async function mountPermitRoles({target,doc,api,active=()=>true,confirm=g
         const roles=Object.fromEntries([...fields.querySelectorAll('select')].map(select=>[select.dataset.permitRole,select.value?Number(select.value):null]));
         if(Object.values(roles).some(Boolean)){
           if(!roles.siteManager){status.textContent='현장소장을 선택해 주세요.';return;}
-          if(String(JSON.parse(doc.details||'{}').company||'').trim()&&!roles.contractorLead){status.textContent='협력사 현장소장을 선택해 주세요.';return;}
+          if(details.directWork!==true&&String(details.company||'').trim()&&!roles.contractorLead){status.textContent='협력사 현장소장을 선택해 주세요.';return;}
           if(Object.values(roles).filter(Boolean).some(id=>!people.some(person=>person.id===id))){status.textContent='사용할 수 없는 직원을 다시 선택해 주세요.';return;}
         }
         if(!confirm('역할 선택으로 기존 일반 시험 결재선을 대체합니다. 같은 직원은 한 번만 결재하며 모두 비우면 결재선이 삭제됩니다. 저장할까요?'))return;
