@@ -8,7 +8,11 @@ import {spawn} from 'node:child_process';
 import {once} from 'node:events';
 import {runInNewContext} from 'node:vm';
 import {Store} from '../store.js';
-import {attendanceMatrix,attendanceMatrixMarkup} from '../public/attendance-matrix.js';
+import {attendanceMatrix,attendanceMatrixMarkup,attendanceEditDeadline} from '../public/attendance-matrix.js';
+
+test('월별 수정 참고 날짜는 연도 경계를 포함해 다음 달 5일이다',()=>{
+  assert.equal(attendanceEditDeadline('2024-02'),'2024-03-05');assert.equal(attendanceEditDeadline('2026-12'),'2027-01-05');assert.equal(attendanceEditDeadline('9999-12'),null);assert.throws(()=>attendanceEditDeadline('2026-13'),/월/);
+});
 
 test('직종·소속 표는 출역 당시 기록을 날짜별로 집계한다',()=>{
   const s=new Store(':memory:');try{const a=s.createSite({name:'가상 A'}),b=s.createSite({name:'가상 B'}),make=(site,name)=>s.createWorker({siteId:site.id,name,category:'직영',company:'가상 소속',occupation:'가상 직종'}),one=make(a,'가상 1'),two=make(a,'가상 2'),other=make(b,'다른 현장'),dates=['2024-02-28','2024-02-29'];
@@ -21,6 +25,11 @@ test('직종·소속 표는 출역 당시 기록을 날짜별로 집계한다',(
 test('출역 조회 도중 현장이 바뀌면 이전 화면을 그리지 않는다',async()=>{
   const source=readFileSync(new URL('../public/app.js',import.meta.url),'utf8'),from=source.indexOf('    const siteId=state.siteId,epoch=detailEpoch,date=state.attendanceDate'),to=source.indexOf('    content.innerHTML=',from);assert.ok(from>=0&&to>from);let release;const waiting=new Promise(resolve=>{release=resolve;}),state={page:'attendance',siteId:1,attendanceDate:'2026-11-01',attendanceMonth:'2026-11',reportFrom:'2026-11-01',reportTo:'2026-11-01',reportGroup:'worker'},context={state,detailEpoch:1,today:()=> '2026-11-01',encodeURIComponent,Promise,api:path=>path.startsWith('/api/attendance?')?waiting:Promise.resolve([])};
   const pending=runInNewContext(`(async()=>{${source.slice(from,to)}return true;})()`,context);state.siteId=2;release([]);assert.equal(await pending,undefined);
+});
+
+test('월별 출역 수정은 화면에 표시된 기록의 확인값을 보낸다',async()=>{
+  const source=readFileSync(new URL('../public/app.js',import.meta.url),'utf8'),from=source.indexOf("    content.lastElementChild.querySelectorAll('tbody tr').forEach((tr,i)=>{const worker=monthly[i]"),to=source.indexOf("    content.lastElementChild.querySelectorAll('tbody tr').forEach((tr,i)=>{tr.cells[0]",from);assert.ok(from>=0&&to>from);let button,submit,request;const tr={cells:[{append(_space,node){button=node;}}]},content={lastElementChild:{querySelectorAll:()=>[tr]}},document={createElement:()=>({setAttribute(){}})},monthly=[{id:7,name:'가상',units:[],version:'a'.repeat(64)}],context={content,document,monthly,month:'2024-02',state:{siteId:1},esc:value=>String(value),field:()=>'',showDialog:(_title,_html,callback)=>{submit=callback;},api:async(path,options)=>{request={path,body:JSON.parse(options.body)};}};
+  runInNewContext(source.slice(from,to),context);button.onclick();await submit({company:'가상 업체'});assert.equal(request.path,'/api/attendance/month/details');assert.equal(request.body.expectedVersion,'a'.repeat(64));assert.equal(request.body.company,'가상 업체');
 });
 
 test('월별 집계 스크립트는 서버에서 제공된다',{timeout:30000},async()=>{

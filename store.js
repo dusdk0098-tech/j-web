@@ -980,7 +980,7 @@ export class Store {
     const records=this.db.prepare('SELECT attendance.worker_id,attendance.date,attendance.units_hundredths,attendance.daily_rate,attendance.salary_kind,attendance.salary_amount,attendance.category_snapshot,attendance.company_snapshot,attendance.occupation_snapshot FROM attendance JOIN workers ON workers.id=attendance.worker_id WHERE workers.site_id=? AND attendance.present=1 AND attendance.date BETWEEN ? AND ? ORDER BY attendance.date').all(Number(siteId),`${month}-01`,`${month}-31`);
     const units=new Map(workers.map(w=>[w.id,[]]));
     for(const record of records)units.get(record.worker_id).push({date:record.date,units_hundredths:record.units_hundredths,daily_rate:record.daily_rate,salary_kind:record.salary_kind,salary_amount:record.salary_amount,estimated_pay:record.salary_kind!==null||record.daily_rate===null||record.units_hundredths===null?null:Math.floor((record.daily_rate*record.units_hundredths+50)/100),category:record.category_snapshot,company:record.company_snapshot,occupation:record.occupation_snapshot});
-    return workers.map(w=>({...w,days:units.get(w.id).map(record=>record.date),units:units.get(w.id)}));
+    return workers.map(w=>{const entries=units.get(w.id),version=createHash('sha256').update(JSON.stringify([w.id,month,entries])).digest('hex');return {...w,days:entries.map(record=>record.date),units:entries,version};});
   }
   workerAttendance(workerId,month) {
     month=monthValue(month);
@@ -1263,7 +1263,7 @@ export class Store {
     const result=this.db.prepare('UPDATE attendance SET salary_kind=?,salary_amount=?,updated_at=CURRENT_TIMESTAMP WHERE worker_id=? AND date=? AND present=1 AND EXISTS(SELECT 1 FROM workers WHERE workers.id=attendance.worker_id AND workers.site_id=?)').run(input.kind,value,Number(input.workerId),date,Number(input.siteId));
     if(!result.changes)throw new Error('같은 현장의 출역 기록을 확인해 주세요.');
   }
-  updateMonthlyAttendanceDetails(input){
+  updateMonthlyAttendanceDetails(input,onAuthorize=()=>{}){
     const month=monthValue(input.month),fields=['category','company','occupation','dailyRate'].filter(key=>input[key]!==undefined);
     const salaryRequested=input.salaryKind!==undefined||input.salaryAmount!==undefined;
     if(salaryRequested&&fields.includes('dailyRate'))throw new Error('일당과 다른 급여를 동시에 변경할 수 없습니다.');
@@ -1271,11 +1271,13 @@ export class Store {
     if(!fields.length&&!salaryRequested)throw new Error('변경할 항목을 선택해 주세요.');
     const values=fields.map(key=>{if(key==='dailyRate'){const value=dailyRateValue(input[key]);if(value===null)throw new Error('변경할 시험 일당을 입력해 주세요.');return value;}return text(input[key],{category:'구분',company:'소속',occupation:'직종'}[key]);});
     const assignments=fields.map(key=>key==='dailyRate'?'daily_rate=?,salary_kind=NULL,salary_amount=NULL':`${key}_snapshot=?`);if(salaryRequested){assignments.push('salary_kind=?,salary_amount=?');values.push(input.salaryKind,salaryAmount);}
-    const worker=this.db.prepare('SELECT id FROM workers WHERE id=? AND site_id=?').get(Number(input.workerId),Number(input.siteId));
-    if(!worker)throw new Error('선택한 현장의 출입자를 확인해 주세요.');
-    const result=this.db.prepare(`UPDATE attendance SET ${assignments.join(',')},updated_at=CURRENT_TIMESTAMP WHERE worker_id=? AND present=1 AND date BETWEEN ? AND ?`).run(...values,worker.id,`${month}-01`,`${month}-31`);
-    if(!result.changes)throw new Error('해당 월의 출역 기록이 없습니다.');
-    return result.changes;
+    if(input.expectedVersion!==undefined&&(typeof input.expectedVersion!=='string'||!/^[a-f0-9]{64}$/.test(input.expectedVersion)))throw new Error('월별 출역 기록을 다시 확인해 주세요.');
+    this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();const worker=this.db.prepare('SELECT id FROM workers WHERE id=? AND site_id=?').get(Number(input.workerId),Number(input.siteId));
+      if(!worker)throw new Error('선택한 현장의 출입자를 확인해 주세요.');
+      if(input.expectedVersion!==undefined&&this.monthlyAttendance(input.siteId,month).find(row=>row.id===worker.id)?.version!==input.expectedVersion)throw Object.assign(new Error('월별 출역 기록이 변경되었습니다. 다시 조회해 주세요.'),{sessionStatus:409});
+      const result=this.db.prepare(`UPDATE attendance SET ${assignments.join(',')},updated_at=CURRENT_TIMESTAMP WHERE worker_id=? AND present=1 AND date BETWEEN ? AND ?`).run(...values,worker.id,`${month}-01`,`${month}-31`);
+      if(!result.changes)throw new Error('해당 월의 출역 기록이 없습니다.');this.db.exec('COMMIT');return result.changes;
+    }catch(error){this.db.exec('ROLLBACK');throw error;}
   }
   workerAccessBlocks(siteId,month){
     month=monthValue(month);siteId=Number(siteId);if(!this.db.prepare('SELECT 1 FROM sites WHERE id=?').get(siteId))throw new Error('현장을 확인해 주세요.');

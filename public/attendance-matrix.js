@@ -1,5 +1,10 @@
 const esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
+export function attendanceEditDeadline(month){
+  if(typeof month!=='string'||!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)||Number(month.slice(0,4))<1000)throw Error('조회할 월을 확인해 주세요.');
+  const [year,number]=month.split('-').map(Number),nextYear=number===12?year+1:year,nextMonth=number===12?1:number+1;return nextYear>9999?null:`${nextYear}-${String(nextMonth).padStart(2,'0')}-05`;
+}
+
 export function attendanceMatrix(workers,dates,field){
   if(!['company','occupation'].includes(field))throw Error('출역 집계 기준을 확인해 주세요.');
   const index=new Map(dates.map((date,i)=>[date,i])),groups=new Map();

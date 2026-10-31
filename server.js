@@ -852,7 +852,7 @@ const server = http.createServer(async (req, res) => {
     if(url.pathname==='/api/attendance/units'&&req.method==='PUT'){store.setAttendanceUnits(await body(req));return json(res,200,{ok:true});}
     if(url.pathname==='/api/attendance/daily-rate'&&req.method==='PUT'){store.setAttendanceDailyRate(await body(req));return json(res,200,{ok:true});}
     if(url.pathname==='/api/attendance/salary'&&req.method==='PUT'){store.setAttendanceSalary(await body(req));return json(res,200,{ok:true});}
-    if(url.pathname==='/api/attendance/month/details'&&req.method==='PUT')return json(res,200,{updated:store.updateMonthlyAttendanceDetails(await body(req))});
+    if(url.pathname==='/api/attendance/month/details'&&req.method==='PUT')return json(res,200,{updated:store.updateMonthlyAttendanceDetails(await body(req),()=>checkRequestSession(req))});
     if (url.pathname === '/api/attendance') {
       if (req.method === 'GET') return json(res,200,store.attendance(url.searchParams.get('siteId'),url.searchParams.get('date')));
       if (req.method === 'POST') {store.setAttendance(await body(req));return json(res,200,{ok:true});}
