@@ -18,6 +18,10 @@ test('작업 지시서 검색은 현장, 협력사, 기간과 검색어를 함�
     const find=(id,from='',to='',query='')=>store.documents(site.id,'instruction',query,from,to,'','',id).map(row=>row.id);
     assert.deepEqual(find(String(a.id)),[one.id,old.id]);
     assert.deepEqual(find(String(a.id),'2026-10-30','2026-10-30'),[one.id]);
+    assert.equal(store.documents(site.id,'instruction').find(row=>row.id===one.id).has_instruction_result,0);
+    store.transition(one.id,'submit');store.transition(one.id,'approve');store.addInstructionResult(one.id,{date:'2026-10-30',actor:'가상 담당자',content:'가상 조치'});
+    assert.equal(store.documents(site.id,'instruction').find(row=>row.id===one.id).has_instruction_result,1);
+    assert.equal(store.documents(site.id,'instruction').find(row=>row.id===old.id).has_instruction_result,0);
     assert.deepEqual(find(String(a.id),'','','지난'),[old.id]);
     assert.throws(()=>find(String(foreign.id)),/협력사/);
     assert.throws(()=>find('01'),/협력사/);
