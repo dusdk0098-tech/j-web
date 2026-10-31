@@ -22,6 +22,12 @@ test('영수증은 별도 페이지로 나누고 일반 사진 순서를 유지�
   await runInNewContext('(async()=>{'+source.slice(start,end)+'})()',context);assert.equal((html.match(/class="cost-photo-page"/g)||[]).length,2);assert.equal((html.match(/class="cost-photo-page receipt"/g)||[]).length,1);assert.ok(html.indexOf('사진.png')<html.indexOf('영수증.png'));assert.ok(html.indexOf('영수증.png')<html.indexOf('사진2.png'));
 });
 
+test('월간 결재서류의 날짜와 비고를 안전하게 표시한다',async()=>{
+  const source=readFileSync(new URL('../public/app.js',import.meta.url),'utf8'),start=source.indexOf("  if(doc.type==='cost'&&Array.isArray(details.rows)){const photos="),end=source.indexOf('\n',start);assert.ok(start>=0);
+  let html='';const context={doc:{type:'cost',id:9},details:{rows:[]},api:async()=>[{id:3,cost_id:0,name:'가상.png',kind:'receipt',source_date:'2026-10-10',note:'<가상>'}],content:{querySelector:()=>({insertAdjacentHTML:(_where,value)=>{html=value;}})},esc:value=>String(value).replaceAll('<','&lt;').replaceAll('>','&gt;')};
+  await runInNewContext('(async()=>{'+source.slice(start,end)+'})()',context);assert.match(html,/시험 결재서류/);assert.match(html,/2026-10-10/);assert.match(html,/&lt;가상&gt;/);assert.doesNotMatch(html,/<가상>/);assert.match(html,/cost-photo-page receipt/);
+});
+
 test('문서 사진 미리보기는 관리자에게만 이미지로 제공하고 다운로드를 유지한다',{timeout:30000},async()=>{
   const dir=mkdtempSync(join(tmpdir(),'jweb-cost-preview-')),reservation=createServer();await new Promise(resolve=>reservation.listen(0,'127.0.0.1',resolve));const port=reservation.address().port;await new Promise(resolve=>reservation.close(resolve));
   const child=spawn(process.execPath,['server.js'],{env:{...process.env,PORT:String(port),JWEB_DATA_DIR:dir,JWEB_ADMIN_PASSWORD:'virtual-admin-password'},stdio:['ignore','pipe','pipe']});

@@ -756,6 +756,13 @@ const server = http.createServer(async (req, res) => {
       if(req.method==='POST')return json(res,201,store.createSafetyCost(await body(req)));
     }
     if(url.pathname==='/api/safety-cost-reports'&&req.method==='POST')return json(res,201,store.createSafetyCostReport(await body(req),()=>checkRequestSession(req)));
+    const costMonthFile=url.pathname.match(/^\/api\/safety-cost-month-files(?:\/(\d+))?$/);
+    if(costMonthFile){const siteId=url.searchParams.get('siteId'),month=url.searchParams.get('month'),id=costMonthFile[1];
+      if(!id&&req.method==='GET')return json(res,200,store.safetyCostMonthFiles(siteId,month));
+      if(!id&&req.method==='POST'){const date=url.searchParams.get('date')||'',note=url.searchParams.get('note')||'';if(date.slice(0,7)!==month)throw new Error('선택한 월의 날짜를 입력해 주세요.');const chunks=[];let size=0;for await(const chunk of req){size+=chunk.length;if(size>2*1024*1024)throw new Error('사진은 2MB 이하여야 합니다.');chunks.push(chunk);}let name;try{name=decodeURIComponent(req.headers['x-file-name']||'');}catch{throw new Error('파일 이름을 확인해 주세요.');}return json(res,201,{id:store.addSafetyCostMonthFile(siteId,date,note,name,Buffer.concat(chunks),()=>checkRequestSession(req))});}
+      if(id&&req.method==='DELETE'){store.deleteSafetyCostMonthFile(siteId,id,()=>checkRequestSession(req));return json(res,200,{ok:true});}
+      if(id&&req.method==='GET'){const file=store.safetyCostMonthFile(siteId,id);if(!file)return json(res,404,{error:'파일을 찾을 수 없습니다.'});const name=encodeURIComponent(file.name).replace(/[!'()*]/g,c=>`%${c.charCodeAt(0).toString(16).toUpperCase()}`);res.writeHead(200,{'Content-Type':'application/octet-stream','Content-Disposition':`attachment; filename="file"; filename*=UTF-8''${name}`,'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(file.data);}
+    }
     const costPhotos=url.pathname.match(/^\/api\/safety-costs\/(\d+)\/photos(?:\/(\d+))?$/);
     if(costPhotos){
       const siteId=url.searchParams.get('siteId'),id=costPhotos[1],photoId=costPhotos[2];
