@@ -329,7 +329,7 @@ const server = http.createServer(async (req, res) => {
     const workerArticleFile=url.pathname.match(/^\/api\/worker\/articles\/(\d+)\/files\/(\d+)$/);
     if(workerArticleFile&&req.method==='GET'){
       const key=workerKey(workerToken),session=workerSessions.get(key);if(!session||session.expires<=Date.now()){workerSessions.delete(key);return json(res,401,{error:'근로자 로그인이 필요합니다.'});}
-      const file=store.workerArticleFile(session.worker.id,workerArticleFile[1],workerArticleFile[2]);if(!file)return json(res,404,{error:'첨부파일을 찾을 수 없습니다.'});
+      let file=store.workerArticleFile(session.worker.id,workerArticleFile[1],workerArticleFile[2]);checkRequestSession(req);if(file)file=store.workerArticleFile(session.worker.id,workerArticleFile[1],workerArticleFile[2]);checkRequestSession(req);if(!file)return json(res,404,{error:'첨부파일을 찾을 수 없습니다.'});
       const name=encodeURIComponent(file.name).replace(/[!'()*]/g,c=>`%${c.charCodeAt(0).toString(16).toUpperCase()}`);res.writeHead(200,{'Content-Type':'application/octet-stream','Content-Disposition':`attachment; filename="attachment"; filename*=UTF-8''${name}`,'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(file.data);
     }
     if(url.pathname==='/api/worker/articles' && req.method==='GET'){
