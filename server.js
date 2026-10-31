@@ -252,10 +252,13 @@ const server = http.createServer(async (req, res) => {
       return json(res,404,{error:'요청한 경로가 없습니다.'});
     }
     const workerToken=(req.headers.cookie||'').split(';').map(x=>x.trim()).find(x=>x.startsWith('jweb_worker='))?.slice(12)||'';
-    if(url.pathname.startsWith('/api/worker/')&&!['/api/worker/site','/api/worker/login','/api/worker/logout'].includes(url.pathname)){
+    if(url.pathname.startsWith('/api/worker/')&&!['/api/worker/site','/api/worker/login','/api/worker/logout','/api/worker/departure'].includes(url.pathname)){
       const session=workerSessions.get(workerKey(workerToken)),now=new Date(),date=new Date(now.getTime()-now.getTimezoneOffset()*60000).toISOString().slice(0,10);
       if(session&&session.expires>now.getTime()&&store.workerAccessBlocked(session.worker.site_id,date))return json(res,403,{error:'해당 현장은 오늘 근로자 접속이 차단되었습니다.'});
       if(session&&session.expires>now.getTime())req.checkSession=()=>workerSessionError(workerToken,session);
+    }
+    if(url.pathname==='/api/worker/departure'&&['GET','POST'].includes(req.method)){
+      const key=workerKey(workerToken),session=workerSessions.get(key);if(!session||session.expires<=Date.now())return json(res,401,{error:'근로자 로그인이 필요합니다.'});const check=()=>{const current=workerSessions.get(key);if(!current||current!==session||current.expires<=Date.now())throw Object.assign(new Error('근로자 로그인이 필요합니다.'),{sessionStatus:401});};if(req.method==='GET'){const policy=store.siteLocationPolicy(session.worker.site_id);check();return json(res,200,{locationRequired:policy.enabled});}const input=await body(req);return json(res,200,store.recordWorkerDeparture(session.worker.site_id,session.worker.id,key,input.location,check));
     }
     if(url.pathname==='/worker.webmanifest'&&req.method==='GET'){
       const key=url.searchParams.get('site');if(!store.siteFromAccess(key))return json(res,404,{error:'현장 접속 주소를 확인해 주세요.'});
@@ -562,6 +565,8 @@ const server = http.createServer(async (req, res) => {
     }
     const inviteSite=url.pathname.match(/^\/api\/sites\/(\d+)\/invitation$/);
     const locationPolicy=url.pathname.match(/^\/api\/sites\/(\d+)\/location-policy$/),locationEvents=url.pathname.match(/^\/api\/sites\/(\d+)\/location-events(?:\/(\d+))?$/);
+    const workerDepartures=url.pathname.match(/^\/api\/sites\/(\d+)\/worker-departures(?:\/(\d+))?$/);
+    if(workerDepartures){if(!workerDepartures[2]&&req.method==='GET'){const records=store.workerDepartures(workerDepartures[1],url.searchParams.get('date'));checkRequestSession(req);return json(res,200,records);}if(workerDepartures[2]&&req.method==='DELETE'){store.deleteWorkerDeparture(workerDepartures[1],workerDepartures[2],url.searchParams.get('version'),()=>checkRequestSession(req));return json(res,200,{ok:true});}}
     if(locationPolicy){if(req.method==='GET')return json(res,200,store.siteLocationPolicy(locationPolicy[1]));if(req.method==='PUT'){const input=await body(req);return json(res,200,store.setSiteLocationPolicy(locationPolicy[1],input,()=>checkRequestSession(req)));}}
     if(locationEvents){if(!locationEvents[2]&&req.method==='GET')return json(res,200,store.workerLocationEvents(locationEvents[1],url.searchParams.get('date')));if(locationEvents[2]&&req.method==='DELETE'){store.deleteWorkerLocationEvent(locationEvents[1],locationEvents[2],()=>checkRequestSession(req));return json(res,200,{ok:true});}}
     const registrationSite=url.pathname.match(/^\/api\/sites\/(\d+)\/access\/registration$/);

@@ -128,6 +128,7 @@ export class Store {
       CREATE TABLE IF NOT EXISTS worker_files (id INTEGER PRIMARY KEY,worker_id INTEGER NOT NULL REFERENCES workers(id),category TEXT NOT NULL,name TEXT NOT NULL,data BLOB NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
       CREATE TABLE IF NOT EXISTS attendance (worker_id INTEGER NOT NULL REFERENCES workers(id), date TEXT NOT NULL, present INTEGER NOT NULL CHECK(present IN (0,1)), updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY(worker_id,date));
       CREATE TABLE IF NOT EXISTS worker_location_events (id INTEGER PRIMARY KEY,site_id INTEGER NOT NULL REFERENCES sites(id),worker_id INTEGER NOT NULL REFERENCES workers(id),date TEXT NOT NULL,latitude REAL NOT NULL,longitude REAL NOT NULL,accuracy_meters REAL NOT NULL,distance_meters INTEGER NOT NULL,captured_at REAL NOT NULL,checked_at INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS worker_departures (id INTEGER PRIMARY KEY,site_id INTEGER NOT NULL REFERENCES sites(id),worker_id INTEGER NOT NULL REFERENCES workers(id),session_hash TEXT NOT NULL,date TEXT NOT NULL,latitude REAL,longitude REAL,accuracy_meters REAL,distance_meters INTEGER,captured_at REAL,checked_at INTEGER NOT NULL,version TEXT NOT NULL,UNIQUE(session_hash,date));
       CREATE TABLE IF NOT EXISTS documents (id INTEGER PRIMARY KEY, site_id INTEGER NOT NULL REFERENCES sites(id), type TEXT NOT NULL, title TEXT NOT NULL, date TEXT NOT NULL, body TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'draft', updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
       CREATE TABLE IF NOT EXISTS basic_document_versions (document_id INTEGER PRIMARY KEY REFERENCES documents(id),version TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS work_plan_copies (document_id INTEGER PRIMARY KEY REFERENCES documents(id),source_document_id INTEGER NOT NULL REFERENCES documents(id));
@@ -1302,6 +1303,19 @@ export class Store {
       const version=randomBytes(16).toString('hex');this.db.prepare('INSERT INTO site_location_policies(site_id,enabled,latitude,longitude,radius_meters,max_accuracy_meters,version) VALUES(?,?,?,?,?,?,?) ON CONFLICT(site_id) DO UPDATE SET enabled=excluded.enabled,latitude=excluded.latitude,longitude=excluded.longitude,radius_meters=excluded.radius_meters,max_accuracy_meters=excluded.max_accuracy_meters,version=excluded.version').run(Number(siteId),input.enabled?1:0,input.enabled?input.latitude:null,input.enabled?input.longitude:null,input.enabled?input.radiusMeters:null,input.enabled?input.maxAccuracyMeters:null,version);
       const result=this.siteLocationPolicy(siteId);this.db.exec('COMMIT');return result;
     }catch(error){this.db.exec('ROLLBACK');throw error;}
+  }
+  recordWorkerDeparture(siteId,workerId,sessionHash,position,onAuthorize=()=>{}){
+    siteId=Number(siteId);workerId=Number(workerId);if(typeof sessionHash!=='string'||!/^[a-f0-9]{64}$/.test(sessionHash))throw new Error('시험 세션을 확인해 주세요.');
+    this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();if(!this.db.prepare('SELECT 1 FROM workers WHERE site_id=? AND id=?').get(siteId,workerId))throw new Error('선택한 현장의 출입자를 확인해 주세요.');const now=Date.now(),date=new Date(now-new Date(now).getTimezoneOffset()*60000).toISOString().slice(0,10),existing=this.db.prepare('SELECT checked_at FROM worker_departures WHERE session_hash=? AND site_id=? AND worker_id=? AND date=?').get(sessionHash,siteId,workerId,date);if(existing){this.db.exec('COMMIT');return {checkedAt:existing.checked_at};}
+      const policy=this.siteLocationPolicy(siteId),location=policy.enabled?verifyWorkerLocation(policy,position,now):null;
+      this.db.prepare('INSERT INTO worker_departures(site_id,worker_id,session_hash,date,latitude,longitude,accuracy_meters,distance_meters,captured_at,checked_at,version) VALUES(?,?,?,?,?,?,?,?,?,?,?)').run(siteId,workerId,sessionHash,date,location?.latitude??null,location?.longitude??null,location?.accuracyMeters??null,location?.distanceMeters??null,location?.capturedAt??null,now,randomBytes(16).toString('hex'));this.db.exec('COMMIT');return {checkedAt:now};
+    }catch(error){this.db.exec('ROLLBACK');throw error;}
+  }
+  workerDepartures(siteId,date){
+    date=dateValue(date);this.siteLocationPolicy(siteId);return this.db.prepare('SELECT d.id,d.worker_id,w.name,d.latitude,d.longitude,d.accuracy_meters,d.distance_meters,d.checked_at,d.version FROM worker_departures d JOIN workers w ON w.id=d.worker_id AND w.site_id=d.site_id WHERE d.site_id=? AND d.date=? ORDER BY d.checked_at DESC,d.id DESC').all(Number(siteId),date);
+  }
+  deleteWorkerDeparture(siteId,id,version,onAuthorize=()=>{}){
+    if(typeof version!=='string'||!/^[a-f0-9]{32}$/.test(version))throw new Error('퇴근 기록을 다시 확인해 주세요.');this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();if(!this.db.prepare('DELETE FROM worker_departures WHERE site_id=? AND id=? AND version=?').run(Number(siteId),Number(id),version).changes)throw Object.assign(new Error('퇴근 기록이 변경되었습니다. 다시 조회해 주세요.'),{sessionStatus:409});this.db.exec('COMMIT');}catch(error){this.db.exec('ROLLBACK');throw error;}
   }
   workerLocationEvents(siteId,date){
     date=dateValue(date);this.siteLocationPolicy(siteId);return this.db.prepare('SELECT e.id,e.worker_id,w.name,e.latitude,e.longitude,e.accuracy_meters,e.distance_meters,e.captured_at,e.checked_at FROM worker_location_events e JOIN workers w ON w.id=e.worker_id AND w.site_id=e.site_id WHERE e.site_id=? AND e.date=? ORDER BY e.checked_at DESC,e.id DESC').all(Number(siteId),date);
