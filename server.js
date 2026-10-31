@@ -127,7 +127,7 @@ const server = http.createServer(async (req, res) => {
       const key=workerKey(reviewerToken),session=reviewerSessions.get(key),reviewer=session&&session.expires>Date.now()?store.reviewer(session.id):null;
       if(!reviewer){reviewerSessions.delete(key);return json(res,401,{error:'결재자 로그인이 필요합니다.'});}
       if(url.pathname==='/api/reviewer/logout'&&req.method==='POST'){reviewerSessions.delete(key);res.setHeader('Set-Cookie',`jweb_reviewer=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0${secureCookie}`);return json(res,200,{ok:true});}
-      req.checkSession=()=>reviewerSessions.get(key)===session&&session.expires>Date.now()&&store.reviewer(session.id)?null:{status:401,error:'결재자 로그인이 필요합니다.'};
+      req.checkSession=()=>reviewerSessions.get(key)===session&&session.expires>Date.now()&&store.reviewer(session.id)?.site_id===reviewer.site_id?null:{status:401,error:'결재자 로그인이 필요합니다.'};
       if(await handleCommonWork(req,res,url,'/api/reviewer/common-work',reviewer))return;
       if(url.pathname==='/api/reviewer/session'&&req.method==='GET')return json(res,200,{reviewer});
       const reviewerBasic=url.pathname.match(/^\/api\/reviewer\/basic-documents\/(\d+)(?:\/attachments\/(\d+))?$/);
