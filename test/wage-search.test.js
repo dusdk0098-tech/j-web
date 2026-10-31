@@ -1,0 +1,32 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {readFileSync,mkdtempSync,rmSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import {createServer} from 'node:net';
+import {spawn} from 'node:child_process';
+import {once} from 'node:events';
+import {runInNewContext} from 'node:vm';
+import {readSheet} from 'read-excel-file/node';
+import {Store} from '../store.js';
+
+test('노임 검색은 가상 생년월일 보존값과 현재 가입 전화번호를 사용한다',()=>{
+  const s=new Store(':memory:');try{const site=s.createSite({name:'가상'}),other=s.createSite({name:'다른 현장'}),make=(target,id,name,birth,phone)=>s.join(s.createInvitation(target.id).token,{name,category:'직영',company:'가상 업체',occupation:'목공',loginId:id,password:'virtual-password-123',acknowledged:true,profile:{birthDate:birth,phone}}),first=make(site,'wage_first','가상 첫째','2000-01-02','010-1111-2222'),second=make(site,'wage_second','가상 둘째','1999-03-04','010-3333-4444'),foreign=make(other,'wage_other','다른 현장','2000-01-02','010-1111-2222'),deductions={income:'0',local:'0',health:'0',care:'0',pension:'0',employment:'0'};for(const [target,worker] of [[site,first],[site,second],[other,foreign]])s.saveWageRecord({siteId:target.id,workerId:worker.id,month:'2024-02',gross:'1000',deductions});
+    s.db.prepare("UPDATE join_acknowledgements SET profile=json_set(profile,'$.birthDate','2001-05-06','$.phone','010-7777-8888') WHERE worker_id=?").run(first.id);for(const q of ['가상 첫','000102','2000-01-02','0107777','7777-8888']){const rows=s.wageRecords(site.id,'2024-02',{q});assert.deepEqual(rows.map(row=>row.worker_id),[first.id]);assert.equal('search_phone' in rows[0],false);assert.equal(s.wageSummary(site.id,'2024-02',{q})[0].count,1);assert.deepEqual(s.wageDailyRecords(site.id,'2024-02',{q}).map(row=>row.worker_id),[first.id]);}assert.equal(s.wageRecords(site.id,'2024-02',{q:'0101111'}).length,0);assert.equal(s.wageRecords(site.id,'2024-02',{q:'0107777',company:'다른 업체'}).length,0);assert.equal(s.wageRecords(other.id,'2024-02',{q:'0107777'}).length,0);s.db.prepare('UPDATE wage_records SET birth_date_snapshot=NULL WHERE worker_id=?').run(first.id);assert.equal(s.wageRecords(site.id,'2024-02',{q:'000102'}).length,0);
+  }finally{s.close();}
+});
+
+test('가상 노임 검색은 목록·합계·날짜·엑셀에 같은 조건을 적용한다',{timeout:30000},async()=>{
+  const dir=mkdtempSync(join(tmpdir(),'jweb-wage-search-')),reservation=createServer();await new Promise(resolve=>reservation.listen(0,'127.0.0.1',resolve));const port=reservation.address().port;await new Promise(resolve=>reservation.close(resolve));const child=spawn(process.execPath,['server.js'],{cwd:process.cwd(),env:{...process.env,PORT:String(port),JWEB_DATA_DIR:dir,JWEB_ADMIN_PASSWORD:'virtual-admin-password'},stdio:['ignore','pipe','pipe']});try{await Promise.race([once(child.stdout,'data'),once(child,'exit').then(()=>{throw Error('시험 서버 종료');})]);const base=`http://127.0.0.1:${port}`,call=(path,method='GET',data,cookie)=>fetch(base+path,{method,headers:{...(data?{'content-type':'application/json'}:{}),...(cookie?{cookie}:{})},...(data?{body:JSON.stringify(data)}:{})}),admin=(await call('/api/login','POST',{password:'virtual-admin-password'})).headers.get('set-cookie').split(';')[0],site=await (await call('/api/sites','POST',{name:'가상'},admin)).json(),invite=await (await call(`/api/sites/${site.id}/invitation`,'POST',{},admin)).json(),token=new URL(invite.link).searchParams.get('token'),deductions={income:'0',local:'0',health:'0',care:'0',pension:'0',employment:'0'};
+    for(const [id,name,phone] of [['wage_one','가상 첫째','010-1111-2222'],['wage_two','가상 둘째','010-3333-4444']]){assert.equal((await call('/api/join','POST',{token,name,category:'직영',occupation:'목공',loginId:id,password:'virtual-password-123',acknowledged:true,profile:{birthDate:'2000-01-02',phone}})).status,201);const login=await call('/api/worker/login','POST',{token,loginId:id,password:'virtual-password-123'}),worker=(await login.json()).worker;assert.equal((await call('/api/wages','POST',{siteId:site.id,workerId:worker.id,month:'2024-02',gross:'1000',deductions},admin)).status,200);}
+    const query=new URLSearchParams({siteId:String(site.id),month:'2024-02',q:'0103333'});assert.equal((await call(`/api/wages?${query}`)).status,401);const rows=await (await call(`/api/wages?${query}`,'GET',null,admin)).json();assert.deepEqual(rows.map(row=>row.name),['가상 둘째']);assert.equal('search_phone' in rows[0],false);assert.equal((await (await call(`/api/wages/summary?${query}`,'GET',null,admin)).json())[0].count,1);assert.equal((await (await call(`/api/wages/daily?${query}`,'GET',null,admin)).json()).length,1);const sheet=await readSheet(Buffer.from(await (await call(`/api/wages/export?${query}`,'GET',null,admin)).arrayBuffer()));assert.equal(sheet.length,2);assert.equal(sheet[1][0],'가상 둘째');assert.equal(sheet.flat().some(value=>typeof value==='string'&&value.includes('010-3333-4444')),false);
+  }finally{if(child.exitCode===null){const exited=once(child,'exit');child.kill();await exited;}rmSync(dir,{recursive:true,force:true});}
+});
+
+test('노임 조회 중 현장이 바뀌면 이전 화면을 그리지 않는다',async()=>{
+  const source=readFileSync(new URL('../public/app.js',import.meta.url),'utf8'),from=source.indexOf('    const siteId=state.siteId,epoch=detailEpoch,filterSnapshot=JSON.stringify(state.wageFilters'),to=source.indexOf('    content.innerHTML=',from);assert.ok(from>=0&&to>from);let release;const wait=new Promise(resolve=>{release=resolve;}),state={page:'wages',siteId:1,wageMonth:'2024-02',wageFilters:{}},context={state,detailEpoch:1,today:()=> '2024-02-01',URLSearchParams,JSON,Promise,api:path=>path.startsWith('/api/workers?')?wait:Promise.resolve([])},pending=runInNewContext(`(async()=>{${source.slice(from,to)}return true;})()`,context);state.siteId=2;release([]);assert.equal(await pending,undefined);
+});
+
+test('노임 인쇄 안내에는 전화번호 검색어 대신 적용 여부를 표시한다',()=>{
+  const source=readFileSync(new URL('../public/app.js',import.meta.url),'utf8'),line=source.split(/\r?\n/).find(item=>item.includes('const wageInfo=document.createElement'));assert.ok(line);const node={},document={createElement:()=>node},siteSelect={selectedOptions:[{textContent:'가상 현장'}]},state={wageFilters:{q:'010-3333-4444'}},content={querySelector:()=>({after(){}})};runInNewContext(line,{document,siteSelect,state,month:'2024-02',content});assert.match(node.textContent,/검색: 조건 적용/);assert.doesNotMatch(node.textContent,/010-3333-4444/);
+});
