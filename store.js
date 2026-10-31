@@ -1245,7 +1245,7 @@ export class Store {
   }
   createInvitation(siteId,pending=false) {
     if (!this.db.prepare('SELECT id FROM sites WHERE id=?').get(Number(siteId))) throw new Error('현장을 선택해 주세요.');
-    this.ensureSiteAccess(siteId);
+    if(!pending)this.ensureSiteAccess(siteId);
     const token = randomBytes(32).toString('base64url');
     const hash = createHash('sha256').update(token).digest('hex');
     const expiresAt = Date.now() + 30 * 24 * 60 * 60 * 1000;
@@ -1256,7 +1256,7 @@ export class Store {
     this.db.exec('BEGIN IMMEDIATE');try{authorize();const count=this.db.prepare('SELECT COUNT(*) AS n FROM invitations WHERE site_id=? AND revoked=0 AND pending=0').get(Number(siteId)).n;this.db.prepare('UPDATE invitations SET revoked=1 WHERE site_id=? AND revoked=0').run(Number(siteId));this.db.prepare('DELETE FROM site_registration WHERE site_id=?').run(Number(siteId));this.db.exec('COMMIT');return count;}catch(error){this.db.exec('ROLLBACK');throw error;}
   }
   activateInvitation(token,authorize){
-    const hash=createHash('sha256').update(token).digest('hex');this.db.exec('BEGIN IMMEDIATE');try{authorize();const result=this.db.prepare('UPDATE invitations SET pending=0 WHERE token_hash=? AND pending=1 AND revoked=0 AND expires_at>?').run(hash,Date.now());this.db.exec('COMMIT');return result.changes===1;}catch(error){this.db.exec('ROLLBACK');throw error;}
+    const hash=createHash('sha256').update(token).digest('hex');this.db.exec('BEGIN IMMEDIATE');try{authorize();const pending=this.db.prepare('SELECT site_id FROM invitations WHERE token_hash=? AND pending=1 AND revoked=0 AND expires_at>?').get(hash,Date.now());if(pending){this.ensureSiteAccess(pending.site_id);this.db.prepare('UPDATE invitations SET pending=0 WHERE token_hash=?').run(hash);}this.db.exec('COMMIT');return !!pending;}catch(error){this.db.exec('ROLLBACK');throw error;}
   }
   discardPendingInvitation(token){this.db.prepare('DELETE FROM invitations WHERE token_hash=? AND pending=1').run(createHash('sha256').update(token).digest('hex'));}
   invitation(token) {
@@ -1273,8 +1273,9 @@ export class Store {
     siteId=Number(siteId);if(!this.db.prepare('SELECT 1 FROM sites WHERE id=?').get(siteId))throw new Error('현장을 선택해 주세요.');
     const key=randomBytes(32).toString('base64url');this.db.prepare('INSERT INTO site_access(site_id,access_key) VALUES(?,?) ON CONFLICT(site_id) DO UPDATE SET access_key=excluded.access_key').run(siteId,key);return key;
   }
+  siteAccessForIssue(siteId){const row=this.db.prepare('SELECT a.access_key FROM sites s LEFT JOIN site_access a ON a.site_id=s.id WHERE s.id=?').get(Number(siteId));if(!row)throw new Error('현장을 선택해 주세요.');return row.access_key;}
   replaceSiteAccess(siteId,oldKey,newKey,authorize){
-    this.db.exec('BEGIN IMMEDIATE');try{authorize();const result=this.db.prepare('UPDATE site_access SET access_key=? WHERE site_id=? AND access_key=?').run(newKey,Number(siteId),oldKey);this.db.exec('COMMIT');return result.changes===1;}catch(error){this.db.exec('ROLLBACK');throw error;}
+    this.db.exec('BEGIN IMMEDIATE');try{authorize();const result=oldKey===null?this.db.prepare('INSERT INTO site_access(site_id,access_key) SELECT id,? FROM sites WHERE id=? AND NOT EXISTS(SELECT 1 FROM site_access WHERE site_id=?)').run(newKey,Number(siteId),Number(siteId)):this.db.prepare('UPDATE site_access SET access_key=? WHERE site_id=? AND access_key=?').run(newKey,Number(siteId),oldKey);this.db.exec('COMMIT');return result.changes===1;}catch(error){this.db.exec('ROLLBACK');throw error;}
   }
   siteFromAccess(key){
     if(typeof key!=='string'||!/^[\w-]{43}$/.test(key))return null;

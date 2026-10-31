@@ -1,8 +1,8 @@
 import { randomBytes } from 'node:crypto';
 
 export async function issueAccessQr(store,siteId,origin,rotate,render,authorize=()=>{}){
-  const oldKey=store.ensureSiteAccess(siteId),key=rotate?randomBytes(32).toString('base64url'):oldKey,link=`${origin}/join?site=${encodeURIComponent(key)}`,image=await render(link);
-  if(rotate){if(!store.replaceSiteAccess(siteId,oldKey,key,authorize))return null;}else{authorize();if(store.siteAccessKey(siteId)!==key)return null;}
+  const oldKey=store.siteAccessForIssue(siteId),key=rotate||!oldKey?randomBytes(32).toString('base64url'):oldKey,link=`${origin}/join?site=${encodeURIComponent(key)}`,image=await render(link);
+  if(rotate||!oldKey){if(!store.replaceSiteAccess(siteId,oldKey,key,authorize))return null;}else{authorize();if(store.siteAccessKey(siteId)!==key)return null;}
   return {link,image,registrationExpiresAt:store.siteRegistrationExpiry(siteId)};
 }
 
