@@ -55,6 +55,7 @@ assets.add('/worker-list.js');
 assets.add('/weekly-ppe.js');
 assets.add('/reviewer-manager-check.js');
 assets.add('/basic-samples.js');
+assets.add('/reviewer-basic-documents.js');
 function checkRequestSession(req){const failure=req.checkSession?.();if(failure)throw Object.assign(new Error(failure.error),{sessionStatus:failure.status});}
 function dailyReportPhoto(doc,kind,id){
   const file=kind==='site'?store.sitePhoto(doc.site_id,id):store.attachment(id);
@@ -128,6 +129,13 @@ const server = http.createServer(async (req, res) => {
       req.checkSession=()=>reviewerSessions.get(key)===session&&session.expires>Date.now()&&store.reviewer(session.id)?null:{status:401,error:'결재자 로그인이 필요합니다.'};
       if(await handleCommonWork(req,res,url,'/api/reviewer/common-work',reviewer))return;
       if(url.pathname==='/api/reviewer/session'&&req.method==='GET')return json(res,200,{reviewer});
+      const reviewerBasic=url.pathname.match(/^\/api\/reviewer\/basic-documents\/(\d+)(?:\/attachments\/(\d+))?$/);
+      if((reviewerBasic||url.pathname==='/api/reviewer/basic-documents')&&req.method==='GET'){
+        const [,id,fileId]=reviewerBasic||[],result=!id?{documents:store.reviewerBasicDocuments(reviewer.id)}:fileId?store.reviewerBasicAttachment(reviewer.id,id,fileId):store.reviewerBasicDocument(reviewer.id,id);checkRequestSession(req);
+        if(store.reviewer(reviewer.id)?.site_id!==reviewer.site_id)return json(res,401,{error:'결재자 로그인이 필요합니다.'});
+        if(!result)return json(res,404,{error:'기본 서류를 찾을 수 없습니다.'});if(!fileId)return json(res,200,result);
+        const name=encodeURIComponent(result.name).replace(/[!'()*]/g,c=>`%${c.charCodeAt(0).toString(16).toUpperCase()}`);res.writeHead(200,{'Content-Type':'application/octet-stream','Content-Disposition':`attachment; filename="attachment"; filename*=UTF-8''${name}`,'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(result.data);
+      }
       if(url.pathname==='/api/reviewer/manager-checks'){
         if(req.method==='GET'){const now=new Date(),today=new Date(now.getTime()-now.getTimezoneOffset()*60000).toISOString().slice(0,10),records=store.reviewerManagerChecks(reviewer.id,()=>checkRequestSession(req));return json(res,200,{today,records});}
         if(req.method==='POST'){const input=await body(req),now=new Date(),date=new Date(now.getTime()-now.getTimezoneOffset()*60000).toISOString().slice(0,10);if(input.expectedDate!==date)throw Object.assign(new Error('오늘 날짜가 바뀌었습니다. 다시 조회해 주세요.'),{sessionStatus:409});store.saveReviewerManagerCheck(reviewer.id,date,input,()=>{checkRequestSession(req);const current=new Date(),today=new Date(current.getTime()-current.getTimezoneOffset()*60000).toISOString().slice(0,10);if(today!==date)throw Object.assign(new Error('오늘 날짜가 바뀌었습니다. 다시 조회해 주세요.'),{sessionStatus:409});});return json(res,201,{ok:true});}

@@ -12,6 +12,7 @@ import { summarizeWorkerCounts } from './public/worker-list.js';
 const siteArticleRow=row=>({...row,rich_body:row.rich_body===null?null:JSON.parse(row.rich_body)});
 const workerVersion=worker=>createHash('sha256').update(JSON.stringify([worker.id,worker.site_id,worker.name,worker.category,worker.company,worker.occupation,worker.created_date,worker.memo])).digest('hex');
 const basicSampleTargetVersion=(row,parent)=>createHash('sha256').update(JSON.stringify([row.id,row.parent_id,row.name,row.description,parent?.name??null,parent?.description??null])).digest('hex');
+const reviewerBasicAccess="r.id=? AND r.active=1 AND d.type='basic' AND d.status='approved' AND (d.site_id=r.site_id OR json_extract(d.details,'$.shared')=1)";
 function workerMemo(value){if(typeof value!=='string'||value.length>2000||/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/.test(value))throw new Error('메모를 확인해 주세요.');return value.trim();}
 function validateManagerAnswers(answers){if(!Array.isArray(answers)||answers.length!==3||answers.some(a=>!a||!['O','X'].includes(a.answer)||typeof a.note!=='string'||a.note.length>500))throw new Error('세 항목의 O/X와 비고를 확인해 주세요.');}
 
@@ -1552,6 +1553,12 @@ export class Store {
       this.db.prepare('DELETE FROM approval_steps WHERE document_id=?').run(Number(id));const add=this.db.prepare('INSERT INTO approval_steps(document_id,position,reviewer_id) VALUES(?,?,?)');ids.forEach((reviewerId,index)=>add.run(Number(id),index+1,reviewerId));if(doc.type==='office')this.db.prepare('DELETE FROM meeting_signatures WHERE document_id=?').run(Number(id));const result=this.approvalLine(id);this.db.exec('COMMIT');return result;
     }catch(error){this.db.exec('ROLLBACK');throw error;}
   }
+  reviewerBasicDocuments(reviewerId){return this.db.prepare(`SELECT d.id,d.title,d.date,d.site_id,COALESCE(json_extract(d.details,'$.category'),'') AS category,COALESCE(json_extract(d.details,'$.shared'),0) AS shared FROM documents d JOIN reviewers r ON ${reviewerBasicAccess} ORDER BY d.date DESC,d.id DESC`).all(Number(reviewerId)).map(row=>({...row,shared:row.shared===1}));}
+  reviewerBasicDocument(reviewerId,id){
+    const row=this.db.prepare(`SELECT d.id,d.title,d.date,d.site_id,d.body,COALESCE(json_extract(d.details,'$.category'),'') AS category,COALESCE(json_extract(d.details,'$.shared'),0) AS shared,(SELECT json_group_array(json_object('id',a.id,'name',a.name)) FROM (SELECT id,name FROM attachments WHERE document_id=d.id ORDER BY id) a) AS attachments FROM documents d JOIN reviewers r ON ${reviewerBasicAccess} WHERE d.id=?`).get(Number(reviewerId),Number(id));
+    if(!row)return null;const {attachments,...document}=row;return {document:{...document,shared:document.shared===1},attachments:JSON.parse(attachments)};
+  }
+  reviewerBasicAttachment(reviewerId,id,fileId){return this.db.prepare(`SELECT a.name,a.data FROM attachments a JOIN documents d ON d.id=a.document_id JOIN reviewers r ON ${reviewerBasicAccess} WHERE d.id=? AND a.id=?`).get(Number(reviewerId),Number(id),Number(fileId))||null;}
   reviewerDocuments(reviewerId){return this.db.prepare("SELECT d.id,d.site_id,d.type,d.title,d.date FROM documents d JOIN approval_steps s ON s.document_id=d.id JOIN reviewers r ON r.id=s.reviewer_id AND r.site_id=d.site_id WHERE r.id=? AND r.active=1 AND d.status='pending' AND s.state='pending' AND NOT EXISTS (SELECT 1 FROM approval_steps prior WHERE prior.document_id=d.id AND prior.position<s.position AND prior.state<>'approved') ORDER BY d.date DESC,d.id DESC").all(Number(reviewerId));}
   reviewerDocument(reviewerId,id){return this.reviewerDocuments(reviewerId).some(doc=>doc.id===Number(id))?this.document(id):null;}
   officeReferences(id){const doc=this.document(id);if(!doc||doc.type!=='office')throw new Error('업무 문서를 확인해 주세요.');return this.db.prepare('SELECT r.id,r.name,r.active FROM office_reference_recipients o JOIN reviewers r ON r.id=o.reviewer_id WHERE o.document_id=? ORDER BY r.name,r.id').all(Number(id));}
