@@ -24,6 +24,11 @@ test('위험요인은 공정과 협력사 조합별로 묶고 기존 미기록�
   assert.equal(groups.length,3);assert.deepEqual(groups[0].items.map(item=>item.task),['첫 작업','셋째 작업']);assert.equal(groups[1].contractor,'가상 B');assert.equal(groups[2].process,'');assert.equal(groups[2].items[0].task,'이전 기록');assert.equal(copyRiskItem(items[0]).processName,'가상 공정');
 });
 
+test('위험요인 상세는 같은 이름의 서로 다른 업체와 직접 입력을 구분한다',()=>{
+  const groups=groupRiskItems([{processName:'공정',contractorId:1,contractor:'동일 업체',task:'첫 항목'},{processName:'공정',contractorId:2,contractor:'동일 업체',task:'다른 업체'},{processName:'공정',contractor:'동일 업체',task:'직접 입력'},{processName:'공정',contractorId:1,contractor:'동일 업체',task:'같은 업체'}]);
+  assert.equal(groups.length,3);assert.deepEqual(groups[0].items.map(row=>row.task),['첫 항목','같은 업체']);assert.equal(groups[1].contractorId,2);assert.equal(groups[2].contractorId,0);
+});
+
 test('평가 척도별 선택 범위는 서버 저장 규칙과 일치한다', () => {
   const expected = {
     '': { grade: [], likelihood: [], severity: [] },

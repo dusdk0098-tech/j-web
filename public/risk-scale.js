@@ -37,6 +37,6 @@ export function copyRiskImprovement(items, sourceIndex, field){
 
 export function groupRiskItems(items){
   const groups=new Map();
-  for(const item of items){const process=item.processName||'',contractor=item.contractor||'',key=JSON.stringify([process,contractor]);if(!groups.has(key))groups.set(key,{process,contractor,items:[]});groups.get(key).items.push(item);}
+  for(const item of items){const process=item.processName||'',contractor=item.contractor||'',contractorId=item.contractorId||0,key=JSON.stringify([process,contractorId,contractorId?'':contractor]);if(!groups.has(key))groups.set(key,{process,contractor,contractorId,items:[]});groups.get(key).items.push(item);}
   return [...groups.values()];
 }
