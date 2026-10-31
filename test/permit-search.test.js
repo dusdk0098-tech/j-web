@@ -18,11 +18,20 @@ test('허가서 업체 검색은 직영·협력사·현장·기간을 구분한�
   }finally{s.close();}
 });
 
+test('작업기간 검색은 양 끝을 포함해 겹치는 기간만 찾는다',()=>{
+  const s=new Store(':memory:');try{
+    const site=s.createSite({name:'가상 현장'}),company=s.createCompany({siteId:site.id,name:'가상 업체',trade:'가상'}),add=(title,details)=>s.createAuthorizedDocument({siteId:site.id,type:'permit',title,date:'2026-10-01',details}),one=add('가상 업체',{companyId:company.id,periodFrom:'2026-10-10',periodTo:'2026-10-12'}),two=add('직영',{directWork:true,companyId:0,periodFrom:'2026-10-12',periodTo:'2026-10-20'});
+    add('기간 미입력',{company:'직접 입력'});const find=(from,to,companyFilter='')=>s.documents(site.id,'permit','','','','','','',companyFilter,from,to).map(row=>row.id);
+    assert.deepEqual(find('2026-10-12','2026-10-12'),[two.id,one.id]);assert.deepEqual(find('2026-10-12','2026-10-12',String(company.id)),[one.id]);assert.deepEqual(find('2026-10-13',''),[two.id]);assert.deepEqual(find('','2026-10-09'),[]);
+    assert.throws(()=>find('2026-10-15','2026-10-14'),/범위/);assert.throws(()=>find('2026-02-30',''),/날짜/);assert.throws(()=>s.documents(site.id,'risk','','','','','','','','2026-10-01',''),/검색 조건/);
+  }finally{s.close();}
+});
+
 test('검색 입력은 업체를 요청에 담고 다른 유형에서는 제외한다',async()=>{
   const source=readFileSync(new URL('../public/app.js',import.meta.url),'utf8'),wire=source.slice(source.indexOf('function wireSearch()'),source.indexOf('\n',source.indexOf('function wireSearch()'))),load=source.slice(source.indexOf('async function loadDocuments()'),source.indexOf('\n',source.indexOf('async function loadDocuments()')));
-  const nodes={'#search':{},'#query':{value:'가상'},'#type-filter':{value:'permit'},'#document-from':{value:''},'#document-to':{value:''},'#permit-company-filter':{value:'direct'}},state={page:'documents',siteId:2,type:'permit'},calls=[],context={state,$:key=>nodes[key],content:{querySelectorAll:()=>[]},render:async()=>{},showError(){},flash(){},api:async path=>{calls.push(path);return [];},URLSearchParams};
-  runInNewContext(wire+'\n'+load+'\nglobalThis.wireSearch=wireSearch;globalThis.loadDocuments=loadDocuments;',context);context.wireSearch();nodes['#search'].onclick();await context.loadDocuments();assert.match(calls[0],/permitCompany=direct/);
-  nodes['#type-filter'].value='risk';nodes['#search'].onclick();await context.loadDocuments();assert.doesNotMatch(calls[1],/permitCompany/);
+  const nodes={'#search':{},'#query':{value:'가상'},'#type-filter':{value:'permit'},'#document-from':{value:''},'#document-to':{value:''},'#permit-company-filter':{value:'direct'},'#permit-from':{value:'2026-10-10'},'#permit-to':{value:'2026-10-12'}},state={page:'documents',siteId:2,type:'permit'},calls=[],context={state,$:key=>nodes[key],content:{querySelectorAll:()=>[]},render:async()=>{},showError(){},flash(){},api:async path=>{calls.push(path);return [];},URLSearchParams};
+  runInNewContext(wire+'\n'+load+'\nglobalThis.wireSearch=wireSearch;globalThis.loadDocuments=loadDocuments;',context);context.wireSearch();nodes['#search'].onclick();await context.loadDocuments();assert.match(calls[0],/permitCompany=direct/);assert.match(calls[0],/permitFrom=2026-10-10/);assert.match(calls[0],/permitTo=2026-10-12/);
+  nodes['#type-filter'].value='risk';nodes['#search'].onclick();await context.loadDocuments();assert.doesNotMatch(calls[1],/permitCompany|permitFrom|permitTo/);
 });
 
 test('허가서 업체 검색 API는 관리자 인증과 현장을 확인한다',{timeout:30000},async()=>{
@@ -30,5 +39,6 @@ test('허가서 업체 검색 API는 관리자 인증과 현장을 확인한다'
   try{
     await Promise.race([once(child.stdout,'data'),once(child,'exit').then(()=>{throw Error('시험 서버가 종료됐습니다.');})]);const base=`http://127.0.0.1:${port}`,call=(path,method='GET',data,cookie)=>fetch(base+path,{method,headers:{...(data?{'content-type':'application/json'}:{}),...(cookie?{cookie}:{})},...(data?{body:JSON.stringify(data)}:{})}),cookie=(await call('/api/login','POST',{password:'virtual-admin-password'})).headers.get('set-cookie').split(';')[0],site=await(await call('/api/sites','POST',{name:'가상 현장'},cookie)).json(),doc=await(await call('/api/documents','POST',{siteId:site.id,type:'permit',title:'가상 직영',date:'2026-10-30',details:{directWork:true,companyId:0}},cookie)).json(),path=`/api/documents?siteId=${site.id}&type=permit&permitCompany=direct`;
     assert.equal((await call(path)).status,401);const response=await call(path,'GET',null,cookie);assert.equal(response.status,200);assert.deepEqual((await response.json()).map(row=>row.id),[doc.id]);assert.equal((await call(path.replace('type=permit','type=risk'),'GET',null,cookie)).status,400);assert.equal((await call(path.replace('direct','999999'),'GET',null,cookie)).status,400);
+    const dated=await(await call('/api/documents','POST',{siteId:site.id,type:'permit',title:'가상 작업기간',date:'2026-10-01',details:{directWork:true,companyId:0,periodFrom:'2026-10-10',periodTo:'2026-10-12'}},cookie)).json();const range=`${path}&permitFrom=2026-10-12&permitTo=2026-10-12`;assert.deepEqual((await(await call(range,'GET',null,cookie)).json()).map(row=>row.id),[dated.id]);assert.equal((await call(`${path}&permitFrom=2026-10-13&permitTo=2026-10-12`,'GET',null,cookie)).status,400);
   }finally{if(child.exitCode===null&&!child.signalCode){const exited=once(child,'exit');child.kill();await exited;}rmSync(dir,{recursive:true,force:true});}
 });
