@@ -4,10 +4,10 @@ import {readFileSync} from 'node:fs';
 import {runInNewContext} from 'node:vm';
 import {recordInput} from '../domain.js';
 
-test('다섯 체크리스트의 판정 선택지는 화면과 저장 검증에서 일치한다',()=>{
+test('열세 체크리스트의 판정 선택지는 화면과 저장 검증에서 일치한다',()=>{
   const source=readFileSync(new URL('../public/app.js',import.meta.url),'utf8'),start=source.indexOf("    if(select.value==='checklist'){"),end=source.indexOf("    if(select.value==='safety_log'){",start);
   assert.ok(start>=0&&end>start);
-  const kinds=[['rain','rainChecks',[false,false,true,true,true,true,true]],['wet_season','wetSeasonChecks',Array(6).fill(true)],['heavy_rain','heavyRainChecks',[false,...Array(10).fill(true)]],['heat','heatChecks',[false,false,true,false,false,true,true,true]],['electrical','electricalChecks',Array(12).fill(true)]];
+  const kinds=[['rain','rainChecks',[false,false,true,true,true,true,true]],['wet_season','wetSeasonChecks',Array(6).fill(true)],['heavy_rain','heavyRainChecks',[false,...Array(10).fill(true)]],['heat','heatChecks',[false,false,true,false,false,true,true,true]],['electrical','electricalChecks',Array(12).fill(true)],['wind','windChecks',Array(9).fill(true)],['thaw','thawChecks',Array(15).fill(true)],['cold','coldChecks',Array(10).fill(true)],['formwork','formworkChecks',Array(7).fill(true)],['falling','fallingChecks',Array(8).fill(true)],['confined','confinedChecks',Array(4).fill(true)],['excavation','excavationChecks',Array(8).fill(true)],['fire','fireChecks',Array(5).fill(true)]];
   for(const [name,arrayName,expected] of kinds){
     const select={value:name,options:[]},fields={innerHTML:''},checks={innerHTML:''},category={value:''},search={value:''};
     const nodes={'#daily-fields':fields,'#dialog-form [name=checklistKind]':select,'#rain-checks':checks,'#checklist-category':category,'#checklist-search':search},context={select:{value:'checklist'},details:{kind:name,answers:[]},$:key=>nodes[key],document:{querySelectorAll:()=>[]},esc:String,filterChecklistKinds(){}};
