@@ -273,19 +273,19 @@ export class Store {
   }
   deleteSitePhoto(siteId,id){if(!this.db.prepare('DELETE FROM site_photos WHERE site_id=? AND id=?').run(Number(siteId),Number(id)).changes)throw new Error('사진을 찾을 수 없습니다.');}
   boardPosts(kind,query=''){
-    if(!['notice','question','general'].includes(kind)||typeof query!=='string'||query.length>200)throw new Error('게시판 또는 검색어를 확인해 주세요.');
+    if(!['notice','system_notice','question','general'].includes(kind)||typeof query!=='string'||query.length>200)throw new Error('게시판 또는 검색어를 확인해 주세요.');
     return this.db.prepare('SELECT * FROM board_posts WHERE kind=? AND (instr(title,?)>0 OR instr(body,?)>0) ORDER BY id DESC').all(kind,query,query);
   }
   saveBoardPost(input,id=null,onAuthorize=()=>{}){
-    if(!['notice','question','general'].includes(input.kind)||typeof input.secret!=='boolean'||(input.secret&&input.kind!=='question')||(input.shared!==undefined&&typeof input.shared!=='boolean'))throw new Error('게시판과 공개 설정을 확인해 주세요.');
+    if(!['notice','system_notice','question','general'].includes(input.kind)||typeof input.secret!=='boolean'||(input.secret&&input.kind!=='question')||(input.shared!==undefined&&typeof input.shared!=='boolean'))throw new Error('게시판과 공개 설정을 확인해 주세요.');
     const title=text(input.title,'제목'),body=text(input.body,'내용',10000),secret=input.secret?1:0;
     this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();const current=id===null?null:this.db.prepare('SELECT shared,version FROM board_posts WHERE id=? AND kind=?').get(Number(id),input.kind);if(id!==null&&!current)throw new Error('게시글을 찾을 수 없습니다.');if(current&&input.expectedVersion!==undefined&&(typeof input.expectedVersion!=='string'||input.expectedVersion!==current.version))throw Object.assign(new Error('게시글이 변경되었습니다. 다시 조회해 주세요.'),{sessionStatus:409});const shared=input.shared===undefined?(current?.shared||0):(input.shared?1:0);if(id===null)id=this.db.prepare("INSERT INTO board_posts(kind,title,body,secret,shared,version) VALUES(?,?,?,?,?,lower(hex(randomblob(16))))").run(input.kind,title,body,secret,shared).lastInsertRowid;
       else this.db.prepare("UPDATE board_posts SET title=?,body=?,secret=?,shared=?,version=lower(hex(randomblob(16))) WHERE id=? AND kind=?").run(title,body,secret,shared,Number(id),input.kind);const result=this.db.prepare('SELECT * FROM board_posts WHERE id=?').get(Number(id));this.db.exec('COMMIT');return result;
     }catch(error){this.db.exec('ROLLBACK');throw error;}
   }
-  deleteBoardPost(kind,id,onAuthorize=()=>{},expectedVersion=undefined){if(!['notice','question','general'].includes(kind))throw new Error('게시글을 찾을 수 없습니다.');this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();const current=this.db.prepare('SELECT version FROM board_posts WHERE kind=? AND id=?').get(kind,Number(id));if(!current)throw new Error('게시글을 찾을 수 없습니다.');if(expectedVersion!==undefined&&(typeof expectedVersion!=='string'||expectedVersion!==current.version))throw Object.assign(new Error('게시글이 변경되었습니다. 다시 조회해 주세요.'),{sessionStatus:409});this.db.prepare('DELETE FROM board_posts WHERE kind=? AND id=?').run(kind,Number(id));this.db.exec('COMMIT');}catch(error){this.db.exec('ROLLBACK');throw error;}}
+  deleteBoardPost(kind,id,onAuthorize=()=>{},expectedVersion=undefined){if(!['notice','system_notice','question','general'].includes(kind))throw new Error('게시글을 찾을 수 없습니다.');this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();const current=this.db.prepare('SELECT version FROM board_posts WHERE kind=? AND id=?').get(kind,Number(id));if(!current)throw new Error('게시글을 찾을 수 없습니다.');if(expectedVersion!==undefined&&(typeof expectedVersion!=='string'||expectedVersion!==current.version))throw Object.assign(new Error('게시글이 변경되었습니다. 다시 조회해 주세요.'),{sessionStatus:409});this.db.prepare('DELETE FROM board_posts WHERE kind=? AND id=?').run(kind,Number(id));this.db.exec('COMMIT');}catch(error){this.db.exec('ROLLBACK');throw error;}}
   reviewerBoardPosts(actor,kind,query=''){
-    if(!['notice','question','general'].includes(kind)||typeof query!=='string'||query.length>200)throw new Error('게시판 또는 검색어를 확인해 주세요.');
+    if(!['notice','system_notice','question','general'].includes(kind)||typeof query!=='string'||query.length>200)throw new Error('게시판 또는 검색어를 확인해 주세요.');
     return this.db.prepare('SELECT id,kind,title,body,secret,created_at,author_id,author_name,version FROM board_posts WHERE kind=? AND (author_id=? OR (shared=1 AND secret=0)) AND (instr(title,?)>0 OR instr(body,?)>0) ORDER BY id DESC').all(kind,Number(actor.id),query,query);
   }
   saveReviewerBoardPost(actor,input,id=null,onAuthorize=()=>{}){
