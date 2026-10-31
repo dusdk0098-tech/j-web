@@ -52,6 +52,7 @@ assets.add('/daily-report-photos.js');
 assets.add('/site-photo-viewer.js');
 assets.add('/worker-preview.js');
 assets.add('/worker-list.js');
+assets.add('/attendance-matrix.js');
 assets.add('/checklist-copy.js');
 assets.add('/safety-cost.js');
 assets.add('/weekly-ppe.js');
