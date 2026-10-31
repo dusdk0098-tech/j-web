@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>발주처 시험 계정 | J웹</title>
+  <link rel="stylesheet" href="/style.css">
+  <script type="module" src="/client.js"></script>
+</head>
+<body>
+  <header class="top"><a class="brand" href="/"><span>J</span>웹 <small>현장 안전관리</small></a></header>
+  <main>
+    <section class="panel">
+      <h1>발주처 시험 계정</h1>
+      <p>실제 개인정보 대신 가상 정보로 시험하세요. 현장 자료 연결과 발주처 업무 화면은 아직 제공하지 않습니다.</p>
+      <p id="message" role="status" aria-live="polite">로그인 상태를 확인하고 있습니다.</p>
+      <div id="auth" hidden>
+        <div class="action-row"><button id="show-login" type="button">로그인</button><button id="show-register" type="button">시험 계정 가입</button></div>
+        <form id="login-form">
+          <fieldset>
+            <legend>시험 로그인</legend>
+            <div class="fields">
+              <label>아이디<input name="loginId" autocomplete="username" required maxlength="50"></label>
+              <label>암호<input name="password" type="password" autocomplete="current-password" required maxlength="256"></label>
+            </div>
+            <button class="primary" type="submit">로그인</button>
+          </fieldset>
+        </form>
+        <form id="register-form" hidden>
+          <fieldset>
+            <legend>시험 계정 가입</legend>
+            <div class="fields">
+              <label>계정 구분<select name="kind" id="kind"><option value="company">기업</option><option value="individual">개인</option></select></label>
+              <label>가상 사업자번호<input name="businessNumber" id="business-number" inputmode="numeric" pattern="[0-9]{10}" maxlength="10" required></label>
+              <label>시험 아이디<input name="loginId" autocomplete="username" pattern="[A-Za-z0-9_]{3,50}" maxlength="50" required></label>
+              <button type="button" id="check-id">아이디 중복 확인</button>
+              <label>시험 암호<input name="password" type="password" autocomplete="new-password" minlength="12" maxlength="256" required></label>
+              <label>시험 암호 확인<input name="confirmPassword" type="password" autocomplete="new-password" minlength="12" maxlength="256" required></label>
+              <label>가상 이메일<input name="email" type="email" maxlength="200" required></label>
+              <label>가상 상호<input name="businessName" id="business-name" maxlength="200" required></label>
+              <label>가상 이름<input name="name" maxlength="200" required></label>
+              <label>직위<input name="position" maxlength="100"></label>
+              <label>가상 휴대전화<input name="phone" type="tel" maxlength="30" required></label>
+            </div>
+            <label><input type="checkbox" name="acknowledged" required> 가상 정보로 시험합니다.</label>
+            <button class="primary" type="submit">시험 계정 만들기</button>
+          </fieldset>
+        </form>
+      </div>
+      <div id="profile" hidden>
+        <h2>내 시험 계정</h2>
+        <dl id="profile-values"></dl>
+        <button type="button" id="logout">로그아웃</button>
+      </div>
+      <p><a href="/login">관리자 로그인</a></p>
+    </section>
+  </main>
+</body>
+</html>

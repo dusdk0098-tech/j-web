@@ -12,6 +12,7 @@ import { PNG } from 'pngjs';
 import jsQR from 'jsqr';
 import { Store } from '../store.js';
 import { WorkerSessions, ReviewerSessions } from '../auth.js';
+import { ClientAccounts } from '../client-accounts.js';
 
 const cleanup=dir=>{assert.ok(resolve(dir).startsWith(resolve(tmpdir())+sep));rmSync(dir,{recursive:true,force:true});};
 const run=(dataDir,...args)=>spawnSync(process.execPath,['db-copy.js',...args],{cwd:process.cwd(),env:{...process.env,JWEB_DATA_DIR:dataDir},encoding:'utf8',timeout:20000});
@@ -30,15 +31,19 @@ test('실행 중 DB의 일관된 사본을 만들고 별도 폴더에서 문서�
     const workerSessions=new WorkerSessions(store.db),reviewerSessions=new ReviewerSessions(store.db),credential=store.db.prepare('SELECT password_hash,auth_version FROM reviewers WHERE id=?').get(reviewer.id);
     workerSessions.set(workerHash,{worker:{id:worker.id,site_id:site.id},expires});assert.ok(workerSessions.get(workerHash));
     assert.equal(reviewerSessions.issue(reviewerHash,{id:reviewer.id,expires},credential.password_hash,credential.auth_version),true);assert.ok(reviewerSessions.get(reviewerHash));
+    const clients=new ClientAccounts(store.db);clients.register({kind:'individual',loginId:'virtual_client',password:'virtual-password-123',confirmPassword:'virtual-password-123',email:'client@example.test',name:'가상 발주처',phone:'010-0000-0000',acknowledged:true});
+    const clientToken=clients.login('virtual_client','virtual-password-123'),clientHash=hash(clientToken);assert.ok(clients.session(clientToken));
     store.db.exec('BEGIN IMMEDIATE');locked=true;store.createDocument({siteId:site.id,type:'tbm',title:'아직 저장 중',date:'2026-10-02'});
     const backup=documented(sourceDir,'backup',archive);assert.equal(backup.status,0,backup.stderr);store.db.exec('COMMIT');locked=false;
     assert.equal(store.db.prepare('SELECT count(*) AS n FROM worker_sessions').get().n,1);assert.equal(store.db.prepare('SELECT count(*) AS n FROM reviewer_sessions').get().n,1);
+    assert.equal(store.db.prepare('SELECT count(*) AS n FROM client_sessions').get().n,1);
     const snapshot=new DatabaseSync(archive,{readOnly:true});try{
       assert.equal(snapshot.prepare('SELECT count(*) AS n FROM documents').get().n,1);assert.equal(snapshot.prepare('SELECT count(*) AS n FROM worker_sessions').get().n,0);assert.equal(snapshot.prepare('SELECT count(*) AS n FROM reviewer_sessions').get().n,0);
+      assert.equal(snapshot.prepare('SELECT count(*) AS n FROM client_sessions').get().n,0);
       assert.deepEqual(Buffer.from(snapshot.prepare('SELECT data FROM attachments WHERE id=?').get(attachment).data),Buffer.from('가상 첨부'));
       assert.equal(snapshot.prepare('SELECT access_key FROM site_access WHERE site_id=?').get(site.id).access_key,siteKey);assert.equal(snapshot.prepare('SELECT revoked FROM invitations').get().revoked,0);
     }finally{snapshot.close();}
-    const bytes=readFileSync(archive);assert.equal(bytes.indexOf(Buffer.from(workerHash)),-1);assert.equal(bytes.indexOf(Buffer.from(reviewerHash)),-1);
+    const bytes=readFileSync(archive);assert.equal(bytes.indexOf(Buffer.from(workerHash)),-1);assert.equal(bytes.indexOf(Buffer.from(reviewerHash)),-1);assert.equal(bytes.indexOf(Buffer.from(clientHash)),-1);
     store.db.exec('PRAGMA journal_mode=WAL; PRAGMA wal_autocheckpoint=0');store.createDocument({siteId:site.id,type:'tbm',title:'가상 WAL 문서',date:'2026-10-03'});
     assert.equal(existsSync(path+'-wal'),true);const walArchive=join(backupDir,'wal.sqlite'),walCopy=documented(sourceDir,'backup',walArchive);assert.equal(walCopy.status,0,walCopy.stderr);
     const walSnapshot=new DatabaseSync(walArchive,{readOnly:true});try{assert.equal(walSnapshot.prepare("SELECT count(*) AS n FROM documents WHERE title='가상 WAL 문서'").get().n,1);}finally{walSnapshot.close();}
@@ -46,6 +51,7 @@ test('실행 중 DB의 일관된 사본을 만들고 별도 폴더에서 문서�
     const restored=new Store(join(restoreDir,'jweb.sqlite'));try{
       assert.equal(restored.document(doc.id).title,'가상 문서');assert.deepEqual(Buffer.from(restored.attachment(attachment).data),Buffer.from('가상 첨부'));
       assert.equal(restored.db.prepare('SELECT count(*) AS n FROM worker_sessions').get().n,0);assert.equal(restored.db.prepare('SELECT count(*) AS n FROM reviewer_sessions').get().n,0);
+      assert.equal(restored.db.prepare('SELECT count(*) AS n FROM client_sessions').get().n,0);
       assert.equal(restored.siteFromAccess(siteKey),null);assert.match(restored.siteAccessKey(site.id),/^[\w-]{43}$/);assert.notEqual(restored.siteAccessKey(site.id),siteKey);
       assert.equal(restored.invitation(invitation.token),null);assert.equal(restored.siteRegistrationOpen(site.id),false);
     }finally{restored.close();}
@@ -57,6 +63,7 @@ test('실행 중 DB의 일관된 사본을 만들고 별도 폴더에서 문서�
     assert.equal(login.status,200);assert.equal(sites[0].name,'가상 현장');
     assert.equal((await fetch(root+'/api/worker/session',{headers:{cookie:`jweb_worker=${workerToken}`}})).status,401);
     assert.equal((await fetch(root+'/api/reviewer/session',{headers:{cookie:`jweb_reviewer=${reviewerToken}`}})).status,401);
+    assert.equal((await fetch(root+'/api/client/session',{headers:{cookie:`jweb_client=${clientToken}`}})).status,401);
     assert.equal((await fetch(root+`/api/join?token=${invitation.token}`)).status,404);assert.equal((await fetch(root+`/api/worker/site?key=${siteKey}`)).status,404);
     const qrResponse=await fetch(root+`/api/sites/${site.id}/access`,{method:'POST',headers:{cookie}}),qr=await qrResponse.json(),png=PNG.sync.read(Buffer.from(qr.image.split(',')[1],'base64')),newKey=new URL(qr.link).searchParams.get('site');
     assert.equal(qrResponse.status,200);assert.notEqual(newKey,siteKey);assert.equal(jsQR(new Uint8ClampedArray(png.data),png.width,png.height)?.data,qr.link);
@@ -64,6 +71,7 @@ test('실행 중 DB의 일관된 사본을 만들고 별도 폴더에서 문서�
     const workerLogin=await fetch(root+'/api/worker/login',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({siteKey:newKey,loginId:'virtual_worker',password:'virtual-password-123'})});
     assert.equal(workerLogin.status,200);assert.equal((await workerLogin.json()).worker.id,worker.id);
     const reviewerLogin=await fetch(root+'/api/reviewer/login',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({loginId:'virtual_reviewer',password:'virtual-password-123'})});assert.equal(reviewerLogin.status,200);
+    const clientLogin=await fetch(root+'/api/client/login',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({loginId:'virtual_client',password:'virtual-password-123'})});assert.equal(clientLogin.status,200);
     assert.deepEqual(files(backupDir),[]);assert.deepEqual(files(restoreDir),[]);
   }finally{if(locked)store.db.exec('ROLLBACK');if(child&&child.exitCode===null){const exited=once(child,'exit');child.kill();await exited;}if(store)store.close();cleanup(dir);}
 });

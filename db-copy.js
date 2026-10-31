@@ -30,11 +30,11 @@ function copyDatabase(source,destination,resetAccess=false){
       if(!['sites','workers','documents','attachments'].every(name=>tables.has(name)))throw new Error('J웹 데이터베이스 형식을 확인해 주세요.');
       const check=snapshot.prepare('PRAGMA integrity_check').all();
       if(check.length!==1||Object.values(check[0])[0]!=='ok'||snapshot.prepare('PRAGMA foreign_key_check').all().length)throw new Error('데이터베이스 무결성 검사가 실패했습니다.');
-      const protectedTables=['worker_sessions','reviewer_sessions',...(resetAccess?['site_access','site_registration','invitations']:[])];
+      const protectedTables=['worker_sessions','reviewer_sessions','client_sessions',...(resetAccess?['site_access','site_registration','invitations']:[])];
       if(snapshot.prepare("SELECT tbl_name FROM sqlite_schema WHERE type='trigger'").all().some(row=>protectedTables.includes(row.tbl_name)))throw new Error('로그인 세션 테이블 또는 접속 설정의 추가 동작을 확인해 주세요.');
       snapshot.exec('PRAGMA journal_mode=DELETE; PRAGMA secure_delete=ON; BEGIN IMMEDIATE');
       try{
-        for(const table of ['worker_sessions','reviewer_sessions'])if(tables.has(table))snapshot.exec(`DELETE FROM ${table}`);
+        for(const table of ['worker_sessions','reviewer_sessions','client_sessions'])if(tables.has(table))snapshot.exec(`DELETE FROM ${table}`);
         if(resetAccess){
           if(tables.has('invitations'))snapshot.exec('UPDATE invitations SET revoked=1');
           if(tables.has('site_registration'))snapshot.exec('DELETE FROM site_registration');

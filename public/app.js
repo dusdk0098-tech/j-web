@@ -36,6 +36,7 @@ labels['site-occupations']='자주 쓰는 직종';
 labels['basic-categories']='기본 서류 분류';
 labels['ppe-issues']='보호구 지급';
 labels['reviewers']='시험 결재자';
+labels['clients']='발주처 시험 계정';
 labels['worker-access-blocks']='출입자 접속 차단';
 labels['worker-locations']='접속 위치 확인';
 labels['schedules']='일정 관리';
@@ -60,6 +61,7 @@ document.querySelector('[data-page=worker-access-blocks]').insertAdjacentHTML('a
 document.querySelector('[data-page=site-occupations]').insertAdjacentHTML('afterend','<button data-page="ppe-issues">보호구 지급</button>');
 document.querySelector('[data-page=documents]').insertAdjacentHTML('afterend','<button data-page="basic-categories">기본 서류 분류</button>');
 document.querySelector('[data-page=approval]').insertAdjacentHTML('afterend','<button data-page="reviewers">시험 결재자</button>');
+document.querySelector('[data-page=reviewers]').insertAdjacentHTML('afterend','<button data-page="clients">발주처 시험 계정</button>');
 document.querySelector('[data-page=documents]').insertAdjacentHTML('beforebegin','<button data-page="schedules">일정 관리</button>');
 document.querySelector('[data-page=schedules]').insertAdjacentHTML('afterend','<button data-page="board">게시판</button>');
 document.querySelector('[data-page=board]').insertAdjacentHTML('beforebegin','<button data-page="office-documents">업무 문서</button>');
@@ -714,8 +716,14 @@ async function renderAllSiteStatistics(siteId,from,to,month,day){
 async function render(){
   await loadSites(); $('#heading').textContent=labels[state.page];$('#crumb').textContent=labels[state.page];
   document.querySelectorAll('[data-page]').forEach(b=>b.classList.toggle('selected',b.dataset.page===state.page));
-  if(!state.siteId&&state.page!=='board'){content.innerHTML='<section class="panel empty">먼저 현장을 추가해 주세요. 시험을 위해 가상의 현장명을 사용하세요.</section>';return;}
+  if(!state.siteId&&state.page!=='board'&&state.page!=='clients'){content.innerHTML='<section class="panel empty">먼저 현장을 추가해 주세요. 시험을 위해 가상의 현장명을 사용하세요.</section>';return;}
   if(state.detail)return renderDetail();
+  if(state.page==='clients'){
+    const people=await api('/api/client-accounts');if(state.page!=='clients')return;
+    content.innerHTML='<section class="panel"><h2>발주처 시험 계정</h2><p>가상 정보로 만든 계정입니다. 계정 중지와 암호 변경 시 해당 시험 로그인을 종료합니다.</p><p><a href="/client">시험 가입·로그인 화면</a></p>'+(people.length?'<ul>'+people.map(p=>'<li>'+esc(p.name)+' · '+esc(p.login_id)+' · '+esc(p.business_name||'개인')+' · '+(p.active?'사용 중':'중지됨')+' <button type="button" data-client-status="'+p.id+'">'+(p.active?'계정 중지':'계정 재개')+'</button> <button type="button" data-client-password="'+p.id+'">암호 재설정</button></li>').join('')+'</ul>':'<p>등록된 시험 계정이 없습니다.</p>')+'</section>';
+    content.querySelectorAll('[data-client-status]').forEach(button=>button.onclick=async()=>{const person=people.find(p=>p.id===Number(button.dataset.clientStatus));if(!person||!confirm(person.name+'의 시험 계정을 '+(person.active?'중지':'재개')+'할까요?'))return;button.disabled=true;try{await api('/api/client-accounts/'+person.id,{method:'PUT',body:JSON.stringify({version:person.version,active:!person.active})});if(state.page==='clients')await render();}catch(error){showError(error);}finally{button.disabled=false;}});
+    content.querySelectorAll('[data-client-password]').forEach(button=>button.onclick=()=>{const person=people.find(p=>p.id===Number(button.dataset.clientPassword));if(!person)return;showDialog('발주처 시험 암호 재설정','<p>'+esc(person.name)+' · '+esc(person.login_id)+'</p><p>기존 시험 로그인은 종료됩니다.</p><label>새 시험 암호<input type="password" name="password" minlength="12" maxlength="256" autocomplete="new-password" required></label><label>새 시험 암호 확인<input type="password" name="confirm" minlength="12" maxlength="256" autocomplete="new-password" required></label>',data=>{if(state.page!=='clients')throw Error('화면이 변경되었습니다. 다시 확인해 주세요.');if(data.password!==data.confirm)throw Error('시험 암호가 일치하지 않습니다.');return api('/api/client-accounts/'+person.id,{method:'PUT',body:JSON.stringify({version:person.version,password:data.password})});});});return;
+  }
   if(state.page==='board'){
     const kind=state.boardKind||'notice',query=state.query,names={notice:'공지사항',system_notice:'시스템 공지',question:'문의 게시판',general:'자유 게시판'},rows=await api(`/api/board-posts?${new URLSearchParams({kind,q:query})}`);if(state.page!=='board'||(state.boardKind||'notice')!==kind||state.query!==query)return;
     content.innerHTML=`<section class="panel"><div class="panel-head"><h2>가상 게시판</h2><button type="button" id="board-add">글쓰기</button></div><p class="muted">공개한 글은 모든 현장의 시험 계정에서 조회합니다. 비밀 문의는 작성자와 관리자만 봅니다.</p><div class="filters"><label>게시판 <select id="board-kind">${Object.entries(names).map(([value,label])=>`<option value="${value}" ${value===kind?'selected':''}>${label}</option>`).join('')}</select></label><label>검색어 <input id="board-query" maxlength="200" value="${esc(query)}"></label><button type="button" id="board-search">검색</button></div>${rows.length?rows.map(row=>`<article><h3>${esc(row.title)}${row.secret?' · 비밀 문의':row.shared?' · 시험 계정 공개':' · 관리자 전용'}</h3><p>${esc(row.author_name||'관리자')} · ${esc(row.created_at)} (UTC)</p><p class="detail-body">${esc(row.body)}</p><button type="button" data-board-edit="${row.id}">수정</button> <button type="button" data-board-delete="${row.id}">삭제</button></article>`).join(''):'<p>등록된 시험 글이 없습니다.</p>'}</section>`;

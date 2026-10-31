@@ -8,6 +8,7 @@ import { CommonWork } from './common-work.js';
 import { Messages } from './messages.js';
 import { EmploymentCertificates } from './employment-certificates.js';
 import { ReviewerProfile } from './reviewer-profile.js';
+import { ClientAccounts } from './client-accounts.js';
 import { types } from './domain.js';
 import QRCode from 'qrcode';
 import { issueAccessQr,issueInvitationQr } from './qr-issue.js';
@@ -33,6 +34,7 @@ const commonWork = new CommonWork(store.db);
 const messages = new Messages(store.db);
 const employment = new EmploymentCertificates(store.db);
 const reviewerProfile = new ReviewerProfile(store.db);
+const clients = new ClientAccounts(store.db);
 const workerSessions=new WorkerSessions(store.db);
 const reviewerSessions=new ReviewerSessions(store.db),reviewerAccountFailures=new Map();let reviewerFailures=[];
 let workerFailures=[];
@@ -43,6 +45,7 @@ delete process.env.JWEB_ADMIN_PASSWORD;
 const mime = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg':'image/svg+xml', '.png':'image/png' };
 const assets = new Set(['/','/app.js','/office-template.js','/common-work-view.js','/rich-text.js','/rich-editor.js','/reviewer-office.js','/reviewer-profile.js','/employment-view.js','/employment-certificate','/employment-certificate.js','/messages-view.js','/board-view.js','/schedule.js','/batch-print.js','/date-range.js','/daily-quantities.js','/risk-scale.js','/musculoskeletal.js','/worker-link.js','/worker-location.js','/remember-worker.js','/worker-documents.js','/worker-loads.js','/join-choices.js','/join-flow.js','/worker-fields.js','/site-qr.js','/tbm-sources.js','/training-groups.js','/site-statistics.js','/restaurant-price.js','/salary-summary.js','/attendance-meals.js','/joint-examples.js','/safety-log-sources.js','/style.css','/jweb-icon.svg','/jweb-icon-192.png','/jweb-icon-512.png','/join','/join.js','/login','/login.js','/review','/review.js']);
 const json = (res, code, value) => { res.writeHead(code, {'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}); res.end(JSON.stringify(value)); };
+assets.add('/client');assets.add('/client.js');
 function checkRequestSession(req){const failure=req.checkSession?.();if(failure)throw Object.assign(new Error(failure.error),{sessionStatus:failure.status});}
 async function body(req,max=65536) {
   const chunks=[];let size=0;
@@ -83,6 +86,15 @@ const server = http.createServer(async (req, res) => {
     if(url.pathname==='/api/logout' && req.method==='POST'){
       auth.logout(token);res.setHeader('Set-Cookie',`jweb_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0${secureCookie}`);return json(res,200,{ok:true});
     }
+    const clientToken=(req.headers.cookie||'').split(';').map(x=>x.trim()).find(x=>x.startsWith('jweb_client='))?.slice(12)||'';
+    if(url.pathname==='/api/client/id-check'&&req.method==='POST'){const input=await body(req);return json(res,200,{available:clients.available(input.loginId)});}
+    if(url.pathname==='/api/client/register'&&req.method==='POST'){const input=await body(req);return json(res,201,clients.register(input));}
+    if(url.pathname==='/api/client/login'&&req.method==='POST'){
+      const input=await body(req),next=clients.login(input.loginId,input.password,clientToken);if(!next)return json(res,401,{error:'아이디 또는 암호가 올바르지 않습니다.'});
+      res.setHeader('Set-Cookie','jweb_client='+next+'; HttpOnly; SameSite=Strict; Path=/; Max-Age=28800'+secureCookie);return json(res,200,{ok:true});
+    }
+    if(url.pathname==='/api/client/logout'&&req.method==='POST'){clients.logout(clientToken);res.setHeader('Set-Cookie','jweb_client=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0'+secureCookie);return json(res,200,{ok:true});}
+    if(url.pathname==='/api/client/session'&&req.method==='GET'){const client=clients.session(clientToken);return client?json(res,200,{client}):json(res,401,{error:'발주처 시험 로그인이 필요합니다.'});}
     const reviewerToken=(req.headers.cookie||'').split(';').map(x=>x.trim()).find(x=>x.startsWith('jweb_reviewer='))?.slice(14)||'';
     if(url.pathname==='/api/reviewer/login'&&req.method==='POST'){
       const input=await body(req),now=Date.now(),accountKey=typeof input.loginId==='string'&&/^[A-Za-z0-9_]{3,40}$/.test(input.loginId)?input.loginId:'invalid';reviewerFailures=reviewerFailures.filter(time=>time>now-5*60*1000);for(const [key,times] of reviewerAccountFailures){const recent=times.filter(time=>time>now-5*60*1000);if(recent.length)reviewerAccountFailures.set(key,recent);else reviewerAccountFailures.delete(key);}
@@ -397,7 +409,7 @@ const server = http.createServer(async (req, res) => {
     if(url.pathname.startsWith('/api/')&&url.pathname!=='/api/join')req.checkSession=()=>auth.valid(token)?null:{status:401,error:'관리자 로그인이 필요합니다.'};
     if(await handleCommonWork(req,res,url,'/api/common-work'))return;
     if (req.method === 'GET' && assets.has(url.pathname)) {
-      const path = url.pathname === '/' ? '/index.html' : url.pathname === '/join' ? '/join.html' : url.pathname === '/login' ? '/login.html' : url.pathname === '/review' ? '/review.html' : url.pathname === '/employment-certificate' ? '/employment-certificate.html' : url.pathname;
+      const path = url.pathname === '/' ? '/index.html' : url.pathname === '/join' ? '/join.html' : url.pathname === '/login' ? '/login.html' : url.pathname === '/review' ? '/review.html' : url.pathname === '/client' ? '/client.html' : url.pathname === '/employment-certificate' ? '/employment-certificate.html' : url.pathname;
       res.writeHead(200, {'Content-Type':mime[extname(path)],'X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer','Content-Security-Policy':"default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; object-src 'none'; frame-ancestors 'none'"});
       return res.end(readFileSync(join(root,'public',path.slice(1))));
     }
@@ -424,6 +436,9 @@ const server = http.createServer(async (req, res) => {
       if(action==='check'&&req.method==='POST'){const input=await body(req);return json(res,200,personalNotes.check(input.siteId,id,input.version,()=>checkRequestSession(req)));}
     }
     if (url.pathname === '/api/types' && req.method === 'GET') return json(res,200,types);
+    if(url.pathname==='/api/client-accounts'&&req.method==='GET'){const result=clients.list();checkRequestSession(req);return json(res,200,result);}
+    const clientAccount=url.pathname.match(/^\/api\/client-accounts\/(\d+)$/);
+    if(clientAccount&&req.method==='PUT'){const input=await body(req);return json(res,200,clients.update(clientAccount[1],input,()=>checkRequestSession(req)));}
     const employmentProfile=url.pathname.match(/^\/api\/reviewers\/(\d+)\/employment$/);
     if(employmentProfile){if(req.method==='GET'){const result=employment.profile(url.searchParams.get('siteId'),employmentProfile[1]);checkRequestSession(req);return json(res,200,result);}if(req.method==='PUT'){const input=await body(req);return json(res,200,employment.saveProfile(input.siteId,employmentProfile[1],input,()=>checkRequestSession(req)));}}
     if(url.pathname==='/api/reviewers'){if(req.method==='GET')return json(res,200,store.reviewers(url.searchParams.get('siteId')));if(req.method==='POST')return json(res,201,store.createReviewer(await body(req)));}
@@ -909,7 +924,7 @@ const server = http.createServer(async (req, res) => {
   } catch (e) {
     // 의도한 오류는 일반 Error나 코드가 있는 오류(SQLite, URL)로 던져지고, TypeError 등 코드 없는 오류는 버그다.
     if(!(e instanceof Error)||e.constructor!==Error&&!e.code){console.error(e);return json(res,500,{error:'요청을 처리하지 못했습니다.'});}
-    if(e.code==='ERR_SQLITE_ERROR'&&Number.isInteger(e.errcode)&&[5,6].includes(e.errcode&255))return json(res,503,{error:'데이터베이스가 사용 중입니다. 잠시 후 다시 시도해 주세요.'});return json(res,[401,403,409].includes(e.sessionStatus)?e.sessionStatus:400,{error:e.message || '요청을 처리하지 못했습니다.'}); }
+    if(e.code==='ERR_SQLITE_ERROR'&&Number.isInteger(e.errcode)&&[5,6].includes(e.errcode&255))return json(res,503,{error:'데이터베이스가 사용 중입니다. 잠시 후 다시 시도해 주세요.'});return json(res,[401,403,409,429].includes(e.sessionStatus)?e.sessionStatus:400,{error:e.message || '요청을 처리하지 못했습니다.'}); }
 });
 const port = Number(process.env.PORT || 4173);
 server.listen(port, '127.0.0.1', () => console.log(`J웹: http://127.0.0.1:${port} (관리자 로그인 활성)`));
