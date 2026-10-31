@@ -8,7 +8,18 @@ import {spawn} from 'node:child_process';
 import {once} from 'node:events';
 import {runInNewContext} from 'node:vm';
 import {Store} from '../store.js';
-import {attendanceMatrix,attendanceMatrixMarkup,attendanceEditDeadline,matchesAttendanceQuery} from '../public/attendance-matrix.js';
+import {attendanceMatrix,attendanceMatrixMarkup,attendanceEditDeadline,matchesAttendanceQuery,matchesMonthlyAttendance} from '../public/attendance-matrix.js';
+
+test('월별 검색 조건은 같은 날짜의 출역 기록에 함께 적용한다',()=>{
+  const worker={name:'가상',birth_date:'2000-01-02',phone:'010-1234-5678',units:[{date:'2026-11-01',category:'직영',occupation:'목공',company:'가상 A'},{date:'2026-11-02',category:'협력업체 근로자',occupation:'철근',company:'가상 B'},{date:'2026-11-03',category:null,occupation:null,company:null}]},empty={name:'미출역',units:[]},base={date:'',category:'',occupation:'',company:'',query:''};
+  assert.equal(matchesMonthlyAttendance(empty,base),true);assert.equal(matchesMonthlyAttendance(empty,{...base,date:'2026-11-01'}),false);assert.equal(matchesMonthlyAttendance(worker,{...base,category:'직영',company:'가상 B'}),false);assert.equal(matchesMonthlyAttendance(worker,{...base,category:'직영',company:'가상 A',occupation:'목공',query:'0101234'}),true);assert.equal(matchesMonthlyAttendance(worker,{...base,date:'2026-11-02',category:'직영'}),false);assert.equal(matchesMonthlyAttendance(worker,{...base,date:'2026-11-03',company:'기록 없음'}),true);assert.equal(matchesMonthlyAttendance(worker,{...base,query:'다른 사람'}),false);
+});
+
+test('월별 화면의 조건 변경은 일치하는 사람만 표시한다',()=>{
+  const source=readFileSync(new URL('../public/app.js',import.meta.url),'utf8').replace(/\r\n/g,'\n'),from=source.indexOf("    if(monthly.length){\n      const section=content.lastElementChild,table=section.querySelector('table'),filters="),to=source.indexOf("    content.lastElementChild.querySelectorAll('tbody tr').forEach((tr,i)=>{const worker=monthly[i]",from);assert.ok(from>=0&&to>from);
+  const controls=Object.fromEntries(['date','category','occupation','company','query'].map(key=>[key,{value:'',append(){}}])),status={},handlers={},filters={querySelector:selector=>selector==='#month-filter-count'?status:controls[selector.replace('#month-filter-','')],addEventListener:(name,handler)=>{handlers[name]=handler;}},rows=[{},{}],table={tBodies:[{rows}],parentElement:{before(){}}},section={querySelector:()=>table},content={lastElementChild:section},document={createElement:name=>name==='div'?filters:{}},monthly=[{name:'첫째',units:[{date:'2026-11-01',category:'직영',company:'가상 A',occupation:'목공'},{date:'2026-11-02',category:'외주',company:'가상 B',occupation:'철근'}]},{name:'둘째',units:[{date:'2026-11-01',category:'직영',company:'가상 B',occupation:'목공'}]}],dates=['2026-11-01','2026-11-02'];
+  runInNewContext(source.slice(from,to),{monthly,dates,content,document,matchesMonthlyAttendance,Set,Object});assert.equal(status.textContent,'검색 결과 2명');controls.category.value='직영';controls.company.value='가상 B';handlers.change();assert.equal(rows[0].hidden,true);assert.equal(rows[1].hidden,false);assert.equal(status.textContent,'검색 결과 1명');controls.date.value='2026-11-02';handlers.change();assert.equal(status.textContent,'검색 결과 0명');
+});
 
 test('출역 검색은 가상 이름·생년월일·전화번호의 구분자를 처리한다',()=>{
   const person={name:'가상 Kim',birth_date:'2000-01-02',phone:'010-1234-5678'};for(const query of ['kim','가상','000102','2000-01-02','0101234','1234-5678'])assert.equal(matchesAttendanceQuery(person,query),true,query);for(const query of ['010999','다른 이름','---'])assert.equal(matchesAttendanceQuery(person,query),false,query);assert.equal(matchesAttendanceQuery({name:'가상',birth_date:null,phone:null},'010'),false);assert.equal(matchesAttendanceQuery(person,' '),true);
