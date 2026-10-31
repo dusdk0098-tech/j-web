@@ -33,4 +33,7 @@ test('작성 화면에서 검색과 종류 변경을 반복해도 종류별 답�
   currentRows=[{querySelector:key=>({value:key==='[data-answer]'?'7명':'아침 가상 비고'})}];category.value='';search.value='';category.onchange();kind.value='rain';kind.onchange();
   assert.match(checks.html,/수정한 가상 비고/);assert.match(checks.html,/<option selected>X<\/option>/);
   currentRows=[{querySelector:key=>({value:key==='[data-answer]'?'X':'수정한 가상 비고'})}];kind.value='morning';kind.onchange();assert.match(checks.html,/7명/);assert.match(checks.html,/아침 가상 비고/);
+  currentRows=[{querySelector:key=>({value:key==='[data-answer]'?'7명':'아침 가상 비고'})}];kind.value='wind';kind.onchange();assert.match(checks.html,/시험 사진 비고/);
+  nodes['#wind-photo-note']={value:'가상 사진 설명'};currentRows=[{querySelector:key=>({value:key==='[data-answer]'?'O':'가상 점검 비고'})}];kind.value='rain';kind.onchange();
+  currentRows=[{querySelector:key=>({value:key==='[data-answer]'?'X':'수정한 가상 비고'})}];kind.value='wind';kind.onchange();assert.match(checks.html,/가상 사진 설명/);assert.match(checks.html,/가상 점검 비고/);
 });
