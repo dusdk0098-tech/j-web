@@ -52,6 +52,7 @@ assets.add('/daily-report-photos.js');
 assets.add('/site-photo-viewer.js');
 assets.add('/worker-preview.js');
 assets.add('/worker-list.js');
+assets.add('/weekly-ppe.js');
 assets.add('/reviewer-manager-check.js');
 assets.add('/basic-samples.js');
 function checkRequestSession(req){const failure=req.checkSession?.();if(failure)throw Object.assign(new Error(failure.error),{sessionStatus:failure.status});}
