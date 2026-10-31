@@ -51,6 +51,7 @@ labels['ppe-issues']='보호구 지급';
 labels['reviewers']='시험 결재자';
 labels['clients']='발주처 시험 계정';
 labels['worker-access-blocks']='출입자 접속 차단';
+labels['worker-permissions']='출입자 시험 권한';
 labels['worker-locations']='접속 위치 확인';
 labels['schedules']='일정 관리';
 labels['board']='게시판';
@@ -70,6 +71,7 @@ document.querySelector('[data-page=personal-notes]').insertAdjacentHTML('beforeb
 document.querySelector('[data-page=site-articles]').insertAdjacentHTML('beforebegin','<button data-page="site-photos">현장사진</button>');
 document.querySelector('[data-page=workers]').insertAdjacentHTML('afterend','<button data-page="site-occupations">자주 쓰는 직종</button>');
 document.querySelector('[data-page=workers]').insertAdjacentHTML('afterend','<button data-page="worker-access-blocks">출입자 접속 차단</button>');
+document.querySelector('[data-page=worker-access-blocks]').insertAdjacentHTML('afterend','<button data-page="worker-permissions">출입자 시험 권한</button>');
 document.querySelector('[data-page=worker-access-blocks]').insertAdjacentHTML('afterend','<button data-page="worker-locations">접속 위치 확인</button>');
 document.querySelector('[data-page=site-occupations]').insertAdjacentHTML('afterend','<button data-page="ppe-issues">보호구 지급</button>');
 document.querySelector('[data-page=documents]').insertAdjacentHTML('afterend','<button data-page="basic-categories">기본 서류 분류</button>');
@@ -150,7 +152,7 @@ async function editWorker(worker=null){
   }catch(error){showError(error);}
 }
 async function showWorkerPermissions(worker){
-  try{const siteId=state.siteId,permissions=await api(`/api/workers/${worker.id}/permissions?siteId=${siteId}`);if(state.siteId!==siteId||state.page!=='workers')return;showDialog('시험 특별권한',`<p>${esc(worker.name)} · ${esc(worker.company)}</p><p>가상 출역 관리 또는 본인 작성 문서의 시험 권한입니다.</p>${Object.entries({training:'TBM·안전교육 작성',attendance:'출역 관리',risk:'위험성평가 작성',work_plan:'작업계획서 작성'}).map(([key,label])=>`<label><input type="checkbox" data-worker-permission value="${key}" ${permissions.includes(key)?'checked':''}> ${label}</label>`).join('')}`,()=>api(`/api/workers/${worker.id}/permissions`,{method:'PUT',body:JSON.stringify({siteId,permissions:[...document.querySelectorAll('[data-worker-permission]:checked')].map(input=>input.value)})}));}catch(error){showError(error);}
+  try{const siteId=state.siteId,permissions=await api(`/api/workers/${worker.id}/permissions?siteId=${siteId}`);if(state.siteId!==siteId||state.page!=='workers')return;showDialog('시험 특별권한',`<p>${esc(worker.name)} · ${esc(worker.company)}</p><p>가상 출역 관리 또는 본인 작성 문서의 시험 권한입니다.</p>${Object.entries({training:'TBM·안전교육 작성',attendance:'출역 관리',risk:'위험성평가 작성',work_plan:'작업계획서 작성'}).map(([key,label])=>`<label><input type="checkbox" data-worker-permission value="${key}" ${permissions.includes(key)?'checked':''}> ${label}</label>`).join('')}`,()=>api(`/api/workers/${worker.id}/permissions`,{method:'PUT',body:JSON.stringify({siteId,expectedPermissions:permissions,permissions:[...document.querySelectorAll('[data-worker-permission]:checked')].map(input=>input.value)})}));}catch(error){showError(error);}
 }
 async function showJoinRecord(worker){
   try{const record=await api(`/api/workers/${worker.id}/join-record?siteId=${state.siteId}`),labels={birthDate:'생년월일',phone:'전화번호',emergencyName:'비상연락 대상',emergencyPhone:'비상연락처',address:'주소',nationality:'국적',bloodType:'혈액형',healthStatus:'건강 상태',pledge:'안전수칙 서약'};showDialog('시험 가입 기록',record?`<p>가상 보호구: ${esc(record.equipment.join(', ')||'선택 없음')}</p>${record.profile?Object.entries(labels).map(([key,label])=>`<p>가상 ${esc(label)}: ${esc(record.profile[key]||'미입력')}</p>`).join(''):'<p>가상 인적사항 미기록</p>'}<p>안내 확인: ${esc(record.created_at)} (UTC)</p>${record.has_signature?`<p><a href="/api/workers/${worker.id}/join-record/signature?siteId=${state.siteId}">시험 서명 다운로드</a></p>`:'<p>시험 서명 없음</p>'}<p class="muted">실제 보호구 지급이나 본인 확인을 증명하지 않습니다.</p>`:'<p>가입 기록이 없습니다.</p>',async()=>{});}catch(error){showError(error);}
@@ -827,6 +829,12 @@ async function render(){
     form.onsubmit=async event=>{event.preventDefault();const button=form.querySelector('button[type=submit]');button.disabled=true;try{const enabled=form.elements.enabled.checked,values=enabled?Object.fromEntries(names.map(name=>[name,Number(form.elements[name].value)])):{};await api(`${base}/location-policy`,{method:'PUT',body:JSON.stringify({enabled,expectedVersion:policy.version,...values})});if(state.siteId===siteId&&state.page==='worker-locations')await render();}catch(error){showError(error);}finally{button.disabled=false;}};
     $('#location-search').onclick=()=>{const value=$('#location-date').value;if(!value){flash('조회일을 선택해 주세요.',true);return;}state.workerLocationDate=value;render().catch(showError);};
     content.querySelectorAll('[data-location-delete]').forEach(button=>button.onclick=async()=>{if(!confirm('선택한 시험 위치 기록을 삭제할까요?'))return;button.disabled=true;try{await api(`${base}/location-events/${button.dataset.locationDelete}`,{method:'DELETE'});if(state.siteId===siteId&&state.page==='worker-locations')await render();}catch(error){showError(error);button.disabled=false;}});return;
+  }
+  if(state.page==='worker-permissions'){
+    const siteId=state.siteId,epoch=detailEpoch,people=await api(`/api/sites/${siteId}/worker-permissions`);if(state.page!=='worker-permissions'||state.siteId!==siteId||detailEpoch!==epoch)return;
+    const names={training:'TBM·안전교육 작성',attendance:'출역 관리',risk:'위험성평가 작성',work_plan:'작업계획서 작성'};
+    content.innerHTML=`<section class="panel"><h2>출입자 시험 권한</h2><p>선택한 현장의 가상 계정에 부여된 시험 권한입니다. 권한 추가는 출입자 관리에서 할 수 있습니다.</p>${people.length?`<div class="table-wrap"><table><thead><tr><th>소속</th><th>이름</th><th>가상 생년월일</th><th>가상 전화번호</th><th>구분</th><th>직종</th><th>권한</th></tr></thead><tbody>${people.map(person=>`<tr><td>${esc(person.company)}</td><td>${esc(person.name)}</td><td>${esc(person.birth_date||'미기록')}</td><td>${esc(person.phone||'미기록')}</td><td>${esc(person.category)}</td><td>${esc(person.occupation)}</td><td>${person.permissions.map(permission=>`<p>${esc(names[permission]||permission)} <button type="button" data-permission-worker="${person.id}" data-permission-key="${esc(permission)}">해제</button></p>`).join('')}</td></tr>`).join('')}</tbody></table></div>`:'<p>부여된 시험 권한이 없습니다.</p>'}</section>`;
+    content.querySelectorAll('[data-permission-worker]').forEach(button=>button.onclick=async()=>{const person=people.find(item=>item.id===Number(button.dataset.permissionWorker)),key=button.dataset.permissionKey;if(!person||!person.permissions.includes(key)||!confirm(`${person.name}의 ${names[key]||key} 시험 권한을 해제할까요?`))return;button.disabled=true;try{await api(`/api/workers/${person.id}/permissions`,{method:'PUT',body:JSON.stringify({siteId,permissions:person.permissions.filter(value=>value!==key),expectedPermissions:person.permissions})});if(state.page==='worker-permissions'&&state.siteId===siteId&&detailEpoch===epoch)await render();}catch(error){if(state.page==='worker-permissions'&&state.siteId===siteId&&detailEpoch===epoch)showError(error);}finally{button.disabled=false;}});return;
   }
   if(state.page==='worker-access-blocks'){
     const siteId=state.siteId,month=state.blockMonth||today().slice(0,7),currentMonth=today().slice(0,7),path=value=>`/api/sites/${siteId}/worker-access-blocks?month=${encodeURIComponent(value)}`,[blocks,currentBlocks]=await Promise.all([api(path(month)),month===currentMonth?Promise.resolve(null):api(path(currentMonth))]);if(state.siteId!==siteId||state.page!=='worker-access-blocks'||(state.blockMonth||today().slice(0,7))!==month)return;

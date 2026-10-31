@@ -1198,9 +1198,15 @@ export class Store {
     if(!this.db.prepare('SELECT 1 FROM workers WHERE id=? AND site_id=?').get(Number(workerId),Number(siteId)))throw new Error('선택한 현장의 출입자를 확인해 주세요.');
     return this.db.prepare('SELECT permission FROM worker_permissions WHERE worker_id=? ORDER BY permission').all(Number(workerId)).map(row=>row.permission);
   }
-  setWorkerPermissions(siteId,workerId,permissions,onAuthorize=()=>{}){
+  workerPermissionOverview(siteId){
+    if(!this.db.prepare('SELECT 1 FROM sites WHERE id=?').get(Number(siteId)))throw new Error('현장을 선택해 주세요.');
+    const rows=this.db.prepare("SELECT w.id,w.site_id,w.name,w.company,w.category,w.occupation,p.permission,CASE WHEN json_valid(j.profile) THEN json_extract(j.profile,'$.birthDate') END AS birth_date,CASE WHEN json_valid(j.profile) THEN json_extract(j.profile,'$.phone') END AS phone FROM worker_permissions p JOIN workers w ON w.id=p.worker_id LEFT JOIN join_acknowledgements j ON j.worker_id=w.id WHERE w.site_id=? ORDER BY w.name,w.id,p.permission").all(Number(siteId)),people=new Map();
+    for(const {permission,...worker} of rows){if(!people.has(worker.id))people.set(worker.id,{...worker,permissions:[]});people.get(worker.id).permissions.push(permission);}return [...people.values()];
+  }
+  setWorkerPermissions(siteId,workerId,permissions,onAuthorize=()=>{},expectedPermissions){
     if(!Array.isArray(permissions)||permissions.some(value=>!['attendance','risk','work_plan','training'].includes(value))||new Set(permissions).size!==permissions.length)throw new Error('시험 권한을 확인해 주세요.');
-    this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();this.workerPermissions(siteId,workerId);
+    if(expectedPermissions!==undefined&&(!Array.isArray(expectedPermissions)||expectedPermissions.some(value=>!['attendance','risk','work_plan','training'].includes(value))||new Set(expectedPermissions).size!==expectedPermissions.length))throw new Error('이전 시험 권한을 확인해 주세요.');
+    this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();const current=this.workerPermissions(siteId,workerId);if(expectedPermissions!==undefined&&JSON.stringify(current)!==JSON.stringify([...expectedPermissions].sort()))throw Object.assign(new Error('시험 권한이 변경되었습니다. 다시 조회해 주세요.'),{sessionStatus:409});
     if(permissions.length&&!this.db.prepare('SELECT 1 FROM worker_accounts WHERE site_id=? AND worker_id=?').get(Number(siteId),Number(workerId)))throw new Error('시험 계정이 있는 출입자를 선택해 주세요.');
     this.db.prepare('DELETE FROM worker_permissions WHERE worker_id=?').run(Number(workerId));for(const permission of permissions)this.db.prepare('INSERT INTO worker_permissions(worker_id,permission) VALUES(?,?)').run(Number(workerId),permission);const result=this.workerPermissions(siteId,workerId);this.db.exec('COMMIT');return result;}catch(error){this.db.exec('ROLLBACK');throw error;}
   }

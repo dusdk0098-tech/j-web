@@ -806,7 +806,9 @@ const server = http.createServer(async (req, res) => {
     if(url.pathname==='/api/workers/preview'&&req.method==='POST'){const input=await body(req),result=store.previewWorkers(input.siteId,input.items,()=>checkRequestSession(req));return json(res,200,result);}
     const worker=url.pathname.match(/^\/api\/workers\/(\d+)$/);
     const workerPermissions=url.pathname.match(/^\/api\/workers\/(\d+)\/permissions$/);
-    if(workerPermissions){if(req.method==='GET')return json(res,200,store.workerPermissions(url.searchParams.get('siteId'),workerPermissions[1]));if(req.method==='PUT'){const input=await body(req);return json(res,200,store.setWorkerPermissions(input.siteId,workerPermissions[1],input.permissions,()=>checkRequestSession(req)));}}
+    if(workerPermissions){if(req.method==='GET')return json(res,200,store.workerPermissions(url.searchParams.get('siteId'),workerPermissions[1]));if(req.method==='PUT'){const input=await body(req);return json(res,200,store.setWorkerPermissions(input.siteId,workerPermissions[1],input.permissions,()=>checkRequestSession(req),input.expectedPermissions));}}
+    const workerPermissionOverview=url.pathname.match(/^\/api\/sites\/(\d+)\/worker-permissions$/);
+    if(workerPermissionOverview&&req.method==='GET'){const result=store.workerPermissionOverview(workerPermissionOverview[1]);checkRequestSession(req);return json(res,200,result);}
     const workerActivity=url.pathname.match(/^\/api\/workers\/(\d+)\/activities$/);
     if(workerActivity&&req.method==='GET'){const raw=url.searchParams.get('offset')||'0';if(!/^\d+$/.test(raw))throw new Error('활동 검색 조건을 확인해 주세요.');return json(res,200,store.workerActivities(url.searchParams.get('siteId'),workerActivity[1],url.searchParams.getAll('kind'),Number(raw)));}
     const workerAccountBlock=url.pathname.match(/^\/api\/workers\/(\d+)\/access-block$/);
