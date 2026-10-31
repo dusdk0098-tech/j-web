@@ -1,4 +1,4 @@
-import { workerSitePath,replaceWorkerSiteAddress } from './worker-link.js';
+import { workerSitePath,replaceWorkerSiteAddress,workerJoinCredentials } from './worker-link.js';
 import { mountWorkerDocuments } from './worker-documents.js';
 import { mountJoinChoices } from './join-choices.js';
 import { workerFieldRequirements } from './worker-fields.js';
@@ -50,7 +50,7 @@ try {
 } catch(error) {site.textContent='';message.textContent=error.message;}
 form.onsubmit=async event=>{
   event.preventDefault();const submit=form.querySelector('button[type=submit], button:not([type])');submit.disabled=true;
-  try {const equipment=[...form.querySelectorAll('[name=equipment]:checked')].map(input=>input.value),profile=Object.fromEntries(['birthDate','phone','emergencyName','emergencyPhone','address','nationality','bloodType','healthStatus','pledge'].map(key=>[key,form.elements[key].value])),response=await fetch('/api/join',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...Object.fromEntries(new FormData(form)),profile,equipment,signature:joinPad.value(),acknowledged:form.elements.acknowledged.checked,token,siteKey})});const data=await response.json();if(!response.ok)throw Error(data.error);adoptSiteAddress(data.siteKey);form.reset();updateWorkerRequirements();joinPad.clear();form.hidden=true;message.textContent='시험 등록이 완료되었습니다. 위에서 로그인하세요.';}catch(error){message.textContent=error.message;}finally{submit.disabled=false;}
+  try {const equipment=[...form.querySelectorAll('[name=equipment]:checked')].map(input=>input.value),profile=Object.fromEntries(['birthDate','phone','emergencyName','emergencyPhone','address','nationality','bloodType','healthStatus','pledge'].map(key=>[key,form.elements[key].value])),response=await fetch('/api/join',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...Object.fromEntries(new FormData(form)),profile,equipment,signature:joinPad.value(),acknowledged:form.elements.acknowledged.checked,...workerJoinCredentials(params,siteKey)})});const data=await response.json();if(!response.ok)throw Error(data.error);adoptSiteAddress(data.siteKey);form.reset();updateWorkerRequirements();joinPad.clear();form.hidden=true;message.textContent='시험 등록이 완료되었습니다. 위에서 로그인하세요.';}catch(error){message.textContent=error.message;}finally{submit.disabled=false;}
 };
 async function showWorker(worker){
     if(document.querySelector('#worker-logout'))return false;
