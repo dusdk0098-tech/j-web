@@ -22,6 +22,7 @@ test('연령대는 70대 이상도 분리하고 기존 집계는 유지한다',(
   assert.deepEqual(result.ageDecades.filter(item=>item.count).map(({label,count})=>[label,count]),[['10세 미만',1],['10대',1],['70대',2],['80대',1],['100세 이상',1],['미기록·확인 불가',2]]);
   assert.deepEqual(result.ages.map(item=>item.count),[2,0,0,0,0,4,2]);
   assert.ok(workerSummaryMarkup(result).includes('70대 2명 (25%)'));
+  assert.ok(workerSummaryMarkup(result).includes('구분: 직영 8명 (100%)'));
   const {ageDecades,...legacy}=result;assert.ok(workerSummaryMarkup(legacy).includes('60세 이상 4명 (50%)'));assert.throws(()=>workerSummaryMarkup({...result,total:0}),/집계/);
   assert.equal((workerSummaryMarkup(result).match(/stroke-dasharray=/g)||[]).length,6);
   assert.doesNotMatch(workerSummaryMarkup(result),/20대 0명/);
