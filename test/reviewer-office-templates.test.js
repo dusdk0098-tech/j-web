@@ -6,7 +6,7 @@ import { richTextFromEditor } from '../public/rich-text.js';
 
 const decode=value=>value.replace(/&(amp|lt|gt|quot|#39);/g,(_,key)=>({amp:'&',lt:'<',gt:'>',quot:'"','#39':"'"}[key]));
 function control(value=''){
-  const listeners={};return {value,hidden:false,disabled:false,isConnected:true,textContent:'',addEventListener(type,fn){(listeners[type]??=[]).push(fn);},emit(type){for(const fn of listeners[type]||[])fn();}};
+  const listeners={};return {value,hidden:false,disabled:false,isConnected:true,textContent:'',addEventListener(type,fn){(listeners[type]??=[]).push(fn);},emit(type){const event={target:{closest:()=>null},preventDefault(){}};this['on'+type]?.(event);for(const fn of listeners[type]||[])fn(event);}};
 }
 // shortcut: 생성된 기본 서식 태그만 모의 처리하며, 브라우저 배치 검증에는 실제 DOM을 사용한다.
 function richNode(tag='div'){
@@ -24,24 +24,104 @@ function richNode(tag='div'){
     querySelector(selector){return this.querySelectorAll(selector)[0]||null;}
   };
 }
-async function screen({state=null,title='',kind='품의서',body='',rich=null,saveWait=null,sources=[]}={}){
+async function screen({state=null,title='',kind='품의서',body='',rich=null,saveWait=null,sources=[],prepare=false,suggestion=async()=>null,preview=async id=>({version:'참조 버전',reference:{id,title:'가상 참조',date:'2026-10-01',body:'가상 본문',files:[]}})}={}){
   const writes=[],reads=[],bodyNode=richNode(),toolbar=control(),submit=control(),form=control(),setup=control(),editor=control(),list=control(),status=control(),newButton=control(),close=control();
-  form.elements=Object.fromEntries(Object.entries({title,date:'2026-10-31',kind,otherKind:'가상 기타',referenceDocId:'9'}).map(([key,value])=>[key,control(value)]));
+  form.elements=Object.fromEntries(Object.entries({title,date:'2026-10-31',kind,otherKind:'가상 기타',referenceDocId:prepare?'0':'9'}).map(([key,value])=>[key,control(value)]));
   const fields={'[data-rich-editor]':bodyNode,'[data-rich-toolbar]':toolbar,'[type=submit]':submit};
   form.querySelector=key=>fields[key]||null;
   form.insertAdjacentHTML=(_position,html)=>{form.markup=html;for(const match of html.matchAll(/\b(data-[\w-]+)(?=[\s>])/g))fields[`[${match[1]}]`]=control();fields['[data-leave-example]'].value='leave';};
   const setupFields=Object.fromEntries(['data-save-line','data-save-references','data-pad','data-clear','data-sign','data-upload','data-load-source','data-load-document','data-load-status'].map(key=>[`[${key}]`,control()])),line=control('2'),reference=control('2'),transition=control();transition.dataset={transition:'submit'};reference.checked=true;
-  setup.querySelector=key=>setupFields[key];setup.querySelectorAll=key=>key==='[data-line]'?[line]:key==='[data-reference]'?[reference]:key==='[data-transition]'&&state==='draft'?[transition]:[];
+  const draftLines=Array.from({length:9},()=>control()),draftReferences=Array.from({length:11},(_,index)=>({...control(String(index+2)),checked:false}));
+  setup.insertAdjacentHTML=(_position,html)=>{setup.innerHTML+=html;for(const match of html.matchAll(/\b(data-[\w-]+)(?=[\s>])/g))setupFields[`[${match[1]}]`]=control();setupFields['[data-draft-enabled]'].checked=true;};
+  setup.querySelector=key=>setupFields[key];setup.querySelectorAll=key=>key==='[data-draft-line]'?draftLines:key==='[data-draft-reference]'?draftReferences:key==='[data-line]'?[line]:key==='[data-reference]'?[reference]:key==='[data-transition]'&&state==='draft'?[transition]:[];
   editor.querySelector=key=>key==='[data-form]'?(editor.innerHTML.includes('<form data-form>')?form:null):key==='[data-close]'?close:key==='[data-setup]'?setup:null;
   editor.replaceChildren=()=>{editor.closed=true;form.isConnected=false;};const openButton=control();openButton.dataset={open:'7'};
   list.querySelectorAll=()=>state?[openButton]:[];
   const target={querySelector:key=>({'[data-list]':list,'[data-editor]':editor,'[data-status]':status,'[data-new]':newButton}[key])};
   const data={document:{id:7,title,date:'2026-10-31',body,status:state,details:JSON.stringify({kind,bodyRich:rich})},version:'가상 버전',line:[],references:[],attachments:[],events:[],hasSignature:true};
-  let optionsWait=null,sourceWait=null;const api=async(path,options={})=>{if(options.method){writes.push({path,method:options.method,input:JSON.parse(options.body)});if(saveWait)await saveWait;return data;}reads.push(path);if(path.endsWith('/options')){if(optionsWait)await optionsWait;return {people:[{id:2,name:'가상 직원'}],documents:sources.map(({id,title,date})=>({id,title,date}))};}if(path.endsWith('/7'))return data;const match=path.match(/\/office-documents\/(\d+)$/);if(match){if(sourceWait)await sourceWait;const document=sources.find(item=>item.id===Number(match[1]));if(!document)throw Error('본인 문서가 없습니다.');return {document};}return state?[data.document]:[];};
-  let active=true;await mountReviewerOffice({target,siteId:1,api,active:()=>active,pad:()=>()=> '가상 서명'});await (state?openButton:newButton).onclick();setupFields['[data-load-document]'].disabled=!sources.length;
-  return {form,fields,bodyNode,editor,setup,setupFields,status,writes,reads,line,reference,transition,close,newButton,openButton,holdOpen(promise){optionsWait=promise;},holdSource(promise){sourceWait=promise;},stop(){active=false;}};
+  let optionsWait=null,sourceWait=null;const api=async(path,options={})=>{if(options.method){writes.push({path,method:options.method,input:JSON.parse(options.body)});if(saveWait)await saveWait;return data;}reads.push(path);if(path.startsWith('/api/reviewer/office-approval-default?'))return suggestion(path);if(path.startsWith('/api/reviewer/office-reference-preview?'))return preview(Number(new URLSearchParams(path.split('?')[1]).get('id')));if(path.endsWith('/options')){if(optionsWait)await optionsWait;return {people:Array.from({length:11},(_,index)=>({id:index+2,name:'가상 직원 '+index,active:1})),documents:sources.map(({id,title,date})=>({id,title,date}))};}if(path.endsWith('/7'))return data;const match=path.match(/\/office-documents\/(\d+)$/);if(match){if(sourceWait)await sourceWait;const document=sources.find(item=>item.id===Number(match[1]));if(!document)throw Error('본인 문서가 없습니다.');return {document};}return state?[data.document]:[];};
+  const pad=(canvas,clear)=>{if(canvas!==setupFields['[data-draft-pad]'])return ()=> '가상 서명';let drawing=false,signed=false,sequence=0;canvas.ink=[];canvas.onpointerdown=()=>{drawing=true;signed=true;canvas.ink.push(++sequence);};canvas.onpointermove=()=>{if(drawing)canvas.ink.push('move');};canvas.onpointerup=canvas.onpointercancel=()=>{drawing=false;};clear.onclick=()=>{canvas.ink=[];signed=false;};return ()=>{if(!signed)throw Error('시험 서명을 다시 입력해 주세요.');return '가상 서명:'+canvas.ink.join(',');};};
+  let active=true;await mountReviewerOffice({target,siteId:1,api,active:()=>active,pad});await (state?openButton:newButton).onclick();setupFields['[data-load-document]'].disabled=!sources.length;
+  if(!state&&!prepare)setupFields['[data-draft-enabled]'].checked=false;
+  return {form,fields,bodyNode,editor,setup,setupFields,status,writes,reads,line,reference,draftLines,draftReferences,transition,close,newButton,openButton,holdOpen(promise){optionsWait=promise;},holdSource(promise){sourceWait=promise;},stop(){active=false;}};
 }
 const flush=()=>new Promise(resolve=>setImmediate(resolve));
+
+const recommendation=(id=2)=>({document:{id:8,title:'가상 이전 문서',date:'2026-10-20'},reviewers:[{reviewer_id:id,active:1}]});
+const signDraft=ui=>ui.setupFields['[data-draft-pad]'].emit('pointerdown');
+const saveDraft=async ui=>{ui.form.onsubmit({preventDefault(){}});await flush();};
+
+test('새 직원 문서는 기본 선택된 결재 준비를 문서와 한 요청에 저장한다',async()=>{
+  const ui=await screen({prepare:true,title:'가상 일괄 문서',suggestion:async()=>recommendation()});await flush();
+  assert.equal(ui.setupFields['[data-draft-enabled]'].checked,true);assert.equal(ui.draftLines.length,9);assert.equal(ui.draftLines[0].value,'2');assert.match(ui.setup.innerHTML,/작성자 시험 서명 입력 영역/);
+  ui.draftReferences[1].checked=true;ui.draftReferences[1].emit('change');signDraft(ui);await saveDraft(ui);
+  assert.equal(ui.writes.length,1);assert.deepEqual(ui.writes[0].input.officeSetup,{reviewerIds:[2],referenceIds:[3],signature:'가상 서명:1',referenceVersion:null});
+  const plain=await screen({prepare:true});plain.setupFields['[data-draft-enabled]'].checked=false;plain.setupFields['[data-draft-enabled]'].onchange();await saveDraft(plain);assert.equal(plain.writes.length,1);assert.equal(plain.writes[0].input.officeSetup,undefined);
+});
+
+test('결재자 누락·중복과 참조자 초과 및 서명 이후 문서·결재 변경을 차단한다',async()=>{
+  for(const change of [ui=>{},ui=>{ui.draftLines[0].value='2';ui.draftLines[1].value='2';},ui=>{ui.draftLines[0].value='2';ui.draftReferences.forEach(item=>item.checked=true);}]){
+    const ui=await screen({prepare:true});await flush();change(ui);signDraft(ui);await saveDraft(ui);assert.equal(ui.writes.length,0);assert.match(ui.status.textContent,/결재자|참조자/);
+  }
+  for(const change of [ui=>{ui.form.elements.title.value='변경';ui.form.emit('input');},ui=>{ui.draftLines[0].value='3';ui.draftLines[0].emit('change');},ui=>{ui.draftReferences[0].checked=true;ui.draftReferences[0].emit('change');},ui=>ui.fields['[data-apply-example]'].onclick(),ui=>ui.setupFields['[data-draft-clear]'].emit('click')]){
+    const ui=await screen({prepare:true});await flush();ui.draftLines[0].value='2';signDraft(ui);change(ui);await saveDraft(ui);assert.equal(ui.writes.length,0);assert.match(ui.status.textContent,/다시 입력/);signDraft(ui);await saveDraft(ui);assert.equal(ui.writes.length,1);
+  }
+});
+
+test('내용 변경은 옛 서명 그림과 진행 중 획을 지우고 다음 서명에는 새 획만 남긴다',async()=>{
+  for(const change of [ui=>{ui.form.elements.title.value='새 제목';ui.form.emit('input');},ui=>{ui.draftLines[0].value='3';ui.draftLines[0].emit('change');},ui=>{ui.draftReferences[0].checked=true;ui.draftReferences[0].emit('change');},ui=>ui.fields['[data-apply-example]'].onclick(),ui=>ui.setupFields['[data-draft-clear]'].emit('click')]){
+    const ui=await screen({prepare:true});await flush();ui.draftLines[0].value='2';const canvas=ui.setupFields['[data-draft-pad]'];signDraft(ui);canvas.emit('pointermove');canvas.emit('pointerup');signDraft(ui);assert.deepEqual(canvas.ink,[1,'move',2]);
+    change(ui);assert.deepEqual(canvas.ink,[]);canvas.emit('pointermove');assert.deepEqual(canvas.ink,[]);await saveDraft(ui);assert.equal(ui.writes.length,0);
+    signDraft(ui);canvas.emit('pointermove');canvas.emit('pointerup');assert.deepEqual(canvas.ink,[3,'move']);await saveDraft(ui);assert.equal(ui.writes[0].input.officeSetup.signature,'가상 서명:3,move');
+  }
+});
+
+test('같은 입력 값의 뒤늦은 change와 서명 후속 획은 현재 서명을 지우지 않는다',async()=>{
+  const ui=await screen({prepare:true,title:'서명할 제목'});await flush();ui.draftLines[0].value='2';ui.form.emit('input');const canvas=ui.setupFields['[data-draft-pad]'];signDraft(ui);canvas.emit('pointerup');ui.form.emit('change');assert.deepEqual(canvas.ink,[1]);
+  signDraft(ui);canvas.emit('pointermove');canvas.emit('pointerup');ui.draftLines[0].emit('change');assert.deepEqual(canvas.ink,[1,2,'move']);await saveDraft(ui);assert.equal(ui.writes[0].input.officeSetup.signature,'가상 서명:1,2,move');
+});
+
+test('잘못된 본문을 비교할 수 없으면 이벤트 오류 없이 서명과 획을 초기화한다',async()=>{
+  const ui=await screen({prepare:true});await flush();ui.draftLines[0].value='2';const canvas=ui.setupFields['[data-draft-pad]'];signDraft(ui);ui.bodyNode.textContent='가'.repeat(200000);assert.doesNotThrow(()=>ui.form.emit('input'));assert.deepEqual(canvas.ink,[]);canvas.emit('pointermove');assert.deepEqual(canvas.ink,[]);
+});
+
+test('추천 응답은 선택 중인 결재선·서명·변경된 문서와 종류를 덮어쓰지 않는다',async()=>{
+  for(const change of [ui=>ui.draftLines[0].emit('pointerdown'),ui=>ui.draftLines[0].emit('keydown'),ui=>{ui.draftLines[0].value='3';ui.draftLines[0].emit('change');},signDraft,ui=>{ui.form.elements.title.value='새 제목';ui.form.emit('input');},ui=>{ui.form.elements.kind.value='휴가신청서';ui.form.emit('change');}]){
+    let finish;const ui=await screen({prepare:true,suggestion:()=>new Promise(resolve=>{finish=resolve;})});change(ui);const before=ui.draftLines.map(item=>item.value);finish(recommendation());await flush();assert.deepEqual(ui.draftLines.map(item=>item.value),before);assert.equal(ui.writes.length,0);
+  }
+});
+
+test('수동 결재선 추천 교체 취소와 기타 구분 입력은 선택을 보존한다',async t=>{
+  const previous=globalThis.confirm;globalThis.confirm=()=>false;t.after(()=>{if(previous)globalThis.confirm=previous;else delete globalThis.confirm;});
+  const ui=await screen({prepare:true,suggestion:async()=>recommendation()});await flush();ui.draftLines[0].value='3';ui.draftLines[0].emit('change');const count=ui.reads.length;await ui.setupFields['[data-default-line]'].onclick();assert.equal(ui.draftLines[0].value,'3');assert.equal(ui.reads.length,count);
+  ui.form.elements.kind.value='기타';ui.form.elements.otherKind.value='새 구분';ui.form.elements.otherKind.emit('input');ui.form.elements.otherKind.emit('change');await flush();assert.equal(ui.draftLines[0].value,'3');
+});
+
+test('구분 변경 이벤트가 폼까지 전파되어도 최신 추천을 적용하고 기타 입력 즉시 옛 자동선을 지운다',async()=>{
+  const ui=await screen({prepare:true,suggestion:async path=>recommendation(path.includes(encodeURIComponent('휴가신청서'))?3:2)});await flush();assert.equal(ui.draftLines[0].value,'2');
+  ui.form.elements.kind.value='휴가신청서';ui.form.elements.kind.emit('change');ui.form.emit('change');await flush();assert.equal(ui.draftLines[0].value,'3');
+  ui.form.elements.kind.value='기타';ui.form.elements.kind.emit('change');ui.form.emit('change');await flush();assert.equal(ui.draftLines[0].value,'2');
+  ui.form.elements.otherKind.value='다른 기타';ui.form.elements.otherKind.emit('input');ui.form.emit('input');assert.equal(ui.draftLines[0].value,'');
+});
+
+test('참조 문서 변경·느린 확인·재확인은 이전 서명을 무효화한다',async()=>{
+  const resolvers=new Map(),ui=await screen({prepare:true,preview:id=>new Promise(resolve=>resolvers.set(id,resolve))});await flush();ui.draftLines[0].value='2';
+  ui.form.elements.referenceDocId.value='9';ui.form.elements.referenceDocId.emit('change');signDraft(ui);await saveDraft(ui);assert.equal(ui.writes.length,0);assert.match(ui.status.textContent,/참조 문서를 다시/);
+  ui.form.elements.referenceDocId.value='10';ui.form.elements.referenceDocId.emit('change');resolvers.get(9)({version:'오래된 버전',reference:{id:9,title:'오래된 참조',date:'',body:'',files:[]}});await flush();assert.doesNotMatch(ui.setupFields['[data-reference-preview]'].innerHTML||'',/오래된 참조/);
+  signDraft(ui);resolvers.get(10)({version:'새 버전',reference:{id:10,title:'새 참조',date:'',body:'',files:[{id:3,name:'가상.txt'}]}});await flush();await saveDraft(ui);assert.equal(ui.writes.length,0);assert.match(ui.status.textContent,/다시 입력/);assert.match(ui.setupFields['[data-reference-preview]'].innerHTML,/\/10\/attachments\/3/);signDraft(ui);await saveDraft(ui);assert.equal(ui.writes[0].input.officeSetup.referenceVersion,'새 버전');
+});
+
+test('일괄 저장 실패 후 입력과 선택을 보존하고 저장 중 추천과 이동을 차단한다',async()=>{
+  let reject;const saveWait=new Promise((_resolve,fail)=>{reject=fail;}),ui=await screen({prepare:true,title:'보존',saveWait});await flush();ui.draftLines[0].value='2';signDraft(ui);ui.form.onsubmit({preventDefault(){}});assert.equal(ui.editor.inert,true);
+  const count=ui.reads.length;await ui.setupFields['[data-default-line]'].onclick();await ui.newButton.onclick();assert.equal(ui.reads.length,count);reject(Error('가상 일괄 저장 실패'));await flush();assert.equal(ui.editor.inert,false);assert.equal(ui.form.elements.title.value,'보존');assert.equal(ui.draftLines[0].value,'2');assert.match(ui.status.textContent,/일괄 저장 실패/);
+});
+
+test('이전 문서 조회 중 결재선·서명 변경은 복사를 취소하고 적용된 복사는 재서명을 요구한다',async()=>{
+  for(const change of [ui=>{ui.draftLines[0].value='3';ui.draftLines[0].emit('change');},signDraft]){
+    let finish;const ui=await screen({prepare:true,sources:[sourceDoc()]});await flush();ui.holdSource(new Promise(resolve=>{finish=resolve;}));ui.setupFields['[data-load-source]'].value='9';const loading=ui.setupFields['[data-load-document]'].onclick();change(ui);finish();await loading;assert.equal(ui.form.elements.title.value,'');assert.match(ui.setupFields['[data-load-status]'].textContent,/바뀌어 불러오지/);
+  }
+  const ui=await screen({prepare:true,sources:[sourceDoc()]});await flush();ui.draftLines[0].value='2';signDraft(ui);ui.setupFields['[data-load-source]'].value='9';await ui.setupFields['[data-load-document]'].onclick();await saveDraft(ui);assert.equal(ui.writes.length,0);assert.match(ui.status.textContent,/다시 입력/);
+});
 
 test('직원 품의 예시는 기존 제목·다른 입력을 보존하고 실제 저장 요청에 본문을 담는다',async()=>{
   const ui=await screen({title:'직접 쓴 가상 제목'}),before={...Object.fromEntries(Object.entries(ui.form.elements).map(([key,node])=>[key,node.value]))};

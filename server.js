@@ -146,9 +146,11 @@ const server = http.createServer(async (req, res) => {
       const employmentCertificate=url.pathname.match(/^\/api\/reviewer\/employment\/(\d+)$/);
       if(employmentCertificate&&req.method==='GET'){const result=employment.get(reviewer.id,employmentCertificate[1]);checkRequestSession(req);return result?json(res,200,result):json(res,404,{error:'발급 기록을 찾을 수 없습니다.'});}
       if(url.pathname==='/api/reviewer/office-documents/options'&&req.method==='GET')return json(res,200,store.reviewerOfficeOptions(reviewer.id));
+      if(url.pathname==='/api/reviewer/office-reference-preview'&&req.method==='GET'){const result=store.reviewerOfficeReferencePreview(reviewer.id,url.searchParams.get('id'));checkRequestSession(req);return json(res,200,result);}
+      if(url.pathname==='/api/reviewer/office-approval-default'&&req.method==='GET'){const result=store.officeApprovalDefault(reviewer.site_id,url.searchParams.get('kind'),url.searchParams.get('otherKind')||'',reviewer.id);checkRequestSession(req);return json(res,200,result);}
       if(url.pathname==='/api/reviewer/office-documents'){
         if(req.method==='GET')return json(res,200,store.reviewerOfficeDocuments(reviewer.id));
-        if(req.method==='POST'){const input=await body(req,120000),doc=store.createReviewerOfficeDocument(reviewer.id,input,()=>checkRequestSession(req));return json(res,201,store.reviewerOfficeDetail(reviewer.id,doc.id));}
+        if(req.method==='POST'){const input=await body(req,220000),doc=store.createReviewerOfficeDocument(reviewer.id,input,()=>checkRequestSession(req));return json(res,201,store.reviewerOfficeDetail(reviewer.id,doc.id));}
       }
       const reviewerOffice=url.pathname.match(/^\/api\/reviewer\/office-documents\/(\d+)(?:\/(line|references|signature|transition|attachments)(?:\/(\d+))?)?$/);
       if(reviewerOffice){
