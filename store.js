@@ -12,6 +12,7 @@ import { summarizeWorkerCounts } from './public/worker-list.js';
 const siteArticleRow=row=>({...row,rich_body:row.rich_body===null?null:JSON.parse(row.rich_body)});
 const workerVersion=worker=>createHash('sha256').update(JSON.stringify([worker.id,worker.site_id,worker.name,worker.category,worker.company,worker.occupation,worker.created_date,worker.memo])).digest('hex');
 function workerMemo(value){if(typeof value!=='string'||value.length>2000||/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/.test(value))throw new Error('메모를 확인해 주세요.');return value.trim();}
+function validateManagerAnswers(answers){if(!Array.isArray(answers)||answers.length!==3||answers.some(a=>!a||!['O','X'].includes(a.answer)||typeof a.note!=='string'||a.note.length>500))throw new Error('세 항목의 O/X와 비고를 확인해 주세요.');}
 
 function workerFields(input){
   const category=text(input.category,'구분'),required=workerFieldRequirements(category),optional=(value,name,needed)=>!needed&&(value==null||typeof value==='string'&&!value.trim())?'':text(value,name);
@@ -145,6 +146,7 @@ export class Store {
       CREATE TABLE IF NOT EXISTS worker_self_checks (worker_id INTEGER NOT NULL REFERENCES workers(id),date TEXT NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(worker_id,date));
       CREATE TABLE IF NOT EXISTS manager_self_checks (site_id INTEGER NOT NULL REFERENCES sites(id),date TEXT NOT NULL,answers TEXT NOT NULL,signature BLOB NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(site_id,date));
       CREATE TABLE IF NOT EXISTS manager_days_off (site_id INTEGER NOT NULL REFERENCES sites(id),date TEXT NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(site_id,date));
+      CREATE TABLE IF NOT EXISTS reviewer_manager_checks (reviewer_id INTEGER NOT NULL REFERENCES reviewers(id),site_id INTEGER NOT NULL REFERENCES sites(id),date TEXT NOT NULL,kind TEXT NOT NULL CHECK(kind IN ('check','day_off')),answers TEXT,signature BLOB,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(reviewer_id,site_id,date),CHECK((kind='check' AND answers IS NOT NULL AND json_valid(answers) AND signature IS NOT NULL) OR (kind='day_off' AND answers IS NULL AND signature IS NULL)));
       CREATE TABLE IF NOT EXISTS worker_training_checks (worker_id INTEGER NOT NULL REFERENCES workers(id),document_id INTEGER NOT NULL REFERENCES documents(id),created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(worker_id,document_id));
       CREATE TABLE IF NOT EXISTS worker_daily_training (worker_id INTEGER NOT NULL REFERENCES workers(id),date TEXT NOT NULL,kind TEXT NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(worker_id,date,kind));
       CREATE TABLE IF NOT EXISTS training_target_config (document_id INTEGER PRIMARY KEY REFERENCES documents(id));
@@ -253,17 +255,28 @@ export class Store {
   managerChecks(siteId) {
     return this.db.prepare("SELECT date,answers,created_at,'check' AS kind FROM manager_self_checks WHERE site_id=? UNION ALL SELECT date,NULL AS answers,created_at,'day_off' AS kind FROM manager_days_off WHERE site_id=? ORDER BY date DESC LIMIT 30").all(Number(siteId),Number(siteId));
   }
-  saveManagerCheck(siteId,date,answers,signature) {
+  saveManagerCheck(siteId,date,answers,signature,onAuthorize=()=>{}) {
     date=dateValue(date);
     if(!this.db.prepare('SELECT 1 FROM sites WHERE id=?').get(Number(siteId)))throw new Error('현장을 선택해 주세요.');
-    if(!Array.isArray(answers) || answers.length!==3 || answers.some(a=>!a || !['O','X'].includes(a.answer) || typeof a.note!=='string' || a.note.length>500))throw new Error('세 항목의 O/X와 비고를 확인해 주세요.');
+    validateManagerAnswers(answers);
     const bytes=signatureBytes(signature);
-    this.db.exec('BEGIN IMMEDIATE');try{if(this.db.prepare('SELECT 1 FROM manager_self_checks WHERE site_id=? AND date=? UNION ALL SELECT 1 FROM manager_days_off WHERE site_id=? AND date=?').get(Number(siteId),date,Number(siteId),date))throw new Error('오늘의 시험 점검 또는 휴무가 이미 저장되었습니다.');this.db.prepare('INSERT INTO manager_self_checks(site_id,date,answers,signature) VALUES(?,?,?,?)').run(Number(siteId),date,JSON.stringify(answers),bytes);this.db.exec('COMMIT');}catch(error){this.db.exec('ROLLBACK');throw error;}
+    this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();if(this.db.prepare('SELECT 1 FROM manager_self_checks WHERE site_id=? AND date=? UNION ALL SELECT 1 FROM manager_days_off WHERE site_id=? AND date=?').get(Number(siteId),date,Number(siteId),date))throw new Error('오늘의 시험 점검 또는 휴무가 이미 저장되었습니다.');this.db.prepare('INSERT INTO manager_self_checks(site_id,date,answers,signature) VALUES(?,?,?,?)').run(Number(siteId),date,JSON.stringify(answers),bytes);this.db.exec('COMMIT');}catch(error){this.db.exec('ROLLBACK');throw error;}
   }
-  saveManagerDayOff(siteId,date){
+  saveManagerDayOff(siteId,date,onAuthorize=()=>{}){
     date=dateValue(date);siteId=Number(siteId);if(!this.db.prepare('SELECT 1 FROM sites WHERE id=?').get(siteId))throw new Error('현장을 선택해 주세요.');
-    this.db.exec('BEGIN IMMEDIATE');try{if(this.db.prepare('SELECT 1 FROM manager_self_checks WHERE site_id=? AND date=? UNION ALL SELECT 1 FROM manager_days_off WHERE site_id=? AND date=?').get(siteId,date,siteId,date))throw new Error('오늘의 시험 점검 또는 휴무가 이미 저장되었습니다.');this.db.prepare('INSERT INTO manager_days_off(site_id,date) VALUES(?,?)').run(siteId,date);this.db.exec('COMMIT');}catch(error){this.db.exec('ROLLBACK');throw error;}
+    this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();if(this.db.prepare('SELECT 1 FROM manager_self_checks WHERE site_id=? AND date=? UNION ALL SELECT 1 FROM manager_days_off WHERE site_id=? AND date=?').get(siteId,date,siteId,date))throw new Error('오늘의 시험 점검 또는 휴무가 이미 저장되었습니다.');this.db.prepare('INSERT INTO manager_days_off(site_id,date) VALUES(?,?)').run(siteId,date);this.db.exec('COMMIT');}catch(error){this.db.exec('ROLLBACK');throw error;}
   }
+  reviewerManagerChecks(reviewerId,onAuthorize=()=>{}){
+    this.db.exec('BEGIN');try{onAuthorize();const person=this.reviewer(reviewerId);if(!person)throw new Error('직원 계정을 확인해 주세요.');const rows=this.db.prepare('SELECT date,kind,answers,created_at FROM reviewer_manager_checks WHERE reviewer_id=? AND site_id=? ORDER BY date DESC LIMIT 30').all(person.id,person.site_id).map(row=>({...row,answers:row.answers===null?null:JSON.parse(row.answers)}));onAuthorize();this.db.exec('COMMIT');return rows;}catch(error){this.db.exec('ROLLBACK');throw error;}
+  }
+  saveReviewerManagerCheck(reviewerId,date,input,onAuthorize=()=>{}){
+    date=dateValue(date);if(!input||!['check','day_off'].includes(input.kind))throw new Error('점검 종류를 확인해 주세요.');let answers=null,signature=null;if(input.kind==='check'){validateManagerAnswers(input.answers);answers=JSON.stringify(input.answers.map(({answer,note})=>({answer,note})));signature=signatureBytes(input.signature);}
+    this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();const person=this.reviewer(reviewerId);if(!person)throw new Error('직원 계정을 확인해 주세요.');if(this.db.prepare('SELECT 1 FROM reviewer_manager_checks WHERE reviewer_id=? AND site_id=? AND date=?').get(person.id,person.site_id,date))throw new Error('오늘의 시험 점검 또는 휴무가 이미 저장되었습니다.');this.db.prepare('INSERT INTO reviewer_manager_checks(reviewer_id,site_id,date,kind,answers,signature) VALUES(?,?,?,?,?,?)').run(person.id,person.site_id,date,input.kind,answers,signature);this.db.exec('COMMIT');}catch(error){this.db.exec('ROLLBACK');throw error;}
+  }
+  siteReviewerManagerChecks(siteId,date){
+    date=dateValue(date);return this.db.prepare('SELECT c.reviewer_id AS id,r.name,c.date,c.kind,c.answers,c.created_at,c.signature IS NOT NULL AS has_signature FROM reviewer_manager_checks c JOIN reviewers r ON r.id=c.reviewer_id WHERE c.site_id=? AND c.date=? ORDER BY r.name,r.id').all(Number(siteId),date).map(row=>({...row,answers:row.answers===null?null:JSON.parse(row.answers)}));
+  }
+  siteReviewerManagerSignature(siteId,reviewerId,date){return this.db.prepare("SELECT signature FROM reviewer_manager_checks WHERE site_id=? AND reviewer_id=? AND date=? AND kind='check'").get(Number(siteId),Number(reviewerId),dateValue(date))?.signature||null;}
   sites() { return this.db.prepare('SELECT * FROM sites ORDER BY name').all(); }
   sitePhotos(siteId,from='',to='',query=''){
     if(from)from=dateValue(from);if(to)to=dateValue(to);if(from&&to&&from>to)throw new Error('조회 기간을 확인해 주세요.');if(typeof query!=='string'||query.length>200)throw new Error('검색어를 확인해 주세요.');
@@ -1421,6 +1434,7 @@ export class Store {
     for(const row of this.db.prepare('SELECT c.date,COUNT(*) AS n FROM worker_self_checks c JOIN workers w ON w.id=c.worker_id WHERE w.site_id=? AND c.date BETWEEN ? AND ? GROUP BY c.date').all(siteId,start,end))byDate.get(row.date).workerChecks=row.n;
     for(const row of this.db.prepare('SELECT date,COUNT(*) AS n FROM manager_self_checks WHERE site_id=? AND date BETWEEN ? AND ? GROUP BY date').all(siteId,start,end))byDate.get(row.date).managerChecks=row.n;
     for(const row of this.db.prepare('SELECT date,COUNT(*) AS n FROM manager_days_off WHERE site_id=? AND date BETWEEN ? AND ? GROUP BY date').all(siteId,start,end))byDate.get(row.date).managerDaysOff=row.n;
+    for(const row of this.db.prepare('SELECT date,kind,COUNT(*) AS n FROM reviewer_manager_checks WHERE site_id=? AND date BETWEEN ? AND ? GROUP BY date,kind').all(siteId,start,end))byDate.get(row.date)[row.kind==='check'?'managerChecks':'managerDaysOff']+=row.n;
     for(const row of this.db.prepare("SELECT date(created_at,'localtime') AS day,COUNT(*) AS n FROM hazard_reports WHERE site_id=? AND date(created_at,'localtime') BETWEEN ? AND ? GROUP BY day").all(siteId,start,end))byDate.get(row.day).hazardReports=row.n;
     for(const row of this.db.prepare("SELECT date,type,COUNT(*) AS n FROM documents WHERE site_id=? AND date BETWEEN ? AND ? AND type<>'office' GROUP BY date,type").all(siteId,start,end))byDate.get(row.date).documents[row.type]=row.n;
     for(const row of this.db.prepare('SELECT date,item,SUM(quantity) AS quantity FROM ppe_issues WHERE site_id=? AND date BETWEEN ? AND ? GROUP BY date,item ORDER BY date,item').all(siteId,start,end))byDate.get(row.date).ppeIssues.push({item:row.item,quantity:row.quantity});

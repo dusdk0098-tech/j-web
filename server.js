@@ -52,6 +52,7 @@ assets.add('/daily-report-photos.js');
 assets.add('/site-photo-viewer.js');
 assets.add('/worker-preview.js');
 assets.add('/worker-list.js');
+assets.add('/reviewer-manager-check.js');
 function checkRequestSession(req){const failure=req.checkSession?.();if(failure)throw Object.assign(new Error(failure.error),{sessionStatus:failure.status});}
 function dailyReportPhoto(doc,kind,id){
   const file=kind==='site'?store.sitePhoto(doc.site_id,id):store.attachment(id);
@@ -125,6 +126,11 @@ const server = http.createServer(async (req, res) => {
       req.checkSession=()=>reviewerSessions.get(key)===session&&session.expires>Date.now()&&store.reviewer(session.id)?null:{status:401,error:'결재자 로그인이 필요합니다.'};
       if(await handleCommonWork(req,res,url,'/api/reviewer/common-work',reviewer))return;
       if(url.pathname==='/api/reviewer/session'&&req.method==='GET')return json(res,200,{reviewer});
+      if(url.pathname==='/api/reviewer/manager-checks'){
+        if(req.method==='GET'){const now=new Date(),today=new Date(now.getTime()-now.getTimezoneOffset()*60000).toISOString().slice(0,10),records=store.reviewerManagerChecks(reviewer.id,()=>checkRequestSession(req));return json(res,200,{today,records});}
+        if(req.method==='POST'){const input=await body(req),now=new Date(),date=new Date(now.getTime()-now.getTimezoneOffset()*60000).toISOString().slice(0,10);if(input.expectedDate!==date)throw Object.assign(new Error('오늘 날짜가 바뀌었습니다. 다시 조회해 주세요.'),{sessionStatus:409});store.saveReviewerManagerCheck(reviewer.id,date,input,()=>{checkRequestSession(req);const current=new Date(),today=new Date(current.getTime()-current.getTimezoneOffset()*60000).toISOString().slice(0,10);if(today!==date)throw Object.assign(new Error('오늘 날짜가 바뀌었습니다. 다시 조회해 주세요.'),{sessionStatus:409});});return json(res,201,{ok:true});}
+      }
+      if(url.pathname==='/api/reviewer/manager-checks/signature'&&req.method==='GET'){const signature=store.siteReviewerManagerSignature(reviewer.site_id,reviewer.id,url.searchParams.get('date'));checkRequestSession(req);if(!signature)return json(res,404,{error:'시험 서명을 찾을 수 없습니다.'});res.writeHead(200,{'Content-Type':'image/png','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(signature);}
       if(url.pathname==='/api/reviewer/board-permissions'&&req.method==='GET'){const canWriteNotice=store.reviewerCanWriteNotice(reviewer.id);checkRequestSession(req);return json(res,200,{canWriteNotice});}
       if(url.pathname==='/api/reviewer/profile'){
         if(req.method==='GET'){const result=reviewerProfile.get(reviewer.id);checkRequestSession(req);return json(res,200,result);}
@@ -475,11 +481,15 @@ const server = http.createServer(async (req, res) => {
     if(workerAccessBlocks){if(req.method==='GET')return json(res,200,store.workerAccessBlocks(workerAccessBlocks[1],url.searchParams.get('month')));if(req.method==='PUT'){const input=await body(req),now=new Date(),today=new Date(now.getTime()-now.getTimezoneOffset()*60000).toISOString().slice(0,10);if(input.kind==='ended'&&input.date!==today)throw new Error('작업 종료는 오늘만 설정할 수 있습니다.');store.setWorkerAccessBlock(workerAccessBlocks[1],input.date,input.kind,input.blocked);return json(res,200,{ok:true});}}
     const managerChecks=url.pathname.match(/^\/api\/sites\/(\d+)\/manager-checks$/);
     const managerDayOff=url.pathname.match(/^\/api\/sites\/(\d+)\/manager-checks\/day-off$/);
-    if(managerDayOff && req.method==='POST'){const now=new Date(),date=new Date(now.getTime()-now.getTimezoneOffset()*60000).toISOString().slice(0,10);store.saveManagerDayOff(managerDayOff[1],date);return json(res,201,{ok:true});}
+    if(managerDayOff && req.method==='POST'){const now=new Date(),date=new Date(now.getTime()-now.getTimezoneOffset()*60000).toISOString().slice(0,10);store.saveManagerDayOff(managerDayOff[1],date,()=>checkRequestSession(req));return json(res,201,{ok:true});}
     if(managerChecks && req.method==='GET')return json(res,200,store.managerChecks(managerChecks[1]));
+    const staffChecks=url.pathname.match(/^\/api\/sites\/(\d+)\/reviewer-manager-checks$/);
+    if(staffChecks&&req.method==='GET'){const rows=store.siteReviewerManagerChecks(staffChecks[1],url.searchParams.get('date'));checkRequestSession(req);return json(res,200,rows);}
+    const staffSignature=url.pathname.match(/^\/api\/sites\/(\d+)\/reviewer-manager-checks\/(\d+)\/signature$/);
+    if(staffSignature&&req.method==='GET'){const signature=store.siteReviewerManagerSignature(staffSignature[1],staffSignature[2],url.searchParams.get('date'));checkRequestSession(req);if(!signature)return json(res,404,{error:'시험 서명을 찾을 수 없습니다.'});res.writeHead(200,{'Content-Type':'image/png','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(signature);}
     if(managerChecks && req.method==='POST'){
       const input=await body(req);const now=new Date(),date=new Date(now.getTime()-now.getTimezoneOffset()*60000).toISOString().slice(0,10);
-      store.saveManagerCheck(managerChecks[1],date,input.answers,input.signature);return json(res,201,{ok:true});
+      store.saveManagerCheck(managerChecks[1],date,input.answers,input.signature,()=>checkRequestSession(req));return json(res,201,{ok:true});
     }
     const siteChecks=url.pathname.match(/^\/api\/sites\/(\d+)\/self-checks$/);
     const dailySignature=url.pathname.match(/^\/api\/sites\/(\d+)\/daily-training\/(\d+)\/signature$/);

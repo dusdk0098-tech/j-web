@@ -1,6 +1,7 @@
 import { riskScaleOptions, riskScore, copyRiskItem, copyRiskImprovement, groupRiskItems, selectedMusculoskeletalItems } from './risk-scale.js';
 import { selectBatchDocuments, selectBatchItems } from './batch-print.js';
 import { paginateWorkers, workerSummaryMarkup } from './worker-list.js';
+import { managerCheckQuestions } from './reviewer-manager-check.js';
 import { siteQrSession, printSiteQr } from './site-qr.js';
 import { mountCommonWork } from './common-work-view.js';
 import { mountPersonalNoteTools } from './personal-notes-tools.js';
@@ -853,8 +854,10 @@ async function render(){
   }
   if(state.page==='manager-check'){
     const siteId=state.siteId,checks=await api(`/api/sites/${siteId}/manager-checks`),current=checks.find(c=>c.date===today()),previous=checks.filter(c=>c.kind==='check');
-    const questions=['안전장구를 착용하였습니까?','음주행위를 하지 않았습니까?','안전체조를 하였습니까?'];
+    const questions=managerCheckQuestions;
     content.innerHTML=`<section class="panel"><h2>관리자 시험 자가점검</h2><p>가상 답변과 시험 서명을 사용하세요. 실제 점검이나 본인 확인 기록이 아닙니다.</p>${current?`<p>오늘의 ${current.kind==='day_off'?'시험 휴무':'시험 점검'}가 저장되었습니다.</p>`:`<label>이전 시험 내용 불러오기 <select id="previous-manager-check"><option value="">선택</option>${previous.map((c,i)=>`<option value="${i}">${esc(c.date)}</option>`).join('')}</select></label><form id="manager-check-form">${questions.map((q,i)=>`<fieldset><legend>${esc(q)}</legend><label><input type="radio" name="answer${i}" value="O" required> O</label><label><input type="radio" name="answer${i}" value="X"> X</label><label>비고 <input name="note${i}" maxlength="500"></label></fieldset>`).join('')}<p>시험 서명</p><canvas id="manager-signature" class="signature-pad" width="320" height="120" aria-label="관리자 시험 서명 입력 영역"></canvas><button type="button" id="manager-signature-clear">지우기</button><button type="submit">시험 점검 저장</button></form><button type="button" id="manager-day-off">시험 휴무 기록</button>`}<p id="manager-check-status" role="status"></p></section>`;
+    const staffPanel=document.createElement('section');staffPanel.innerHTML=`<h3>직원별 시험 점검</h3><label>조회일 <input type="date" data-staff-date value="${esc(today())}"></label> <button type="button" data-staff-load>조회</button><div data-staff-results role="status"></div>`;$('#manager-check-status').before(staffPanel);
+    const staffDate=staffPanel.querySelector('[data-staff-date]'),staffResults=staffPanel.querySelector('[data-staff-results]'),loadStaff=async()=>{const date=staffDate.value;staffResults.textContent='불러오는 중입니다.';try{const rows=await api(`/api/sites/${siteId}/reviewer-manager-checks?date=${encodeURIComponent(date)}`);if(!staffPanel.isConnected||state.page!=='manager-check'||state.siteId!==siteId||staffDate.value!==date)return;staffResults.innerHTML=rows.length?rows.map(row=>`<article><strong>${esc(row.name)}</strong> · ${row.kind==='day_off'?'시험 휴무':'시험 점검'}${row.kind==='check'?`<ul>${questions.map((q,i)=>`<li>${esc(q)} ${esc(row.answers?.[i]?.answer||'미기록')}${row.answers?.[i]?.note?' · '+esc(row.answers[i].note):''}</li>`).join('')}</ul>${row.has_signature?`<a href="/api/sites/${siteId}/reviewer-manager-checks/${row.id}/signature?date=${encodeURIComponent(date)}">시험 서명 보기</a>`:''}`:''}</article>`).join(''):'해당 날짜의 직원 시험 점검이 없습니다.';}catch(error){if(staffPanel.isConnected&&state.page==='manager-check'&&state.siteId===siteId&&staffDate.value===date)staffResults.textContent=error.message;}};staffPanel.querySelector('[data-staff-load]').onclick=loadStaff;loadStaff();
     const daysOff=checks.filter(c=>c.kind==='day_off');if(daysOff.length)$('#manager-check-status').insertAdjacentHTML('beforebegin',`<h3>최근 시험 휴무 기록</h3><ul>${daysOff.map(day=>`<li>${esc(day.date)}</li>`).join('')}</ul>`);
     if(current?.kind==='day_off')return;
     if(current){
