@@ -1847,7 +1847,7 @@ export class Store {
     if(doc.status!=='approved')throw new Error('승인된 시험 지시서에만 조치 기록을 추가할 수 있습니다.');
     const date=dateValue(input.date),actor=text(input.actor,'가상 담당자'),content=text(input.content,'시험 조치 내용',2000);
     if(!['manager','worker'].includes(source))throw new Error('시험 기록 출처를 확인해 주세요.');
-    const signature=source==='worker'&&input.signature ? signatureBytes(input.signature) : null;
+    const signature=input.signature ? signatureBytes(input.signature) : null;
     this.db.prepare('INSERT INTO instruction_results(document_id,date,actor,content,source,signature) VALUES(?,?,?,?,?,?)').run(Number(id),date,actor,content,source,signature);return this.instructionResult(id);
   }
   workerInstructions(workerId){
