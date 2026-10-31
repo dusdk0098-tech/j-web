@@ -8,6 +8,7 @@ import { workerFieldRequirements } from './public/worker-fields.js';
 import { salarySummary } from './public/salary-summary.js';
 import { normalizeRichText,richTextToPlain } from './public/rich-text.js';
 import { summarizeWorkerCounts } from './public/worker-list.js';
+import { safetyCostAmount } from './public/safety-cost.js';
 
 const siteArticleRow=row=>({...row,rich_body:row.rich_body===null?null:JSON.parse(row.rich_body)});
 const workerVersion=worker=>createHash('sha256').update(JSON.stringify([worker.id,worker.site_id,worker.name,worker.category,worker.company,worker.occupation,worker.created_date,worker.memo])).digest('hex');
@@ -696,10 +697,7 @@ export class Store {
     const date=dateValue(input.date),description=text(input.description,'사용내역'),unit=text(input.unit,'단위');
     if(typeof input.note!=='string'||input.note.length>2000)throw new Error('비고를 확인해 주세요.');
     const price=input.unitPrice,quantity=input.quantity;
-    if(typeof price!=='string'||!/^\d{1,12}$/.test(price)||typeof quantity!=='string'||!/^\d{1,8}(?:\.\d{1,3})?$/.test(quantity))throw new Error('단가와 수량을 확인해 주세요.');
-    const [whole,fraction='']=quantity.split('.'),scale=10n**BigInt(fraction.length),numerator=BigInt(price)*(BigInt(whole)*scale+BigInt(fraction||'0'));
-    if(numerator%scale!==0n)throw new Error('금액은 원 단위로 계산되어야 합니다.');
-    const amount=(numerator/scale).toString();
+    const amount=safetyCostAmount(price,quantity);
     const id=this.db.prepare('INSERT INTO safety_costs(site_id,category,date,description,note,unit_price,quantity,unit,amount) VALUES(?,?,?,?,?,?,?,?,?)').run(siteId,category,date,description,input.note.trim(),price,quantity,unit,amount).lastInsertRowid;
     return this.db.prepare('SELECT * FROM safety_costs WHERE id=?').get(id);
   }
