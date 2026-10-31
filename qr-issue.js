@@ -8,6 +8,6 @@ export async function issueAccessQr(store,siteId,origin,rotate,render,authorize=
 
 export async function issueInvitationQr(store,siteId,origin,render,authorize=()=>{}){
   const invite=store.createInvitation(siteId,true),link=`${origin}/join?token=${encodeURIComponent(invite.token)}`;
-  try{const image=await render(link);if(!store.activateInvitation(invite.token,authorize))return null;return {link,image,expiresAt:invite.expiresAt};}
+  try{const image=await render(link);if(!store.activateInvitation(invite.token,authorize)){try{store.discardPendingInvitation(invite.token);}catch{}return null;}return {link,image,expiresAt:invite.expiresAt};}
   catch(error){try{store.discardPendingInvitation(invite.token);}catch{}throw error;}
 }

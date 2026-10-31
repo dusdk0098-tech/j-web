@@ -45,7 +45,7 @@ test('새 현장의 가입 QR이 취소되거나 실패하면 접속 주소도 �
     const site=store.createSite({name:'새 가상 현장'});let token,release;
     const pending=issueInvitationQr(store,site.id,'https://example.test',link=>{token=new URL(link).searchParams.get('token');return new Promise(resolve=>{release=resolve;});});
     assert.equal(store.siteAccessKey(site.id),null);assert.equal(store.invitation(token),null);store.revokeInvitations(site.id);release('이미지');
-    assert.equal(await pending,null);assert.equal(store.siteAccessKey(site.id),null);assert.equal(store.invitation(token),null);
+    assert.equal(await pending,null);assert.equal(store.siteAccessKey(site.id),null);assert.equal(store.invitation(token),null);assert.equal(store.db.prepare('SELECT COUNT(*) AS n FROM invitations WHERE site_id=? AND pending=1').get(site.id).n,0);
     await assert.rejects(issueInvitationQr(store,site.id,'https://example.test',async()=>{throw Error('이미지 실패');}),/이미지 실패/);assert.equal(store.siteAccessKey(site.id),null);
     await assert.rejects(issueInvitationQr(store,site.id,'https://example.test',async()=> '이미지',()=>{throw Error('권한 만료');}),/권한 만료/);assert.equal(store.siteAccessKey(site.id),null);
     const issued=await issueInvitationQr(store,site.id,'https://example.test',async()=> '이미지'),access=store.siteAccessKey(site.id);
@@ -79,6 +79,15 @@ test('가입 QR 준비 중에는 초대가 유효하지 않고 실패 후에도 
     assert.equal(store.invitation(token),null);release('가상 이미지');const issued=await pending;assert.equal(store.invitation(token).id,site.id);assert.equal(new URL(issued.link).searchParams.get('token'),token);
     let failedToken;await assert.rejects(issueInvitationQr(store,site.id,'https://example.test',async link=>{failedToken=new URL(link).searchParams.get('token');throw Error('가상 오류');}),/가상 오류/);assert.equal(store.invitation(failedToken),null);assert.equal(store.invitation(token).id,site.id);
     let unauthorized;await assert.rejects(issueInvitationQr(store,site.id,'https://example.test',async link=>{unauthorized=new URL(link).searchParams.get('token');return '이미지';},()=>{throw Error('권한 만료');}),/권한 만료/);assert.equal(store.invitation(unauthorized),null);
+  }finally{store.close();}
+});
+
+test('준비 중 만료된 초대만 정리하고 기존 유효 초대는 유지한다',async()=>{
+  const store=new Store(':memory:');try{
+    const site=store.createSite({name:'가상 현장'}),existing=await issueInvitationQr(store,site.id,'https://example.test',async()=>'이미지');let release;
+    const pending=issueInvitationQr(store,site.id,'https://example.test',()=>new Promise(resolve=>{release=resolve;}));
+    store.db.prepare('UPDATE invitations SET expires_at=0 WHERE site_id=? AND pending=1').run(site.id);release('이미지');assert.equal(await pending,null);
+    assert.equal(store.db.prepare('SELECT COUNT(*) AS n FROM invitations WHERE site_id=? AND pending=1').get(site.id).n,0);assert.equal(store.invitation(new URL(existing.link).searchParams.get('token')).id,site.id);
   }finally{store.close();}
 });
 
