@@ -78,6 +78,7 @@ export function recordInput(input) {
     if((details.timeFrom||details.timeTo)&&(!details.timeFrom||!details.timeTo||details.timeFrom>=details.timeTo))throw new Error('회의시간을 확인해 주세요.');
     const ids=value.workerIds??[];if(!Array.isArray(ids)||ids.length>100||ids.some(id=>!Number.isSafeInteger(id)||id<1)||new Set(ids).size!==ids.length)throw new Error('참석자를 확인해 주세요.');details.workerIds=ids;
     if(value.managerIds!==undefined){const managers=value.managerIds;if(!Array.isArray(managers)||managers.length>100||managers.some(id=>!Number.isSafeInteger(id)||id<1)||new Set(managers).size!==managers.length||managers.some(id=>ids.includes(id)))throw new Error('관리자 참석자를 확인해 주세요.');details.managerIds=managers;}
+    if(type!=='joint_inspection'&&value.employeeIds!==undefined){const employees=value.employeeIds;if(!Array.isArray(employees)||employees.length>100||employees.some(id=>!Number.isSafeInteger(id)||id<1)||new Set(employees).size!==employees.length)throw new Error('임직원 참석자를 확인해 주세요.');details.employeeIds=employees;}
     if(type!=='joint_inspection'){const names=value.employerParticipants??[];if(!Array.isArray(names)||names.length>100||names.some(name=>typeof name!=='string'||!name.trim()||name.trim().length>200||/[\x00-\x1f\x7f]/.test(name)))throw new Error('사용자 측 참석자를 확인해 주세요.');details.employerParticipants=names.map(name=>name.trim());}
     if(type==='work_council'){
       if(!['임시 회의','정기 회의'].includes(value.kind))throw new Error('회의 종류를 확인해 주세요.');details.kind=value.kind;

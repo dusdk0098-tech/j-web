@@ -1979,6 +1979,10 @@ export class Store {
       if(ids.some(id=>doc.details.workerIds.includes(id)))throw new Error('관리자와 근로자를 중복 선택할 수 없습니다.');
       doc.details.managerIds=ids;doc.details.managerSnapshot=ids.map(id=>{const old=prior.find(row=>row.id===id),manager=lookup.get(id,doc.siteId);if(old)return old;if(!manager)throw new Error('같은 현장의 가상 현장관리자를 선택해 주세요.');return manager;});
     }
+    if(doc.type!=='joint_inspection'){
+      const prior=current?JSON.parse(current.details).employeeSnapshot||[]:[],ids=doc.details.employeeIds??prior.map(row=>row.id),lookup=this.db.prepare('SELECT id,name FROM reviewers WHERE id=? AND site_id=? AND active=1');
+      doc.details.employeeIds=ids;doc.details.employeeSnapshot=ids.map(id=>{const old=prior.find(row=>row.id===id);if(old)return old;const employee=lookup.get(id,doc.siteId);if(!employee)throw new Error('같은 현장의 활성 임직원을 선택해 주세요.');return employee;});
+    }
   }
   validateInstructionRecipient(doc){
     if(doc.type!=='instruction')return;
