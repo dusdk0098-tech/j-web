@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Store } from '../store.js';
 import { summarizeWorkerCounts, paginateWorkers, workerSummaryMarkup } from '../public/worker-list.js';
+import { selectBatchDocuments } from '../public/batch-print.js';
 
 test('가상 출입자 요약은 날짜 경계와 누락을 구분하고 내용을 안전하게 표시한다',()=>{
   const births=['2010-03-02','2000-03-01','1996-03-02','1996-03-01','1986-03-01','1976-03-01','1966-03-01','','2026-02-30','2026-03-02'];
@@ -15,14 +16,16 @@ test('가상 출입자 요약은 날짜 경계와 누락을 구분하고 내용�
   assert.throws(()=>summarizeWorkerCounts([], '2026-02-30'),/날짜/);
 });
 
-test('가상 출입자 목록은 25명씩 자르고 유효한 페이지로 보정한다',()=>{
+test('가상 출입자 목록은 20명씩 자르고 페이지 전체를 선택할 수 있다',()=>{
   assert.deepEqual(paginateWorkers([],99),{rows:[],page:0,pages:1});
   const rows=Array.from({length:51},(_,index)=>index+1);
-  assert.deepEqual(paginateWorkers(rows,-1),{rows:rows.slice(0,25),page:0,pages:3});
-  assert.deepEqual(paginateWorkers(rows,1),{rows:rows.slice(25,50),page:1,pages:3});
-  assert.deepEqual(paginateWorkers(rows,999),{rows:[51],page:2,pages:3});
-  assert.equal(paginateWorkers(rows.slice(0,25),1).pages,1);
-  assert.equal(paginateWorkers(rows.slice(0,26),1).rows.length,1);
+  assert.deepEqual(paginateWorkers(rows,-1),{rows:rows.slice(0,20),page:0,pages:3});
+  assert.deepEqual(paginateWorkers(rows,1),{rows:rows.slice(20,40),page:1,pages:3});
+  assert.deepEqual(paginateWorkers(rows,999),{rows:rows.slice(40),page:2,pages:3});
+  assert.equal(paginateWorkers(rows.slice(0,20),1).pages,1);
+  assert.equal(paginateWorkers(rows.slice(0,21),1).rows.length,1);
+  const page=paginateWorkers(rows.map(id=>({id})),0).rows;
+  assert.deepEqual(selectBatchDocuments(page,page.map(item=>String(item.id))),rows.slice(0,20));
 });
 
 test('목록과 요약은 같은 현장·검색 조건을 사용하고 권한 실패를 되돌린다',()=>{

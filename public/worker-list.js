@@ -8,6 +8,6 @@ export function summarizeWorkerCounts(records,asOf){
   return {asOf,total:records.length,categories:[...categories].sort(([a],[b])=>a.localeCompare(b,'ko')).map(([label,count])=>({label,count})),ages};
 }
 
-export function paginateWorkers(rows,page){if(!Array.isArray(rows))throw Error('출입자 목록을 확인해 주세요.');const pages=Math.max(1,Math.ceil(rows.length/25)),current=Math.min(Math.max(Number.isSafeInteger(page)?page:0,0),pages-1);return {rows:rows.slice(current*25,(current+1)*25),page:current,pages};}
+export function paginateWorkers(rows,page){if(!Array.isArray(rows))throw Error('출입자 목록을 확인해 주세요.');const pages=Math.max(1,Math.ceil(rows.length/20)),current=Math.min(Math.max(Number.isSafeInteger(page)?page:0,0),pages-1);return {rows:rows.slice(current*20,(current+1)*20),page:current,pages};}
 
 export function workerSummaryMarkup(summary){return `<section class="worker-summary"><h3>검색 결과 요약</h3><p>가상 출입자 ${esc(summary.total)}명 · 기준일 ${esc(summary.asOf)}</p><p>구분: ${summary.categories.map(item=>`${esc(item.label)} ${esc(item.count)}명`).join(' · ')||'없음'}</p><p>가상 연령: ${summary.ages.map(item=>`${esc(item.label)} ${esc(item.count)}명`).join(' · ')}</p><p>연령은 기준일의 월일을 생일과 비교한 시험 값입니다. 생년월일이 없거나 미래이면 확인 불가로 표시합니다.</p></section>`;}
