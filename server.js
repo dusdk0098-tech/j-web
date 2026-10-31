@@ -58,6 +58,12 @@ assets.add('/basic-samples.js');
 assets.add('/reviewer-basic-documents.js');
 assets.add('/permit-roles.js');
 function checkRequestSession(req){const failure=req.checkSession?.();if(failure)throw Object.assign(new Error(failure.error),{sessionStatus:failure.status});}
+function instructionPhotoResponse(res,photo,preview){
+  const bytes=Buffer.from(photo.data),type=bytes.subarray(0,8).equals(Buffer.from('89504e470d0a1a0a','hex'))?'image/png':bytes.subarray(0,3).equals(Buffer.from('ffd8ff','hex'))?'image/jpeg':null;
+  if(preview&&!type)return json(res,415,{error:'미리 볼 수 없는 사진입니다.'});
+  const name=encodeURIComponent(photo.name).replace(/[!'()*]/g,c=>`%${c.charCodeAt(0).toString(16).toUpperCase()}`);
+  res.writeHead(200,{'Content-Type':preview?type:'application/octet-stream',...(preview?{}:{'Content-Disposition':`attachment; filename="photo"; filename*=UTF-8''${name}`}),'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(bytes);
+}
 function dailyReportPhoto(doc,kind,id){
   const file=kind==='site'?store.sitePhoto(doc.site_id,id):store.attachment(id);
   if(!file||(kind==='site'?file.date!==doc.date:file.document_id!==doc.id))return null;
@@ -380,8 +386,7 @@ const server = http.createServer(async (req, res) => {
         const photos=store.workerInstructionPhotos(session.worker.id,id);
         if(!photoId)return json(res,200,photos);
         if(!photos.some(photo=>photo.id===Number(photoId)))return json(res,404,{error:'시험 사진을 찾을 수 없습니다.'});
-        const photo=store.instructionPhoto(id,photoId),name=encodeURIComponent(photo.name).replace(/[!'()*]/g,c=>`%${c.charCodeAt(0).toString(16).toUpperCase()}`);
-        res.writeHead(200,{'Content-Type':'application/octet-stream','Content-Disposition':`attachment; filename="photo"; filename*=UTF-8''${name}`,'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(photo.data);
+        const photo=store.instructionPhoto(id,photoId);return instructionPhotoResponse(res,photo,url.searchParams.get('preview')==='1');
       }
       if(photoId)return json(res,404,{error:'요청을 찾을 수 없습니다.'});
       store.workerInstructionPhotos(session.worker.id,id);
@@ -882,7 +887,7 @@ const server = http.createServer(async (req, res) => {
         return json(res,201,{id:store.addInstructionPhoto(id,url.searchParams.get('phase'),name,Buffer.concat(chunks))});
       }
       if(photoId&&req.method==='DELETE'){store.deleteInstructionPhoto(id,photoId);return json(res,200,{ok:true});}
-      if(photoId&&req.method==='GET'){const photo=store.instructionPhoto(id,photoId);if(!photo)return json(res,404,{error:'시험 사진을 찾을 수 없습니다.'});const name=encodeURIComponent(photo.name).replace(/[!'()*]/g,c=>`%${c.charCodeAt(0).toString(16).toUpperCase()}`);res.writeHead(200,{'Content-Type':'application/octet-stream','Content-Disposition':`attachment; filename="photo"; filename*=UTF-8''${name}`,'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(photo.data);}
+      if(photoId&&req.method==='GET'){const photo=store.instructionPhoto(id,photoId);if(!photo)return json(res,404,{error:'시험 사진을 찾을 수 없습니다.'});return instructionPhotoResponse(res,photo,url.searchParams.get('preview')==='1');}
     }
     const meetingChecks=url.pathname.match(/^\/api\/documents\/(\d+)\/meeting-checks(?:\/(\d+)\/signature)?$/);
     if(meetingChecks&&req.method==='GET'){const [,id,workerId]=meetingChecks;if(!workerId)return json(res,200,store.meetingChecks(id));const signature=store.meetingWorkerSignature(id,workerId);if(!signature)return json(res,404,{error:'시험 서명을 찾을 수 없습니다.'});res.writeHead(200,{'Content-Type':'image/png','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(signature);}

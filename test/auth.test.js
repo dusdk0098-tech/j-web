@@ -592,6 +592,7 @@ test('관리자 인증 모드가 문서 API를 보호하고 로그아웃을 적�
     assert.deepEqual((await (await fetch(workerPhotos,{headers:{cookie:workerCookie}})).json()).map(p=>p.phase),['before','after']);
     assert.equal((await fetch(`${workerPhotos}/${workerPhotoId}`)).status,401);
     assert.deepEqual(Buffer.from(await (await fetch(`${workerPhotos}/${workerPhotoId}`,{headers:{cookie:workerCookie}})).arrayBuffer()),signatureBytes);
+    const workerPreview=await fetch(`${workerPhotos}/${workerPhotoId}?preview=1`,{headers:{cookie:workerCookie}});assert.equal(workerPreview.headers.get('content-type'),'image/png');assert.equal(workerPreview.headers.get('x-content-type-options'),'nosniff');assert.deepEqual(Buffer.from(await workerPreview.arrayBuffer()),signatureBytes);assert.equal((await fetch(`${workerPhotos}/${workerPhotoId}?preview=1`)).status,401);
     assert.equal((await fetch(`${workerPhotos}/999999`,{headers:{cookie:workerCookie}})).status,404);
     assert.equal((await fetch(`${base}/api/worker/instructions/${unapproved.id}/photos/${workerPhotoId}`,{headers:{cookie:workerCookie}})).status,400);
     assert.deepEqual((await (await fetch(`${base}/api/documents/${assigned.id}/instruction-photos`,{headers:{cookie}})).json()).map(p=>p.phase),['before','after']);
@@ -649,6 +650,7 @@ test('관리자 인증 모드가 문서 API를 보호하고 로그아웃을 적�
     const instructionPhotoId=(await instructionUpload.json()).id,instructionPhotoUrl=`${resultPhotos}/${instructionPhotoId}`;
     assert.equal((await (await fetch(resultPhotos,{headers:{cookie}})).json())[0].phase,'before');
     assert.deepEqual(Buffer.from(await (await fetch(instructionPhotoUrl,{headers:{cookie}})).arrayBuffer()),photo);
+    const instructionPreview=await fetch(instructionPhotoUrl+'?preview=1',{headers:{cookie}});assert.equal(instructionPreview.headers.get('content-type'),'image/png');assert.equal(instructionPreview.headers.get('cache-control'),'no-store');assert.deepEqual(Buffer.from(await instructionPreview.arrayBuffer()),photo);assert.equal((await fetch(instructionPhotoUrl+'?preview=1',{headers:{cookie:workerCookie}})).status,401);
     assert.equal((await fetch(`${base}/api/documents/${risk.id}/instruction-photos/${instructionPhotoId}`,{headers:{cookie}})).status,404);
     assert.equal((await fetch(`${resultPhotos}?phase=other`,{method:'POST',headers:{cookie,'x-file-name':'test.png'},body:photo})).status,400);
     assert.equal((await fetch(instructionPhotoUrl,{method:'DELETE',headers:{cookie}})).status,200);
