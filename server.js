@@ -98,6 +98,7 @@ const server = http.createServer(async (req, res) => {
       req.checkSession=()=>reviewerSessions.get(key)===session&&session.expires>Date.now()&&store.reviewer(session.id)?null:{status:401,error:'결재자 로그인이 필요합니다.'};
       if(await handleCommonWork(req,res,url,'/api/reviewer/common-work',reviewer))return;
       if(url.pathname==='/api/reviewer/session'&&req.method==='GET')return json(res,200,{reviewer});
+      if(url.pathname==='/api/reviewer/board-permissions'&&req.method==='GET'){const canWriteNotice=store.reviewerCanWriteNotice(reviewer.id);checkRequestSession(req);return json(res,200,{canWriteNotice});}
       if(url.pathname==='/api/reviewer/profile'){
         if(req.method==='GET'){const result=reviewerProfile.get(reviewer.id);checkRequestSession(req);return json(res,200,result);}
         if(req.method==='PUT'){const input=await body(req,120000),result=reviewerProfile.update(reviewer.id,input,()=>checkRequestSession(req));if(result.passwordChanged)res.setHeader('Set-Cookie',`jweb_reviewer=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0${secureCookie}`);return json(res,200,result);}
@@ -428,6 +429,8 @@ const server = http.createServer(async (req, res) => {
     if(url.pathname==='/api/reviewers'){if(req.method==='GET')return json(res,200,store.reviewers(url.searchParams.get('siteId')));if(req.method==='POST')return json(res,201,store.createReviewer(await body(req)));}
     const reviewerAccount=url.pathname.match(/^\/api\/reviewers\/(\d+)$/);
     if(reviewerAccount&&req.method==='PUT'){const input=await body(req),account=store.updateReviewer(input.siteId,reviewerAccount[1],input);if(input.password!==undefined){reviewerAccountFailures.delete(account.login_id);}return json(res,200,account);}
+    const reviewerNoticeWrite=url.pathname.match(/^\/api\/reviewers\/(\d+)\/notice-write$/);
+    if(reviewerNoticeWrite&&req.method==='PUT'){const input=await body(req);return json(res,200,store.setReviewerNoticeWrite(input.siteId,reviewerNoticeWrite[1],input,()=>checkRequestSession(req)));}
     const reviewerFinalApproval=url.pathname.match(/^\/api\/reviewers\/(\d+)\/final-approval$/);
     if(reviewerFinalApproval&&req.method==='PUT'){const input=await body(req);return json(res,200,store.setReviewerFinalApproval(input.siteId,reviewerFinalApproval[1],input,()=>checkRequestSession(req)));}
     const workerAccessBlocks=url.pathname.match(/^\/api\/sites\/(\d+)\/worker-access-blocks$/);
