@@ -246,6 +246,13 @@ test('현장관리자 자동 식대는 직영 설정과 분리되고 현장별�
   }finally{s.close();rmSync(dir,{recursive:true,force:true});}
 });
 
+test('자동 식대 설정은 저장 잠금 후 인증 실패 시 기존 설정을 보존한다',()=>{
+  const s=new Store(':memory:');try{
+    const site=s.createSite({name:'가상 현장'}),restaurant=s.saveRestaurant({siteId:site.id,name:'가상 식당',mealPrice:'5000',snackPrice:'1000',tax:'0'});
+    for(const group of ['direct','manager']){s.saveMealDefaults(site.id,[{kind:'lunch',restaurantId:restaurant.id}],group);assert.throws(()=>s.saveMealDefaults(site.id,[{kind:'dinner',restaurantId:restaurant.id}],group,()=>{throw Error('세션 만료');}),/세션 만료/);assert.deepEqual(s.mealDefaults(site.id,group).map(row=>row.kind),['lunch']);}
+  }finally{s.close();}
+});
+
 test('자동 식대 설정과 기록은 데이터베이스를 다시 열어도 보존된다',()=>{
   const dir=mkdtempSync(join(tmpdir(),'j-web-meal-')),path=join(dir,'test.sqlite');try{
     let s=new Store(path),site,worker;try{site=s.createSite({name:'가상 현장'});worker=s.createWorker({siteId:site.id,name:'가상 근로자',category:'직영',company:'가상 회사',occupation:'목공'});const restaurant=s.saveRestaurant({siteId:site.id,name:'가상 식당',mealPrice:'5000',snackPrice:'1000',tax:'0'});s.saveMealDefaults(site.id,[{kind:'lunch',restaurantId:restaurant.id}]);}finally{s.close();}

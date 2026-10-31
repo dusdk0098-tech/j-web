@@ -556,13 +556,12 @@ export class Store {
     const table=group==='manager'?'manager_meal_defaults':'meal_defaults';
     return this.db.prepare(`SELECT kind,restaurant_id FROM ${table} WHERE site_id=? ORDER BY kind`).all(Number(siteId));
   }
-  saveMealDefaults(siteId,items,group='direct') {
-    siteId=Number(siteId);if(!this.db.prepare('SELECT 1 FROM sites WHERE id=?').get(siteId))throw new Error('현장을 선택해 주세요.');
+  saveMealDefaults(siteId,items,group='direct',onAuthorize=()=>{}) {
+    siteId=Number(siteId);
     if(!['direct','manager'].includes(group))throw new Error('자동 식대 대상 구분을 확인해 주세요.');
     const table=group==='manager'?'manager_meal_defaults':'meal_defaults',kinds=group==='manager'?['breakfast','lunch','dinner']:['breakfast','lunch','dinner','snack'];
     if(!Array.isArray(items)||items.length>4||new Set(items.map(x=>x?.kind)).size!==items.length)throw new Error('자동 식대 설정을 확인해 주세요.');
-    for(const item of items){if(!item||!kinds.includes(item.kind)||!this.db.prepare('SELECT 1 FROM restaurants WHERE id=? AND site_id=?').get(Number(item.restaurantId),siteId))throw new Error('식사 종류와 현장의 식당을 확인해 주세요.');}
-    this.db.exec('BEGIN IMMEDIATE');try{this.db.prepare(`DELETE FROM ${table} WHERE site_id=?`).run(siteId);const insert=this.db.prepare(`INSERT INTO ${table}(site_id,kind,restaurant_id) VALUES(?,?,?)`);for(const item of items)insert.run(siteId,item.kind,Number(item.restaurantId));this.db.exec('COMMIT');}catch(error){this.db.exec('ROLLBACK');throw error;}
+    this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();if(!this.db.prepare('SELECT 1 FROM sites WHERE id=?').get(siteId))throw new Error('현장을 선택해 주세요.');for(const item of items){if(!item||!kinds.includes(item.kind)||!this.db.prepare('SELECT 1 FROM restaurants WHERE id=? AND site_id=?').get(Number(item.restaurantId),siteId))throw new Error('식사 종류와 현장의 식당을 확인해 주세요.');}this.db.prepare(`DELETE FROM ${table} WHERE site_id=?`).run(siteId);const insert=this.db.prepare(`INSERT INTO ${table}(site_id,kind,restaurant_id) VALUES(?,?,?)`);for(const item of items)insert.run(siteId,item.kind,Number(item.restaurantId));this.db.exec('COMMIT');}catch(error){this.db.exec('ROLLBACK');throw error;}
     return this.mealDefaults(siteId,group);
   }
   applyMealDefaults(workerId,date) {
