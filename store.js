@@ -206,6 +206,7 @@ export class Store {
       if(!this.db.prepare('PRAGMA table_info(site_articles)').all().some(c=>c.name==='rich_body'))this.db.exec('ALTER TABLE site_articles ADD COLUMN rich_body TEXT');
       if(!this.db.prepare('PRAGMA table_info(site_articles)').all().some(c=>c.name==='version'))this.db.exec("ALTER TABLE site_articles ADD COLUMN version TEXT NOT NULL DEFAULT ''");
       if(!this.db.prepare('PRAGMA table_info(workers)').all().some(c=>c.name==='memo'))this.db.exec("ALTER TABLE workers ADD COLUMN memo TEXT NOT NULL DEFAULT ''");
+      for(const table of ['safety_cost_photos','safety_cost_report_photos'])if(!this.db.prepare(`PRAGMA table_info(${table})`).all().some(c=>c.name==='kind'))this.db.exec(`ALTER TABLE ${table} ADD COLUMN kind TEXT NOT NULL DEFAULT 'photo' CHECK(kind IN ('photo','receipt'))`);
       this.db.exec("UPDATE site_articles SET version=lower(hex(randomblob(16))) WHERE version=''");
       this.db.exec("UPDATE board_posts SET version=lower(hex(randomblob(16))) WHERE version=''");
       this.db.exec("UPDATE reviewers SET auth_version=lower(hex(randomblob(16))) WHERE auth_version=''");
@@ -678,18 +679,19 @@ export class Store {
     const rows=this.db.prepare('SELECT * FROM safety_costs WHERE site_id=? AND date>=? AND date<? ORDER BY date,id').all(Number(siteId),`${month}-01`,`${month}-32`);
     return {rows,total:rows.reduce((sum,row)=>sum+BigInt(row.amount),0n).toString()};
   }
-  safetyCostPhotos(siteId,costId){if(!this.db.prepare('SELECT 1 FROM safety_costs WHERE id=? AND site_id=?').get(Number(costId),Number(siteId)))throw new Error('선택한 현장의 사용내역을 확인해 주세요.');return this.db.prepare('SELECT id,name,length(data) AS size FROM safety_cost_photos WHERE cost_id=? ORDER BY id').all(Number(costId));}
-  addSafetyCostPhoto(siteId,costId,name,data){
+  safetyCostPhotos(siteId,costId){if(!this.db.prepare('SELECT 1 FROM safety_costs WHERE id=? AND site_id=?').get(Number(costId),Number(siteId)))throw new Error('선택한 현장의 사용내역을 확인해 주세요.');return this.db.prepare('SELECT id,name,kind,length(data) AS size FROM safety_cost_photos WHERE cost_id=? ORDER BY id').all(Number(costId));}
+  addSafetyCostPhoto(siteId,costId,name,data,kind='photo'){
     const existing=this.safetyCostPhotos(siteId,costId);
+    if(!['photo','receipt'].includes(kind))throw new Error('증빙 유형을 확인해 주세요.');
     if(typeof name!=='string'||!name.trim()||name.length>200||/[\\/\x00-\x1f\x7f]/.test(name))throw new Error('사진 이름을 확인해 주세요.');
     if(!(data instanceof Uint8Array)||!data.length||data.length>2*1024*1024)throw new Error('사진은 1바이트 이상 2MB 이하여야 합니다.');
     const bytes=Buffer.from(data);if(!bytes.subarray(0,8).equals(Buffer.from('89504e470d0a1a0a','hex'))&&!bytes.subarray(0,3).equals(Buffer.from('ffd8ff','hex')))throw new Error('PNG 또는 JPEG 사진을 선택해 주세요.');
     if(existing.length>=20)throw new Error('사용내역당 사진은 20개까지 가능합니다.');
-    return this.db.prepare('INSERT INTO safety_cost_photos(cost_id,name,data) VALUES(?,?,?)').run(Number(costId),name,bytes).lastInsertRowid;
+    return this.db.prepare('INSERT INTO safety_cost_photos(cost_id,name,data,kind) VALUES(?,?,?,?)').run(Number(costId),name,bytes,kind).lastInsertRowid;
   }
   safetyCostPhoto(siteId,costId,id){return this.db.prepare('SELECT p.* FROM safety_cost_photos p JOIN safety_costs c ON c.id=p.cost_id WHERE c.site_id=? AND c.id=? AND p.id=?').get(Number(siteId),Number(costId),Number(id))||null;}
   deleteSafetyCostPhoto(siteId,costId,id){if(!this.safetyCostPhoto(siteId,costId,id))throw new Error('사진을 찾을 수 없습니다.');this.db.prepare('DELETE FROM safety_cost_photos WHERE cost_id=? AND id=?').run(Number(costId),Number(id));}
-  safetyCostReportPhotos(id){const doc=this.document(id);if(!doc||doc.type!=='cost'||!Array.isArray(JSON.parse(doc.details).rows))throw new Error('월간 사용내역서를 확인해 주세요.');return this.db.prepare('SELECT id,cost_id,name,length(data) AS size FROM safety_cost_report_photos WHERE document_id=? ORDER BY id').all(Number(id));}
+  safetyCostReportPhotos(id){const doc=this.document(id);if(!doc||doc.type!=='cost'||!Array.isArray(JSON.parse(doc.details).rows))throw new Error('월간 사용내역서를 확인해 주세요.');return this.db.prepare('SELECT id,cost_id,name,kind,length(data) AS size FROM safety_cost_report_photos WHERE document_id=? ORDER BY id').all(Number(id));}
   safetyCostReportPhoto(id,photoId){return this.db.prepare('SELECT * FROM safety_cost_report_photos WHERE document_id=? AND id=?').get(Number(id),Number(photoId))||null;}
   createSafetyCost(input){
     const siteId=Number(input.siteId);if(!this.db.prepare('SELECT 1 FROM sites WHERE id=?').get(siteId))throw new Error('현장을 선택해 주세요.');
@@ -708,7 +710,7 @@ export class Store {
     const progress=input.progress;if(typeof progress!=='string'||!/^\d{1,3}(?:\.\d{1,2})?$/.test(progress)||Number(progress)>100)throw new Error('공정률을 확인해 주세요.');
     const date=dateValue(input.date);this.db.exec('BEGIN IMMEDIATE');
     try{onAuthorize();if(!this.db.prepare('SELECT 1 FROM sites WHERE id=?').get(siteId))throw new Error('현장을 선택해 주세요.');const report=this.safetyCosts(siteId,month);if(!report.rows.length)throw new Error('해당 월의 사용내역을 먼저 등록해 주세요.');const categoryTotals=Array.from({length:9},(_,index)=>report.rows.filter(row=>row.category===index+1).reduce((sum,row)=>sum+BigInt(row.amount),0n).toString());const details={month,periodFrom,periodTo,...amounts,progress,categoryTotals,total:report.total,rows:report.rows};const id=this.db.prepare('INSERT INTO documents(site_id,type,title,date,body,details) VALUES(?,?,?,?,?,?)').run(siteId,'cost',`${month} 가상 월간 사용내역서`,date,'시험용 문서입니다.',JSON.stringify(details)).lastInsertRowid;
-      const copy=this.db.prepare('INSERT INTO safety_cost_report_photos(document_id,cost_id,name,data) SELECT ?,cost_id,name,data FROM safety_cost_photos WHERE cost_id=?');for(const row of report.rows)copy.run(id,row.id);
+      const copy=this.db.prepare('INSERT INTO safety_cost_report_photos(document_id,cost_id,name,data,kind) SELECT ?,cost_id,name,data,kind FROM safety_cost_photos WHERE cost_id=?');for(const row of report.rows)copy.run(id,row.id);
       this.db.exec('COMMIT');return this.document(id);
     }catch(error){this.db.exec('ROLLBACK');throw error;}
   }
