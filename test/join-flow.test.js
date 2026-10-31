@@ -13,5 +13,6 @@ test('현장 진입은 로그인과 동의 후 가입을 구분하고 닫힌 가
   flow.open(false);assert.equal(choices.hidden,false);assert.equal(joinChoice.hidden,true);joinChoice.onclick();assert.equal(form.hidden,true);loginChoice.onclick();assert.equal(login.hidden,false);assert.equal(form.hidden,true);
   flow.open(true);assert.equal(joinChoice.hidden,false);assert.equal(login.hidden,true);joinChoice.onclick();assert.equal(form.hidden,false);assert.equal(consent.hidden,false);assert.equal(details.hidden,true);next.onclick();assert.equal(details.hidden,true);assert.match(status.textContent,/확인/);
   acknowledged.checked=true;next.onclick();assert.equal(consent.hidden,true);assert.equal(details.hidden,false);back.onclick();assert.equal(consent.hidden,false);assert.equal(details.hidden,true);assert.equal(acknowledged.checked,true);
+  acknowledged.checked=false;next.onclick();assert.equal(consent.hidden,false);assert.equal(details.hidden,true);assert.match(status.textContent,/세 가지.*모두/);acknowledged.checked=true;next.onclick();assert.equal(details.hidden,false);assert.equal(status.textContent,'');
   loginChoice.onclick();assert.equal(login.hidden,false);assert.equal(form.hidden,true);flow.hide();assert.equal(choices.hidden,true);assert.equal(login.hidden,true);assert.equal(form.hidden,true);flow.open(false);assert.equal(joinChoice.hidden,true);
 });
