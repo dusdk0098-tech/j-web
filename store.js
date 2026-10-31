@@ -11,6 +11,7 @@ import { summarizeWorkerCounts } from './public/worker-list.js';
 
 const siteArticleRow=row=>({...row,rich_body:row.rich_body===null?null:JSON.parse(row.rich_body)});
 const workerVersion=worker=>createHash('sha256').update(JSON.stringify([worker.id,worker.site_id,worker.name,worker.category,worker.company,worker.occupation,worker.created_date,worker.memo])).digest('hex');
+const basicSampleTargetVersion=(row,parent)=>createHash('sha256').update(JSON.stringify([row.id,row.parent_id,row.name,row.description,parent?.name??null,parent?.description??null])).digest('hex');
 function workerMemo(value){if(typeof value!=='string'||value.length>2000||/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/.test(value))throw new Error('메모를 확인해 주세요.');return value.trim();}
 function validateManagerAnswers(answers){if(!Array.isArray(answers)||answers.length!==3||answers.some(a=>!a||!['O','X'].includes(a.answer)||typeof a.note!=='string'||a.note.length>500))throw new Error('세 항목의 O/X와 비고를 확인해 주세요.');}
 
@@ -93,6 +94,7 @@ export class Store {
       CREATE TABLE IF NOT EXISTS site_occupations (id INTEGER PRIMARY KEY,site_id INTEGER NOT NULL REFERENCES sites(id),name TEXT NOT NULL,UNIQUE(site_id,name));
       CREATE TABLE IF NOT EXISTS basic_categories (id INTEGER PRIMARY KEY AUTOINCREMENT,site_id INTEGER NOT NULL REFERENCES sites(id),parent_id INTEGER REFERENCES basic_categories(id),name TEXT NOT NULL,description TEXT NOT NULL DEFAULT '',position INTEGER NOT NULL);
       CREATE UNIQUE INDEX IF NOT EXISTS basic_category_name ON basic_categories(site_id,COALESCE(parent_id,0),name);
+      CREATE TABLE IF NOT EXISTS basic_category_samples (id INTEGER PRIMARY KEY AUTOINCREMENT,category_id INTEGER NOT NULL REFERENCES basic_categories(id) ON DELETE CASCADE,name TEXT NOT NULL,data BLOB NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
       CREATE TABLE IF NOT EXISTS restaurants (id INTEGER PRIMARY KEY,site_id INTEGER NOT NULL REFERENCES sites(id),name TEXT NOT NULL,meal_price INTEGER NOT NULL,snack_price INTEGER NOT NULL,tax INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS meal_defaults (site_id INTEGER NOT NULL REFERENCES sites(id),kind TEXT NOT NULL,restaurant_id INTEGER NOT NULL REFERENCES restaurants(id),PRIMARY KEY(site_id,kind));
       CREATE TABLE IF NOT EXISTS manager_meal_defaults (site_id INTEGER NOT NULL REFERENCES sites(id),kind TEXT NOT NULL,restaurant_id INTEGER NOT NULL REFERENCES restaurants(id),PRIMARY KEY(site_id,kind));
@@ -399,8 +401,17 @@ export class Store {
     siteId=Number(siteId);if(!this.db.prepare('SELECT 1 FROM sites WHERE id=?').get(siteId))throw new Error('현장을 선택해 주세요.');
     const rows=this.db.prepare('SELECT id,parent_id,name,description,position FROM basic_categories WHERE site_id=? ORDER BY position,id').all(siteId);
     const docs=this.db.prepare("SELECT d.id,json_extract(d.details,'$.categoryId') AS category_id,v.version FROM documents d JOIN basic_document_versions v ON v.document_id=d.id WHERE d.site_id=? AND d.type='basic' AND COALESCE(json_extract(d.details,'$.categoryId'),0)>0").all(siteId);
-    return rows.map(row=>{const linked=docs.filter(doc=>doc.category_id===row.id);return {...row,documentIds:linked.map(doc=>doc.id),documentVersions:linked.map(doc=>({id:doc.id,version:doc.version}))};});
+    const samples=this.db.prepare('SELECT s.id,s.category_id,s.name,length(s.data) AS size,s.created_at FROM basic_category_samples s JOIN basic_categories c ON c.id=s.category_id WHERE c.site_id=? ORDER BY s.id').all(siteId);
+    return rows.map(row=>{const linked=docs.filter(doc=>doc.category_id===row.id),parent=rows.find(item=>item.id===row.parent_id);return {...row,documentIds:linked.map(doc=>doc.id),documentVersions:linked.map(doc=>({id:doc.id,version:doc.version})),samples:samples.filter(sample=>sample.category_id===row.id).map(({category_id,...sample})=>sample),sampleTargetVersion:basicSampleTargetVersion(row,parent)};});
   }
+  addBasicCategorySample(siteId,categoryId,name,data,expectedVersion,onAuthorize=()=>{}){
+    siteId=Number(siteId);categoryId=Number(categoryId);if(!Number.isSafeInteger(siteId)||siteId<1||!Number.isSafeInteger(categoryId)||categoryId<1)throw new Error('현장과 분류를 확인해 주세요.');
+    if(typeof name!=='string'||!name.trim()||name.length>200||/[\\/\x00-\x1f\x7f]/.test(name))throw new Error('파일 이름을 확인해 주세요.');if(!(data instanceof Uint8Array)||!data.length||data.length>2*1024*1024)throw new Error('샘플 파일은 1바이트 이상 2MB 이하여야 합니다.');
+    if(typeof expectedVersion!=='string'||!/^[a-f0-9]{64}$/.test(expectedVersion))throw new Error('분류를 다시 조회해 주세요.');
+    this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();const category=this.basicCategories(siteId).find(row=>row.id===categoryId);if(!category)throw new Error('선택한 현장의 분류를 확인해 주세요.');if(category.sampleTargetVersion!==expectedVersion)throw Object.assign(new Error('분류가 변경되었습니다. 다시 조회해 주세요.'),{sessionStatus:409});if(category.samples.length>=20)throw new Error('분류별 샘플은 20개까지 등록할 수 있습니다.');const id=this.db.prepare('INSERT INTO basic_category_samples(category_id,name,data) VALUES(?,?,?)').run(categoryId,name.trim(),Buffer.from(data)).lastInsertRowid;this.db.exec('COMMIT');return Number(id);}catch(error){this.db.exec('ROLLBACK');throw error;}
+  }
+  basicCategorySample(siteId,categoryId,id){return this.db.prepare('SELECT s.id,s.name,s.data FROM basic_category_samples s JOIN basic_categories c ON c.id=s.category_id WHERE c.site_id=? AND c.id=? AND s.id=?').get(Number(siteId),Number(categoryId),Number(id))||null;}
+  deleteBasicCategorySample(siteId,categoryId,id,onAuthorize=()=>{}){this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();const file=this.basicCategorySample(siteId,categoryId,id);if(!file)throw new Error('선택한 분류의 샘플을 찾을 수 없습니다.');this.db.prepare('DELETE FROM basic_category_samples WHERE id=?').run(file.id);this.db.exec('COMMIT');}catch(error){this.db.exec('ROLLBACK');throw error;}}
   saveBasicCategory(siteId,input,id=null){
     siteId=Number(siteId);const name=text(input.name,'분류 이름',80),description=input.description??'';
     if(typeof description!=='string'||description.length>2000)throw new Error('분류 설명을 확인해 주세요.');
@@ -420,12 +431,14 @@ export class Store {
       const update=this.db.prepare('UPDATE basic_categories SET position=? WHERE site_id=? AND id=?');ids.forEach((id,index)=>update.run(index+1,siteId,id));this.db.exec('COMMIT');
     }catch(error){this.db.exec('ROLLBACK');throw error;}
   }
-  deleteBasicCategory(siteId,id,input){
+  deleteBasicCategory(siteId,id,input,onAuthorize=()=>{}){
     siteId=Number(siteId);id=Number(id);
+    const expectedSampleIds=input.expectedSampleIds??[];if(!Array.isArray(expectedSampleIds)||expectedSampleIds.some(id=>!Number.isSafeInteger(id)||id<1)||new Set(expectedSampleIds).size!==expectedSampleIds.length)throw new Error('삭제할 샘플을 다시 확인해 주세요.');
     if(!Array.isArray(input.expectedCategories)||input.expectedCategories.some(item=>!item||!Number.isSafeInteger(item.id)||item.id<1||!(item.parent_id===null||Number.isSafeInteger(item.parent_id))||typeof item.name!=='string'||typeof item.description!=='string'||!Number.isSafeInteger(item.position))||new Set(input.expectedCategories.map(item=>item.id)).size!==input.expectedCategories.length||!Array.isArray(input.expectedDocumentVersions)||input.expectedDocumentVersions.some(item=>!item||!Number.isSafeInteger(item.id)||item.id<1||typeof item.version!=='string'||!/^[a-f0-9]{32}$/.test(item.version))||new Set(input.expectedDocumentVersions.map(item=>item.id)).size!==input.expectedDocumentVersions.length)throw new Error('삭제할 분류와 문서를 다시 확인해 주세요.');
     this.db.exec('BEGIN IMMEDIATE');try{
-      const all=this.basicCategories(siteId),item=all.find(row=>row.id===id);if(!item)throw new Error('분류를 찾을 수 없습니다.');
+      onAuthorize();const all=this.basicCategories(siteId),item=all.find(row=>row.id===id);if(!item)throw new Error('분류를 찾을 수 없습니다.');
       const selected=all.filter(row=>row.id===id||row.parent_id===id),versions=selected.flatMap(row=>row.documentVersions),documentIds=versions.map(item=>item.id);
+      const sampleIds=selected.flatMap(row=>row.samples.map(sample=>sample.id));if(JSON.stringify([...sampleIds].sort((a,b)=>a-b))!==JSON.stringify([...expectedSampleIds].sort((a,b)=>a-b)))throw new Error('분류의 샘플이 변경되었습니다. 다시 조회해 주세요.');
       const sameCategories=(a,b)=>JSON.stringify([...a].map(({id,parent_id,name,description,position})=>({id,parent_id,name,description,position})).sort((x,y)=>x.id-y.id))===JSON.stringify([...b].map(({id,parent_id,name,description,position})=>({id,parent_id,name,description,position})).sort((x,y)=>x.id-y.id));
       const sameVersions=(a,b)=>JSON.stringify([...a].map(({id,version})=>({id,version})).sort((x,y)=>x.id-y.id))===JSON.stringify([...b].map(({id,version})=>({id,version})).sort((x,y)=>x.id-y.id));
       if(!sameCategories(selected,input.expectedCategories)||!sameVersions(versions,input.expectedDocumentVersions))throw new Error('분류나 문서가 변경되었습니다. 다시 조회해 주세요.');

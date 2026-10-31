@@ -53,6 +53,7 @@ assets.add('/site-photo-viewer.js');
 assets.add('/worker-preview.js');
 assets.add('/worker-list.js');
 assets.add('/reviewer-manager-check.js');
+assets.add('/basic-samples.js');
 function checkRequestSession(req){const failure=req.checkSession?.();if(failure)throw Object.assign(new Error(failure.error),{sessionStatus:failure.status});}
 function dailyReportPhoto(doc,kind,id){
   const file=kind==='site'?store.sitePhoto(doc.site_id,id):store.attachment(id);
@@ -705,15 +706,22 @@ const server = http.createServer(async (req, res) => {
     }
     if(url.pathname==='/api/basic-categories'){
       const siteId=url.searchParams.get('siteId');
-      if(req.method==='GET')return json(res,200,store.basicCategories(siteId));
+      if(req.method==='GET'){const rows=store.basicCategories(siteId);checkRequestSession(req);return json(res,200,rows);}
       if(req.method==='POST')return json(res,201,{id:store.saveBasicCategory(siteId,await body(req))});
       if(req.method==='PUT'){const input=await body(req);store.orderBasicCategories(siteId,input);return json(res,200,{ok:true});}
+    }
+    const basicSample=url.pathname.match(/^\/api\/basic-categories\/(\d+)\/samples(?:\/(\d+))?$/);
+    if(basicSample){
+      const [,categoryId,fileId]=basicSample,siteId=url.searchParams.get('siteId');
+      if(!fileId&&req.method==='POST'){const chunks=[];let size=0;for await(const chunk of req){size+=chunk.length;if(size>2*1024*1024)throw new Error('파일은 2MB 이하여야 합니다.');chunks.push(chunk);}checkRequestSession(req);let name;try{name=decodeURIComponent(req.headers['x-file-name']||'');}catch{throw new Error('파일 이름을 확인해 주세요.');}return json(res,201,{id:store.addBasicCategorySample(siteId,categoryId,name,Buffer.concat(chunks),url.searchParams.get('expectedVersion'),()=>checkRequestSession(req))});}
+      if(fileId&&req.method==='DELETE'){store.deleteBasicCategorySample(siteId,categoryId,fileId,()=>checkRequestSession(req));return json(res,200,{ok:true});}
+      if(fileId&&req.method==='GET'){const file=store.basicCategorySample(siteId,categoryId,fileId);checkRequestSession(req);if(!file)return json(res,404,{error:'샘플 파일을 찾을 수 없습니다.'});const name=encodeURIComponent(file.name).replace(/[!'()*]/g,c=>`%${c.charCodeAt(0).toString(16).toUpperCase()}`);res.writeHead(200,{'Content-Type':'application/octet-stream','Content-Disposition':`attachment; filename="sample"; filename*=UTF-8''${name}`,'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(file.data);}
     }
     const basicCategory=url.pathname.match(/^\/api\/basic-categories\/(\d+)$/);
     if(basicCategory){
       const siteId=url.searchParams.get('siteId');
       if(req.method==='PUT')return json(res,200,{id:store.saveBasicCategory(siteId,await body(req),basicCategory[1])});
-      if(req.method==='DELETE'){store.deleteBasicCategory(siteId,basicCategory[1],await body(req,2097152));return json(res,200,{ok:true});}
+      if(req.method==='DELETE'){store.deleteBasicCategory(siteId,basicCategory[1],await body(req,2097152),()=>checkRequestSession(req));return json(res,200,{ok:true});}
     }
     if (url.pathname === '/api/companies') {
       if(req.method==='GET'){const siteId=url.searchParams.get('siteId'),companies=store.companies(siteId);if(url.searchParams.get('withUsage')!=='1')return json(res,200,companies);const usage=store.companyUsage(siteId);return json(res,200,companies.map(company=>({...company,in_use:usage.ids.has(company.id)||usage.names.has(company.name)})));}
