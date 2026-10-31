@@ -33,7 +33,7 @@ import { checklistSources,mergeChecklistAnswers } from './checklist-copy.js';
 const $ = (s) => document.querySelector(s);
 const content = $('#content'), siteSelect = $('#site-select'), dialog = $('#dialog'), notice = $('#notice');
 const state = { page:'dashboard', siteId:null, types:{}, type:'', riskKind:'', riskContractorId:'', instructionCompanyId:'', permitCompany:'', query:'', detail:null, attendanceDate:null, attendanceMonth:null, reportFrom:null, reportTo:null, reportGroup:'worker', workerFilters:{}, workerOrder:'default', workerPage:0, documentFrom:'', documentTo:'', statisticsMonth:null, statisticsDay:'' };
-let sitePhotoEpoch=0,workerListEpoch=0,detailEpoch=0;
+let sitePhotoEpoch=0,workerListEpoch=0,detailEpoch=0,workerSelfCheckEpoch=0;
 let permitRoleCleanup=null;
 const labels = {dashboard:'현장 현황','manager-check':'관리자 자가점검',workers:'출입자 관리',companies:'협력사 관리',equipment:'기계·장비',rigging:'줄걸이·체결장구','work-places':'작업장소','safety-costs':'산업안전보건관리비',attendance:'출역 관리',stops:'작업중지 요청',documents:'안전 문서',approval:'미결재 문서',statistics:'안전 활동 통계'};
 labels['hazards']='의견제안 및 위험신고';
@@ -159,12 +159,13 @@ async function showPpeRecords(worker){
   try{const rows=await api(`/api/workers/${worker.id}/ppe-issues?siteId=${state.siteId}`);showDialog('가상 보호구 지급 내역',`<p>${esc(worker.name)} · ${esc(worker.company)}</p><p class="muted">가입 시 선택한 보호구와 별도의 시험 기록입니다.</p>${rows.length?`<ul>${rows.map(r=>`<li>${esc(r.date)} · ${esc(r.item)} · ${r.quantity}개${r.receipt_at?` · <a href="/api/ppe-issues/${r.id}/receipt?siteId=${state.siteId}">시험 서명</a>`:" · 미확인"}</li>`).join('')}</ul>`:'<p>기록이 없습니다.</p>'}`,async()=>{});$('#dialog-form button[type=submit]').textContent='닫기';}catch(error){showError(error);}
 }
 async function showWorkerSelfCheck(worker,siteId,date){
+  const activityView=$('#activity-results');if(!activityView||!dialog.open||state.siteId!==siteId)return;const request=++workerSelfCheckEpoch,active=()=>request===workerSelfCheckEpoch&&state.siteId===siteId&&dialog.open&&activityView.isConnected&&$('#activity-results')===activityView;
   try{
     const rows=await api(`/api/sites/${siteId}/self-checks?date=${encodeURIComponent(date)}`),record=rows.find(row=>row.id===worker.id&&row.created_at);
-    if(!record)throw Error('시험 자가점검 기록을 찾을 수 없습니다.');if(state.siteId!==siteId||!dialog.open||!$('#activity-results'))return;
+    if(!active())return;if(!record)throw Error('시험 자가점검 기록을 찾을 수 없습니다.');
     const questions={equipment:'안전장구 확인',sober:'음주하지 않음',exercise:'안전체조 확인',briefing:'주의사항 안내 확인'},signature=`/api/sites/${siteId}/self-checks/${worker.id}/signature?date=${encodeURIComponent(date)}`;
     dialog.close();showDialog('시험 자가점검 상세',`<div class="self-check-print"><h2>시험 자가점검</h2><p>${esc(worker.name)} · ${esc(date)}</p><p class="muted">가상 기록이며 본인 확인이나 실제 점검을 증명하지 않습니다.</p>${record.answers?`<ul>${Object.entries(questions).map(([key,label])=>`<li>${esc(label)}: ${record.answers[key]===true?'확인':'미기록'}</li>`).join('')}</ul>`:'<p>이전 기록의 답변은 보존되지 않았습니다.</p>'}${record.has_signature?`<p>시험 서명</p><img class="signature-pad" src="${signature}&amp;preview=1" alt="시험 자가점검 서명"><a href="${signature}">시험 서명 다운로드</a>`:'<p>시험 서명 없음</p>'}</div><button type="button" id="self-check-print-button">인쇄</button>`,async()=>{});$('#dialog-form button[type=submit]').textContent='닫기';$('#self-check-print-button').onclick=()=>{const image=$('.self-check-print img');if(image&&(!image.complete||!image.naturalWidth)){flash('시험 서명을 불러온 뒤 다시 시도해 주세요.',true);return;}window.print();};
-  }catch(error){showError(error);}
+  }catch(error){if(active())showError(error);}
 }
 async function showWorkerActivities(worker){
   const siteId=state.siteId,labels={tbm:'TBM',education:'안전교육',notice:'공지 확인',checklist:'자가점검',hazard:'위험신고',risk:'위험성평가 활동',work_plan:'작업계획서',instruction:'안전 작업 지시서'};
