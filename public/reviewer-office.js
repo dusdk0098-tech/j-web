@@ -1,13 +1,13 @@
 import { mountRichEditor,richBody,richEditorMarkup } from './rich-editor.js';
 import { documentRichLimits } from './rich-text.js';
-import { leaveExamples,officeTemplate } from './office-template.js';
+import { leaveExamples,officeTemplate,officeSourceContent,officeSourceCurrent } from './office-template.js';
 
 const esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const today=()=>new Date(Date.now()-new Date().getTimezoneOffset()*60000).toISOString().slice(0,10);
 const statuses={draft:'임시저장',pending:'결재 대기',approved:'승인',rejected:'반려'};
 const kinds=['품의서','경비청구','휴가신청서','사고발생보고서','기타'];
 
-export async function mountReviewerOffice({target,api,active,pad}){
+export async function mountReviewerOffice({target,siteId,api,active,pad}){
   target.innerHTML='<h2>내 시험 업무 문서</h2><p>본인이 작성한 가상 문서와 같은 현장 직원을 대상으로 시험합니다.</p><button type="button" data-new>문서 작성</button><div data-list></div><div data-editor></div><p role="status" data-status></p>';
   const list=target.querySelector('[data-list]'),editor=target.querySelector('[data-editor]'),status=target.querySelector('[data-status]');let request=0,pending=0,dirty=()=>false;
   const savingMessage='저장 중입니다. 완료될 때까지 편집을 기다려 주세요.';
@@ -31,6 +31,23 @@ export async function mountReviewerOffice({target,api,active,pad}){
       form.insertAdjacentHTML('beforeend',`<div data-example hidden><label data-leave-label>가상 신청 예시<select data-leave-example>${Object.entries(leaveExamples).map(([value,label])=>`<option value="${value}">${esc(label)}</option>`).join('')}</select></label><button type="button" data-apply-example>빈 내용에 예시 적용</button><p>가상 예시를 확인하고 필요한 내용을 직접 입력하세요.</p><p role="status" data-example-status></p></div>`);
       const kind=form.elements.kind,example=form.querySelector('[data-example]'),leave=form.querySelector('[data-leave-label]'),message=form.querySelector('[data-example-status]'),showExample=()=>{example.hidden=!['품의서','휴가신청서'].includes(kind.value);leave.hidden=kind.value!=='휴가신청서';message.textContent='';};kind.addEventListener('change',showExample);showExample();
       form.querySelector('[data-apply-example]').onclick=()=>{try{if(pending)throw Error('진행 중인 저장이 끝난 뒤 예시를 적용해 주세요.');if(rich.hasTable())throw Error('표가 있는 내용은 먼저 지워 주세요.');const result=officeTemplate(kind.value,form.querySelector('[data-leave-example]').value,form.elements.title.value,rich.plain());rich.set(result.rich??null,result.body);form.elements.title.value=result.title;formDirty=true;request++;message.textContent='가상 예시를 적용했습니다. 내용을 직접 확인해 주세요.';rich.focus();}catch(e){message.textContent=e.message;}};
+      if(!doc){
+        const sourcePanel=editor.querySelector('[data-setup]');sourcePanel.innerHTML=`<fieldset><legend>이전 가상 문서 불러오기</legend><label>본인이 작성한 문서<select data-load-source><option value="">선택하세요</option>${options.documents.map(item=>`<option value="${esc(item.id)}">${esc(item.date)} · ${esc(item.title)}</option>`).join('')}</select></label><button type="button" data-load-document ${options.documents.length?'':'disabled'}>제목과 내용 불러오기</button><p>작성일·구분·참조 문서·첨부·결재선은 복사하지 않습니다.</p><p role="status" data-load-status></p></fieldset>`;
+        const sourceSelect=sourcePanel.querySelector('[data-load-source]'),sourceButton=sourcePanel.querySelector('[data-load-document]'),sourceStatus=sourcePanel.querySelector('[data-load-status]'),draft=()=>({title:form.elements.title.value,rich:rich.value()});
+        sourceSelect.addEventListener('change',()=>{request++;sourceStatus.textContent='';});
+        sourceButton.onclick=async()=>{if(sourceButton.disabled)return;try{
+          if(pending)throw Error('저장이 끝난 뒤 불러와 주세요.');
+          const expected={siteId,selected:sourceSelect.value,signatureRevision:request,draft:draft()};
+          if(!options.documents.some(item=>String(item.id)===expected.selected))throw Error('이전 업무 문서를 선택해 주세요.');
+          if((expected.draft.title.trim()||rich.plain().trim()||rich.hasTable())&&!confirm('기존 제목과 내용을 바꿀까요?'))return;
+          sourceButton.disabled=true;sourceStatus.textContent='가상 문서를 불러오는 중입니다.';
+          const result=await api(`/api/reviewer/office-documents/${expected.selected}`);if(!form.isConnected||!active())return;
+          const current={siteId,selected:sourceSelect.value,signatureRevision:request,draft:draft(),connected:form.isConnected,open:active()};
+          if(pending||!officeSourceCurrent(expected,current))throw Error('작성 내용이나 선택이 바뀌어 불러오지 않았습니다.');
+          if(result?.document?.id!==Number(expected.selected))throw Error('업무 문서를 다시 확인해 주세요.');
+          const copied=officeSourceContent(result.document,siteId);rich.set(copied.rich,copied.body);form.elements.title.value=copied.title;formDirty=true;request++;sourceStatus.textContent='제목과 내용을 불러왔습니다. 저장 전 확인해 주세요.';rich.focus();
+        }catch(e){if(form.isConnected&&active())sourceStatus.textContent=e.message||String(e);}finally{if(form.isConnected)sourceButton.disabled=false;}};
+      }
       for(const event of ['input','change','paste','drop'])form.addEventListener(event,()=>{formDirty=true;request++;});form.querySelector('[data-rich-toolbar]').addEventListener('click',()=>{formDirty=true;request++;});
       form.onsubmit=event=>{event.preventDefault();const button=form.querySelector('[type=submit]');run(button,'form',async()=>{const input={title:form.elements.title.value,date:form.elements.date.value,details:{kind:form.elements.kind.value,otherKind:form.elements.otherKind.value,referenceId:0,referenceDocId:Number(form.elements.referenceDocId.value),bodyRich:rich.value()}};const result=await send(path||'/api/reviewer/office-documents',id?'PUT':'POST',{...input,...(data?{version:data.version}:{})});await reload(result.document.id);})();};
     }

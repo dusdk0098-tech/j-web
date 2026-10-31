@@ -8,6 +8,7 @@ import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { PNG } from 'pngjs';
 import { Store } from '../store.js';
+import { officeSourceContent } from '../public/office-template.js';
 
 const png=new PNG({width:1,height:1});png.data[3]=255;
 const signature=`data:image/png;base64,${PNG.sync.write(png).toString('base64')}`;
@@ -39,6 +40,10 @@ test('직원은 본인 문서를 작성해 다른 직원에게 결재를 요청�
     const created=await send(base,'POST',{...input,siteId:otherSite.id,type:'risk'},one);assert.equal(created.status,201);let data=await created.json(),path=`${base}/${data.document.id}`;assert.equal(data.document.site_id,site.id);assert.equal(data.document.type,'office');
     assert.equal((await send(path,'GET',undefined,two)).status,400);assert.equal((await send(path,'GET',undefined,foreign)).status,400);assert.deepEqual(await (await send(base,'GET',undefined,two)).json(),[]);
     const outsideDoc=await (await send(base,'POST',input,two)).json(),adminDoc=await (await send('/api/documents','POST',{...input,type:'office',siteId:site.id},admin)).json();
+    const ownOptions=await (await send(base+'/options','GET',undefined,one)).json();assert.deepEqual(ownOptions.documents.map(doc=>doc.id),[data.document.id]);assert.ok(!ownOptions.documents.some(doc=>[outsideDoc.document.id,adminDoc.id].includes(doc.id)));
+    const rich=[{type:'strong',children:[{type:'text',value:'이전 가상 서식'}]}],formatted=await (await send(base,'POST',{...input,title:'이전 가상 제목',details:{kind:'품의서',bodyRich:rich}},one)).json(),sourcePath=`${base}/${formatted.document.id}`;
+    assert.equal((await send(sourcePath,'GET',undefined,two)).status,400);assert.equal((await send(sourcePath,'GET',undefined,foreign)).status,400);const sourceResponse=await (await send(sourcePath,'GET',undefined,one)).json(),copied=officeSourceContent(sourceResponse.document,site.id);assert.equal(copied.title,'이전 가상 제목');assert.deepEqual(copied.rich,rich);
+    const copiedDraft=await (await send(base,'POST',{title:copied.title,date:'2026-10-31',details:{kind:'기타',otherKind:'새 구분',bodyRich:copied.rich}},one)).json();assert.equal(copiedDraft.document.body,'이전 가상 서식');assert.deepEqual(JSON.parse(copiedDraft.document.details).bodyRich,rich);assert.equal(JSON.parse(copiedDraft.document.details).kind,'기타');assert.deepEqual(copiedDraft.attachments,[]);assert.deepEqual(copiedDraft.line,[]);assert.equal(copiedDraft.hasSignature,false);
     for(const referenceDocId of [outsideDoc.document.id,adminDoc.id])assert.equal((await send(base,'POST',{...input,details:{kind:'품의서',referenceDocId}},one)).status,400);
     const ownReference=await send(base,'POST',{...input,title:'가상 참조',details:{kind:'품의서',referenceDocId:data.document.id}},one);assert.equal(ownReference.status,201);
     const oldVersion=data.version,updated=await send(path,'PUT',{...input,title:'변경된 가상 문서',version:data.version},one);assert.equal(updated.status,200);data=await updated.json();assert.equal((await send(path,'PUT',{...input,version:oldVersion},one)).status,409);

@@ -6,7 +6,7 @@ import { richTextFromEditor } from '../public/rich-text.js';
 
 const decode=value=>value.replace(/&(amp|lt|gt|quot|#39);/g,(_,key)=>({amp:'&',lt:'<',gt:'>',quot:'"','#39':"'"}[key]));
 function control(value=''){
-  const listeners={};return {value,hidden:false,disabled:false,textContent:'',addEventListener(type,fn){(listeners[type]??=[]).push(fn);},emit(type){for(const fn of listeners[type]||[])fn();}};
+  const listeners={};return {value,hidden:false,disabled:false,isConnected:true,textContent:'',addEventListener(type,fn){(listeners[type]??=[]).push(fn);},emit(type){for(const fn of listeners[type]||[])fn();}};
 }
 // shortcut: 생성된 기본 서식 태그만 모의 처리하며, 브라우저 배치 검증에는 실제 DOM을 사용한다.
 function richNode(tag='div'){
@@ -24,22 +24,22 @@ function richNode(tag='div'){
     querySelector(selector){return this.querySelectorAll(selector)[0]||null;}
   };
 }
-async function screen({state=null,title='',kind='품의서',body='',rich=null,saveWait=null}={}){
-  const writes=[],bodyNode=richNode(),toolbar=control(),submit=control(),form=control(),setup=control(),editor=control(),list=control(),status=control(),newButton=control(),close=control();
+async function screen({state=null,title='',kind='품의서',body='',rich=null,saveWait=null,sources=[]}={}){
+  const writes=[],reads=[],bodyNode=richNode(),toolbar=control(),submit=control(),form=control(),setup=control(),editor=control(),list=control(),status=control(),newButton=control(),close=control();
   form.elements=Object.fromEntries(Object.entries({title,date:'2026-10-31',kind,otherKind:'가상 기타',referenceDocId:'9'}).map(([key,value])=>[key,control(value)]));
   const fields={'[data-rich-editor]':bodyNode,'[data-rich-toolbar]':toolbar,'[type=submit]':submit};
   form.querySelector=key=>fields[key]||null;
   form.insertAdjacentHTML=(_position,html)=>{form.markup=html;for(const match of html.matchAll(/\b(data-[\w-]+)(?=[\s>])/g))fields[`[${match[1]}]`]=control();fields['[data-leave-example]'].value='leave';};
-  const setupFields=Object.fromEntries(['data-save-line','data-save-references','data-pad','data-clear','data-sign','data-upload'].map(key=>[`[${key}]`,control()])),line=control('2'),reference=control('2'),transition=control();transition.dataset={transition:'submit'};reference.checked=true;
+  const setupFields=Object.fromEntries(['data-save-line','data-save-references','data-pad','data-clear','data-sign','data-upload','data-load-source','data-load-document','data-load-status'].map(key=>[`[${key}]`,control()])),line=control('2'),reference=control('2'),transition=control();transition.dataset={transition:'submit'};reference.checked=true;
   setup.querySelector=key=>setupFields[key];setup.querySelectorAll=key=>key==='[data-line]'?[line]:key==='[data-reference]'?[reference]:key==='[data-transition]'&&state==='draft'?[transition]:[];
   editor.querySelector=key=>key==='[data-form]'?(editor.innerHTML.includes('<form data-form>')?form:null):key==='[data-close]'?close:key==='[data-setup]'?setup:null;
-  editor.replaceChildren=()=>{editor.closed=true;};const openButton=control();openButton.dataset={open:'7'};
+  editor.replaceChildren=()=>{editor.closed=true;form.isConnected=false;};const openButton=control();openButton.dataset={open:'7'};
   list.querySelectorAll=()=>state?[openButton]:[];
   const target={querySelector:key=>({'[data-list]':list,'[data-editor]':editor,'[data-status]':status,'[data-new]':newButton}[key])};
   const data={document:{id:7,title,date:'2026-10-31',body,status:state,details:JSON.stringify({kind,bodyRich:rich})},version:'가상 버전',line:[],references:[],attachments:[],events:[],hasSignature:true};
-  let optionsWait=null;const api=async(path,options={})=>{if(options.method){writes.push({path,method:options.method,input:JSON.parse(options.body)});if(saveWait)await saveWait;return data;}if(path.endsWith('/options')){if(optionsWait)await optionsWait;return {people:[{id:2,name:'가상 직원'}],documents:[]};}if(path.endsWith('/7'))return data;return state?[data.document]:[];};
-  let active=true;await mountReviewerOffice({target,api,active:()=>active,pad:()=>()=> '가상 서명'});await (state?openButton:newButton).onclick();
-  return {form,fields,bodyNode,editor,setup,setupFields,status,writes,line,reference,transition,close,newButton,openButton,holdOpen(promise){optionsWait=promise;},stop(){active=false;}};
+  let optionsWait=null,sourceWait=null;const api=async(path,options={})=>{if(options.method){writes.push({path,method:options.method,input:JSON.parse(options.body)});if(saveWait)await saveWait;return data;}reads.push(path);if(path.endsWith('/options')){if(optionsWait)await optionsWait;return {people:[{id:2,name:'가상 직원'}],documents:sources.map(({id,title,date})=>({id,title,date}))};}if(path.endsWith('/7'))return data;const match=path.match(/\/office-documents\/(\d+)$/);if(match){if(sourceWait)await sourceWait;const document=sources.find(item=>item.id===Number(match[1]));if(!document)throw Error('본인 문서가 없습니다.');return {document};}return state?[data.document]:[];};
+  let active=true;await mountReviewerOffice({target,siteId:1,api,active:()=>active,pad:()=>()=> '가상 서명'});await (state?openButton:newButton).onclick();setupFields['[data-load-document]'].disabled=!sources.length;
+  return {form,fields,bodyNode,editor,setup,setupFields,status,writes,reads,line,reference,transition,close,newButton,openButton,holdOpen(promise){optionsWait=promise;},holdSource(promise){sourceWait=promise;},stop(){active=false;}};
 }
 const flush=()=>new Promise(resolve=>setImmediate(resolve));
 
@@ -165,4 +165,47 @@ test('첨부 선택 취소는 요청을 보내지 않고 잠금과 저장 중 �
   const ui=await screen({state:'draft'}),upload=ui.setupFields['[data-upload]'];upload.files=[];const cancelled=upload.onchange();
   assert.equal(ui.editor.inert,true);await ui.newButton.onclick();await cancelled;
   assert.equal(ui.editor.inert,false);assert.equal(upload.disabled,false);assert.equal(ui.status.textContent,'');assert.equal(ui.writes.length,0);
+});
+
+const sourceDoc=(id=9,siteId=1)=>({id,site_id:siteId,type:'office',date:'2026-10-20',title:'이전 <가상> 제목',body:'서식 본문',details:JSON.stringify({kind:'품의서',bodyRich:[{type:'strong',children:[{type:'text',value:'서식 본문'}]}]})});
+
+test('직원은 자신의 이전 문서에서 제목과 서식 본문만 불러와 새 문서에 저장한다',async t=>{
+  const previous=Object.getOwnPropertyDescriptor(globalThis,'confirm');let confirmations=0;globalThis.confirm=()=>{confirmations++;return true;};t.after(()=>{if(previous)Object.defineProperty(globalThis,'confirm',previous);else delete globalThis.confirm;});
+  const ui=await screen({title:'기존 제목',body:'기존 본문',sources:[sourceDoc()]}),selection=ui.setupFields['[data-load-source]'],button=ui.setupFields['[data-load-document]'];
+  assert.match(ui.setup.innerHTML,/이전 &lt;가상&gt; 제목/);assert.doesNotMatch(ui.setup.innerHTML,/이전 <가상> 제목/);selection.value='9';selection.emit('change');await button.onclick();
+  assert.equal(confirmations,1);assert.equal(ui.form.elements.title.value,'이전 <가상> 제목');assert.deepEqual(richTextFromEditor(ui.bodyNode),[{type:'strong',children:[{type:'text',value:'서식 본문'}]}]);
+  assert.equal(ui.form.elements.date.value,'2026-10-31');assert.equal(ui.form.elements.kind.value,'품의서');assert.equal(ui.form.elements.referenceDocId.value,'9');assert.equal(ui.bodyNode.focused,true);assert.match(ui.setupFields['[data-load-status]'].textContent,/저장 전 확인/);globalThis.confirm=()=>false;ui.close.onclick();assert.notEqual(ui.editor.closed,true);
+  assert.equal(ui.writes.length,0);ui.form.onsubmit({preventDefault(){}});await flush();assert.equal(ui.writes.length,1);assert.equal(ui.writes[0].input.title,'이전 <가상> 제목');assert.deepEqual(ui.writes[0].input.details.bodyRich,[{type:'strong',children:[{type:'text',value:'서식 본문'}]}]);
+});
+
+test('이전 문서 선택과 취소는 입력을 바꾸거나 문서를 저장하지 않는다',async t=>{
+  const previous=Object.getOwnPropertyDescriptor(globalThis,'confirm');globalThis.confirm=()=>false;t.after(()=>{if(previous)Object.defineProperty(globalThis,'confirm',previous);else delete globalThis.confirm;});
+  const ui=await screen({title:'보존할 제목',sources:[sourceDoc()]}),selection=ui.setupFields['[data-load-source]'],button=ui.setupFields['[data-load-document]'];ui.bodyNode.textContent='보존할 본문';ui.form.emit('input');
+  selection.value='9';selection.emit('change');await button.onclick();assert.equal(ui.form.elements.title.value,'보존할 제목');assert.deepEqual(richTextFromEditor(ui.bodyNode),[{type:'text',value:'보존할 본문'}]);assert.ok(!ui.reads.includes('/api/reviewer/office-documents/9'));assert.equal(ui.writes.length,0);
+  ui.close.onclick();assert.notEqual(ui.editor.closed,true);const empty=await screen({sources:[sourceDoc()]});empty.setupFields['[data-load-source]'].value='9';empty.setupFields['[data-load-source]'].emit('change');empty.close.onclick();assert.equal(empty.editor.closed,true);
+  const invalid=await screen({sources:[sourceDoc()]});invalid.setupFields['[data-load-source]'].value='10';await invalid.setupFields['[data-load-document]'].onclick();assert.match(invalid.setupFields['[data-load-status]'].textContent,/선택해 주세요/);assert.ok(!invalid.reads.includes('/api/reviewer/office-documents/10'));
+  const foreign=await screen({sources:[sourceDoc(9,2)]});foreign.setupFields['[data-load-source]'].value='9';await foreign.setupFields['[data-load-document]'].onclick();assert.match(foreign.setupFields['[data-load-status]'].textContent,/같은 현장/);assert.equal(foreign.form.elements.title.value,'');
+});
+
+test('늦은 이전 문서 조회는 그동안 바뀐 제목·본문·선택·예시를 덮어쓰지 않는다',async()=>{
+  const changes=[
+    ui=>{ui.form.elements.title.value='새 제목';ui.form.emit('input');},
+    ui=>{ui.bodyNode.textContent='새 본문';ui.form.emit('input');},
+    ui=>{ui.setupFields['[data-load-source]'].value='10';ui.setupFields['[data-load-source]'].emit('change');},
+    ui=>{ui.setupFields['[data-load-source]'].value='10';ui.setupFields['[data-load-source]'].emit('change');ui.setupFields['[data-load-source]'].value='9';ui.setupFields['[data-load-source]'].emit('change');},
+    ui=>ui.fields['[data-apply-example]'].onclick()
+  ];
+  for(const change of changes){
+    const ui=await screen({sources:[sourceDoc(),sourceDoc(10)]});let release;ui.holdSource(new Promise(resolve=>{release=resolve;}));const selection=ui.setupFields['[data-load-source]'];selection.value='9';selection.emit('change');const loading=ui.setupFields['[data-load-document]'].onclick();
+    change(ui);const title=ui.form.elements.title.value,body=richTextFromEditor(ui.bodyNode);release();await loading;assert.equal(ui.form.elements.title.value,title);assert.deepEqual(richTextFromEditor(ui.bodyNode),body);assert.match(ui.setupFields['[data-load-status]'].textContent,/바뀌어 불러오지/);assert.equal(ui.writes.length,0);
+  }
+});
+
+test('문서를 닫거나 저장을 시작하면 진행 중인 이전 문서 조회를 적용하지 않는다',async()=>{
+  for(const action of ['close','save']){
+    let finishSource,finishSave;const saveWait=new Promise(resolve=>{finishSave=resolve;}),ui=await screen({sources:[sourceDoc()],saveWait});ui.holdSource(new Promise(resolve=>{finishSource=resolve;}));ui.setupFields['[data-load-source]'].value='9';const loading=ui.setupFields['[data-load-document]'].onclick();
+    if(action==='close')ui.close.onclick();else{ui.form.onsubmit({preventDefault(){}});assert.equal(ui.editor.inert,true);}
+    finishSource();await loading;assert.equal(ui.form.elements.title.value,'');assert.deepEqual(richTextFromEditor(ui.bodyNode),[]);if(action==='save'){assert.match(ui.setupFields['[data-load-status]'].textContent,/바뀌어 불러오지/);assert.equal(ui.writes.length,1);}else assert.equal(ui.writes.length,0);
+    finishSave();await flush();
+  }
 });
