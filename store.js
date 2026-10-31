@@ -1280,10 +1280,11 @@ export class Store {
     month=monthValue(month);siteId=Number(siteId);if(!this.db.prepare('SELECT 1 FROM sites WHERE id=?').get(siteId))throw new Error('현장을 확인해 주세요.');
     return this.db.prepare('SELECT date,kind FROM site_worker_blocks WHERE site_id=? AND date BETWEEN ? AND ? ORDER BY date,kind').all(siteId,`${month}-01`,`${month}-31`);
   }
-  setWorkerAccessBlock(siteId,date,kind,blocked,onAuthorize=()=>{}){
+  setWorkerAccessBlock(siteId,date,kind,blocked,onAuthorize=()=>{},expectedBlocked){
     siteId=Number(siteId);date=dateValue(date);
-    if(!['holiday','ended'].includes(kind)||typeof blocked!=='boolean')throw new Error('차단 설정을 확인해 주세요.');
+    if(!['holiday','ended'].includes(kind)||typeof blocked!=='boolean'||expectedBlocked!==undefined&&typeof expectedBlocked!=='boolean')throw new Error('차단 설정을 확인해 주세요.');
     this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();if(!this.db.prepare('SELECT 1 FROM sites WHERE id=?').get(siteId))throw new Error('현장을 확인해 주세요.');
+    if(expectedBlocked!==undefined&&!!this.db.prepare('SELECT 1 FROM site_worker_blocks WHERE site_id=? AND date=? AND kind=?').get(siteId,date,kind)!==expectedBlocked)throw Object.assign(new Error('차단 설정이 변경되었습니다. 다시 조회해 주세요.'),{sessionStatus:409});
     if(blocked)this.db.prepare('INSERT OR IGNORE INTO site_worker_blocks(site_id,date,kind) VALUES(?,?,?)').run(siteId,date,kind);
     else this.db.prepare('DELETE FROM site_worker_blocks WHERE site_id=? AND date=? AND kind=?').run(siteId,date,kind);
     this.db.exec('COMMIT');}catch(error){this.db.exec('ROLLBACK');throw error;}
