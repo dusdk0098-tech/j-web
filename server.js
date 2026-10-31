@@ -51,6 +51,7 @@ assets.add('/personal-notes-tools.js');
 assets.add('/daily-report-photos.js');
 assets.add('/site-photo-viewer.js');
 assets.add('/worker-preview.js');
+assets.add('/worker-list.js');
 function checkRequestSession(req){const failure=req.checkSession?.();if(failure)throw Object.assign(new Error(failure.error),{sessionStatus:failure.status});}
 function dailyReportPhoto(doc,kind,id){
   const file=kind==='site'?store.sitePhoto(doc.site_id,id):store.attachment(id);
@@ -739,6 +740,7 @@ const server = http.createServer(async (req, res) => {
     const ppeIssue=url.pathname.match(/^\/api\/ppe-issues\/(\d+)$/);
     if(ppeIssue&&req.method==='PUT'){store.updatePpeIssue(ppeIssue[1],await body(req),()=>checkRequestSession(req));return json(res,200,{ok:true});}
     if(ppeIssue&&req.method==='DELETE'){store.deletePpeIssue(url.searchParams.get('siteId'),ppeIssue[1],url.searchParams.has('expectedVersion')?url.searchParams.get('expectedVersion'):undefined,()=>checkRequestSession(req));return json(res,200,{ok:true});}
+    if(url.pathname==='/api/workers/list'&&req.method==='GET'){const result=store.workerListing(url.searchParams.get('siteId'),url.searchParams.get('q')||'',Object.fromEntries(url.searchParams),()=>checkRequestSession(req));return json(res,200,result);}
     if (url.pathname === '/api/workers') {
       if (req.method === 'GET'){const rows=store.workers(url.searchParams.get('siteId'),url.searchParams.get('q') || '',Object.fromEntries(url.searchParams));checkRequestSession(req);return json(res,200,rows);}
       if (req.method === 'POST') return json(res,201,store.createWorker(await body(req),()=>checkRequestSession(req)));

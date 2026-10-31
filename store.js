@@ -7,6 +7,7 @@ import { verifyWorkerLocation } from './geo.js';
 import { workerFieldRequirements } from './public/worker-fields.js';
 import { salarySummary } from './public/salary-summary.js';
 import { normalizeRichText,richTextToPlain } from './public/rich-text.js';
+import { summarizeWorkerCounts } from './public/worker-list.js';
 
 const siteArticleRow=row=>({...row,rich_body:row.rich_body===null?null:JSON.parse(row.rich_body)});
 const workerVersion=worker=>createHash('sha256').update(JSON.stringify([worker.id,worker.site_id,worker.name,worker.category,worker.company,worker.occupation,worker.created_date,worker.memo])).digest('hex');
@@ -907,10 +908,15 @@ export class Store {
   }
   workers(siteId, query = '', filters = {}) {
     if(typeof query!=='string'||query.length>200)throw new Error('검색어를 확인해 주세요.');const digits=/^[0-9()+\-\s]+$/.test(query)?query.replace(/\D/g,''):'';
+    const order=filters.order||'default';if(!['default','recent'].includes(order))throw new Error('정렬 조건을 확인해 주세요.');
     const category=filters.category || '',company=filters.company || '',occupation=filters.occupation || '';
     const from=filters.from?dateValue(filters.from):'',to=filters.to?dateValue(filters.to):'';
     if(from && to && from>to)throw new Error('조회 시작일은 종료일보다 늦을 수 없습니다.');
-    return this.db.prepare("SELECT workers.*,EXISTS(SELECT 1 FROM worker_accounts a WHERE a.worker_id=workers.id AND a.site_id=workers.site_id) AS has_account FROM workers LEFT JOIN join_acknowledgements j ON j.worker_id=workers.id WHERE workers.site_id=? AND (workers.name LIKE ? OR workers.company LIKE ? OR workers.occupation LIKE ? OR workers.memo LIKE ? OR (?<>'' AND (instr(replace(COALESCE(json_extract(j.profile,'$.birthDate'),''),'-',''),?)>0 OR instr(replace(replace(replace(replace(replace(COALESCE(json_extract(j.profile,'$.phone'),''),'-',''),' ',''),'(',''),')',''),'+',''),?)>0))) AND (?='' OR workers.category=?) AND (?='' OR workers.company=?) AND (?='' OR workers.occupation=?) AND (?='' OR workers.created_date>=?) AND (?='' OR workers.created_date<=?) ORDER BY workers.id DESC").all(Number(siteId),...Array(4).fill(`%${query}%`),digits,digits,digits,category,category,company,company,occupation,occupation,from,from,to,to).map(row=>({...row,version:workerVersion(row)}));
+    const ordering=order==='recent'?'workers.created_date IS NULL,workers.created_date DESC,workers.id DESC':'workers.id DESC';return this.db.prepare("SELECT workers.*,EXISTS(SELECT 1 FROM worker_accounts a WHERE a.worker_id=workers.id AND a.site_id=workers.site_id) AS has_account FROM workers LEFT JOIN join_acknowledgements j ON j.worker_id=workers.id WHERE workers.site_id=? AND (workers.name LIKE ? OR workers.company LIKE ? OR workers.occupation LIKE ? OR workers.memo LIKE ? OR (?<>'' AND (instr(replace(COALESCE(json_extract(j.profile,'$.birthDate'),''),'-',''),?)>0 OR instr(replace(replace(replace(replace(replace(COALESCE(json_extract(j.profile,'$.phone'),''),'-',''),' ',''),'(',''),')',''),'+',''),?)>0))) AND (?='' OR workers.category=?) AND (?='' OR workers.company=?) AND (?='' OR workers.occupation=?) AND (?='' OR workers.created_date>=?) AND (?='' OR workers.created_date<=?) ORDER BY "+ordering).all(Number(siteId),...Array(4).fill(`%${query}%`),digits,digits,digits,category,category,company,company,occupation,occupation,from,from,to,to).map(row=>({...row,version:workerVersion(row)}));
+  }
+  workerListing(siteId,query='',filters={},onAuthorize=()=>{},asOf=null){
+    siteId=Number(siteId);if(!Number.isSafeInteger(siteId)||siteId<1)throw new Error('현장을 선택해 주세요.');const now=new Date(),date=dateValue(asOf??new Date(now.getTime()-now.getTimezoneOffset()*60000).toISOString().slice(0,10));
+    this.db.exec('BEGIN');try{onAuthorize();if(!this.db.prepare('SELECT 1 FROM sites WHERE id=?').get(siteId))throw new Error('현장을 선택해 주세요.');const workers=this.workers(siteId,query,filters),birth=this.db.prepare("SELECT CASE WHEN json_valid(profile) THEN json_extract(profile,'$.birthDate') ELSE NULL END AS birthDate FROM join_acknowledgements WHERE worker_id=?"),summary=summarizeWorkerCounts(workers.map(worker=>({category:worker.category,birthDate:birth.get(worker.id)?.birthDate})),date);onAuthorize();this.db.exec('COMMIT');return {workers,summary};}catch(error){this.db.exec('ROLLBACK');throw error;}
   }
   previewWorkers(siteId,items,onAuthorize=()=>{}){
     siteId=Number(siteId);if(!Number.isSafeInteger(siteId)||siteId<1||!Array.isArray(items)||!items.length||items.length>20||items.some(item=>!item||!Number.isSafeInteger(item.id)||item.id<1||typeof item.version!=='string'||!/^[a-f0-9]{64}$/.test(item.version))||new Set(items.map(item=>item.id)).size!==items.length)throw new Error('선택한 출입자를 확인해 주세요.');
