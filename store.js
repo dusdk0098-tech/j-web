@@ -49,7 +49,7 @@ function equipmentDetails(input){
   if((details.insuranceFrom && details.insuranceTo && details.insuranceFrom>details.insuranceTo) || (details.inspectionFrom && details.inspectionTo && details.inspectionFrom>details.inspectionTo))throw new Error('보험 또는 검사 기간을 확인해 주세요.');
   return details;
 }
-function signatureBytes(signature) {
+export function signatureBytes(signature) {
   if(typeof signature!=='string' || signature.length>56000)throw new Error('시험 서명을 확인해 주세요.');
   const match=signature.match(/^data:image\/png;base64,([A-Za-z0-9+/]+={0,2})$/);
   if(!match)throw new Error('시험 서명을 입력해 주세요.');
