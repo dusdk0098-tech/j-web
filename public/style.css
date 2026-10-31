@@ -23,6 +23,7 @@
 @media print{.training-target-controls,.training-roster-download{display:none!important}.training-roster .table-wrap{overflow:visible}.training-roster table{min-width:0;width:100%;table-layout:fixed}.training-roster th,.training-roster td{overflow-wrap:anywhere}.training-roster tr{break-inside:avoid}.training-roster thead{display:table-header-group}}
 @media print{.notice-roster-download{display:none!important}.notice-roster .table-wrap{overflow:visible}.notice-roster table{min-width:0;width:100%;table-layout:fixed}.notice-roster th,.notice-roster td{overflow-wrap:anywhere}.notice-roster tr{break-inside:avoid}.notice-roster thead{display:table-header-group}}
 .common-work-preview{width:min(950px,95vw);max-height:90vh}
+.daily-report-photos figure{break-inside:avoid}.daily-report-photos img{max-width:min(450px,100%);max-height:400px;object-fit:contain}
 @media print{body:has(dialog.common-work-preview[open])>:not(dialog.common-work-preview){display:none!important}dialog.common-work-preview[open]{position:static;display:block;width:100%;max-width:none;max-height:none;border:0;box-shadow:none}.common-work-print-item{break-after:page}.common-work-print-item:last-child{break-after:auto}}
 #worker-choices:not([hidden]){display:flex;gap:8px;flex-wrap:wrap;margin-top:20px}
 #join-form [hidden]{display:none!important}

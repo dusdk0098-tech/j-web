@@ -48,7 +48,15 @@ const json = (res, code, value) => { res.writeHead(code, {'Content-Type':'applic
 assets.add('/client');assets.add('/client.js');
 assets.add('/common-work-print.js');
 assets.add('/personal-notes-tools.js');
+assets.add('/daily-report-photos.js');
 function checkRequestSession(req){const failure=req.checkSession?.();if(failure)throw Object.assign(new Error(failure.error),{sessionStatus:failure.status});}
+function dailyReportPhoto(doc,kind,id){
+  const file=kind==='site'?store.sitePhoto(doc.site_id,id):store.attachment(id);
+  if(!file||(kind==='site'?file.date!==doc.date:file.document_id!==doc.id))return null;
+  const bytes=Buffer.from(file.data),type=bytes.subarray(0,8).equals(Buffer.from('89504e470d0a1a0a','hex'))?'image/png':bytes.subarray(0,3).equals(Buffer.from('ffd8ff','hex'))?'image/jpeg':null;if(!type)return null;
+  const version=createHash('sha256').update(JSON.stringify([doc.id,doc.site_id,doc.date,kind,file.id,file.name,file.description||''])).update(bytes).digest('hex');
+  return {id:file.id,kind,name:file.name,description:kind==='site'?file.description:'',type,version,bytes};
+}
 async function body(req,max=65536) {
   const chunks=[];let size=0;
   for await (const chunk of req) { size+=chunk.length;if(size>max)throw new Error('입력 내용이 너무 깁니다.');chunks.push(chunk); }
@@ -417,6 +425,12 @@ const server = http.createServer(async (req, res) => {
       const path = url.pathname === '/' ? '/index.html' : url.pathname === '/join' ? '/join.html' : url.pathname === '/login' ? '/login.html' : url.pathname === '/review' ? '/review.html' : url.pathname === '/client' ? '/client.html' : url.pathname === '/employment-certificate' ? '/employment-certificate.html' : url.pathname;
       res.writeHead(200, {'Content-Type':mime[extname(path)],'X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer','Content-Security-Policy':"default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; object-src 'none'; frame-ancestors 'none'"});
       return res.end(readFileSync(join(root,'public',path.slice(1))));
+    }
+    const dailyPrintPhotos=url.pathname.match(/^\/api\/sites\/(\d+)\/daily-reports\/(\d+)\/print-photos(?:\/(attachment|site)\/(\d+))?$/);
+    if(dailyPrintPhotos&&req.method==='GET'){
+      const [,siteId,id,kind,fileId]=dailyPrintPhotos,doc=store.document(id);if(!doc||doc.type!=='daily_report'||doc.site_id!==Number(siteId))return json(res,404,{error:'작업일보를 찾을 수 없습니다.'});
+      if(!kind){const metadata=(kind,file)=>{const photo=dailyReportPhoto(doc,kind,file.id);if(!photo)return null;const {bytes,...item}=photo;return item;},files=[...store.attachments(doc.id).map(file=>metadata('attachment',file)),...store.sitePhotos(doc.site_id,doc.date,doc.date).map(file=>metadata('site',file))].filter(Boolean);checkRequestSession(req);return json(res,200,files);}
+      const file=dailyReportPhoto(doc,kind,fileId);if(!file)return json(res,404,{error:'일치하는 사진을 찾을 수 없습니다.'});if(url.searchParams.get('version')!==file.version)return json(res,409,{error:'사진이 변경되었습니다. 다시 조회해 주세요.'});checkRequestSession(req);res.writeHead(200,{'Content-Type':file.type,'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(file.bytes);
     }
     if(url.pathname==='/api/personal-supervisor'){
       if(req.method==='GET')return json(res,200,personalNotes.supervisor(url.searchParams.get('siteId')));
