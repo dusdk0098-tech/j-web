@@ -116,6 +116,7 @@ export class Store {
       CREATE TABLE IF NOT EXISTS basic_document_versions (document_id INTEGER PRIMARY KEY REFERENCES documents(id),version TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS work_plan_copies (document_id INTEGER PRIMARY KEY REFERENCES documents(id),source_document_id INTEGER NOT NULL REFERENCES documents(id));
       CREATE TABLE IF NOT EXISTS office_document_copies (document_id INTEGER PRIMARY KEY REFERENCES documents(id),source_document_id INTEGER NOT NULL REFERENCES documents(id));
+      CREATE TABLE IF NOT EXISTS office_document_authors (document_id INTEGER PRIMARY KEY REFERENCES documents(id),reviewer_id INTEGER NOT NULL REFERENCES reviewers(id));
       CREATE TABLE IF NOT EXISTS office_reference_recipients (document_id INTEGER NOT NULL REFERENCES documents(id),reviewer_id INTEGER NOT NULL REFERENCES reviewers(id),PRIMARY KEY(document_id,reviewer_id));
       CREATE TABLE IF NOT EXISTS reviewers (id INTEGER PRIMARY KEY,site_id INTEGER NOT NULL REFERENCES sites(id),login_id TEXT NOT NULL UNIQUE,name TEXT NOT NULL,salt BLOB NOT NULL,password_hash BLOB NOT NULL,active INTEGER NOT NULL DEFAULT 1 CHECK(active IN (0,1)));
       CREATE TABLE IF NOT EXISTS equipment_check_approval_cycles (id INTEGER PRIMARY KEY AUTOINCREMENT,check_id INTEGER NOT NULL REFERENCES equipment_checks(id) ON DELETE CASCADE,status TEXT NOT NULL CHECK(status IN ('pending','approved','rejected','withdrawn')),created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,ended_at TEXT);
@@ -1459,10 +1460,29 @@ export class Store {
     if(input?.type!=='office'||!setup||typeof setup!=='object'||Array.isArray(setup)||!valid(setup.reviewerIds,9,1)||!valid(setup.referenceIds,10))throw new Error('시험 결재자와 참조자를 확인해 주세요.');const signature=signatureBytes(setup.signature);
     this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();const doc=this.createDocument(input),exists=this.db.prepare('SELECT 1 FROM reviewers WHERE id=? AND site_id=? AND active=1');if([...setup.reviewerIds,...setup.referenceIds].some(id=>!exists.get(id,doc.site_id)))throw new Error('같은 현장의 활성 결재자와 참조자를 선택해 주세요.');const line=this.db.prepare('INSERT INTO approval_steps(document_id,position,reviewer_id) VALUES(?,?,?)');setup.reviewerIds.forEach((id,index)=>line.run(doc.id,index+1,id));const ref=this.db.prepare('INSERT INTO office_reference_recipients(document_id,reviewer_id) VALUES(?,?)');for(const id of setup.referenceIds)ref.run(doc.id,id);this.db.prepare('INSERT INTO meeting_signatures(document_id,signature) VALUES(?,?)').run(doc.id,signature);this.db.exec('COMMIT');return doc;}catch(error){this.db.exec('ROLLBACK');throw error;}
   }
+  reviewerOfficeDocuments(reviewerId){return this.db.prepare("SELECT d.* FROM documents d JOIN office_document_authors a ON a.document_id=d.id JOIN reviewers r ON r.id=a.reviewer_id AND r.site_id=d.site_id WHERE a.reviewer_id=? AND r.active=1 AND d.type='office' ORDER BY d.date DESC,d.id DESC").all(Number(reviewerId));}
+  reviewerOfficeDocument(reviewerId,id){const doc=this.reviewerOfficeDocuments(reviewerId).find(item=>item.id===Number(id));if(!doc)throw new Error('본인이 작성한 업무 문서를 확인해 주세요.');return doc;}
+  reviewerOfficeOptions(reviewerId){const actor=this.reviewer(reviewerId);if(!actor)throw new Error('직원 계정을 확인해 주세요.');return {people:this.reviewers(actor.site_id).filter(person=>person.active&&person.id!==actor.id).map(({id,name})=>({id,name})),documents:this.reviewerOfficeDocuments(reviewerId).map(({id,title,date})=>({id,title,date}))};}
+  reviewerOfficeReference(reviewerId,details){for(const id of [details?.referenceId,details?.referenceDocId])if(id)this.reviewerOfficeDocument(reviewerId,id);}
+  reviewerOfficeDetail(reviewerId,id){
+    const document=this.reviewerOfficeDocument(reviewerId,id),line=this.approvalLine(id),references=this.officeReferences(id),attachments=this.attachments(id),events=this.events(id),signature=this.meetingSignature(id);
+    const version=createHash('sha256').update(JSON.stringify({document,line,references,attachments,events})).update(signature?.signature||'').digest('hex');
+    return {document,line,references,attachments,events,hasSignature:!!signature,version};
+  }
+  reviewerOfficeAuthorize(reviewerId,id,version){const detail=this.reviewerOfficeDetail(reviewerId,id);if(typeof version!=='string'||version!==detail.version)throw Object.assign(new Error('문서가 변경되었습니다. 다시 조회해 주세요.'),{sessionStatus:409});return detail.document;}
+  createReviewerOfficeDocument(reviewerId,input,onAuthorize=()=>{}){
+    this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();const actor=this.reviewer(reviewerId);if(!actor)throw new Error('직원 계정을 확인해 주세요.');this.reviewerOfficeReference(reviewerId,input?.details);const doc=this.createDocument({...input,type:'office',siteId:actor.site_id});this.db.prepare('INSERT INTO office_document_authors(document_id,reviewer_id) VALUES(?,?)').run(doc.id,actor.id);this.db.exec('COMMIT');return doc;}catch(error){this.db.exec('ROLLBACK');throw error;}
+  }
+  updateReviewerOfficeDocument(reviewerId,id,input,version,onAuthorize=()=>{}){
+    const doc=this.reviewerOfficeDocument(reviewerId,id);return this.updateDocument(id,{...input,type:'office',siteId:doc.site_id},()=>{onAuthorize();this.reviewerOfficeAuthorize(reviewerId,id,version);this.reviewerOfficeReference(reviewerId,input?.details);});
+  }
+  transitionReviewerOfficeDocument(reviewerId,id,action,version,onAuthorize=()=>{}){
+    this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();const doc=this.reviewerOfficeAuthorize(reviewerId,id,version);if(!['submit','withdraw','revise'].includes(action))throw new Error('허용된 문서 상태 변경을 확인해 주세요.');if(action==='submit'){this.reviewerOfficeReference(reviewerId,JSON.parse(doc.details));if(this.approvalLine(id).some(step=>step.reviewer_id===Number(reviewerId)))throw new Error('작성자는 직접 결재할 수 없습니다.');}const result=this.transition(id,action);this.db.exec('COMMIT');return result;}catch(error){this.db.exec('ROLLBACK');throw error;}
+  }
   setApprovalLine(id,ids,onAuthorize=()=>{}){
     if(!Array.isArray(ids)||ids.some(x=>!Number.isSafeInteger(x)||x<1)||new Set(ids).size!==ids.length)throw new Error('결재자를 확인해 주세요.');
     this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();const doc=this.document(id);if(!doc||!['draft','rejected'].includes(doc.status))throw new Error('수정 가능한 문서를 확인해 주세요.');if(ids.length>(doc.type==='office'?9:4))throw new Error('결재자를 확인해 주세요.');
-      const exists=this.db.prepare('SELECT 1 FROM reviewers WHERE id=? AND site_id=? AND active=1');if(ids.some(id=>!exists.get(id,doc.site_id)))throw new Error('같은 현장의 활성 결재자를 선택해 주세요.');
+      const exists=this.db.prepare('SELECT 1 FROM reviewers WHERE id=? AND site_id=? AND active=1'),author=this.db.prepare('SELECT reviewer_id FROM office_document_authors WHERE document_id=?').get(Number(id));if(ids.some(id=>!exists.get(id,doc.site_id))||author&&ids.includes(author.reviewer_id))throw new Error('같은 현장의 활성 결재자를 선택해 주세요. 작성자는 직접 결재할 수 없습니다.');
       this.db.prepare('DELETE FROM approval_steps WHERE document_id=?').run(Number(id));const add=this.db.prepare('INSERT INTO approval_steps(document_id,position,reviewer_id) VALUES(?,?,?)');ids.forEach((reviewerId,index)=>add.run(Number(id),index+1,reviewerId));if(doc.type==='office')this.db.prepare('DELETE FROM meeting_signatures WHERE document_id=?').run(Number(id));const result=this.approvalLine(id);this.db.exec('COMMIT');return result;
     }catch(error){this.db.exec('ROLLBACK');throw error;}
   }
