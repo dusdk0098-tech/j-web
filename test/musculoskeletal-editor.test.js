@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mountMusculoskeletal } from '../public/musculoskeletal.js';
+import { mountMusculoskeletal, mountMuscleReferences } from '../public/musculoskeletal.js';
 import { Store } from '../store.js';
 import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
@@ -32,6 +32,66 @@ function screen(t,rows=[],companies=[],initialScale='3x3'){
   const scale={value:initialScale},editor=mountMusculoskeletal(container,{rows,companies,scale:()=>scale.value});
   return {editor,list,direct,submit,events,scale,status:controls['[data-mus-status]']};
 }
+
+function references(ui,{worker=false,request}={}){
+  const controls=Object.fromEntries(['reload','select','append','title','save','delete','status'].map(name=>[name,{value:'',textContent:'',disabled:false}])),state={active:true},events=[],calls=[];
+  const container={isConnected:true,querySelector(selector){return controls[selector.match(/data-ref-(\w+)/)[1]];},closest(){return {querySelector(){return ui.submit;}};},dispatchEvent(event){events.push(event);}};
+  const panel=mountMuscleReferences(container,{editor:ui.editor,scale:()=>ui.scale.value,siteId:7,worker,active:()=>state.active,request:async(...args)=>{calls.push(args);return request?request(...args):[];}});
+  return {controls,state,events,calls,container,panel,choose(id){controls.select.value=String(id);controls.select.onchange();}};
+}
+const deferred=()=>{let resolve,reject;const promise=new Promise((yes,no)=>{resolve=yes;reject=no;});return {promise,resolve,reject};};
+
+test('참고자료 관리자 저장은 선택한 입력의 독립 사본과 개선 후 등급을 보내며 중복 요청을 막는다',async t=>{
+  const ui=screen(t,[{task:'보존할 입력',selected:true,improvedGrade:'중'},{task:'제외',selected:false,improvedGrade:'하'}],[],'three-level'),pending=deferred(),ref=references(ui,{request:()=>pending.promise}),before=ui.editor.read();
+  ref.controls.title.value='  현장 자료  ';const save=ref.controls.save.onclick();await ref.controls.save.onclick();assert.equal(ref.calls.length,1);
+  const [path,options]=ref.calls[0],body=JSON.parse(options.body);assert.equal(path,'/api/muscle-references');assert.equal(options.method,'POST');assert.equal(body.siteId,7);assert.equal(body.scale,'three-level');assert.equal(body.title,'현장 자료');assert.deepEqual(body.items,[before[0]]);
+  ui.list.children[0].querySelector('[data-mus-field=task]').value='저장 대기 중 수정';assert.equal(body.items[0].task,'보존할 입력');pending.resolve({id:1});await save;assert.equal(ui.editor.read()[0].task,'저장 대기 중 수정');assert.match(ref.controls.status.textContent,/저장했습니다/);
+});
+
+test('참고자료 목록 선택과 추가는 기존 입력·미선택·개선 등급을 보존하고 제목을 이스케이프한다',async t=>{
+  const ui=screen(t,[{task:'기존 입력',selected:true}],[],'three-level'),source=[{task:'사용자 작성',selected:false,improvedGrade:'하'}],ref=references(ui,{request:async()=>[{id:9,title:'<script>가상</script>',scale:'three-level',items:source}]});
+  await ref.controls.reload.onclick();assert.equal(ref.calls[0][0],'/api/muscle-references?siteId=7&scale=three-level');assert.match(ref.controls.select.innerHTML,/&lt;script&gt;/);assert.doesNotMatch(ref.controls.select.innerHTML,/<script>/);ref.choose(9);ref.controls.append.onclick();ref.controls.append.onclick();
+  assert.deepEqual(ui.editor.read().map(row=>[row.task,row.selected,row.improvedGrade]),[['기존 입력',true,''],['사용자 작성',false,'하']]);assert.equal(ref.events.length,1);ui.list.children[1].querySelector('[data-mus-field=task]').value='수정';assert.equal(source[0].task,'사용자 작성');
+  assert.match(ref.container.innerHTML,/사용자가 직접 작성/);assert.match(ref.container.innerHTML,/실제 위험 판정을 제공하지 않습니다/);
+});
+
+test('참고자료 잘못된 항목과 100개 초과는 전부 검증 후 추가하므로 기존 입력을 보존한다',async t=>{
+  for(const [count,items,error] of [[99,[{selected:true},{selected:false}],/100개/],[1,[{selected:true},{selected:'true'}],/확인/],[1,[{selected:true,improvedGrade:'하'}],/확인/]])await t.test(`${count}개, ${JSON.stringify(items)}`,async sub=>{
+    const ui=screen(sub,Array.from({length:count},()=>({task:'보존',selected:true}))),before=ui.editor.read(),ref=references(ui,{request:async()=>[{id:1,title:'자료',scale:'3x3',items}]});await ref.controls.reload.onclick();ref.choose(1);ref.controls.append.onclick();assert.deepEqual(ui.editor.read(),before);assert.equal(ref.events.length,0);assert.match(ref.controls.status.textContent,error);
+  });
+});
+
+test('참고자료는 척도 변경 뒤 돌아와도 이전 조회 응답과 목록을 사용하지 않는다',async t=>{
+  const ui=screen(t),pending=deferred(),ref=references(ui,{request:()=>pending.promise}),loading=ref.controls.reload.onclick();await ref.controls.reload.onclick();assert.equal(ref.calls.length,1);
+  ui.scale.value='5x4';ref.panel.refresh();ui.scale.value='3x3';ref.panel.refresh();pending.resolve([{id:1,title:'늦은 자료',scale:'3x3',items:[{selected:true}]}]);await loading;assert.doesNotMatch(ref.controls.select.innerHTML,/늦은 자료/);ref.choose(1);ref.controls.append.onclick();assert.equal(ui.editor.read().length,0);
+});
+
+test('닫힌 창·현장 전환·문서 저장 중에는 참고자료 응답과 추가를 적용하지 않는다',async t=>{
+  for(const reason of ['closed','site','saving'])await t.test(reason,async sub=>{
+    const ui=screen(sub),pending=deferred(),ref=references(ui,{request:()=>pending.promise}),loading=ref.controls.reload.onclick();
+    if(reason==='closed')ref.container.isConnected=false;if(reason==='site')ref.state.active=false;if(reason==='saving')ui.submit.disabled=true;
+    pending.resolve([{id:1,title:'무시할 자료',scale:'3x3',items:[{selected:true}]}]);await loading;assert.doesNotMatch(ref.controls.select.innerHTML,/무시할 자료/);ref.choose(1);ref.controls.append.onclick();await ref.controls.save.onclick();assert.equal(ref.calls.length,1);assert.equal(ui.editor.read().length,0);
+  });
+});
+
+test('근로자는 참고자료 조회·추가만 제공하며 삭제는 관리자 자료만 지우고 문서 입력을 보존한다',async t=>{
+  const previousConfirm=globalThis.confirm;globalThis.confirm=()=>true;t.after(()=>{if(previousConfirm===undefined)delete globalThis.confirm;else globalThis.confirm=previousConfirm;});
+  const ui=screen(t,[{task:'보존',selected:true}]),data=[{id:4,title:'시험',scale:'3x3',items:[{task:'참고',selected:true}]}],ref=references(ui,{worker:true,request:async()=>data});assert.doesNotMatch(ref.container.innerHTML,/data-ref-(save|delete|title)/);assert.equal(ref.controls.save.onclick,undefined);
+  await ref.controls.reload.onclick();assert.equal(ref.calls[0][0],'/api/worker/muscle-references?scale=3x3');ref.choose(4);ref.controls.append.onclick();assert.equal(ui.editor.read().length,2);
+  const admin=references(ui,{request:async()=>data}),before=ui.editor.read();await admin.controls.reload.onclick();admin.choose(4);await admin.controls.delete.onclick();assert.equal(admin.calls[1][0],'/api/muscle-references/4?siteId=7');assert.equal(admin.calls[1][1].method,'DELETE');assert.deepEqual(ui.editor.read(),before);assert.equal(admin.controls.append.disabled,true);
+});
+
+test('참고자료 삭제 확인을 취소하면 요청 없이 자료와 문서 입력을 유지한다',async t=>{
+  const previousConfirm=globalThis.confirm;globalThis.confirm=()=>false;t.after(()=>{if(previousConfirm===undefined)delete globalThis.confirm;else globalThis.confirm=previousConfirm;});
+  const ui=screen(t,[{task:'보존',selected:true}]),before=ui.editor.read(),ref=references(ui,{request:async()=>[{id:4,title:'시험',scale:'3x3',items:[{selected:true}]}]});await ref.controls.reload.onclick();ref.choose(4);await ref.controls.delete.onclick();assert.equal(ref.calls.length,1);assert.equal(ref.controls.select.value,'4');assert.equal(ref.controls.delete.disabled,false);assert.deepEqual(ui.editor.read(),before);
+});
+
+test('참고자료 오류·빈 이름·미선택·다른 척도 응답에서는 입력을 보존하고 다시 시도할 수 있다',async t=>{
+  const ui=screen(t,[{task:'보존',selected:false}]),before=ui.editor.read(),ref=references(ui,{request:async()=>{throw Error('시험 통신 실패');}});
+  await ref.controls.save.onclick();assert.match(ref.controls.status.textContent,/이름/);ref.controls.title.value='이름';await ref.controls.save.onclick();assert.match(ref.controls.status.textContent,/항목을 선택/);assert.equal(ref.calls.length,0);
+  await ref.controls.reload.onclick();assert.match(ref.controls.status.textContent,/통신 실패/);assert.equal(ref.controls.reload.disabled,false);assert.deepEqual(ui.editor.read(),before);
+  const wrong=references(ui,{request:async()=>[{id:2,title:'다른 척도',scale:'5x4',items:[]}]});await wrong.controls.reload.onclick();assert.match(wrong.controls.status.textContent,/목록을 다시 확인/);assert.equal(wrong.controls.append.disabled,true);assert.deepEqual(ui.editor.read(),before);
+});
 
 test('근골격계 업체 선택은 같은 이름도 번호로 구분하며 이름을 안전하게 표시한다',t=>{
   const companies=[{id:1,name:'가상 <업체>'},{id:2,name:'가상 <업체>'}],ui=screen(t,[{contractorId:2,selected:true}],companies),html=ui.list.children[0].markup;

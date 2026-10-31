@@ -32,6 +32,16 @@ export function dateValue(value) {
   return date;
 }
 
+export function muscleReferenceInput(input) {
+  if(!input||typeof input!=='object'||Array.isArray(input)||!Number.isSafeInteger(input.siteId)||input.siteId<1)throw new Error('현장을 확인해 주세요.');
+  const title=text(input.title,'참고자료 제목'),scale=input.scale??'';
+  if(!['','three-level','3x3','5x4'].includes(scale))throw new Error('위험성평가 척도를 확인해 주세요.');
+  if(!Array.isArray(input.items)||!input.items.length||input.items.length>100)throw new Error('참고 항목은 1개부터 100개까지 등록해 주세요.');
+  const doc=recordInput({siteId:input.siteId,type:'risk',title,date:'2000-01-01',details:{scale,items:[],musculoskeletalItems:input.items}});
+  if(doc.details.musculoskeletalItems.some(row=>!row.task&&!row.hazard))throw new Error('참고 항목의 작업 또는 유해위험요인을 입력해 주세요.');
+  return {siteId:input.siteId,title,scale,items:doc.details.musculoskeletalItems};
+}
+
 export function recordInput(input) {
   const type = text(input.type, '문서 유형');
   if (!Object.hasOwn(types, type)) throw new Error('지원하지 않는 문서 유형입니다.');

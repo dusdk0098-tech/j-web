@@ -1,6 +1,6 @@
 import { DatabaseSync } from 'node:sqlite';
 import { createHash, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
-import { dateValue, officeKinds, recordInput, text, transitions } from './domain.js';
+import { dateValue, officeKinds, recordInput, muscleReferenceInput, text, transitions } from './domain.js';
 import { PNG } from 'pngjs';
 import { scheduleTypes } from './public/schedule.js';
 import { verifyWorkerLocation } from './geo.js';
@@ -82,6 +82,7 @@ export class Store {
     this.db = new DatabaseSync(path);
     this.db.exec(`PRAGMA foreign_keys=ON; PRAGMA busy_timeout=3000;
       CREATE TABLE IF NOT EXISTS sites (id INTEGER PRIMARY KEY, name TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+      CREATE TABLE IF NOT EXISTS muscle_references (id INTEGER PRIMARY KEY AUTOINCREMENT,site_id INTEGER NOT NULL REFERENCES sites(id),title TEXT NOT NULL,scale TEXT NOT NULL,items TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS site_location_policies (site_id INTEGER PRIMARY KEY REFERENCES sites(id),enabled INTEGER NOT NULL CHECK(enabled IN (0,1)),latitude REAL,longitude REAL,radius_meters INTEGER,max_accuracy_meters INTEGER,version TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS site_access (site_id INTEGER PRIMARY KEY REFERENCES sites(id),access_key TEXT NOT NULL UNIQUE);
       CREATE TABLE IF NOT EXISTS site_registration (site_id INTEGER PRIMARY KEY REFERENCES sites(id),expires_at INTEGER NOT NULL);
@@ -1424,6 +1425,33 @@ export class Store {
   previousInspections(siteId,before,excludeId) {
     before=dateValue(before);
     return this.db.prepare("SELECT id,title,date,details FROM documents WHERE site_id=? AND type='inspection' AND date<? AND id<>? ORDER BY date DESC,id DESC LIMIT 20").all(Number(siteId),before,Number(excludeId)||0);
+  }
+  muscleReferences(siteId,scale='') {
+    if(!Number.isSafeInteger(Number(siteId))||Number(siteId)<1||!this.db.prepare('SELECT 1 FROM sites WHERE id=?').get(Number(siteId)))throw new Error('현장을 확인해 주세요.');
+    if(!['','three-level','3x3','5x4'].includes(scale))throw new Error('위험성평가 척도를 확인해 주세요.');
+    return this.db.prepare('SELECT id,title,scale,items FROM muscle_references WHERE site_id=? AND scale=? ORDER BY id DESC').all(Number(siteId),scale).map(row=>({...row,items:JSON.parse(row.items)}));
+  }
+  saveMuscleReference(input,onAuthorize=()=>{}) {
+    const value=muscleReferenceInput(input);
+    this.db.exec('BEGIN IMMEDIATE');try{
+      onAuthorize();if(!this.db.prepare('SELECT 1 FROM sites WHERE id=?').get(value.siteId))throw new Error('현장을 확인해 주세요.');
+      this.validateRiskContractors({type:'risk',siteId:value.siteId,details:{items:[],musculoskeletalItems:value.items}});
+      const id=Number(this.db.prepare('INSERT INTO muscle_references(site_id,title,scale,items) VALUES(?,?,?,?)').run(value.siteId,value.title,value.scale,JSON.stringify(value.items)).lastInsertRowid);
+      this.db.exec('COMMIT');return {id,title:value.title,scale:value.scale,items:value.items};
+    }catch(error){this.db.exec('ROLLBACK');throw error;}
+  }
+  deleteMuscleReference(siteId,id,onAuthorize=()=>{}) {
+    this.db.exec('BEGIN IMMEDIATE');try{
+      onAuthorize();if(!Number.isSafeInteger(Number(siteId))||Number(siteId)<1||!this.db.prepare('SELECT 1 FROM sites WHERE id=?').get(Number(siteId)))throw new Error('현장을 확인해 주세요.');
+      if(!Number.isSafeInteger(Number(id))||Number(id)<1||!this.db.prepare('DELETE FROM muscle_references WHERE id=? AND site_id=?').run(Number(id),Number(siteId)).changes)throw new Error('같은 현장의 참고자료를 확인해 주세요.');
+      this.db.exec('COMMIT');return {ok:true};
+    }catch(error){this.db.exec('ROLLBACK');throw error;}
+  }
+  workerMuscleReferences(siteId,workerId,scale='') {
+    if(!this.workerPermissions(siteId,workerId).includes('risk'))throw Object.assign(new Error('위험성평가 작성 권한이 필요합니다.'),{sessionStatus:403});
+    const result=this.muscleReferences(siteId,scale);
+    if(!this.workerPermissions(siteId,workerId).includes('risk'))throw Object.assign(new Error('위험성평가 작성 권한이 필요합니다.'),{sessionStatus:403});
+    return result;
   }
   previousRiskAssessments(siteId,before,kind,scale,excludeId) {
     before=dateValue(before);
