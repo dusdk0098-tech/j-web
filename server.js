@@ -50,6 +50,7 @@ assets.add('/common-work-print.js');
 assets.add('/personal-notes-tools.js');
 assets.add('/daily-report-photos.js');
 assets.add('/site-photo-viewer.js');
+assets.add('/worker-preview.js');
 function checkRequestSession(req){const failure=req.checkSession?.();if(failure)throw Object.assign(new Error(failure.error),{sessionStatus:failure.status});}
 function dailyReportPhoto(doc,kind,id){
   const file=kind==='site'?store.sitePhoto(doc.site_id,id):store.attachment(id);
@@ -739,9 +740,10 @@ const server = http.createServer(async (req, res) => {
     if(ppeIssue&&req.method==='PUT'){store.updatePpeIssue(ppeIssue[1],await body(req),()=>checkRequestSession(req));return json(res,200,{ok:true});}
     if(ppeIssue&&req.method==='DELETE'){store.deletePpeIssue(url.searchParams.get('siteId'),ppeIssue[1],url.searchParams.has('expectedVersion')?url.searchParams.get('expectedVersion'):undefined,()=>checkRequestSession(req));return json(res,200,{ok:true});}
     if (url.pathname === '/api/workers') {
-      if (req.method === 'GET') return json(res,200,store.workers(url.searchParams.get('siteId'),url.searchParams.get('q') || '',Object.fromEntries(url.searchParams)));
-      if (req.method === 'POST') return json(res,201,store.createWorker(await body(req)));
+      if (req.method === 'GET'){const rows=store.workers(url.searchParams.get('siteId'),url.searchParams.get('q') || '',Object.fromEntries(url.searchParams));checkRequestSession(req);return json(res,200,rows);}
+      if (req.method === 'POST') return json(res,201,store.createWorker(await body(req),()=>checkRequestSession(req)));
     }
+    if(url.pathname==='/api/workers/preview'&&req.method==='POST'){const input=await body(req),result=store.previewWorkers(input.siteId,input.items,()=>checkRequestSession(req));return json(res,200,result);}
     const worker=url.pathname.match(/^\/api\/workers\/(\d+)$/);
     const workerPermissions=url.pathname.match(/^\/api\/workers\/(\d+)\/permissions$/);
     if(workerPermissions){if(req.method==='GET')return json(res,200,store.workerPermissions(url.searchParams.get('siteId'),workerPermissions[1]));if(req.method==='PUT'){const input=await body(req);return json(res,200,store.setWorkerPermissions(input.siteId,workerPermissions[1],input.permissions));}}
@@ -766,7 +768,7 @@ const server = http.createServer(async (req, res) => {
       const signature=store.joinSignature(siteId,workerJoin[1]);if(!signature)return json(res,404,{error:'시험 서명을 찾을 수 없습니다.'});
       res.writeHead(200,{'Content-Type':'application/octet-stream','Content-Disposition':'attachment; filename="test-join-signature.png"','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(signature);
     }
-    if(worker && req.method==='PUT')return json(res,200,store.updateWorker(worker[1],await body(req)));
+    if(worker && req.method==='PUT')return json(res,200,store.updateWorker(worker[1],await body(req),()=>checkRequestSession(req)));
     if (url.pathname === '/api/workers/export' && req.method === 'GET') {
       const data=await workerSpreadsheet(store.workers(url.searchParams.get('siteId'),url.searchParams.get('q') || '',Object.fromEntries(url.searchParams)));
       res.writeHead(200,{'Content-Type':'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet','Content-Disposition':"attachment; filename=workers.xlsx",'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});

@@ -9,6 +9,8 @@ import { salarySummary } from './public/salary-summary.js';
 import { normalizeRichText,richTextToPlain } from './public/rich-text.js';
 
 const siteArticleRow=row=>({...row,rich_body:row.rich_body===null?null:JSON.parse(row.rich_body)});
+const workerVersion=worker=>createHash('sha256').update(JSON.stringify([worker.id,worker.site_id,worker.name,worker.category,worker.company,worker.occupation,worker.created_date,worker.memo])).digest('hex');
+function workerMemo(value){if(typeof value!=='string'||value.length>2000||/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/.test(value))throw new Error('메모를 확인해 주세요.');return value.trim();}
 
 function workerFields(input){
   const category=text(input.category,'구분'),required=workerFieldRequirements(category),optional=(value,name,needed)=>!needed&&(value==null||typeof value==='string'&&!value.trim())?'':text(value,name);
@@ -106,7 +108,7 @@ export class Store {
       CREATE TABLE IF NOT EXISTS work_place_photos (id INTEGER PRIMARY KEY,place_id INTEGER NOT NULL REFERENCES work_places(id),name TEXT NOT NULL,data BLOB NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
       CREATE TABLE IF NOT EXISTS equipment_attachments (id INTEGER PRIMARY KEY,equipment_id INTEGER NOT NULL REFERENCES equipment(id),category TEXT NOT NULL,name TEXT NOT NULL,data BLOB NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
       CREATE TABLE IF NOT EXISTS equipment_checks (id INTEGER PRIMARY KEY,document_id INTEGER NOT NULL REFERENCES documents(id),equipment_id INTEGER NOT NULL REFERENCES equipment(id),date TEXT NOT NULL,items TEXT NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,UNIQUE(document_id,equipment_id,date));
-      CREATE TABLE IF NOT EXISTS workers (id INTEGER PRIMARY KEY, site_id INTEGER NOT NULL REFERENCES sites(id), name TEXT NOT NULL, category TEXT NOT NULL, company TEXT NOT NULL, occupation TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS workers (id INTEGER PRIMARY KEY, site_id INTEGER NOT NULL REFERENCES sites(id), name TEXT NOT NULL, category TEXT NOT NULL, company TEXT NOT NULL, occupation TEXT NOT NULL, memo TEXT NOT NULL DEFAULT '');
       CREATE TABLE IF NOT EXISTS worker_accounts (worker_id INTEGER PRIMARY KEY REFERENCES workers(id),site_id INTEGER NOT NULL REFERENCES sites(id),login_id TEXT NOT NULL,salt BLOB NOT NULL,password_hash BLOB NOT NULL,UNIQUE(site_id,login_id));
       CREATE TABLE IF NOT EXISTS worker_sessions (token_hash TEXT PRIMARY KEY,worker_id INTEGER NOT NULL REFERENCES workers(id),expires INTEGER NOT NULL,credential_hash BLOB NOT NULL);
       CREATE TABLE IF NOT EXISTS worker_permissions (worker_id INTEGER NOT NULL REFERENCES workers(id),permission TEXT NOT NULL,PRIMARY KEY(worker_id,permission));
@@ -187,6 +189,7 @@ export class Store {
       if(!this.db.prepare('PRAGMA table_info(board_posts)').all().some(c=>c.name==='shared'))this.db.exec('ALTER TABLE board_posts ADD COLUMN shared INTEGER NOT NULL DEFAULT 0 CHECK(shared IN (0,1))');
       if(!this.db.prepare('PRAGMA table_info(site_articles)').all().some(c=>c.name==='rich_body'))this.db.exec('ALTER TABLE site_articles ADD COLUMN rich_body TEXT');
       if(!this.db.prepare('PRAGMA table_info(site_articles)').all().some(c=>c.name==='version'))this.db.exec("ALTER TABLE site_articles ADD COLUMN version TEXT NOT NULL DEFAULT ''");
+      if(!this.db.prepare('PRAGMA table_info(workers)').all().some(c=>c.name==='memo'))this.db.exec("ALTER TABLE workers ADD COLUMN memo TEXT NOT NULL DEFAULT ''");
       this.db.exec("UPDATE site_articles SET version=lower(hex(randomblob(16))) WHERE version=''");
       this.db.exec("UPDATE board_posts SET version=lower(hex(randomblob(16))) WHERE version=''");
       this.db.exec("UPDATE reviewers SET auth_version=lower(hex(randomblob(16))) WHERE auth_version=''");
@@ -893,24 +896,25 @@ export class Store {
       this.db.exec('COMMIT');
     }catch(error){this.db.exec('ROLLBACK');throw error;}
   }
-  createWorker(input) {
-    const siteId = Number(input.siteId);
-    if (!this.db.prepare('SELECT id FROM sites WHERE id=?').get(siteId)) throw new Error('현장을 선택해 주세요.');
-    const now=new Date(),date=new Date(now.getTime()-now.getTimezoneOffset()*60000).toISOString().slice(0,10);
-    const fields=workerFields(input),id = this.db.prepare('INSERT INTO workers(site_id,name,category,company,occupation,created_date) VALUES(?,?,?,?,?,?)').run(siteId,fields.name,fields.category,fields.company,fields.occupation,date).lastInsertRowid;
-    return this.db.prepare('SELECT * FROM workers WHERE id=?').get(id);
+  createWorker(input,onAuthorize=null) {
+    const siteId=Number(input.siteId),fields=workerFields(input),memo=workerMemo(input.memo??'');
+    const save=()=>{if(!this.db.prepare('SELECT id FROM sites WHERE id=?').get(siteId))throw new Error('현장을 선택해 주세요.');const now=new Date(),date=new Date(now.getTime()-now.getTimezoneOffset()*60000).toISOString().slice(0,10),id=this.db.prepare('INSERT INTO workers(site_id,name,category,company,occupation,created_date,memo) VALUES(?,?,?,?,?,?,?)').run(siteId,fields.name,fields.category,fields.company,fields.occupation,date,memo).lastInsertRowid;return this.db.prepare('SELECT * FROM workers WHERE id=?').get(id);};
+    if(!onAuthorize)return save();this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();const row=save();this.db.exec('COMMIT');return row;}catch(error){this.db.exec('ROLLBACK');throw error;}
   }
-  updateWorker(id,input) {
-    const siteId=Number(input.siteId);
-    if(!this.db.prepare('SELECT id FROM workers WHERE id=? AND site_id=?').get(Number(id),siteId))throw new Error('선택한 현장의 출입자를 확인해 주세요.');
-    const fields=workerFields(input);this.db.prepare('UPDATE workers SET name=?,category=?,company=?,occupation=? WHERE id=? AND site_id=?').run(fields.name,fields.category,fields.company,fields.occupation,Number(id),siteId);
-    return this.db.prepare('SELECT * FROM workers WHERE id=? AND site_id=?').get(Number(id),siteId);
+  updateWorker(id,input,onAuthorize=()=>{}) {
+    const siteId=Number(input.siteId),fields=workerFields(input),memo=input.memo===undefined?undefined:workerMemo(input.memo);
+    this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();const previous=this.db.prepare('SELECT * FROM workers WHERE id=? AND site_id=?').get(Number(id),siteId);if(!previous)throw new Error('선택한 현장의 출입자를 확인해 주세요.');if(input.version!==undefined&&input.version!==workerVersion(previous))throw Object.assign(new Error('출입자 정보가 변경되었습니다. 다시 조회해 주세요.'),{sessionStatus:409});this.db.prepare('UPDATE workers SET name=?,category=?,company=?,occupation=?,memo=? WHERE id=? AND site_id=?').run(fields.name,fields.category,fields.company,fields.occupation,memo===undefined?previous.memo:memo,Number(id),siteId);const row=this.db.prepare('SELECT * FROM workers WHERE id=? AND site_id=?').get(Number(id),siteId);this.db.exec('COMMIT');return row;}catch(error){this.db.exec('ROLLBACK');throw error;}
   }
   workers(siteId, query = '', filters = {}) {
+    if(typeof query!=='string'||query.length>200)throw new Error('검색어를 확인해 주세요.');const digits=/^[0-9()+\-\s]+$/.test(query)?query.replace(/\D/g,''):'';
     const category=filters.category || '',company=filters.company || '',occupation=filters.occupation || '';
     const from=filters.from?dateValue(filters.from):'',to=filters.to?dateValue(filters.to):'';
     if(from && to && from>to)throw new Error('조회 시작일은 종료일보다 늦을 수 없습니다.');
-    return this.db.prepare("SELECT workers.*,EXISTS(SELECT 1 FROM worker_accounts a WHERE a.worker_id=workers.id AND a.site_id=workers.site_id) AS has_account FROM workers WHERE site_id=? AND (name LIKE ? OR company LIKE ? OR occupation LIKE ?) AND (?='' OR category=?) AND (?='' OR company=?) AND (?='' OR occupation=?) AND (?='' OR created_date>=?) AND (?='' OR created_date<=?) ORDER BY id DESC").all(Number(siteId),...Array(3).fill(`%${query}%`),category,category,company,company,occupation,occupation,from,from,to,to);
+    return this.db.prepare("SELECT workers.*,EXISTS(SELECT 1 FROM worker_accounts a WHERE a.worker_id=workers.id AND a.site_id=workers.site_id) AS has_account FROM workers LEFT JOIN join_acknowledgements j ON j.worker_id=workers.id WHERE workers.site_id=? AND (workers.name LIKE ? OR workers.company LIKE ? OR workers.occupation LIKE ? OR workers.memo LIKE ? OR (?<>'' AND (instr(replace(COALESCE(json_extract(j.profile,'$.birthDate'),''),'-',''),?)>0 OR instr(replace(replace(replace(replace(replace(COALESCE(json_extract(j.profile,'$.phone'),''),'-',''),' ',''),'(',''),')',''),'+',''),?)>0))) AND (?='' OR workers.category=?) AND (?='' OR workers.company=?) AND (?='' OR workers.occupation=?) AND (?='' OR workers.created_date>=?) AND (?='' OR workers.created_date<=?) ORDER BY workers.id DESC").all(Number(siteId),...Array(4).fill(`%${query}%`),digits,digits,digits,category,category,company,company,occupation,occupation,from,from,to,to).map(row=>({...row,version:workerVersion(row)}));
+  }
+  previewWorkers(siteId,items,onAuthorize=()=>{}){
+    siteId=Number(siteId);if(!Number.isSafeInteger(siteId)||siteId<1||!Array.isArray(items)||!items.length||items.length>20||items.some(item=>!item||!Number.isSafeInteger(item.id)||item.id<1||typeof item.version!=='string'||!/^[a-f0-9]{64}$/.test(item.version))||new Set(items.map(item=>item.id)).size!==items.length)throw new Error('선택한 출입자를 확인해 주세요.');
+    this.db.exec('BEGIN');try{onAuthorize();const site=this.db.prepare('SELECT name FROM sites WHERE id=?').get(siteId);if(!site)throw new Error('현장을 선택해 주세요.');const workers=items.map(item=>{const row=this.db.prepare('SELECT * FROM workers WHERE id=? AND site_id=?').get(item.id,siteId);if(!row)throw new Error('선택한 현장의 출입자를 확인해 주세요.');if(workerVersion(row)!==item.version)throw Object.assign(new Error('출입자 정보가 변경되었습니다. 다시 조회해 주세요.'),{sessionStatus:409});const signature=this.joinSignature(siteId,row.id);return {...row,join:this.joinAcknowledgement(siteId,row.id),files:this.workerFiles(siteId,row.id),ppe:this.workerPpeIssues(siteId,row.id),signature:signature?'data:image/png;base64,'+Buffer.from(signature).toString('base64'):null};});onAuthorize();this.db.exec('COMMIT');return {siteName:site.name,workers};}catch(error){this.db.exec('ROLLBACK');throw error;}
   }
   attendance(siteId, date) {
     date = dateValue(date);
@@ -1325,7 +1329,7 @@ export class Store {
       const current=input.siteKey?this.siteFromAccess(input.siteKey):this.invitation(token);
       if(!current||current.id!==invite.id)throw new Error('유효하지 않거나 만료된 가입 링크입니다.');
       if(input.siteKey&&!this.siteRegistrationOpen(current.id))throw new Error('이 현장의 시험 가입이 중지되었거나 만료되었습니다.');
-      const worker=this.createWorker({...input,siteId:invite.id});
+      const worker=this.createWorker({...input,siteId:invite.id,memo:''});
       this.db.prepare('INSERT INTO worker_accounts(worker_id,site_id,login_id,salt,password_hash) VALUES(?,?,?,?,?)').run(worker.id,invite.id,input.loginId,salt,passwordHash);
       this.db.prepare('INSERT INTO join_acknowledgements(worker_id,notice_version,equipment,signature,profile) VALUES(?,?,?,?,?)').run(worker.id,'demo-v1',JSON.stringify(equipment),signature,profile?JSON.stringify(profile):null);
       this.db.exec('COMMIT');return worker;
