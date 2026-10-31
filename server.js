@@ -270,6 +270,7 @@ const server = http.createServer(async (req, res) => {
       const {worker,credentialHash}=authenticated;
       const current=new Date(now),date=new Date(now-current.getTimezoneOffset()*60000).toISOString().slice(0,10);
       if(store.workerAccessBlocked(worker.site_id,date))return json(res,403,{error:'해당 현장은 오늘 근로자 접속이 차단되었습니다.'});
+      if(store.workerAccountBlock(worker.site_id,worker.id).blocked)return json(res,403,{error:'시험 계정의 접속이 차단되었습니다.'});
       const raw=randomBytes(32).toString('base64url');store.recordWorkerLogin(worker.id,date,credentialHash,()=>{const currentSite=input.siteKey?store.siteFromAccess(input.siteKey):store.invitation(input.token);if(!currentSite||currentSite.id!==worker.site_id||identityMode&&store.workerLoginIdentity(currentSite.id,input.name,input.birthDigits)?.worker_id!==worker.id){const error=new Error('가입 링크 또는 로그인 정보를 확인해 주세요.');error.sessionStatus=401;throw error;}workerSessions.delete(workerKey(workerToken));workerSessions.set(workerKey(raw),{worker,expires:now+8*60*60*1000});},input.location);
       workerAccountFailures.delete(accountKey);
       for(const [key,session] of workerSessions)if(session.expires<=now)workerSessions.delete(key);
@@ -800,6 +801,8 @@ const server = http.createServer(async (req, res) => {
     if(workerPermissions){if(req.method==='GET')return json(res,200,store.workerPermissions(url.searchParams.get('siteId'),workerPermissions[1]));if(req.method==='PUT'){const input=await body(req);return json(res,200,store.setWorkerPermissions(input.siteId,workerPermissions[1],input.permissions,()=>checkRequestSession(req)));}}
     const workerActivity=url.pathname.match(/^\/api\/workers\/(\d+)\/activities$/);
     if(workerActivity&&req.method==='GET'){const raw=url.searchParams.get('offset')||'0';if(!/^\d+$/.test(raw))throw new Error('활동 검색 조건을 확인해 주세요.');return json(res,200,store.workerActivities(url.searchParams.get('siteId'),workerActivity[1],url.searchParams.getAll('kind'),Number(raw)));}
+    const workerAccountBlock=url.pathname.match(/^\/api\/workers\/(\d+)\/access-block$/);
+    if(workerAccountBlock){if(req.method==='GET')return json(res,200,store.workerAccountBlock(url.searchParams.get('siteId'),workerAccountBlock[1]));if(req.method==='PUT'){const input=await body(req),result=store.setWorkerAccountBlock(input.siteId,workerAccountBlock[1],input,()=>checkRequestSession(req));return json(res,200,result);}}
     const workerPassword=url.pathname.match(/^\/api\/workers\/(\d+)\/password$/);
     if(workerPassword&&req.method==='PUT'){const input=await body(req),siteId=Number(input.siteId),id=Number(workerPassword[1]),loginId=store.resetWorkerPassword(siteId,id,input.password,()=>checkRequestSession(req));for(const [key,session] of workerSessions)if(session.worker.id===id&&session.worker.site_id===siteId)Map.prototype.delete.call(workerSessions,key);workerAccountFailures.delete(`${siteId}:${loginId}`);return json(res,200,{ok:true});}
     const workerFiles=url.pathname.match(/^\/api\/workers\/(\d+)\/files(?:\/(\d+))?$/);
