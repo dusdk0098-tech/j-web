@@ -314,7 +314,7 @@ const server = http.createServer(async (req, res) => {
     if(url.pathname==='/api/worker/articles' && req.method==='GET'){
       const key=workerKey(workerToken),session=workerSessions.get(key);
       if(!session||session.expires<=Date.now()){workerSessions.delete(key);return json(res,401,{error:'근로자 로그인이 필요합니다.'});}
-      return json(res,200,store.workerArticles(session.worker.id));
+      const items=store.workerArticles(session.worker.id);checkRequestSession(req);return json(res,200,items);
     }
     if(url.pathname==='/api/worker/notices' && req.method==='GET'){
       const key=workerKey(workerToken),session=workerSessions.get(key);
@@ -650,11 +650,11 @@ const server = http.createServer(async (req, res) => {
     if(schedule&&req.method==='PUT')return json(res,200,store.saveSchedule(await body(req),schedule[1],()=>checkRequestSession(req)));
     if(schedule&&req.method==='DELETE'){const input=await body(req);store.deleteSchedule(input.siteId,schedule[1]);return json(res,200,{ok:true});}
     if(url.pathname==='/api/site-articles'){
-      if(req.method==='GET')return json(res,200,store.siteArticles(url.searchParams.get('siteId'),url.searchParams.get('category')||'',url.searchParams.get('q')||''));
-      if(req.method==='POST')return json(res,201,store.saveSiteArticle(await body(req)));
+      if(req.method==='GET'){const items=store.siteArticles(url.searchParams.get('siteId'),url.searchParams.get('category')||'',url.searchParams.get('q')||'');checkRequestSession(req);return json(res,200,items);}
+      if(req.method==='POST')return json(res,201,store.saveSiteArticle(await body(req),null,()=>checkRequestSession(req)));
     }
     const siteArticle=url.pathname.match(/^\/api\/site-articles\/(\d+)$/);
-    if(siteArticle&&req.method==='PUT')return json(res,200,store.saveSiteArticle(await body(req),siteArticle[1]));
+    if(siteArticle&&req.method==='PUT')return json(res,200,store.saveSiteArticle(await body(req),siteArticle[1],()=>checkRequestSession(req)));
     if(url.pathname==='/api/wages/estimate'&&req.method==='GET')return json(res,200,store.wageEstimate(url.searchParams.get('siteId'),url.searchParams.get('workerId'),url.searchParams.get('month')));
     if(url.pathname==='/api/wages/summary'&&req.method==='GET')return json(res,200,store.wageSummary(url.searchParams.get('siteId'),url.searchParams.get('month'),Object.fromEntries(url.searchParams)));
     if(url.pathname==='/api/wages/daily'&&req.method==='GET')return json(res,200,store.wageDailyRecords(url.searchParams.get('siteId'),url.searchParams.get('month'),Object.fromEntries(url.searchParams)));

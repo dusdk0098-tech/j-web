@@ -6,6 +6,9 @@ import { scheduleTypes } from './public/schedule.js';
 import { verifyWorkerLocation } from './geo.js';
 import { workerFieldRequirements } from './public/worker-fields.js';
 import { salarySummary } from './public/salary-summary.js';
+import { normalizeRichText,richTextToPlain } from './public/rich-text.js';
+
+const siteArticleRow=row=>({...row,rich_body:row.rich_body===null?null:JSON.parse(row.rich_body)});
 
 function workerFields(input){
   const category=text(input.category,'구분'),required=workerFieldRequirements(category),optional=(value,name,needed)=>!needed&&(value==null||typeof value==='string'&&!value.trim())?'':text(value,name);
@@ -78,7 +81,7 @@ export class Store {
       CREATE TABLE IF NOT EXISTS schedules (id INTEGER PRIMARY KEY,site_id INTEGER NOT NULL REFERENCES sites(id),kind TEXT NOT NULL,start_date TEXT NOT NULL,end_date TEXT NOT NULL,start_time TEXT NOT NULL,end_time TEXT NOT NULL,content TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS board_posts (id INTEGER PRIMARY KEY,kind TEXT NOT NULL,title TEXT NOT NULL,body TEXT NOT NULL,secret INTEGER NOT NULL CHECK(secret IN (0,1)),created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
       CREATE TABLE IF NOT EXISTS site_worker_blocks (site_id INTEGER NOT NULL REFERENCES sites(id),date TEXT NOT NULL,kind TEXT NOT NULL CHECK(kind IN ('holiday','ended')),PRIMARY KEY(site_id,date,kind));
-      CREATE TABLE IF NOT EXISTS site_articles (id INTEGER PRIMARY KEY,site_id INTEGER NOT NULL REFERENCES sites(id),category TEXT NOT NULL,title TEXT NOT NULL,body TEXT NOT NULL,visible INTEGER NOT NULL CHECK(visible IN (0,1)),created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+      CREATE TABLE IF NOT EXISTS site_articles (id INTEGER PRIMARY KEY,site_id INTEGER NOT NULL REFERENCES sites(id),category TEXT NOT NULL,title TEXT NOT NULL,body TEXT NOT NULL,rich_body TEXT,visible INTEGER NOT NULL CHECK(visible IN (0,1)),version TEXT NOT NULL DEFAULT '',created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
       CREATE TABLE IF NOT EXISTS site_photos (id INTEGER PRIMARY KEY,site_id INTEGER NOT NULL REFERENCES sites(id),name TEXT NOT NULL,date TEXT NOT NULL,description TEXT NOT NULL DEFAULT '',data BLOB NOT NULL);
       CREATE TABLE IF NOT EXISTS site_article_files (id INTEGER PRIMARY KEY,article_id INTEGER NOT NULL REFERENCES site_articles(id),name TEXT NOT NULL,data BLOB NOT NULL);
       CREATE TABLE IF NOT EXISTS companies (id INTEGER PRIMARY KEY, site_id INTEGER NOT NULL REFERENCES sites(id), name TEXT NOT NULL, trade TEXT NOT NULL);
@@ -182,6 +185,9 @@ export class Store {
       if(!this.db.prepare('PRAGMA table_info(board_posts)').all().some(c=>c.name==='author_name'))this.db.exec("ALTER TABLE board_posts ADD COLUMN author_name TEXT NOT NULL DEFAULT ''");
       if(!this.db.prepare('PRAGMA table_info(board_posts)').all().some(c=>c.name==='version'))this.db.exec("ALTER TABLE board_posts ADD COLUMN version TEXT NOT NULL DEFAULT ''");
       if(!this.db.prepare('PRAGMA table_info(board_posts)').all().some(c=>c.name==='shared'))this.db.exec('ALTER TABLE board_posts ADD COLUMN shared INTEGER NOT NULL DEFAULT 0 CHECK(shared IN (0,1))');
+      if(!this.db.prepare('PRAGMA table_info(site_articles)').all().some(c=>c.name==='rich_body'))this.db.exec('ALTER TABLE site_articles ADD COLUMN rich_body TEXT');
+      if(!this.db.prepare('PRAGMA table_info(site_articles)').all().some(c=>c.name==='version'))this.db.exec("ALTER TABLE site_articles ADD COLUMN version TEXT NOT NULL DEFAULT ''");
+      this.db.exec("UPDATE site_articles SET version=lower(hex(randomblob(16))) WHERE version=''");
       this.db.exec("UPDATE board_posts SET version=lower(hex(randomblob(16))) WHERE version=''");
       this.db.exec("UPDATE reviewers SET auth_version=lower(hex(randomblob(16))) WHERE auth_version=''");
       this.db.exec('COMMIT');
@@ -324,10 +330,10 @@ export class Store {
   deleteSchedule(siteId,id){if(!this.db.prepare('DELETE FROM schedules WHERE site_id=? AND id=?').run(Number(siteId),Number(id)).changes)throw new Error('선택한 현장의 일정을 확인해 주세요.');}
   siteArticles(siteId,category='',query='') {
     if(!['','안전·보건','기타'].includes(category)||typeof query!=='string'||query.length>200)throw new Error('검색 조건을 확인해 주세요.');
-    return this.db.prepare("SELECT id,category,title,body,visible,created_at FROM site_articles WHERE site_id=? AND (?='' OR category=?) AND (instr(title,?)>0 OR instr(body,?)>0) ORDER BY id DESC").all(Number(siteId),category,category,query,query).map(a=>({...a,files:this.articleFiles(a.id)}));
+    return this.db.prepare("SELECT id,category,title,body,rich_body,visible,version,created_at FROM site_articles WHERE site_id=? AND (?='' OR category=?) AND (instr(title,?)>0 OR instr(body,?)>0) ORDER BY id DESC").all(Number(siteId),category,category,query,query).map(a=>({...siteArticleRow(a),files:this.articleFiles(a.id)}));
   }
   workerArticles(workerId) {
-    return this.db.prepare('SELECT a.id,a.category,a.title,a.body,a.created_at FROM site_articles a JOIN workers w ON w.site_id=a.site_id WHERE w.id=? AND a.visible=1 ORDER BY a.id DESC').all(Number(workerId)).map(a=>({...a,files:this.articleFiles(a.id)}));
+    return this.db.prepare('SELECT a.id,a.category,a.title,a.body,a.rich_body,a.created_at FROM site_articles a JOIN workers w ON w.site_id=a.site_id WHERE w.id=? AND a.visible=1 ORDER BY a.id DESC').all(Number(workerId)).map(a=>({...siteArticleRow(a),files:this.articleFiles(a.id)}));
   }
   articleFiles(articleId){return this.db.prepare('SELECT id,name,length(data) AS size FROM site_article_files WHERE article_id=? ORDER BY id').all(Number(articleId));}
   addArticleFile(siteId,articleId,name,data){
@@ -340,14 +346,15 @@ export class Store {
   articleFile(siteId,articleId,fileId){return this.db.prepare('SELECT f.* FROM site_article_files f JOIN site_articles a ON a.id=f.article_id WHERE a.site_id=? AND a.id=? AND f.id=?').get(Number(siteId),Number(articleId),Number(fileId))||null;}
   workerArticleFile(workerId,articleId,fileId){return this.db.prepare('SELECT f.* FROM site_article_files f JOIN site_articles a ON a.id=f.article_id JOIN workers w ON w.site_id=a.site_id WHERE w.id=? AND a.visible=1 AND a.id=? AND f.id=?').get(Number(workerId),Number(articleId),Number(fileId))||null;}
   deleteArticleFile(siteId,articleId,fileId){if(!this.articleFile(siteId,articleId,fileId))throw new Error('첨부파일을 찾을 수 없습니다.');this.db.prepare('DELETE FROM site_article_files WHERE id=?').run(Number(fileId));}
-  saveSiteArticle(input,id=null) {
+  saveSiteArticle(input,id=null,onAuthorize=()=>{}) {
     const siteId=Number(input.siteId);
-    if(!this.db.prepare('SELECT 1 FROM sites WHERE id=?').get(siteId))throw new Error('현장을 선택해 주세요.');
     if(!['안전·보건','기타'].includes(input.category)||typeof input.visible!=='boolean')throw new Error('분류와 공개 설정을 확인해 주세요.');
-    const title=text(input.title,'제목'),body=text(input.body,'내용',10000),visible=input.visible?1:0;
-    if(id===null)id=this.db.prepare('INSERT INTO site_articles(site_id,category,title,body,visible) VALUES(?,?,?,?,?)').run(siteId,input.category,title,body,visible).lastInsertRowid;
-    else if(!this.db.prepare('UPDATE site_articles SET category=?,title=?,body=?,visible=? WHERE id=? AND site_id=?').run(input.category,title,body,visible,Number(id),siteId).changes)throw new Error('선택한 현장의 게시글을 확인해 주세요.');
-    return this.db.prepare('SELECT id,category,title,body,visible,created_at FROM site_articles WHERE id=? AND site_id=?').get(Number(id),siteId);
+    const rich=input.bodyRich===undefined?undefined:normalizeRichText(input.bodyRich),title=text(input.title,'제목'),body=text(rich===undefined?input.body:richTextToPlain(rich),'내용',10000),visible=input.visible?1:0;
+    this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();if(!this.db.prepare('SELECT 1 FROM sites WHERE id=?').get(siteId))throw new Error('현장을 선택해 주세요.');
+      if(id===null)id=this.db.prepare('INSERT INTO site_articles(site_id,category,title,body,rich_body,visible,version) VALUES(?,?,?,?,?,?,lower(hex(randomblob(16))))').run(siteId,input.category,title,body,rich===undefined?null:JSON.stringify(rich),visible).lastInsertRowid;
+      else{const previous=this.db.prepare('SELECT body,rich_body,version FROM site_articles WHERE id=? AND site_id=?').get(Number(id),siteId);if(!previous)throw new Error('선택한 현장의 게시글을 확인해 주세요.');if(input.version!==undefined&&input.version!==previous.version)throw Object.assign(new Error('게시글이 변경되었습니다. 다시 조회해 주세요.'),{sessionStatus:409});if(rich===undefined&&previous.rich_body!==null&&body!==previous.body)throw Object.assign(new Error('서식 있는 본문을 수정하려면 화면을 새로고침해 주세요.'),{sessionStatus:409});this.db.prepare('UPDATE site_articles SET category=?,title=?,body=?,rich_body=?,visible=?,version=lower(hex(randomblob(16))) WHERE id=? AND site_id=?').run(input.category,title,body,rich===undefined?previous.rich_body:JSON.stringify(rich),visible,Number(id),siteId);}
+      const result=siteArticleRow(this.db.prepare('SELECT id,category,title,body,rich_body,visible,version,created_at FROM site_articles WHERE id=? AND site_id=?').get(Number(id),siteId));this.db.exec('COMMIT');return result;
+    }catch(error){this.db.exec('ROLLBACK');throw error;}
   }
   createSite(input) {
     const name = text(input.name, '현장명');
