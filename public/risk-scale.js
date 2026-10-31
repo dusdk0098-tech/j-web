@@ -32,7 +32,7 @@ export function copyMusculoskeletalItems(items,existingCount,scale){
 export function copyRiskImprovement(items, sourceIndex, field){
   const source=items[sourceIndex];
   if(!source?.processName?.trim()||!['dueDate','completionDate','responsible'].includes(field))return items;
-  return items.map(item=>item.processName.trim()===source.processName.trim()&&item.contractor.trim()===source.contractor.trim()?{...item,[field]:source[field]}:item);
+  return items.map(item=>item.processName.trim()===source.processName.trim()&&(source.contractorId||item.contractorId?source.contractorId===item.contractorId:item.contractor.trim()===source.contractor.trim())?{...item,[field]:source[field]}:item);
 }
 
 export function groupRiskItems(items){

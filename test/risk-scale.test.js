@@ -13,6 +13,12 @@ test('개선 정보 복사는 같은 공정과 협력사에 선택한 항목만 
   const result=copyRiskImprovement(rows,0,'dueDate');assert.equal(result[1].dueDate,'2026-11-01');assert.equal(result[1].responsible,'기존 담당');assert.equal(result[2].dueDate,'');assert.equal(result[3].dueDate,'');assert.equal(rows[1].dueDate,'');assert.equal(copyRiskImprovement(rows,4,'dueDate'),rows);assert.equal(copyRiskImprovement(rows,0,'hazard'),rows);
 });
 
+test('개선 정보 복사는 동명이업체와 직접 입력을 등록 업체와 구분한다',()=>{
+  const rows=[{processName:'공정',contractorId:1,contractor:'동일 이름',responsible:'가상 담당'},{processName:'공정',contractorId:1,contractor:'예전 이름',responsible:''},{processName:'공정',contractorId:2,contractor:'동일 이름',responsible:''},{processName:'공정',contractorId:0,contractor:'동일 이름',responsible:''}];
+  const result=copyRiskImprovement(rows,0,'responsible');assert.equal(result[1].responsible,'가상 담당');assert.equal(result[2].responsible,'');assert.equal(result[3].responsible,'');
+  const direct=copyRiskImprovement([{processName:'공정',contractorId:0,contractor:'동일 이름',responsible:'담당'},{processName:'공정',contractorId:0,contractor:'동일 이름',responsible:''},{processName:'공정',contractorId:1,contractor:'동일 이름',responsible:''}],0,'responsible');assert.equal(direct[1].responsible,'담당');assert.equal(direct[2].responsible,'');
+});
+
 test('위험요인은 공정과 협력사 조합별로 묶고 기존 미기록도 보존한다',()=>{
   const items=[{processName:'가상 공정',contractor:'가상 A',task:'첫 작업'},{processName:'가상 공정',contractor:'가상 B',task:'둘째 작업'},{processName:'가상 공정',contractor:'가상 A',task:'셋째 작업'},{task:'이전 기록'}],groups=groupRiskItems(items);
   assert.equal(groups.length,3);assert.deepEqual(groups[0].items.map(item=>item.task),['첫 작업','셋째 작업']);assert.equal(groups[1].contractor,'가상 B');assert.equal(groups[2].process,'');assert.equal(groups[2].items[0].task,'이전 기록');assert.equal(copyRiskItem(items[0]).processName,'가상 공정');
