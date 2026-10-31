@@ -1722,7 +1722,7 @@ export class Store {
   }
   validatePermitRoles(doc,roles){
     const ids=[...new Set(Object.values(roles).filter(id=>id!==null))];
-    if(ids.length&&(!roles.siteManager||JSON.parse(doc.details).company?.trim()&&!roles.contractorLead))throw new Error('현장소장과 작업업체의 협력사 현장소장을 지정해 주세요.');
+    const details=JSON.parse(doc.details);if(ids.length&&(!roles.siteManager||details.directWork!==true&&details.company?.trim()&&!roles.contractorLead))throw new Error('현장소장과 작업업체의 협력사 현장소장을 지정해 주세요.');
     const exists=this.db.prepare('SELECT 1 FROM reviewers WHERE id=? AND site_id=? AND active=1');if(ids.some(id=>!exists.get(id,doc.site_id)))throw new Error('같은 현장의 활성 직원을 선택해 주세요.');return ids;
   }
   setPermitRoles(documentId,input,onAuthorize=()=>{}){
@@ -1922,7 +1922,6 @@ export class Store {
     const d = recordInput(input);
     if (d.siteId !== current.site_id || d.type !== current.type) throw new Error('문서의 현장과 유형은 변경할 수 없습니다.');
     this.validatePermitCompany(d,current);
-    if(d.type==='permit')this.validatePermitRoles({...current,details:JSON.stringify(d.details)},this.permitRoles(id).roles);
     this.validateBasicCategory(d);
     if(d.type==='checklist'&&d.details.kind!=='morning'&&this.db.prepare("SELECT 1 FROM attachments WHERE document_id=? AND category='morning_hazard_photo' LIMIT 1").get(Number(id)))throw new Error('점검 항목 사진을 삭제한 뒤 점검 종류를 변경해 주세요.');
     this.validatePlanEquipment(d);
@@ -2018,7 +2017,11 @@ export class Store {
     try {
       if(doc.type==='permit'&&action==='submit'){
         this.db.prepare('UPDATE documents SET id=id WHERE id=?').run(Number(id));const latest=this.document(id),roles=this.permitRoles(id).roles,ids=this.validatePermitRoles(latest,roles);
-        if(latest.status!==doc.status||latest.details!==doc.details||JSON.stringify(this.approvalLine(id))!==JSON.stringify(line)||ids.length&&JSON.stringify(ids)!==JSON.stringify(line.map(step=>step.reviewer_id)))throw new Error('작업허가서 또는 시험 결재선이 변경되었습니다. 다시 조회해 주세요.');
+        if(['status','title','date','body','details'].some(key=>latest[key]!==doc[key])||JSON.stringify(this.approvalLine(id))!==JSON.stringify(line))throw new Error('작업허가서 또는 시험 결재선이 변경되었습니다. 다시 조회해 주세요.');
+        const details=JSON.parse(latest.details),present=value=>typeof value==='string'&&value.trim();
+        if(!present(latest.title)||!present(latest.date)||details.directWork!==true&&!present(details.company)||!present(details.personnel)||details.personnel.trim()==='0'||['periodFrom','periodTo','place','work'].some(key=>!present(details[key])))throw new Error('시험 결재 요청 전에 작성일, 공정명, 작업업체 또는 직영, 작업인원, 작업기간, 작업장소와 작업내용을 입력해 주세요.');
+        if(!roles.siteManager||details.directWork!==true&&!roles.contractorLead)throw new Error('시험 결재 요청 전에 현장소장과 협력사 작업의 협력사 현장소장을 지정해 주세요.');
+        if(JSON.stringify(ids)!==JSON.stringify(line.map(step=>step.reviewer_id)))throw new Error('역할별 시험 결재자를 다시 저장해 결재선을 설정해 주세요.');
       }
       if(doc.type==='office'&&action==='submit'){
         this.db.prepare('UPDATE documents SET id=id WHERE id=?').run(Number(id));const currentDoc=this.document(id),currentLine=this.approvalLine(id);

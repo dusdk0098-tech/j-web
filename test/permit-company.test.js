@@ -14,6 +14,7 @@ import {Store} from '../store.js';
 const input=(siteId,details={})=>({siteId,type:'permit',title:'가상 허가',date:'2026-10-31',details});
 const expected=company=>({siteId:company.site_id,expectedName:company.name,expectedTrade:company.trade});
 const emptyRoles=()=>({contractorLead:null,coordinator:null,supervisor:null,safetyOfficer:null,siteManager:null,inspector:null});
+const required={personnel:'2',periodFrom:'2026-10-31',periodTo:'2026-10-31',place:'가상 장소',work:'가상 작업'};
 
 test('허가서의 등록 협력사 연결과 저장 당시 이름을 보호하고 수동 입력도 유지한다',()=>{
   const store=new Store(':memory:');
@@ -27,6 +28,7 @@ test('허가서의 등록 협력사 연결과 저장 당시 이름을 보호하�
     const doc=store.createAuthorizedDocument(input(site.id,{companyId:duplicate.id,company:'임의 이름'}));
     assert.deepEqual(JSON.parse(doc.details),{company:'같은 가상 업체',companyId:duplicate.id});
     assert.equal(store.companyInUse(site.id,duplicate.id,duplicate.name),true);
+    store.updateDocument(doc.id,input(site.id,{...required,companyId:duplicate.id}));const reviewer=store.createReviewer({siteId:site.id,loginId:'company_snapshot',name:'가상 직원',password:'virtual-password-123'});store.setPermitRoles(doc.id,{expectedVersion:store.permitRoles(doc.id).version,roles:{...emptyRoles(),siteManager:reviewer.id,contractorLead:reviewer.id}});
     store.managedTransition(doc.id,{action:'submit'});const cycle=store.document(doc.id).approval_cycle_id;
     const changed=store.updateCompany(duplicate.id,{siteId:site.id,name:'변경된 가상 업체',trade:duplicate.trade});
     assert.throws(()=>store.archiveCompany(duplicate.id,expected(changed)),/사용 중/);
@@ -51,8 +53,8 @@ test('등록 업체를 추가할 때 기존 허가 역할의 필수 조건을 �
   try{
     const site=store.createSite({name:'가상 현장'}),company=store.createCompany({siteId:site.id,name:'가상 업체',trade:'시험'}),reviewer=store.createReviewer({siteId:site.id,loginId:'permit_company_manager',name:'가상 직원',password:'virtual-password-123'}),doc=store.createAuthorizedDocument(input(site.id));
     store.setPermitRoles(doc.id,{expectedVersion:store.permitRoles(doc.id).version,roles:{...emptyRoles(),siteManager:reviewer.id}});
-    const before=store.document(doc.id);
-    assert.throws(()=>store.updateDocument(doc.id,input(site.id,{companyId:company.id,company:''})),/협력사 현장소장/);
+    store.updateDocument(doc.id,input(site.id,{...required,companyId:company.id,company:''}));const before=store.document(doc.id);
+    assert.throws(()=>store.managedTransition(doc.id,{action:'submit'}),/협력사 현장소장/);
     assert.deepEqual(store.document(doc.id),before);
     store.setPermitRoles(doc.id,{expectedVersion:store.permitRoles(doc.id).version,roles:{...emptyRoles(),siteManager:reviewer.id,contractorLead:reviewer.id}});
     assert.equal(JSON.parse(store.updateDocument(doc.id,input(site.id,{companyId:company.id,company:''})).details).company,'가상 업체');
@@ -65,11 +67,12 @@ test('직영 작업은 명시적으로 구분하고 협력사 결재자 없이 �
     const site=store.createSite({name:'가상 현장'}),company=store.createCompany({siteId:site.id,name:'가상 업체',trade:'시험'}),reviewer=store.createReviewer({siteId:site.id,loginId:'direct_manager',name:'가상 직원',password:'virtual-password-123'}),details={directWork:true,companyId:0,company:''};
     for(const invalid of [{...details,company:'가상 업체'},{...details,companyId:company.id},{...details,directWork:'true'}])assert.throws(()=>store.createAuthorizedDocument(input(site.id,invalid)),/직영|협력사/);
     const doc=store.createAuthorizedDocument(input(site.id,details));assert.equal(JSON.parse(doc.details).directWork,true);
+    store.updateDocument(doc.id,input(site.id,{...required,...details}));
     store.setPermitRoles(doc.id,{expectedVersion:store.permitRoles(doc.id).version,roles:{...emptyRoles(),siteManager:reviewer.id}});
     store.managedTransition(doc.id,{action:'submit'});const cycle=store.document(doc.id).approval_cycle_id;assert.equal(JSON.parse(store.approvalCycle(doc.id,cycle).document.details).directWork,true);
     store.managedTransition(doc.id,{action:'withdraw'});assert.throws(()=>store.updateDocument(doc.id,input(site.id,{companyId:0,company:''})),/새로고침/);
-    assert.throws(()=>store.updateDocument(doc.id,input(site.id,{directWork:false,companyId:company.id})),/협력사 현장소장/);
-    assert.equal(JSON.parse(store.document(doc.id).details).directWork,true);
+    store.updateDocument(doc.id,input(site.id,{...required,directWork:false,companyId:company.id}));assert.throws(()=>store.managedTransition(doc.id,{action:'submit'}),/협력사 현장소장/);
+    assert.equal(JSON.parse(store.document(doc.id).details).directWork,undefined);
     store.setPermitRoles(doc.id,{expectedVersion:store.permitRoles(doc.id).version,roles:{...emptyRoles(),siteManager:reviewer.id,contractorLead:reviewer.id}});
     const changed=store.updateDocument(doc.id,input(site.id,{directWork:false,companyId:company.id}));assert.equal(JSON.parse(changed.details).companyId,company.id);assert.equal(JSON.parse(changed.details).directWork,undefined);
     assert.equal(JSON.parse(store.approvalCycle(doc.id,cycle).document.details).directWork,true);
@@ -93,6 +96,7 @@ test('HTTP 허가서 작성은 잠금 대기 중 보관된 업체를 거절한�
     const directResponse=await send('/api/documents','POST',input(site.id,{directWork:true,companyId:0,company:''}),admin);assert.equal(directResponse.status,201);const direct=await directResponse.json(),directPath=`/api/documents/${direct.id}`;
     const reviewer=await (await send('/api/reviewers','POST',{siteId:site.id,loginId:'direct_http_manager',name:'가상 직원',password:'virtual-password-123'},admin)).json(),roles=await (await send(`${directPath}/permit-roles`,'GET',null,admin)).json();
     assert.equal((await send(`${directPath}/permit-roles`,'PUT',{expectedVersion:roles.version,roles:{...emptyRoles(),siteManager:reviewer.id}},admin)).status,200);
+    assert.equal((await send(directPath,'PUT',input(site.id,{...required,directWork:true}),admin)).status,200);
     assert.equal((await send(`${directPath}/transition`,'POST',{action:'submit'},admin)).status,200);const submitted=await (await send(directPath,'GET',null,admin)).json();assert.equal(JSON.parse(submitted.details).directWork,true);
   }finally{lines?.close();if(db){if(locked)db.exec('ROLLBACK');db.close();}if(child.exitCode===null){const exited=once(child,'exit');child.kill();await exited;}assert.ok(resolve(dir).startsWith(resolve(tmpdir())+sep));rmSync(dir,{recursive:true,force:true});}
 });

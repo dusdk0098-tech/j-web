@@ -17,7 +17,7 @@ const keys=['contractorLead','coordinator','supervisor','safetyOfficer','siteMan
 const empty=()=>Object.fromEntries(keys.map(key=>[key,null]));
 const png=new PNG({width:1,height:1});png.data[3]=255;
 const signature=`data:image/png;base64,${PNG.sync.write(png).toString('base64')}`;
-function fixture(s){const site=s.createSite({name:'가상 현장'}),other=s.createSite({name:'다른 가상 현장'}),people=Array.from({length:7},(_,i)=>s.createReviewer({siteId:i===6?other.id:site.id,loginId:`permit_role_${i}`,name:`가상 직원 ${i}`,password:'virtual-password-123'})),input={siteId:site.id,type:'permit',title:'가상 허가',date:'2026-10-31',details:{company:'가상 작업업체'}},doc=s.createDocument(input);return {site,people,input,doc,roles:Object.fromEntries(keys.map((key,i)=>[key,people[i].id]))};}
+function fixture(s){const site=s.createSite({name:'가상 현장'}),other=s.createSite({name:'다른 가상 현장'}),people=Array.from({length:7},(_,i)=>s.createReviewer({siteId:i===6?other.id:site.id,loginId:`permit_role_${i}`,name:`가상 직원 ${i}`,password:'virtual-password-123'})),input={siteId:site.id,type:'permit',title:'가상 허가',date:'2026-10-31',details:{company:'가상 작업업체',personnel:'2',periodFrom:'2026-10-31',periodTo:'2026-10-31',place:'가상 장소',work:'가상 작업'}},doc=s.createDocument(input);return {site,people,input,doc,roles:Object.fromEntries(keys.map((key,i)=>[key,people[i].id]))};}
 
 test('여섯 역할은 순차 결재와 요청 사본에 연결되고 재요청·재시작에도 사본을 보존한다',()=>{
   const dir=mkdtempSync(join(tmpdir(),'jweb-permit-roles-')),file=join(dir,'db.sqlite');let s=new Store(file);
@@ -45,9 +45,9 @@ test('역할 필수조건·현장·활성·버전 검사와 삽입 실패는 역
     s.db.exec("CREATE TRIGGER fail_permit_line BEFORE INSERT ON approval_steps BEGIN SELECT RAISE(ABORT,'시험 삽입 실패'); END");assert.throws(()=>put({...roles,inspector:null}),/시험 삽입 실패/);assert.deepEqual(s.permitRoles(doc.id),before);s.db.exec('DROP TRIGGER fail_permit_line');
     s.updateReviewer(input.siteId,people[0].id,{active:false});assert.throws(()=>put(roles),/활성/);assert.throws(()=>s.managedTransition(doc.id,{action:'submit'}),/활성/);s.updateReviewer(input.siteId,people[0].id,{active:true});
     put(empty());s.setApprovalLine(doc.id,[people[0].id]);const prior=s.permitRoles(doc.id).version;s.setApprovalLine(doc.id,[]);s.setApprovalLine(doc.id,[people[0].id]);assert.throws(()=>s.setPermitRoles(doc.id,{expectedVersion:prior,roles}),/다시 조회/);
-    s.managedTransition(doc.id,{action:'submit'});s.reviewerTransition(doc.id,people[0].id,'approve','',signature);assert.equal(s.document(doc.id).status,'approved');
-    const free=s.createDocument({...input,details:{}}),assigned={...empty(),siteManager:people[0].id};s.setPermitRoles(free.id,{expectedVersion:s.permitRoles(free.id).version,roles:assigned});assert.throws(()=>s.updateDocument(free.id,input),/협력사 현장소장/);assert.deepEqual(JSON.parse(s.document(free.id).details),{});
-    const legacy=s.createDocument(input);s.managedTransition(legacy.id,{action:'submit'});s.managedTransition(legacy.id,{action:'approve',signature});assert.equal(s.document(legacy.id).status,'approved');
+    assert.throws(()=>s.managedTransition(doc.id,{action:'submit'}),/현장소장/);put({...empty(),siteManager:people[0].id,contractorLead:people[0].id});s.managedTransition(doc.id,{action:'submit'});s.reviewerTransition(doc.id,people[0].id,'approve','',signature);assert.equal(s.document(doc.id).status,'approved');
+    const free=s.createDocument({...input,details:{}}),assigned={...empty(),siteManager:people[0].id};s.setPermitRoles(free.id,{expectedVersion:s.permitRoles(free.id).version,roles:assigned});s.updateDocument(free.id,input);assert.throws(()=>s.managedTransition(free.id,{action:'submit'}),/협력사 현장소장/);assert.deepEqual(JSON.parse(s.document(free.id).details),input.details);
+    const legacy=s.createDocument(input);s.db.prepare("UPDATE documents SET status='pending' WHERE id=?").run(legacy.id);s.managedTransition(legacy.id,{action:'approve',signature});assert.equal(s.document(legacy.id).status,'approved');
     const deleted=s.createDocument(input);s.db.prepare('DELETE FROM documents WHERE id=?').run(deleted.id);assert.equal(s.db.prepare('SELECT 1 FROM permit_roles WHERE document_id=?').get(deleted.id),undefined);
   }finally{s.close();}
 });

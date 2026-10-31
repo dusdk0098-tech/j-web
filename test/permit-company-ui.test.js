@@ -16,7 +16,7 @@ async function screen({details={},companies=[company(11),company(12)],existing=f
       const options=[...body.matchAll(/<option\b([^>]*)>([\s\S]*?)<\/option>/g)].map(([,attrs,text])=>({value:decode(attrs.match(/\bvalue="([^"]*)"/)?.[1]??text),selected:/\bselected\b/.test(attrs),label:decode(text)}));
       controls.set(name,{name,tag,options,disabled:/\bdisabled\b/.test(attrs),value:tag==='select'?(options.find(option=>option.selected)||options[0])?.value||'':tag==='textarea'?decode(body):decode(attrs.match(/\bvalue="([^"]*)"/)?.[1]||'')});
     }
-    for(const [,id] of html.matchAll(/\bid="([^"]+)"/g))if(!nodes.has('#'+id))nodes.set('#'+id,node());
+    for(const [tag,id] of html.matchAll(/<\w+\b[^>]*\bid="([^"]+)"[^>]*>/g))if(!nodes.has('#'+id))nodes.set('#'+id,Object.assign(node(),{checked:/\bchecked\b/.test(tag)}));
   };
   const node=()=>({disabled:false,textContent:'',html:'',set innerHTML(html){this.html=html;parse(html);},get innerHTML(){return this.html;},insertAdjacentHTML(position,html){this.html=position==='afterbegin'?html+this.html:this.html+html;parse(html);}});
   for(const key of ['#dialog-title','#dialog-body','#dialog-error','#dialog-form','#dialog-form button[type=submit]'])nodes.set(key,node());
@@ -32,6 +32,41 @@ async function screen({details={},companies=[company(11),company(12)],existing=f
 test('현장의 등록 업체를 선택하고 실제 폼 제출 경로로 식별자와 업체명을 전송한다',async()=>{
   const ui=await screen();assert.equal(ui.calls.filter(call=>call.path==='/api/companies?siteId=7').length,1);assert.equal(ui.select().value,'0');ui.choose(12);assert.equal(ui.input().disabled,true);await ui.save();
   assert.equal(ui.writes()[0].path,'/api/documents');assert.equal(ui.writes()[0].options.method,'POST');assert.equal(ui.payload().details.companyId,12);assert.equal(ui.payload().details.company,'가상 협력사');assert.equal(ui.payload().siteId,7);assert.equal(ui.closed(),1);assert.equal(Object.hasOwn(ui.payload(),'permitCompany'),false);assert.match(ui.markup(),/업체 권한을 부여하지 않습니다/);
+});
+
+test('시간입력은 처음에 숨기고 켤 때만 기본 시간과 30분·24:00 선택을 제공한다',async()=>{
+  const ui=await screen(),toggle=ui.nodes.get('#permit-use-time'),times=ui.nodes.get('#permit-times'),from=ui.controls.get('timeFrom'),to=ui.controls.get('timeTo');
+  assert.equal(toggle.checked,false);assert.equal(times.hidden,true);assert.equal(from.disabled,true);assert.equal(to.disabled,true);assert.equal(from.value,'');assert.equal(to.value,'');
+  toggle.checked=true;toggle.onchange();assert.equal(times.hidden,false);assert.equal(from.disabled,false);assert.equal(to.disabled,false);assert.equal(from.value,'07:00');assert.equal(to.value,'16:00');
+  const values=from.options.map(option=>option.value);assert.equal(values[0],'');assert.equal(values.length,50);assert.equal(new Set(values).size,50);assert.ok(values.slice(1).every(value=>/^(?:[01]\d|2[0-3]):(?:00|30)$|^24:00$/.test(value)));assert.equal(values.at(-1),'24:00');assert.deepEqual(to.options,from.options);
+  await ui.save();assert.equal(ui.payload().details.timeFrom,'07:00');assert.equal(ui.payload().details.timeTo,'16:00');assert.equal(Object.hasOwn(ui.payload(),'permit-use-time'),false);
+});
+
+test('기존 시간과 편집 중 시간은 끄고 다시 켜도 보존되며 꺼진 채 저장하면 두 시간을 비운다',async()=>{
+  const ui=await screen({existing:true,details:{timeFrom:'09:30',timeTo:'24:00'}}),toggle=ui.nodes.get('#permit-use-time'),from=ui.controls.get('timeFrom'),to=ui.controls.get('timeTo');
+  assert.equal(toggle.checked,true);assert.equal(ui.nodes.get('#permit-times').hidden,false);assert.equal(from.value,'09:30');assert.equal(to.value,'24:00');
+  from.value='10:30';to.value='23:30';toggle.checked=false;toggle.onchange();assert.equal(from.disabled,true);assert.equal(to.disabled,true);toggle.checked=true;toggle.onchange();assert.equal(from.value,'10:30');assert.equal(to.value,'23:30');
+  await ui.save();assert.equal(ui.payload().details.timeFrom,'10:30');assert.equal(ui.payload().details.timeTo,'23:30');
+  toggle.checked=false;toggle.onchange();await ui.save();assert.equal(ui.payload().details.timeFrom,'');assert.equal(ui.payload().details.timeTo,'');assert.equal(Object.hasOwn(ui.payload(),'timeFrom'),false);assert.equal(Object.hasOwn(ui.payload(),'timeTo'),false);
+});
+
+test('부분 시간은 기존 값을 덮지 않고 그대로 전송하며 저장 오류에서도 보존한다',async()=>{
+  for(const details of [{timeFrom:'08:30',timeTo:''},{timeFrom:'',timeTo:'18:00'}]){
+    const ui=await screen({existing:true,details,failSave:true}),toggle=ui.nodes.get('#permit-use-time');assert.equal(toggle.checked,true);
+    toggle.checked=false;toggle.onchange();toggle.checked=true;toggle.onchange();await ui.save();assert.equal(ui.payload().details.timeFrom,details.timeFrom);assert.equal(ui.payload().details.timeTo,details.timeTo);assert.equal(ui.closed(),0);assert.equal(ui.error(),'가상 저장 실패');
+    assert.match(ui.markup(),/시작·종료 시간을 모두 선택/);assert.equal(ui.controls.get('timeFrom').value,details.timeFrom);assert.equal(ui.controls.get('timeTo').value,details.timeTo);
+  }
+});
+
+test('시간 선택을 반복해도 다른 기본 항목과 등록업체·직영·수동업체 입력이 유지된다',async()=>{
+  for(const companyId of [0,12,-1]){
+    const ui=await screen(),values={title:'가상 시간 시험',date:'2026-10-30',body:'가상 본문',personnel:'3',periodFrom:'2026-10-30',periodTo:'2026-10-31',place:'가상 구역',work:'가상 작업'};
+    for(const [key,value] of Object.entries(values))ui.controls.get(key).value=value;
+    ui.input().value='가상 수동 업체';ui.choose(companyId);const toggle=ui.nodes.get('#permit-use-time');for(const enabled of [true,false,true]){toggle.checked=enabled;toggle.onchange();}
+    assert.equal(ui.select().value,String(companyId));assert.equal(ui.input().value,'가상 수동 업체');await ui.save();const payload=ui.payload();
+    for(const [key,value] of Object.entries(values))assert.equal(['title','date','body'].includes(key)?payload[key]:payload.details[key],value);
+    assert.equal(payload.details.companyId,companyId>0?companyId:0);assert.equal(payload.details.directWork,companyId===-1);assert.equal(payload.details.company,companyId===-1?'':companyId===0?'가상 수동 업체':'가상 협력사');
+  }
 });
 
 test('식별자 없는 과거 수동입력은 같은 이름의 등록 업체가 있어도 직접입력으로 보존한다',async()=>{

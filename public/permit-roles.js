@@ -7,7 +7,7 @@ export function permitRoleSnapshot(linked){
 export async function mountPermitRoles({target,doc,api,active=()=>true,confirm=globalThis.confirm,onSaved=()=>{},onLockChange=()=>{},genericButton}){
   const editable=['draft','rejected'].includes(doc.status),details=JSON.parse(doc.details||'{}'),path=`/api/documents/${doc.id}/permit-roles`,current=()=>target.isConnected&&active();
   let epoch=0,busy=false,dirty=false,blocked=true,version,people=[];
-  target.innerHTML='<h2>역할별 시험 결재자</h2><p>J웹의 독립 시험 규칙입니다. 아래 표시 순서대로 결재하며 같은 직원은 한 번만 결재합니다. 역할 저장은 기존 일반 시험 결재선을 대체합니다. 모두 비우면 시험 결재선도 비워집니다.</p><div data-permit-role-fields></div><button type="button" data-permit-role-reload>다시 조회</button><p data-permit-role-status role="status"></p>';
+  target.innerHTML='<h2>역할별 시험 결재자</h2><p>J웹의 독립 시험 규칙입니다. 아래 표시 순서대로 결재하며 같은 직원은 한 번만 결재합니다. 역할 저장은 기존 일반 시험 결재선을 대체합니다. 모두 비우면 시험 결재선도 비워집니다.</p><p>시험 결재 요청 전 문서 수정에서 작성일·제목·작업업체(직영 작업 선택 가능)·작업인원(빈값 또는 0 불가)·작업기간 시작일과 종료일·작업장소·작업내용을 보완해 저장하세요. 일반 시험 결재선만으로는 요청할 수 없습니다. 아래 현장소장을 지정하고, 직영 작업이 아니면 협력사 현장소장도 지정한 뒤 역할과 시험 결재선을 저장하세요. 모두 비운 경우에는 요청 전에 필수 역할을 다시 지정하세요.</p><div data-permit-role-fields></div><button type="button" data-permit-role-reload>다시 조회</button><p data-permit-role-status role="status"></p>';
   const fields=target.querySelector('[data-permit-role-fields]'),status=target.querySelector('[data-permit-role-status]'),reload=target.querySelector('[data-permit-role-reload]');
   const controls=()=>fields.querySelectorAll('select,button');
   const lock=()=>{for(const control of controls())control.disabled=busy||blocked;reload.disabled=busy;if(genericButton)genericButton.disabled=busy||blocked||dirty;onLockChange(busy||blocked||dirty);};

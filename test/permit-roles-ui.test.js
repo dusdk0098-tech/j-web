@@ -114,6 +114,16 @@ test('실제 관리자 상세의 역할 미저장·저장 중에는 수정 및 �
   select.value='1';fields.selects[4].value='1';fields.selects[4].onchange();ui.context.permitRoleCleanup();assert.equal(edit.disabled,false);assert.equal(submit.disabled,false);
 });
 
+test('임시 허가 상세와 역할 설정은 시험 요청 전 기본 항목 및 직영별 필수 역할의 저장 순서를 안내한다',async()=>{
+  const ui=adminScreen();await ui.ready;
+  assert.match(ui.content.innerHTML,/시험 결재 요청 전 확인/);
+  for(const markup of [ui.content.innerHTML,ui.content.roleTarget.innerHTML]){
+    assert.match(markup,/문서 수정에서 작성일·제목·작업업체\(직영 작업 선택 가능\)·작업인원\(빈값 또는 0 불가\)·작업기간 시작일과 종료일·작업장소·작업내용/);
+    assert.match(markup,/현장소장을 지정/);assert.match(markup,/직영 작업이 아니면 협력사 현장소장도/);assert.match(markup,/역할과 시험 결재선을 저장/);assert.match(markup,/일반 시험 결재선만/);assert.match(markup,/필수 역할을 다시 지정/);
+  }
+  assert.match(ui.content.innerHTML,/실제 작업허가를 대체하지 않습니다/);assert.equal(ui.calls.some(call=>call.options),false);
+});
+
 test('관리자 문서 상세는 업체명 대신 직영 작업을 표시하고 내부 필드는 노출하지 않는다',async()=>{
   const ui=adminScreen(path=>path==='/api/documents/4'?{id:4,site_id:7,type:'permit',status:'draft',title:'가상 직영 문서',date:'2026-10-31',details:JSON.stringify({directWork:true,companyId:0,company:''})}:undefined);ui.context.permitFields={company:'작업업체'};await ui.ready;
   assert.match(ui.content.innerHTML,/<strong>작업업체<\/strong> 직영 작업/);assert.doesNotMatch(ui.content.innerHTML,/directWork|추가 항목/);
