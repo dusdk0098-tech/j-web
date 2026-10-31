@@ -13,6 +13,7 @@ const siteArticleRow=row=>({...row,rich_body:row.rich_body===null?null:JSON.pars
 const workerVersion=worker=>createHash('sha256').update(JSON.stringify([worker.id,worker.site_id,worker.name,worker.category,worker.company,worker.occupation,worker.created_date,worker.memo])).digest('hex');
 const basicSampleTargetVersion=(row,parent)=>createHash('sha256').update(JSON.stringify([row.id,row.parent_id,row.name,row.description,parent?.name??null,parent?.description??null])).digest('hex');
 const reviewerBasicAccess="r.id=? AND r.active=1 AND d.type='basic' AND d.status='approved' AND (d.site_id=r.site_id OR json_extract(d.details,'$.shared')=1)";
+const permitRoleLabels={contractorLead:'협력사 현장소장',coordinator:'담당자',supervisor:'관리감독자',safetyOfficer:'안전관리자',siteManager:'현장소장',inspector:'감리'};
 function workerMemo(value){if(typeof value!=='string'||value.length>2000||/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/.test(value))throw new Error('메모를 확인해 주세요.');return value.trim();}
 function validateManagerAnswers(answers){if(!Array.isArray(answers)||answers.length!==3||answers.some(a=>!a||!['O','X'].includes(a.answer)||typeof a.note!=='string'||a.note.length>500))throw new Error('세 항목의 O/X와 비고를 확인해 주세요.');}
 
@@ -163,6 +164,13 @@ export class Store {
       CREATE TABLE IF NOT EXISTS events (id INTEGER PRIMARY KEY, document_id INTEGER NOT NULL REFERENCES documents(id), action TEXT NOT NULL, from_status TEXT NOT NULL, to_status TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
       CREATE TABLE IF NOT EXISTS risk_activities (id INTEGER PRIMARY KEY, document_id INTEGER NOT NULL REFERENCES documents(id), kind TEXT NOT NULL,date TEXT NOT NULL,place TEXT NOT NULL,host TEXT NOT NULL,participants TEXT NOT NULL,content TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS permit_checks (id INTEGER PRIMARY KEY,document_id INTEGER NOT NULL REFERENCES documents(id),date TEXT NOT NULL,items TEXT NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+      CREATE TABLE IF NOT EXISTS permit_roles (document_id INTEGER PRIMARY KEY REFERENCES documents(id) ON DELETE CASCADE,roles TEXT NOT NULL DEFAULT '{}',version INTEGER NOT NULL DEFAULT 0);
+      INSERT OR IGNORE INTO permit_roles(document_id) SELECT id FROM documents WHERE type='permit';
+      CREATE TRIGGER IF NOT EXISTS permit_roles_created AFTER INSERT ON documents WHEN NEW.type='permit' BEGIN INSERT INTO permit_roles(document_id) VALUES(NEW.id); END;
+      CREATE TRIGGER IF NOT EXISTS permit_roles_updated AFTER UPDATE ON documents WHEN NEW.type='permit' BEGIN UPDATE permit_roles SET version=version+1 WHERE document_id=NEW.id; END;
+      CREATE TRIGGER IF NOT EXISTS permit_line_added AFTER INSERT ON approval_steps BEGIN UPDATE permit_roles SET version=version+1 WHERE document_id=NEW.document_id; END;
+      CREATE TRIGGER IF NOT EXISTS permit_line_removed AFTER DELETE ON approval_steps BEGIN UPDATE permit_roles SET version=version+1 WHERE document_id=OLD.document_id; END;
+      CREATE TRIGGER IF NOT EXISTS permit_line_updated AFTER UPDATE ON approval_steps BEGIN UPDATE permit_roles SET version=version+1 WHERE document_id=NEW.document_id; END;
       CREATE TABLE IF NOT EXISTS permit_extensions (id INTEGER PRIMARY KEY,document_id INTEGER NOT NULL REFERENCES documents(id),date_from TEXT NOT NULL,date_to TEXT NOT NULL,time_from TEXT NOT NULL,time_to TEXT NOT NULL,signature BLOB NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
       CREATE TABLE IF NOT EXISTS risk_activity_photos (id INTEGER PRIMARY KEY, activity_id INTEGER NOT NULL REFERENCES risk_activities(id) ON DELETE CASCADE, name TEXT NOT NULL,data BLOB NOT NULL);
       CREATE TABLE IF NOT EXISTS risk_activity_signatures (activity_id INTEGER PRIMARY KEY REFERENCES risk_activities(id) ON DELETE CASCADE,signature BLOB NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
@@ -1549,6 +1557,7 @@ export class Store {
   setApprovalLine(id,ids,onAuthorize=()=>{}){
     if(!Array.isArray(ids)||ids.some(x=>!Number.isSafeInteger(x)||x<1)||new Set(ids).size!==ids.length)throw new Error('결재자를 확인해 주세요.');
     this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();const doc=this.document(id);if(!doc||!['draft','rejected'].includes(doc.status))throw new Error('수정 가능한 문서를 확인해 주세요.');if(ids.length>(doc.type==='office'?9:4))throw new Error('결재자를 확인해 주세요.');
+      if(doc.type==='permit'&&Object.values(this.permitRoles(id).roles).some(Boolean))throw Object.assign(new Error('역할별 시험 결재자를 먼저 전체 해제해 주세요.'),{sessionStatus:409});
       const exists=this.db.prepare('SELECT 1 FROM reviewers WHERE id=? AND site_id=? AND active=1'),author=this.db.prepare('SELECT reviewer_id FROM office_document_authors WHERE document_id=?').get(Number(id));if(ids.some(id=>!exists.get(id,doc.site_id))||author&&ids.includes(author.reviewer_id))throw new Error('같은 현장의 활성 결재자를 선택해 주세요. 작성자는 직접 결재할 수 없습니다.');
       this.db.prepare('DELETE FROM approval_steps WHERE document_id=?').run(Number(id));const add=this.db.prepare('INSERT INTO approval_steps(document_id,position,reviewer_id) VALUES(?,?,?)');ids.forEach((reviewerId,index)=>add.run(Number(id),index+1,reviewerId));if(doc.type==='office')this.db.prepare('DELETE FROM meeting_signatures WHERE document_id=?').run(Number(id));const result=this.approvalLine(id);this.db.exec('COMMIT');return result;
     }catch(error){this.db.exec('ROLLBACK');throw error;}
@@ -1597,7 +1606,7 @@ export class Store {
   }
   liveReviewerLinks(doc){
     if(doc.type==='risk')return {type:'risk',activities:this.riskActivities(doc.id).map(activity=>({...activity,worker_snapshot:JSON.parse(activity.worker_snapshot||'[]'),reviewer_snapshot:JSON.parse(activity.reviewer_snapshot||'[]'),files:this.riskActivityPhotos(doc.id,activity.id)}))};
-    if(doc.type==='permit')return {type:'permit',checks:this.permitChecks(doc.id),extensions:this.permitExtensions(doc.id)};
+    if(doc.type==='permit')return {type:'permit',checks:this.permitChecks(doc.id),extensions:this.permitExtensions(doc.id),permitRoles:Object.entries(this.permitRoles(doc.id).roles).filter(([,id])=>id!==null).map(([key,id])=>({key,label:permitRoleLabels[key],reviewer_id:id,reviewer_name:this.db.prepare('SELECT name FROM reviewers WHERE id=?').get(id)?.name||''}))};
     if(doc.type==='checklist')return {type:'checklist',authorSignature:!!this.checklistSignature(doc.id)};
     if(doc.type==='cost')return {type:'cost',photos:Array.isArray(JSON.parse(doc.details||'{}').rows)?this.safetyCostReportPhotos(doc.id):[],authorSignature:!!this.meetingSignature(doc.id)};
     if(doc.type==='joint_inspection')return {type:'joint',authorSignature:!!this.jointSignature(doc.id)};
@@ -1704,6 +1713,28 @@ export class Store {
   copyWorkPlan(id,input){
     const source=this.document(id);if(!source||source.type!=='work_plan'||source.site_id!==Number(input.siteId))throw new Error('같은 현장의 작업계획서를 확인해 주세요.');
     this.db.exec('SAVEPOINT copy_work_plan');try{const copy=this.createDocument({siteId:source.site_id,type:'work_plan',title:input.title,date:input.date,body:source.body,details:JSON.parse(source.details)});this.db.prepare('INSERT INTO work_plan_copies(document_id,source_document_id) VALUES(?,?)').run(copy.id,source.id);this.db.exec('RELEASE copy_work_plan');return this.document(copy.id);}catch(error){this.db.exec('ROLLBACK TO copy_work_plan');this.db.exec('RELEASE copy_work_plan');throw error;}
+  }
+  permitRoles(documentId){
+    const doc=this.document(documentId);if(!doc||doc.type!=='permit')throw new Error('시험 작업허가서를 확인해 주세요.');
+    const row=this.db.prepare('SELECT roles,version FROM permit_roles WHERE document_id=?').get(doc.id),saved=JSON.parse(row?.roles||'{}'),roles=Object.fromEntries(Object.keys(permitRoleLabels).map(key=>[key,saved[key]??null])),line=this.approvalLine(doc.id);
+    return {version:createHash('sha256').update(JSON.stringify([doc,row?.version??0,roles,line])).digest('hex'),roles,line};
+  }
+  validatePermitRoles(doc,roles){
+    const ids=[...new Set(Object.values(roles).filter(id=>id!==null))];
+    if(ids.length&&(!roles.siteManager||JSON.parse(doc.details).company?.trim()&&!roles.contractorLead))throw new Error('현장소장과 작업업체의 협력사 현장소장을 지정해 주세요.');
+    const exists=this.db.prepare('SELECT 1 FROM reviewers WHERE id=? AND site_id=? AND active=1');if(ids.some(id=>!exists.get(id,doc.site_id)))throw new Error('같은 현장의 활성 직원을 선택해 주세요.');return ids;
+  }
+  setPermitRoles(documentId,input,onAuthorize=()=>{}){
+    this.db.exec('BEGIN IMMEDIATE');try{
+      onAuthorize();const doc=this.document(documentId),current=this.permitRoles(documentId);
+      if(!['draft','rejected'].includes(doc.status))throw new Error('수정 가능한 작업허가서를 확인해 주세요.');
+      if(input?.expectedVersion!==current.version)throw Object.assign(new Error('작업허가서가 변경되었습니다. 다시 조회해 주세요.'),{sessionStatus:409});
+      const roles=input.roles,keys=Object.keys(permitRoleLabels);if(!roles||typeof roles!=='object'||Array.isArray(roles)||Object.keys(roles).length!==keys.length||keys.some(key=>!Object.hasOwn(roles,key)||roles[key]!==null&&(!Number.isSafeInteger(roles[key])||roles[key]<1)))throw new Error('여섯 역할의 시험 결재자를 확인해 주세요.');
+      const ordered=Object.fromEntries(keys.map(key=>[key,roles[key]])),ids=this.validatePermitRoles(doc,ordered);
+      this.db.prepare('UPDATE permit_roles SET roles=?,version=version+1 WHERE document_id=?').run(JSON.stringify(ordered),doc.id);
+      this.db.prepare('DELETE FROM approval_steps WHERE document_id=?').run(doc.id);const add=this.db.prepare('INSERT INTO approval_steps(document_id,position,reviewer_id) VALUES(?,?,?)');ids.forEach((id,index)=>add.run(doc.id,index+1,id));
+      const result=this.permitRoles(doc.id);this.db.exec('COMMIT');return result;
+    }catch(error){this.db.exec('ROLLBACK');throw error;}
   }
   permitChecks(documentId){const doc=this.document(documentId);if(!doc||doc.type!=='permit')throw new Error('시험 작업허가서를 확인해 주세요.');return this.db.prepare('SELECT * FROM permit_checks WHERE document_id=? ORDER BY date DESC,id DESC').all(Number(documentId)).map(row=>({...row,items:JSON.parse(row.items)}));}
   savePermitCheck(documentId,input,id=null,onAuthorize=()=>{}){
@@ -1889,6 +1920,7 @@ export class Store {
     if(current.type==='office'){const previous=JSON.parse(current.details);if(previous.bodyRich!==undefined&&input.details?.bodyRich===undefined){if(input.body!==current.body)throw Object.assign(new Error('서식 있는 본문을 수정하려면 화면을 새로고침해 주세요.'),{sessionStatus:409});input={...input,details:{...input.details,bodyRich:previous.bodyRich}};}}
     const d = recordInput(input);
     if (d.siteId !== current.site_id || d.type !== current.type) throw new Error('문서의 현장과 유형은 변경할 수 없습니다.');
+    if(d.type==='permit')this.validatePermitRoles({...current,details:JSON.stringify(d.details)},this.permitRoles(id).roles);
     this.validateBasicCategory(d);
     if(d.type==='checklist'&&d.details.kind!=='morning'&&this.db.prepare("SELECT 1 FROM attachments WHERE document_id=? AND category='morning_hazard_photo' LIMIT 1").get(Number(id)))throw new Error('점검 항목 사진을 삭제한 뒤 점검 종류를 변경해 주세요.');
     this.validatePlanEquipment(d);
@@ -1975,6 +2007,10 @@ export class Store {
     if(doc.type==='risk' && action==='reject' && !opinion)throw new Error('반려 의견을 입력해 주세요.');
     let cycleId=doc.approval_cycle_id||null;this.db.exec('SAVEPOINT document_transition');
     try {
+      if(doc.type==='permit'&&action==='submit'){
+        this.db.prepare('UPDATE documents SET id=id WHERE id=?').run(Number(id));const latest=this.document(id),roles=this.permitRoles(id).roles,ids=this.validatePermitRoles(latest,roles);
+        if(latest.status!==doc.status||latest.details!==doc.details||JSON.stringify(this.approvalLine(id))!==JSON.stringify(line)||ids.length&&JSON.stringify(ids)!==JSON.stringify(line.map(step=>step.reviewer_id)))throw new Error('작업허가서 또는 시험 결재선이 변경되었습니다. 다시 조회해 주세요.');
+      }
       if(doc.type==='office'&&action==='submit'){
         this.db.prepare('UPDATE documents SET id=id WHERE id=?').run(Number(id));const currentDoc=this.document(id),currentLine=this.approvalLine(id);
         if(!currentDoc||['status','title','date','body','details'].some(key=>currentDoc[key]!==doc[key])||JSON.stringify(currentLine)!==JSON.stringify(line))throw new Error('문서 또는 결재선이 변경되었습니다. 다시 확인해 주세요.');

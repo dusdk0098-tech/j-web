@@ -56,6 +56,7 @@ assets.add('/weekly-ppe.js');
 assets.add('/reviewer-manager-check.js');
 assets.add('/basic-samples.js');
 assets.add('/reviewer-basic-documents.js');
+assets.add('/permit-roles.js');
 function checkRequestSession(req){const failure=req.checkSession?.();if(failure)throw Object.assign(new Error(failure.error),{sessionStatus:failure.status});}
 function dailyReportPhoto(doc,kind,id){
   const file=kind==='site'?store.sitePhoto(doc.site_id,id):store.attachment(id);
@@ -925,6 +926,8 @@ const server = http.createServer(async (req, res) => {
       if(photoId&&req.method==='GET'){const photo=store.riskActivityPhoto(docId,activityId,photoId);if(!photo)return json(res,404,{error:'시험 사진을 찾을 수 없습니다.'});const name=encodeURIComponent(photo.name).replace(/[!'()*]/g,c=>`%${c.charCodeAt(0).toString(16).toUpperCase()}`);res.writeHead(200,{'Content-Type':'application/octet-stream','Content-Disposition':`attachment; filename="photo"; filename*=UTF-8''${name}`,'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(photo.data);}
     }
     const permitCheck=url.pathname.match(/^\/api\/documents\/(\d+)\/permit-checks(?:\/(\d+))?$/);
+    const permitRoles=url.pathname.match(/^\/api\/documents\/(\d+)\/permit-roles$/);
+    if(permitRoles){if(req.method==='GET'){const result=store.permitRoles(permitRoles[1]);checkRequestSession(req);return json(res,200,result);}if(req.method==='PUT'){const input=await body(req);return json(res,200,store.setPermitRoles(permitRoles[1],input,()=>checkRequestSession(req)));}}
     if(permitCheck){const [,id,checkId]=permitCheck;if(!checkId&&req.method==='GET')return json(res,200,store.permitChecks(id));if(!checkId&&req.method==='POST')return json(res,201,{id:store.savePermitCheck(id,await body(req,120000),null,()=>checkRequestSession(req))});if(checkId&&req.method==='PUT')return json(res,200,{id:store.savePermitCheck(id,await body(req,120000),checkId,()=>checkRequestSession(req))});if(checkId&&req.method==='DELETE'){store.deletePermitCheck(id,checkId,()=>checkRequestSession(req));return json(res,200,{ok:true});}}
     const permitExtension=url.pathname.match(/^\/api\/documents\/(\d+)\/permit-extensions(?:\/(\d+))?(?:\/(signature))?$/);
     if(permitExtension){const [,id,extensionId,signature]=permitExtension;if(!extensionId&&!signature&&req.method==='GET')return json(res,200,store.permitExtensions(id));if(!extensionId&&!signature&&req.method==='POST')return json(res,201,{id:store.savePermitExtension(id,await body(req),null,()=>checkRequestSession(req))});if(extensionId&&!signature&&req.method==='PUT')return json(res,200,{id:store.savePermitExtension(id,await body(req),extensionId,()=>checkRequestSession(req))});if(extensionId&&!signature&&req.method==='DELETE'){store.deletePermitExtension(id,extensionId,()=>checkRequestSession(req));return json(res,200,{ok:true});}if(extensionId&&signature&&req.method==='GET'){const image=store.permitExtensionSignature(id,extensionId);if(!image)return json(res,404,{error:'시험 서명을 찾을 수 없습니다.'});res.writeHead(200,{'Content-Type':'image/png','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(image);}}
