@@ -1842,6 +1842,9 @@ export class Store {
   deleteRiskActivityPhoto(documentId,id,photoId){if(!this.riskActivityPhoto(documentId,id,photoId))throw new Error('시험 사진을 찾을 수 없습니다.');this.db.exec('SAVEPOINT delete_risk_activity_file');try{this.db.prepare('DELETE FROM risk_activity_photos WHERE id=?').run(Number(photoId));this.db.prepare('DELETE FROM risk_activity_signatures WHERE activity_id=?').run(Number(id));this.db.exec('RELEASE delete_risk_activity_file');}catch(error){this.db.exec('ROLLBACK TO delete_risk_activity_file');this.db.exec('RELEASE delete_risk_activity_file');throw error;}}
   instructionResult(id){const doc=this.document(id);if(!doc||doc.type!=='instruction')throw new Error('작업지시서를 확인해 주세요.');return this.db.prepare('SELECT date,actor,content,created_at,source,signature IS NOT NULL AS has_signature FROM instruction_results WHERE document_id=?').get(Number(id))||null;}
   instructionSignature(id){return this.db.prepare('SELECT signature FROM instruction_results WHERE document_id=? AND signature IS NOT NULL').get(Number(id))?.signature || null;}
+  addAuthorizedInstructionResult(id,input,onAuthorize=()=>{}){
+    this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();const result=this.addInstructionResult(id,input);this.db.exec('COMMIT');return result;}catch(error){this.db.exec('ROLLBACK');throw error;}
+  }
   addInstructionResult(id,input,source='manager'){
     const existing=this.instructionResult(id),doc=this.document(id);if(existing)throw new Error('시험 조치 기록이 이미 있습니다.');
     if(doc.status!=='approved')throw new Error('승인된 시험 지시서에만 조치 기록을 추가할 수 있습니다.');

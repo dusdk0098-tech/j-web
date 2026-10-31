@@ -875,7 +875,7 @@ const server = http.createServer(async (req, res) => {
     const instructionResult=url.pathname.match(/^\/api\/documents\/(\d+)\/instruction-result$/);
     if(instructionResult){
       if(req.method==='GET')return json(res,200,store.instructionResult(instructionResult[1]));
-      if(req.method==='POST')return json(res,201,store.addInstructionResult(instructionResult[1],await body(req)));
+      if(req.method==='POST')return json(res,201,store.addAuthorizedInstructionResult(instructionResult[1],await body(req),()=>checkRequestSession(req)));
     }
     const instructionPhotos=url.pathname.match(/^\/api\/documents\/(\d+)\/instruction-photos(?:\/(\d+))?$/);
     if(instructionPhotos){
