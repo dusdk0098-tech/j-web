@@ -2,6 +2,7 @@ import { riskScaleOptions, riskScore, copyRiskItem, copyRiskImprovement, groupRi
 import { selectBatchDocuments, selectBatchItems } from './batch-print.js';
 import { siteQrSession, printSiteQr } from './site-qr.js';
 import { mountCommonWork } from './common-work-view.js';
+import { mountPersonalNoteTools } from './personal-notes-tools.js';
 import { selectTbmSources, mergeTbmSource } from './tbm-sources.js';
 import { trainingGroups, trainingRoster, filterEducationReport } from './training-groups.js';
 import { summarizeSiteAttendance } from './site-statistics.js';
@@ -714,6 +715,7 @@ async function renderAllSiteStatistics(siteId,from,to,month,day){
   section.querySelectorAll('[data-site-education]').forEach(button=>button.onclick=async()=>{const target=Number(button.dataset.siteEducation);state.siteId=target;state.statisticsDay='';state.detail=null;state.workerFilters={};state.wageFilters={};try{await render();if(state.page==='statistics'&&state.siteId===target)content.querySelector('#education-report')?.scrollIntoView({block:'start'});}catch(error){showError(error);}});
 }
 async function render(){
+  document.querySelector('dialog.personal-note-preview[open]')?.close();
   await loadSites(); $('#heading').textContent=labels[state.page];$('#crumb').textContent=labels[state.page];
   document.querySelectorAll('[data-page]').forEach(b=>b.classList.toggle('selected',b.dataset.page===state.page));
   if(!state.siteId&&state.page!=='board'&&state.page!=='clients'){content.innerHTML='<section class="panel empty">먼저 현장을 추가해 주세요. 시험을 위해 가상의 현장명을 사용하세요.</section>';return;}
@@ -937,6 +939,7 @@ async function render(){
     const edit=note=>showDialog(note?'가상 개인업무 수정':'가상 개인업무 작성',`<div class="fields">${field('date','작성일',note?.date||today(),'date')}<label>내용<textarea name="content" maxlength="10000" required>${esc(note?.content||'')}</textarea></label><label><input type="checkbox" name="private" ${note?.private?'checked':''}> 비공개 표시 (시험용)</label></div>`,d=>api(note?`/api/personal-notes/${note.id}`:'/api/personal-notes',{method:note?'PUT':'POST',body:JSON.stringify({siteId,date:d.date,content:d.content,private:d.private==='on',...(note?{version:note.version}:{})})}));
     $('#personal-add').onclick=()=>edit(null);$('#personal-search').onclick=()=>{const from=$('#personal-from').value,to=$('#personal-to').value;if(from&&to&&from>to){flash('조회 기간을 확인해 주세요.',true);return;}state.personalFilters={from,to,q:$('#personal-query').value};render().catch(showError);};
     for(const note of notes){const card=content.querySelector(`[data-personal-note="${note.id}"]`);if(note.checked)continue;card.querySelector('[data-personal-edit]').onclick=()=>edit(note);card.querySelector('[data-personal-check]').onclick=async()=>{if(!confirm('시험 확인 후에는 수정과 삭제가 불가능합니다. 확인할까요?'))return;try{await api(`/api/personal-notes/${note.id}/check`,{method:'POST',body:JSON.stringify({siteId,version:note.version})});await render();}catch(error){showError(error);}};card.querySelector('[data-personal-delete]').onclick=async()=>{if(!confirm('가상 일지와 첨부파일을 삭제할까요?'))return;try{await api(`/api/personal-notes/${note.id}`,{method:'DELETE',body:JSON.stringify({siteId,version:note.version})});await render();}catch(error){showError(error);}};card.querySelector('[data-personal-file]').onchange=async event=>{const file=event.target.files[0];if(!file)return;try{const response=await fetch(`/api/personal-notes/${note.id}/files?${new URLSearchParams({siteId:String(siteId),version:note.version})}`,{method:'POST',headers:{'x-file-name':encodeURIComponent(file.name)},body:file});if(!response.ok)throw Error((await response.json()).error);await render();}catch(error){showError(error);}};card.querySelectorAll('[data-personal-file-delete]').forEach(button=>button.onclick=async()=>{try{await api(`/api/personal-notes/${note.id}/files/${button.dataset.personalFileDelete}?siteId=${siteId}`,{method:'DELETE',body:JSON.stringify({version:note.version})});await render();}catch(error){showError(error);}});}
+    mountPersonalNoteTools({target:content.querySelector('.panel'),notes,api,base:'/api/personal-notes',siteId,cardAttribute:'data-personal-note',active:()=>state.page==='personal-notes'&&state.siteId===siteId});
     return;
   }
   if(state.page==='site-articles'){

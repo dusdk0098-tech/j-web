@@ -47,6 +47,7 @@ const assets = new Set(['/','/app.js','/office-template.js','/common-work-view.j
 const json = (res, code, value) => { res.writeHead(code, {'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}); res.end(JSON.stringify(value)); };
 assets.add('/client');assets.add('/client.js');
 assets.add('/common-work-print.js');
+assets.add('/personal-notes-tools.js');
 function checkRequestSession(req){const failure=req.checkSession?.();if(failure)throw Object.assign(new Error(failure.error),{sessionStatus:failure.status});}
 async function body(req,max=65536) {
   const chunks=[];let size=0;
@@ -157,6 +158,7 @@ const server = http.createServer(async (req, res) => {
       if(reviewerMessage){const [,id,part,fileId]=reviewerMessage;if(!part&&req.method==='GET'){const item=messages.get(reviewer,id);checkRequestSession(req);return item?json(res,200,item):json(res,404,{error:'쪽지를 찾을 수 없습니다.'});}if(!part&&req.method==='DELETE'){await body(req);messages.remove(reviewer,id,()=>checkRequestSession(req));return json(res,200,{ok:true});}if(part==='read'&&req.method==='POST'){await body(req);return json(res,200,messages.read(reviewer,id,()=>checkRequestSession(req)));}if(fileId&&req.method==='GET'){const file=messages.file(reviewer,id,fileId);checkRequestSession(req);if(!file)return json(res,404,{error:'첨부파일을 찾을 수 없습니다.'});const name=encodeURIComponent(file.name).replace(/[!'()*]/g,c=>`%${c.charCodeAt(0).toString(16).toUpperCase()}`);res.writeHead(200,{'Content-Type':'application/octet-stream','Content-Disposition':`attachment; filename="attachment"; filename*=UTF-8''${name}`,'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(file.data);}}
       if(url.pathname==='/api/reviewer/schedules'&&req.method==='GET'){const result=store.reviewerSchedules(reviewer.id,url.searchParams.get('month'),url.searchParams.get('q')||'');checkRequestSession(req);return json(res,200,result);}
       if(url.pathname==='/api/reviewer/personal-supervisor'&&req.method==='GET')return json(res,200,personalNotes.supervisor(reviewer.site_id));
+      if(url.pathname==='/api/reviewer/personal-notes/preview'&&req.method==='POST'){const input=await body(req),result=personalNotes.preview(reviewer.site_id,input.items,reviewer);checkRequestSession(req);return json(res,200,result);}
       if(url.pathname==='/api/reviewer/personal-notes'){
         if(req.method==='GET')return json(res,200,personalNotes.list(reviewer.site_id,url.searchParams.get('from')||'',url.searchParams.get('to')||'',url.searchParams.get('q')||'',reviewer));
         if(req.method==='POST'){const input=await body(req);return json(res,201,personalNotes.create({...input,siteId:reviewer.site_id},()=>checkRequestSession(req),reviewer));}
@@ -420,6 +422,7 @@ const server = http.createServer(async (req, res) => {
       if(req.method==='GET')return json(res,200,personalNotes.supervisor(url.searchParams.get('siteId')));
       if(req.method==='PUT'){const input=await body(req);return json(res,200,personalNotes.setSupervisor(input.siteId,input.reviewerId,()=>checkRequestSession(req)));}
     }
+    if(url.pathname==='/api/personal-notes/preview'&&req.method==='POST'){const input=await body(req),result=personalNotes.preview(input.siteId,input.items);checkRequestSession(req);return json(res,200,result);}
     if(url.pathname==='/api/personal-notes'){
       if(req.method==='GET')return json(res,200,personalNotes.list(url.searchParams.get('siteId'),url.searchParams.get('from')||'',url.searchParams.get('to')||'',url.searchParams.get('q')||''));
       if(req.method==='POST'){const input=await body(req);return json(res,201,personalNotes.create(input,()=>checkRequestSession(req)));}
