@@ -108,7 +108,7 @@ const server = http.createServer(async (req, res) => {
           const input=await body(req,120000),check=()=>authorize(input.version);
           if(part==='line')store.setApprovalLine(id,input.ids,check);
           if(part==='references')store.setOfficeReferences(id,input.ids,check);
-          if(part==='signature')store.saveMeetingSignature(id,input.signature,check);
+          if(part==='signature')store.saveMeetingSignature(id,input.signature,()=>{const current=check();store.reviewerOfficeReference(reviewer.id,JSON.parse(current.details||'{}'));},input.expectedVersion);
           if(part==='transition')store.transitionReviewerOfficeDocument(reviewer.id,id,input.action,input.version,()=>checkRequestSession(req));
           return json(res,200,detail());
         }
@@ -733,6 +733,7 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === '/api/attendance/sites-report' && req.method === 'GET') return json(res,200,store.attendanceSitesReport(url.searchParams.get('from'),url.searchParams.get('to')));
     if (url.pathname === '/api/attendance/delegated-events' && req.method === 'GET') return json(res,200,store.delegatedAttendanceEvents(url.searchParams.get('siteId'),url.searchParams.get('date')));
     if(url.pathname==='/api/office-approval-default'&&req.method==='GET'){const result=store.officeApprovalDefault(url.searchParams.get('siteId'),url.searchParams.get('kind'),url.searchParams.get('otherKind')||'');checkRequestSession(req);return json(res,200,result);}
+    if(url.pathname==='/api/office-reference-preview'&&req.method==='GET'){const siteId=Number(url.searchParams.get('siteId')),id=Number(url.searchParams.get('id'));if(!Number.isSafeInteger(siteId)||siteId<1||!Number.isSafeInteger(id)||id<1)throw new Error('현장과 참조 문서를 확인해 주세요.');const result=store.officeReferenceInfo(siteId,id);checkRequestSession(req);return json(res,200,result);}
     if (url.pathname === '/api/documents') {
       if (req.method === 'GET') return json(res,200,store.documents(url.searchParams.get('siteId'),url.searchParams.get('type') || '',url.searchParams.get('q') || '',url.searchParams.get('from') || '',url.searchParams.get('to') || '',url.searchParams.get('riskKind') || '',url.searchParams.get('riskContractorId') || ''));
       if (req.method === 'POST') {const input=await body(req,220000);return json(res,201,input.officeSetup===undefined?store.createAuthorizedDocument(input,()=>checkRequestSession(req)):store.createOfficeDraft(input,()=>checkRequestSession(req)));}
@@ -791,7 +792,7 @@ const server = http.createServer(async (req, res) => {
     const jointSignature=url.pathname.match(/^\/api\/documents\/(\d+)\/joint-signature(?:\/(image))?$/);
     if(jointSignature){const [,id,image]=jointSignature;if(req.method==='POST'&&!image){const input=await body(req);store.saveJointSignature(id,input.signature,()=>checkRequestSession(req));return json(res,200,{ok:true});}if(req.method==='GET'){const saved=store.jointSignature(id);if(!image)return json(res,200,{hasSignature:!!saved,createdAt:saved?.created_at||null});if(!saved)return json(res,404,{error:'시험 서명을 찾을 수 없습니다.'});res.writeHead(200,{'Content-Type':'image/png','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(saved.signature);}}
     const meetingSignature=url.pathname.match(/^\/api\/documents\/(\d+)\/meeting-signature(?:\/(image))?$/);
-    if(meetingSignature){const [,id,image]=meetingSignature;if(req.method==='POST'&&!image){const input=await body(req);store.saveMeetingSignature(id,input.signature,()=>checkRequestSession(req),input.expectedVersion);return json(res,200,{ok:true});}if(req.method==='GET'){const saved=store.meetingSignature(id),doc=store.document(id);if(!image)return json(res,200,doc.type==='work_plan'?store.planSignatureInfo(doc):{hasSignature:!!saved,createdAt:saved?.created_at||null});if(!saved)return json(res,404,{error:'시험 서명을 찾을 수 없습니다.'});res.writeHead(200,{'Content-Type':'image/png','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(saved.signature);}}
+    if(meetingSignature){const [,id,image]=meetingSignature;if(req.method==='POST'&&!image){const input=await body(req);store.saveMeetingSignature(id,input.signature,()=>checkRequestSession(req),input.expectedVersion);return json(res,200,{ok:true});}if(req.method==='GET'){const saved=store.meetingSignature(id),doc=store.document(id);if(!image)return json(res,200,doc.type==='work_plan'?store.planSignatureInfo(doc):doc.type==='office'?store.officeSignatureInfo(doc):{hasSignature:!!saved,createdAt:saved?.created_at||null});if(!saved)return json(res,404,{error:'시험 서명을 찾을 수 없습니다.'});res.writeHead(200,{'Content-Type':'image/png','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(saved.signature);}}
     const attachList=url.pathname.match(/^\/api\/documents\/(\d+)\/attachments$/);
     if(attachList){
       if(req.method==='GET') return json(res,200,store.attachments(attachList[1]));
