@@ -1674,6 +1674,7 @@ export class Store {
     this.validatePlanEquipment(d);
     this.validateSafetyMeeting(d);
     this.validateInstructionRecipient(d);
+    this.validatePermitCompany(d);
     this.validateRiskContractors(d);
     this.validateOfficeReference(d);
     if(d.type==='safety_log')d.details.attendanceSnapshot={present:this.attendance(d.siteId,d.date).filter(row=>row.present).length,capturedAt:new Date().toISOString()};
@@ -1913,13 +1914,14 @@ export class Store {
     if(current.type==='risk'){const previous=JSON.parse(current.details),rows=Array.isArray(previous.items)?previous.items:[previous],keys=['improvedGrade','improvedLikelihood','improvedSeverity'];if(rows.some(row=>keys.some(key=>row[key]))){const next=input.details,items=next&&Array.isArray(next.items)?next.items:next&&typeof next==='object'?[next]:null;if(!items||items.some(item=>!item||keys.some(key=>item[key]===undefined)))throw new Error('개선 후 위험성 정보를 보존하려면 화면을 새로고침해 주세요.');}}
     if(current.type==='risk'&&JSON.parse(current.details).musculoskeletalItems?.length&&input.details?.musculoskeletalItems===undefined)throw new Error('근골격계 항목을 보존하려면 화면을 새로고침해 주세요.');
     if(current.type==='work_plan'&&(input.details===undefined||input.details&&typeof input.details==='object'&&!Array.isArray(input.details))){const previous=JSON.parse(current.details),details={...input.details};for(const key of ['heavyLoads','equipmentAssignments','safetyMeasures'])if(details[key]===undefined&&previous[key]!==undefined)details[key]=previous[key];input={...input,details};}
-    if(current.type==='permit'&&(input.details===undefined||input.details&&typeof input.details==='object'&&!Array.isArray(input.details))){const previous=JSON.parse(current.details),details={...input.details};if(details.safetyMeasures===undefined&&previous.safetyMeasures!==undefined)details.safetyMeasures=previous.safetyMeasures;input={...input,details};}
+    if(current.type==='permit'&&(input.details==null||typeof input.details==='object'&&!Array.isArray(input.details))){const previous=JSON.parse(current.details),details={...input.details};if(previous.companyId>0&&details.companyId===undefined)throw new Error('연결된 협력사를 보존하려면 화면을 새로고침해 주세요.');if(details.safetyMeasures===undefined&&previous.safetyMeasures!==undefined)details.safetyMeasures=previous.safetyMeasures;input={...input,details};}
     if(current.type==='basic'&&JSON.parse(current.details).categoryId>0&&input.details?.categoryId===undefined)throw new Error('기본 서류 분류를 보존하려면 화면을 새로고침해 주세요.');
     if(current.type==='office'&&JSON.parse(current.details).referenceId>0&&input.details?.referenceId===undefined)throw new Error('참조 품의서를 보존하려면 화면을 새로고침해 주세요.');
     if(current.type==='office'&&JSON.parse(current.details).referenceDocId>0&&input.details?.referenceDocId===undefined)throw new Error('참조 문서를 보존하려면 화면을 새로고침해 주세요.');
     if(current.type==='office'){const previous=JSON.parse(current.details);if(previous.bodyRich!==undefined&&input.details?.bodyRich===undefined){if(input.body!==current.body)throw Object.assign(new Error('서식 있는 본문을 수정하려면 화면을 새로고침해 주세요.'),{sessionStatus:409});input={...input,details:{...input.details,bodyRich:previous.bodyRich}};}}
     const d = recordInput(input);
     if (d.siteId !== current.site_id || d.type !== current.type) throw new Error('문서의 현장과 유형은 변경할 수 없습니다.');
+    this.validatePermitCompany(d,current);
     if(d.type==='permit')this.validatePermitRoles({...current,details:JSON.stringify(d.details)},this.permitRoles(id).roles);
     this.validateBasicCategory(d);
     if(d.type==='checklist'&&d.details.kind!=='morning'&&this.db.prepare("SELECT 1 FROM attachments WHERE document_id=? AND category='morning_hazard_photo' LIMIT 1").get(Number(id)))throw new Error('점검 항목 사진을 삭제한 뒤 점검 종류를 변경해 주세요.');
@@ -1987,6 +1989,13 @@ export class Store {
     if(!company)throw new Error('같은 현장의 협력사를 선택해 주세요.');
     doc.details.companyName=company.name;doc.details.companyTrade=company.trade;
     if(doc.details.recipientId){const worker=this.db.prepare('SELECT name FROM workers WHERE id=? AND site_id=? AND company=?').get(doc.details.recipientId,doc.siteId,company.name);if(!worker)throw new Error('선택한 현장과 협력사의 담당자를 확인해 주세요.');doc.details.recipient=worker.name;}
+  }
+  validatePermitCompany(doc,current=null){
+    if(doc.type!=='permit'||!doc.details.companyId)return;
+    const company=this.db.prepare('SELECT c.name FROM companies c WHERE c.id=? AND c.site_id=? AND NOT EXISTS(SELECT 1 FROM archived_companies a WHERE a.company_id=c.id)').get(doc.details.companyId,doc.siteId);
+    if(!company)throw new Error('같은 현장의 협력사를 선택해 주세요.');
+    const previous=current?JSON.parse(current.details):null;
+    doc.details.company=previous?.companyId===doc.details.companyId&&previous.company?previous.company:company.name;
   }
   transition(id, action, opinion='', signature=null,reviewerId=null) {
     const doc = this.document(id);
