@@ -22,9 +22,9 @@ export function copyRiskItem(item){
 
 export function copyMusculoskeletalItems(items,existingCount,scale){
   if(!Array.isArray(items)||!Number.isSafeInteger(existingCount)||existingCount<0||existingCount+items.length>100)throw new Error('근골격계 항목은 100개까지 입력할 수 있습니다.');
-  const fields=['processName','contractor','task','hazard','existingMeasures','additionalMeasures','grade','likelihood','severity'];
+  const fields=['processName','contractor','task','hazard','existingMeasures','additionalMeasures','grade','improvedGrade','likelihood','severity'];
   return items.map(item=>{
-    if(!item||typeof item!=='object'||Array.isArray(item)||typeof item.selected!=='boolean'||fields.some(key=>item[key]!==undefined&&(typeof item[key]!=='string'||item[key].length>2000))||['grade','likelihood','severity'].some(key=>item[key]&&!riskScaleOptions(scale,key).includes(item[key]))||item.contractorId!==undefined&&(!Number.isSafeInteger(item.contractorId)||item.contractorId<1))throw new Error('이전 근골격계 항목을 확인해 주세요.');
+    if(!item||typeof item!=='object'||Array.isArray(item)||typeof item.selected!=='boolean'||fields.some(key=>item[key]!==undefined&&(typeof item[key]!=='string'||item[key].length>2000))||['grade','improvedGrade','likelihood','severity'].some(key=>item[key]&&!riskScaleOptions(scale,key).includes(item[key]))||item.contractorId!==undefined&&(!Number.isSafeInteger(item.contractorId)||item.contractorId<1))throw new Error('이전 근골격계 항목을 확인해 주세요.');
     const copy=Object.fromEntries(fields.filter(key=>item[key]!==undefined).map(key=>[key,item[key]]));if(item.contractorId!==undefined)copy.contractorId=item.contractorId;copy.selected=item.selected;return copy;
   });
 }

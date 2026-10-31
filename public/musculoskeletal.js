@@ -2,8 +2,8 @@ import { riskScaleOptions, riskScore, copyMusculoskeletalItems } from './risk-sc
 
 const esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const fields={processName:'가상 공정명',contractor:'가상 협력사',task:'작업 내용',hazard:'부담 요인',existingMeasures:'현재 조치',additionalMeasures:'추가 조치'};
-const choices={grade:['상','중','하'],likelihood:['1','2','3','4','5'],severity:['1','2','3','4']};
-const choiceLabels={grade:'현재 위험 등급',likelihood:'가능성',severity:'중대성'};
+const choices={grade:['상','중','하'],improvedGrade:['상','중','하'],likelihood:['1','2','3','4','5'],severity:['1','2','3','4']};
+const choiceLabels={grade:'현재 위험 등급',improvedGrade:'개선 후 위험 등급',likelihood:'가능성',severity:'중대성'};
 
 export function mountMusculoskeletal(container,{rows,companies,scale}){
   container.innerHTML='<fieldset><legend>근골격계 가상 위험요인</legend><p>직접 입력한 시험 자료입니다. 자동 참고자료와 실제 위험 판정은 제공하지 않습니다.</p><div data-mus-list></div><button type="button" data-mus-direct>직접 입력 3개 추가</button> <button type="button" data-mus-add>항목 추가</button> <button type="button" data-mus-delete>선택 항목 삭제</button><p data-mus-status role="status"></p></fieldset>';

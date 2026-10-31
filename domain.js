@@ -246,7 +246,7 @@ export function recordInput(input) {
     else details=validate(value);
     if(value.musculoskeletalItems!==undefined){
       if(!Array.isArray(value.musculoskeletalItems)||value.musculoskeletalItems.length>100)throw new Error('근골격계 항목을 확인해 주세요.');
-      const keys=['processName','contractor','contractorId','task','hazard','existingMeasures','additionalMeasures','grade','likelihood','severity','score'];
+      const keys=['processName','contractor','contractorId','task','hazard','existingMeasures','additionalMeasures','grade','likelihood','severity','score','improvedGrade'];
       details.musculoskeletalItems=value.musculoskeletalItems.map(item=>{if(!item||typeof item.selected!=='boolean')throw new Error('근골격계 선택을 확인해 주세요.');const row=validate(item);return {...Object.fromEntries(keys.filter(key=>Object.hasOwn(row,key)).map(key=>[key,row[key]])),selected:item.selected};});
     }
     if(value.kind!==undefined && value.kind!==''){
