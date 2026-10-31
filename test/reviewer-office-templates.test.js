@@ -6,7 +6,7 @@ import { richTextFromEditor } from '../public/rich-text.js';
 
 const decode=value=>value.replace(/&(amp|lt|gt|quot|#39);/g,(_,key)=>({amp:'&',lt:'<',gt:'>',quot:'"','#39':"'"}[key]));
 function control(value=''){
-  const listeners={};return {value,hidden:false,disabled:false,isConnected:true,textContent:'',addEventListener(type,fn){(listeners[type]??=[]).push(fn);},emit(type){const event={target:{closest:()=>null},preventDefault(){}};this['on'+type]?.(event);for(const fn of listeners[type]||[])fn(event);}};
+  const listeners={};return {value,hidden:false,disabled:false,isConnected:true,textContent:'',addEventListener(type,fn){(listeners[type]??=[]).push(fn);},dispatchEvent(event){this.lastEvent=event;this['on'+event.type]?.(event);for(const fn of listeners[event.type]||[])fn(event);return true;},emit(type){this.dispatchEvent({type,target:{closest:()=>null},preventDefault(){}});}};
 }
 // shortcut: 생성된 기본 서식 태그만 모의 처리하며, 브라우저 배치 검증에는 실제 DOM을 사용한다.
 function richNode(tag='div'){
@@ -30,26 +30,83 @@ async function screen({state=null,title='',kind='품의서',body='',rich=null,sa
   const fields={'[data-rich-editor]':bodyNode,'[data-rich-toolbar]':toolbar,'[type=submit]':submit};
   form.querySelector=key=>fields[key]||null;
   form.insertAdjacentHTML=(_position,html)=>{form.markup=html;for(const match of html.matchAll(/\b(data-[\w-]+)(?=[\s>])/g))fields[`[${match[1]}]`]=control();fields['[data-leave-example]'].value='leave';};
-  const setupFields=Object.fromEntries(['data-save-line','data-save-references','data-pad','data-clear','data-sign','data-upload','data-load-source','data-load-document','data-load-status'].map(key=>[`[${key}]`,control()])),line=control('2'),reference=control('2'),transition=control();transition.dataset={transition:'submit'};reference.checked=true;
-  const draftLines=Array.from({length:9},()=>control()),draftReferences=Array.from({length:11},(_,index)=>({...control(String(index+2)),checked:false}));
+  const setupFields=Object.fromEntries(['data-clear-line','data-clear-references','data-save-line','data-save-references','data-pad','data-clear','data-sign','data-upload','data-load-source','data-load-document','data-load-status'].map(key=>[`[${key}]`,control()])),line=control('2'),reference=control('2'),transition=control();transition.dataset={transition:'submit'};reference.checked=true;
+  const draftLines=Array.from({length:9},()=>control()),draftReferences=Array.from({length:11},(_,index)=>({...control(String(index+2)),checked:false})),detailLines=[line,...Array.from({length:8},()=>control())],detailReferences=[reference,...Array.from({length:10},(_,index)=>({...control(String(index+3)),checked:false}))];
   setup.insertAdjacentHTML=(_position,html)=>{setup.innerHTML+=html;for(const match of html.matchAll(/\b(data-[\w-]+)(?=[\s>])/g))setupFields[`[${match[1]}]`]=control();setupFields['[data-draft-enabled]'].checked=true;};
-  setup.querySelector=key=>setupFields[key];setup.querySelectorAll=key=>key==='[data-draft-line]'?draftLines:key==='[data-draft-reference]'?draftReferences:key==='[data-line]'?[line]:key==='[data-reference]'?[reference]:key==='[data-transition]'&&state==='draft'?[transition]:[];
+  setup.querySelector=key=>setupFields[key];setup.querySelectorAll=key=>key==='[data-draft-line]'?draftLines:key==='[data-draft-reference]'?draftReferences:key==='[data-line]'?detailLines:key==='[data-reference]'?detailReferences:key==='[data-transition]'&&state==='draft'?[transition]:[];
   editor.querySelector=key=>key==='[data-form]'?(editor.innerHTML.includes('<form data-form>')?form:null):key==='[data-close]'?close:key==='[data-setup]'?setup:null;
   editor.replaceChildren=()=>{editor.closed=true;form.isConnected=false;};const openButton=control();openButton.dataset={open:'7'};
   list.querySelectorAll=()=>state?[openButton]:[];
   const target={querySelector:key=>({'[data-list]':list,'[data-editor]':editor,'[data-status]':status,'[data-new]':newButton}[key])};
   const data={document:{id:7,title,date:'2026-10-31',body,status:state,details:JSON.stringify({kind,bodyRich:rich})},version:'가상 버전',line:[],references:[],attachments:[],events:[],hasSignature:true};
   let optionsWait=null,sourceWait=null;const api=async(path,options={})=>{if(options.method){writes.push({path,method:options.method,input:JSON.parse(options.body)});if(saveWait)await saveWait;return data;}reads.push(path);if(path.startsWith('/api/reviewer/office-approval-default?'))return suggestion(path);if(path.startsWith('/api/reviewer/office-reference-preview?'))return preview(Number(new URLSearchParams(path.split('?')[1]).get('id')));if(path.endsWith('/options')){if(optionsWait)await optionsWait;return {people:Array.from({length:11},(_,index)=>({id:index+2,name:'가상 직원 '+index,active:1})),documents:sources.map(({id,title,date})=>({id,title,date}))};}if(path.endsWith('/7'))return data;const match=path.match(/\/office-documents\/(\d+)$/);if(match){if(sourceWait)await sourceWait;const document=sources.find(item=>item.id===Number(match[1]));if(!document)throw Error('본인 문서가 없습니다.');return {document};}return state?[data.document]:[];};
-  const pad=(canvas,clear)=>{if(canvas!==setupFields['[data-draft-pad]'])return ()=> '가상 서명';let drawing=false,signed=false,sequence=0;canvas.ink=[];canvas.onpointerdown=()=>{drawing=true;signed=true;canvas.ink.push(++sequence);};canvas.onpointermove=()=>{if(drawing)canvas.ink.push('move');};canvas.onpointerup=canvas.onpointercancel=()=>{drawing=false;};clear.onclick=()=>{canvas.ink=[];signed=false;};return ()=>{if(!signed)throw Error('시험 서명을 다시 입력해 주세요.');return '가상 서명:'+canvas.ink.join(',');};};
+  const pad=(canvas,clear)=>{let drawing=false,signed=false,sequence=0;canvas.ink=[];canvas.onpointerdown=()=>{drawing=true;signed=true;canvas.ink.push(++sequence);};canvas.onpointermove=()=>{if(drawing)canvas.ink.push('move');};canvas.onpointerup=canvas.onpointercancel=()=>{drawing=false;};clear.onclick=()=>{canvas.ink=[];signed=false;};return ()=>{if(!signed)throw Error('시험 서명을 다시 입력해 주세요.');return '가상 서명:'+canvas.ink.join(',');};};
   let active=true;await mountReviewerOffice({target,siteId:1,api,active:()=>active,pad});await (state?openButton:newButton).onclick();setupFields['[data-load-document]'].disabled=!sources.length;
   if(!state&&!prepare)setupFields['[data-draft-enabled]'].checked=false;
-  return {form,fields,bodyNode,editor,setup,setupFields,status,writes,reads,line,reference,draftLines,draftReferences,transition,close,newButton,openButton,holdOpen(promise){optionsWait=promise;},holdSource(promise){sourceWait=promise;},stop(){active=false;}};
+  return {form,fields,bodyNode,editor,setup,setupFields,status,writes,reads,line,reference,draftLines,draftReferences,detailLines,detailReferences,transition,close,newButton,openButton,holdOpen(promise){optionsWait=promise;},holdSource(promise){sourceWait=promise;},stop(){active=false;}};
 }
 const flush=()=>new Promise(resolve=>setImmediate(resolve));
 
 const recommendation=(id=2)=>({document:{id:8,title:'가상 이전 문서',date:'2026-10-20'},reviewers:[{reviewer_id:id,active:1}]});
 const signDraft=ui=>ui.setupFields['[data-draft-pad]'].emit('pointerdown');
 const saveDraft=async ui=>{ui.form.onsubmit({preventDefault(){}});await flush();};
+
+test('새 문서의 전체 해제는 선택만 비우고 서명 그림과 진행 중 획을 취소한다',async()=>{
+  for(const key of ['[data-clear-line]','[data-clear-references]']){
+    const ui=await screen({prepare:true,title:'선택 해제 시험'});await flush();ui.draftLines[0].value='2';ui.draftLines[1].value='3';ui.draftReferences[0].checked=true;ui.draftReferences[1].checked=true;
+    const canvas=ui.setupFields['[data-draft-pad]'];signDraft(ui);canvas.emit('pointermove');ui.setupFields[key].onclick();canvas.emit('pointermove');assert.deepEqual(canvas.ink,[]);assert.equal(ui.form.elements.title.value,'선택 해제 시험');
+    if(key==='[data-clear-line]'){assert.ok(ui.draftLines.every(item=>item.value===''));assert.equal(ui.draftReferences.filter(item=>item.checked).length,2);assert.equal(ui.draftLines[0].lastEvent.bubbles,true);ui.draftLines[0].value='2';ui.draftLines[0].emit('change');}
+    else{assert.ok(ui.draftReferences.every(item=>!item.checked));assert.equal(ui.draftLines[0].value,'2');assert.equal(ui.draftReferences[0].lastEvent.bubbles,true);}
+    await saveDraft(ui);assert.equal(ui.writes.length,0);assert.match(ui.status.textContent,/다시 입력/);signDraft(ui);await saveDraft(ui);assert.equal(ui.writes.length,1);assert.equal(ui.writes[0].input.officeSetup.signature,'가상 서명:2');assert.deepEqual(ui.writes[0].input.officeSetup.referenceIds,key==='[data-clear-references]'?[]:[2,3]);
+  }
+});
+
+test('빈 선택의 전체 해제는 변경 상태와 서명을 만들지 않고 늦은 자동 추천은 취소한다',async t=>{
+  const previous=globalThis.confirm;let prompts=0;globalThis.confirm=()=>{prompts++;return false;};t.after(()=>{if(previous)globalThis.confirm=previous;else delete globalThis.confirm;});
+  let finish;const fresh=await screen({prepare:true,suggestion:()=>new Promise(resolve=>{finish=resolve;})});fresh.setupFields['[data-clear-line]'].onclick();fresh.setupFields['[data-clear-references]'].onclick();finish(recommendation());await flush();assert.ok(fresh.draftLines.every(item=>!item.value));fresh.close.onclick();assert.equal(fresh.editor.closed,true);assert.equal(prompts,0);
+  for(const state of ['draft','rejected']){const ui=await screen({state});ui.line.value='';ui.reference.checked=false;ui.setupFields['[data-clear-line]'].onclick();ui.setupFields['[data-clear-references]'].onclick();ui.close.onclick();assert.equal(ui.editor.closed,true);assert.equal(prompts,0);}
+  const signed=await screen({prepare:true});await flush();signed.draftLines[0].value='2';signDraft(signed);signed.setupFields['[data-clear-references]'].onclick();assert.deepEqual(signed.setupFields['[data-draft-pad]'].ink,[1]);await saveDraft(signed);assert.equal(signed.writes.length,1);
+  const detail=await screen({state:'draft'});detail.line.value='';detail.reference.checked=false;const canvas=detail.setupFields['[data-pad]'];canvas.emit('pointerdown');detail.setupFields['[data-clear-line]'].onclick();detail.setupFields['[data-clear-references]'].onclick();assert.deepEqual(canvas.ink,[1]);await detail.setupFields['[data-sign]'].onclick();assert.equal(detail.writes.length,1);assert.equal(detail.writes[0].input.signature,'가상 서명:1');
+});
+
+test('늦은 추천과 문서 조회는 전체 해제한 선택을 복원하지 않는다',async()=>{
+  let finish;const fresh=await screen({prepare:true,suggestion:()=>new Promise(resolve=>{finish=resolve;})});fresh.draftLines[0].value='2';fresh.setupFields['[data-clear-line]'].onclick();finish(recommendation(3));await flush();assert.ok(fresh.draftLines.every(item=>!item.value));assert.equal(fresh.writes.length,0);
+  for(const key of ['[data-clear-line]','[data-clear-references]']){const ui=await screen({state:'draft'});let release;ui.holdOpen(new Promise(resolve=>{release=resolve;}));const markup=ui.editor.innerHTML,opening=ui.newButton.onclick();ui.setupFields[key].onclick();release();await opening;assert.equal(ui.editor.innerHTML,markup);assert.equal(key==='[data-clear-line]'?ui.line.value:ui.reference.checked,key==='[data-clear-line]'?'':false);}
+});
+
+test('임시·반려 문서의 전체 해제는 새 서명을 지우며 해당 선택만 빈 배열로 저장한다',async()=>{
+  for(const state of ['draft','rejected'])for(const key of ['line','references']){
+    const ui=await screen({state,title:'보존할 문서'}),canvas=ui.setupFields['[data-pad]'];ui.detailLines[3].value='3';ui.detailReferences[1].checked=true;canvas.emit('pointerdown');canvas.emit('pointermove');ui.setupFields[`[data-clear-${key}]`].onclick();assert.deepEqual(canvas.ink,[]);canvas.emit('pointermove');assert.deepEqual(canvas.ink,[]);
+    assert.ok(key==='line'?ui.detailLines.every(item=>!item.value):ui.detailReferences.every(item=>!item.checked));
+    assert.equal(key==='line'?ui.line.value:ui.reference.checked,key==='line'?'':false);assert.equal(key==='line'?ui.reference.checked:ui.line.value,key==='line'?true:'2');assert.equal(ui.form.elements.title.value,'보존할 문서');
+    await ui.setupFields['[data-sign]'].onclick();assert.equal(ui.writes.length,0);assert.match(ui.status.textContent,/저장하지 않은 변경/);
+    await ui.setupFields[`[data-save-${key}]`].onclick();assert.equal(ui.writes.length,1);assert.equal(ui.writes[0].path,`/api/reviewer/office-documents/7/${key}`);assert.deepEqual(ui.writes[0].input,{version:'가상 버전',ids:[]});
+  }
+});
+
+test('전체 해제의 닫기 취소는 선택을 보존하고 다른 종류의 미저장 변경은 저장을 막는다',async t=>{
+  const previous=globalThis.confirm;let accept=false,prompts=0;globalThis.confirm=()=>{prompts++;return accept;};t.after(()=>{if(previous)globalThis.confirm=previous;else delete globalThis.confirm;});
+  for(const state of [null,'draft','rejected'])for(const key of ['line','references']){
+    accept=false;const ui=await screen({state,prepare:!state});await flush();if(!state){ui.draftLines[0].value='2';ui.draftReferences[0].checked=true;}ui.setupFields[`[data-clear-${key}]`].onclick();ui.close.onclick();assert.notEqual(ui.editor.closed,true);assert.equal(ui.writes.length,0);accept=true;ui.close.onclick();assert.equal(ui.editor.closed,true);
+  }
+  assert.equal(prompts,12);
+  for(const key of ['line','references'])for(const other of ['form','selection']){
+    const ui=await screen({state:'draft'});if(other==='form'){ui.form.elements.title.value='미저장 제목';ui.form.emit('input');}else if(key==='line'){ui.reference.checked=false;ui.reference.emit('change');}else{ui.line.value='3';ui.line.emit('change');}
+    ui.setupFields[`[data-clear-${key}]`].onclick();await ui.setupFields[`[data-save-${key}]`].onclick();assert.equal(ui.writes.length,0);assert.match(ui.status.textContent,/저장하지 않은 변경/);
+  }
+});
+
+test('저장 중 전체 해제 시도는 신규·기존 선택과 서명 및 저장 요청을 바꾸지 않는다',async()=>{
+  for(const state of [null,'draft','rejected']){
+    let release;const saveWait=new Promise(resolve=>{release=resolve;}),ui=await screen({state,prepare:!state,saveWait});await flush();let saving;
+    if(!state){ui.draftLines[0].value='2';ui.draftReferences[0].checked=true;signDraft(ui);ui.form.onsubmit({preventDefault(){}});}else{ui.setupFields['[data-pad]'].emit('pointerdown');saving=ui.setupFields['[data-sign]'].onclick();}
+    assert.equal(ui.editor.inert,true);ui.setupFields['[data-clear-line]'].onclick();ui.setupFields['[data-clear-references]'].onclick();assert.equal(state?ui.line.value:ui.draftLines[0].value,'2');assert.equal(state?ui.reference.checked:ui.draftReferences[0].checked,true);assert.deepEqual(ui.setupFields[state?'[data-pad]':'[data-draft-pad]'].ink,[1]);assert.equal(ui.writes.length,1);release();await saving;await flush();assert.equal(ui.editor.inert,false);
+  }
+});
+
+test('전체 해제 버튼은 편집 가능한 문서에만 표시한다',async()=>{
+  for(const state of [null,'draft','rejected','pending','approved']){const ui=await screen({state});for(const name of ['line','references'])assert.equal(ui.setup.innerHTML.includes(`data-clear-${name}`),!['pending','approved'].includes(state));}
+});
 
 test('새 직원 문서는 기본 선택된 결재 준비를 문서와 한 요청에 저장한다',async()=>{
   const ui=await screen({prepare:true,title:'가상 일괄 문서',suggestion:async()=>recommendation()});await flush();
@@ -180,7 +237,7 @@ test('문서 저장 응답을 기다리는 동안 예시 적용으로 저장되�
 
 test('결재선·참조자·서명·제출 저장 응답 중 예시 적용은 입력과 요청을 바꾸지 않는다',async()=>{
   for(const key of ['[data-save-line]','[data-save-references]','[data-sign]','transition']){
-    let release;const saveWait=new Promise(resolve=>{release=resolve;}),ui=await screen({state:'draft',saveWait}),button=key==='transition'?ui.transition:ui.setupFields[key],saving=button.onclick();
+    let release;const saveWait=new Promise(resolve=>{release=resolve;}),ui=await screen({state:'draft',saveWait}),button=key==='transition'?ui.transition:ui.setupFields[key];if(key==='[data-sign]')ui.setupFields['[data-pad]'].emit('pointerdown');const saving=button.onclick();
     assert.equal(button.disabled,true);assert.equal(ui.fields['[type=submit]'].disabled,false);assert.equal(ui.writes.length,1);
     try{ui.fields['[data-apply-example]'].onclick();assert.match(ui.fields['[data-example-status]'].textContent,/저장이 끝난 뒤/);assert.equal(ui.form.elements.title.value,'');assert.deepEqual(richTextFromEditor(ui.bodyNode),[]);assert.equal(ui.writes.length,1);}
     finally{release();await saving;}

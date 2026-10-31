@@ -1170,11 +1170,11 @@ export class Store {
     if(!this.db.prepare('SELECT 1 FROM workers WHERE id=? AND site_id=?').get(Number(workerId),Number(siteId)))throw new Error('선택한 현장의 출입자를 확인해 주세요.');
     return this.db.prepare('SELECT permission FROM worker_permissions WHERE worker_id=? ORDER BY permission').all(Number(workerId)).map(row=>row.permission);
   }
-  setWorkerPermissions(siteId,workerId,permissions){
-    this.workerPermissions(siteId,workerId);if(!Array.isArray(permissions)||permissions.some(value=>!['attendance','risk','work_plan'].includes(value))||new Set(permissions).size!==permissions.length)throw new Error('시험 권한을 확인해 주세요.');
+  setWorkerPermissions(siteId,workerId,permissions,onAuthorize=()=>{}){
+    if(!Array.isArray(permissions)||permissions.some(value=>!['attendance','risk','work_plan'].includes(value))||new Set(permissions).size!==permissions.length)throw new Error('시험 권한을 확인해 주세요.');
+    this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();this.workerPermissions(siteId,workerId);
     if(permissions.length&&!this.db.prepare('SELECT 1 FROM worker_accounts WHERE site_id=? AND worker_id=?').get(Number(siteId),Number(workerId)))throw new Error('시험 계정이 있는 출입자를 선택해 주세요.');
-    this.db.exec('SAVEPOINT permission_update');try{this.db.prepare('DELETE FROM worker_permissions WHERE worker_id=?').run(Number(workerId));for(const permission of permissions)this.db.prepare('INSERT INTO worker_permissions(worker_id,permission) VALUES(?,?)').run(Number(workerId),permission);this.db.exec('RELEASE permission_update');}catch(error){this.db.exec('ROLLBACK TO permission_update');this.db.exec('RELEASE permission_update');throw error;}
-    return this.workerPermissions(siteId,workerId);
+    this.db.prepare('DELETE FROM worker_permissions WHERE worker_id=?').run(Number(workerId));for(const permission of permissions)this.db.prepare('INSERT INTO worker_permissions(worker_id,permission) VALUES(?,?)').run(Number(workerId),permission);const result=this.workerPermissions(siteId,workerId);this.db.exec('COMMIT');return result;}catch(error){this.db.exec('ROLLBACK');throw error;}
   }
   delegatedAttendance(siteId,actorId,date){
     if(!this.workerPermissions(siteId,actorId).includes('attendance'))throw new Error('출역 관리 시험 권한이 필요합니다.');
@@ -1245,11 +1245,13 @@ export class Store {
     month=monthValue(month);siteId=Number(siteId);if(!this.db.prepare('SELECT 1 FROM sites WHERE id=?').get(siteId))throw new Error('현장을 확인해 주세요.');
     return this.db.prepare('SELECT date,kind FROM site_worker_blocks WHERE site_id=? AND date BETWEEN ? AND ? ORDER BY date,kind').all(siteId,`${month}-01`,`${month}-31`);
   }
-  setWorkerAccessBlock(siteId,date,kind,blocked){
-    siteId=Number(siteId);date=dateValue(date);if(!this.db.prepare('SELECT 1 FROM sites WHERE id=?').get(siteId))throw new Error('현장을 확인해 주세요.');
+  setWorkerAccessBlock(siteId,date,kind,blocked,onAuthorize=()=>{}){
+    siteId=Number(siteId);date=dateValue(date);
     if(!['holiday','ended'].includes(kind)||typeof blocked!=='boolean')throw new Error('차단 설정을 확인해 주세요.');
+    this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();if(!this.db.prepare('SELECT 1 FROM sites WHERE id=?').get(siteId))throw new Error('현장을 확인해 주세요.');
     if(blocked)this.db.prepare('INSERT OR IGNORE INTO site_worker_blocks(site_id,date,kind) VALUES(?,?,?)').run(siteId,date,kind);
     else this.db.prepare('DELETE FROM site_worker_blocks WHERE site_id=? AND date=? AND kind=?').run(siteId,date,kind);
+    this.db.exec('COMMIT');}catch(error){this.db.exec('ROLLBACK');throw error;}
   }
   workerAccessBlocked(siteId,date){return !!this.db.prepare('SELECT 1 FROM site_worker_blocks WHERE site_id=? AND date=? LIMIT 1').get(Number(siteId),dateValue(date));}
   siteLocationPolicy(siteId){
@@ -1372,10 +1374,12 @@ export class Store {
     return row?{...row,equipment:JSON.parse(row.equipment),profile:row.profile?JSON.parse(row.profile):null}:null;
   }
   joinSignature(siteId,workerId){return this.db.prepare('SELECT a.signature FROM join_acknowledgements a JOIN workers w ON w.id=a.worker_id WHERE w.site_id=? AND w.id=? AND a.signature IS NOT NULL').get(Number(siteId),Number(workerId))?.signature||null;}
-  resetWorkerPassword(siteId,workerId,password) {
+  resetWorkerPassword(siteId,workerId,password,onAuthorize=()=>{}) {
     if(typeof password!=='string'||password.length<12||password.length>256)throw new Error('암호는 12자 이상 256자 이하여야 합니다.');
+    const salt=randomBytes(16),hash=scryptSync(password,salt,32);
+    this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();
     const account=this.db.prepare('SELECT login_id FROM worker_accounts WHERE site_id=? AND worker_id=?').get(Number(siteId),Number(workerId));if(!account)throw new Error('선택한 현장의 시험 계정을 확인해 주세요.');
-    const salt=randomBytes(16),hash=scryptSync(password,salt,32);this.db.prepare('UPDATE worker_accounts SET salt=?,password_hash=? WHERE site_id=? AND worker_id=?').run(salt,hash,Number(siteId),Number(workerId));return account.login_id;
+    this.db.prepare('UPDATE worker_accounts SET salt=?,password_hash=? WHERE site_id=? AND worker_id=?').run(salt,hash,Number(siteId),Number(workerId));this.db.prepare('DELETE FROM worker_sessions WHERE worker_id=?').run(Number(workerId));this.db.exec('COMMIT');return account.login_id;}catch(error){this.db.exec('ROLLBACK');throw error;}
   }
   workerLoginIdentity(siteId,name,birthDigits){
     if(typeof name!=='string'||!name.trim()||name.length>200||/[\x00-\x1f\x7f]/.test(name)||typeof birthDigits!=='string'||!/^\d{6}$/.test(birthDigits))return null;
@@ -1481,22 +1485,20 @@ export class Store {
       this.db.exec('COMMIT');return {enabled:input.enabled};
     }catch(error){this.db.exec('ROLLBACK');throw error;}
   }
-  createReviewer(input){
+  createReviewer(input,onAuthorize=()=>{}){
     const siteId=Number(input.siteId),name=text(input.name,'결재자 이름');
-    if(!Number.isSafeInteger(siteId)||!this.db.prepare('SELECT 1 FROM sites WHERE id=?').get(siteId))throw new Error('현장을 확인해 주세요.');
+    if(!Number.isSafeInteger(siteId))throw new Error('현장을 확인해 주세요.');
     if(typeof input.loginId!=='string'||!/^[A-Za-z0-9_]{3,40}$/.test(input.loginId))throw new Error('시험 아이디를 확인해 주세요.');
     if(typeof input.password!=='string'||input.password.length<12||input.password.length>256)throw new Error('시험 암호는 12자 이상 256자 이하여야 합니다.');
-    if(this.db.prepare('SELECT 1 FROM reviewers WHERE login_id=?').get(input.loginId))throw new Error('이미 사용 중인 시험 아이디입니다.');
-    const salt=randomBytes(16),hash=scryptSync(input.password,salt,32),id=this.db.prepare('INSERT INTO reviewers(site_id,login_id,name,salt,password_hash,auth_version) VALUES(?,?,?,?,?,lower(hex(randomblob(16))))').run(siteId,input.loginId,name,salt,hash).lastInsertRowid;
-    return this.db.prepare('SELECT id,site_id,login_id,name,active FROM reviewers WHERE id=?').get(id);
+    const salt=randomBytes(16),hash=scryptSync(input.password,salt,32);
+    this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();if(!this.db.prepare('SELECT 1 FROM sites WHERE id=?').get(siteId))throw new Error('현장을 확인해 주세요.');if(this.db.prepare('SELECT 1 FROM reviewers WHERE login_id=?').get(input.loginId))throw new Error('이미 사용 중인 시험 아이디입니다.');
+    const id=this.db.prepare('INSERT INTO reviewers(site_id,login_id,name,salt,password_hash,auth_version) VALUES(?,?,?,?,?,lower(hex(randomblob(16))))').run(siteId,input.loginId,name,salt,hash).lastInsertRowid,result=this.db.prepare('SELECT id,site_id,login_id,name,active FROM reviewers WHERE id=?').get(id);this.db.exec('COMMIT');return result;}catch(error){this.db.exec('ROLLBACK');throw error;}
   }
-  updateReviewer(siteId,id,input){
-    const row=this.db.prepare('SELECT id FROM reviewers WHERE id=? AND site_id=?').get(Number(id),Number(siteId));if(!row)throw new Error('선택한 현장의 시험 결재자를 확인해 주세요.');
+  updateReviewer(siteId,id,input,onAuthorize=()=>{}){
     if(input.active!==undefined&&typeof input.active!=='boolean')throw new Error('계정 상태를 확인해 주세요.');
     if(input.password!==undefined&&(typeof input.password!=='string'||input.password.length<12||input.password.length>256))throw new Error('시험 암호는 12자 이상 256자 이하여야 합니다.');
     if(input.active===undefined&&input.password===undefined)throw new Error('변경할 내용을 확인해 주세요.');
-    this.db.exec('SAVEPOINT update_reviewer');try{if(input.password!==undefined){const salt=randomBytes(16),hash=scryptSync(input.password,salt,32);this.db.prepare('UPDATE reviewers SET salt=?,password_hash=? WHERE id=?').run(salt,hash,row.id);}if(input.active!==undefined)this.db.prepare('UPDATE reviewers SET active=? WHERE id=?').run(input.active?1:0,row.id);if(input.password!==undefined||input.active===false){this.db.prepare('UPDATE reviewers SET auth_version=lower(hex(randomblob(16))) WHERE id=?').run(row.id);this.db.prepare('DELETE FROM reviewer_sessions WHERE reviewer_id=?').run(row.id);}this.db.exec('RELEASE update_reviewer');}catch(error){this.db.exec('ROLLBACK TO update_reviewer');this.db.exec('RELEASE update_reviewer');throw error;}
-    return this.db.prepare('SELECT id,site_id,login_id,name,active FROM reviewers WHERE id=?').get(row.id);
+    this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();const row=this.db.prepare('SELECT id FROM reviewers WHERE id=? AND site_id=?').get(Number(id),Number(siteId));if(!row)throw new Error('선택한 현장의 시험 결재자를 확인해 주세요.');if(input.password!==undefined){const salt=randomBytes(16),hash=scryptSync(input.password,salt,32);this.db.prepare('UPDATE reviewers SET salt=?,password_hash=? WHERE id=?').run(salt,hash,row.id);}if(input.active!==undefined)this.db.prepare('UPDATE reviewers SET active=? WHERE id=?').run(input.active?1:0,row.id);if(input.password!==undefined||input.active===false){this.db.prepare('UPDATE reviewers SET auth_version=lower(hex(randomblob(16))) WHERE id=?').run(row.id);this.db.prepare('DELETE FROM reviewer_sessions WHERE reviewer_id=?').run(row.id);}const result=this.db.prepare('SELECT id,site_id,login_id,name,active FROM reviewers WHERE id=?').get(row.id);this.db.exec('COMMIT');return result;}catch(error){this.db.exec('ROLLBACK');throw error;}
   }
   authenticateReviewer(loginId,password,withCredential=false){
     const row=typeof loginId==='string'&&/^[A-Za-z0-9_]{3,40}$/.test(loginId)?this.db.prepare('SELECT * FROM reviewers WHERE login_id=?').get(loginId):null;

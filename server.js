@@ -474,15 +474,15 @@ const server = http.createServer(async (req, res) => {
     if(clientAccount&&req.method==='PUT'){const input=await body(req);return json(res,200,clients.update(clientAccount[1],input,()=>checkRequestSession(req)));}
     const employmentProfile=url.pathname.match(/^\/api\/reviewers\/(\d+)\/employment$/);
     if(employmentProfile){if(req.method==='GET'){const result=employment.profile(url.searchParams.get('siteId'),employmentProfile[1]);checkRequestSession(req);return json(res,200,result);}if(req.method==='PUT'){const input=await body(req);return json(res,200,employment.saveProfile(input.siteId,employmentProfile[1],input,()=>checkRequestSession(req)));}}
-    if(url.pathname==='/api/reviewers'){if(req.method==='GET')return json(res,200,store.reviewers(url.searchParams.get('siteId')));if(req.method==='POST')return json(res,201,store.createReviewer(await body(req)));}
+    if(url.pathname==='/api/reviewers'){if(req.method==='GET')return json(res,200,store.reviewers(url.searchParams.get('siteId')));if(req.method==='POST')return json(res,201,store.createReviewer(await body(req),()=>checkRequestSession(req)));}
     const reviewerAccount=url.pathname.match(/^\/api\/reviewers\/(\d+)$/);
-    if(reviewerAccount&&req.method==='PUT'){const input=await body(req),account=store.updateReviewer(input.siteId,reviewerAccount[1],input);if(input.password!==undefined){reviewerAccountFailures.delete(account.login_id);}return json(res,200,account);}
+    if(reviewerAccount&&req.method==='PUT'){const input=await body(req),account=store.updateReviewer(input.siteId,reviewerAccount[1],input,()=>checkRequestSession(req));if(input.password!==undefined){reviewerAccountFailures.delete(account.login_id);}return json(res,200,account);}
     const reviewerNoticeWrite=url.pathname.match(/^\/api\/reviewers\/(\d+)\/notice-write$/);
     if(reviewerNoticeWrite&&req.method==='PUT'){const input=await body(req);return json(res,200,store.setReviewerNoticeWrite(input.siteId,reviewerNoticeWrite[1],input,()=>checkRequestSession(req)));}
     const reviewerFinalApproval=url.pathname.match(/^\/api\/reviewers\/(\d+)\/final-approval$/);
     if(reviewerFinalApproval&&req.method==='PUT'){const input=await body(req);return json(res,200,store.setReviewerFinalApproval(input.siteId,reviewerFinalApproval[1],input,()=>checkRequestSession(req)));}
     const workerAccessBlocks=url.pathname.match(/^\/api\/sites\/(\d+)\/worker-access-blocks$/);
-    if(workerAccessBlocks){if(req.method==='GET')return json(res,200,store.workerAccessBlocks(workerAccessBlocks[1],url.searchParams.get('month')));if(req.method==='PUT'){const input=await body(req),now=new Date(),today=new Date(now.getTime()-now.getTimezoneOffset()*60000).toISOString().slice(0,10);if(input.kind==='ended'&&input.date!==today)throw new Error('작업 종료는 오늘만 설정할 수 있습니다.');store.setWorkerAccessBlock(workerAccessBlocks[1],input.date,input.kind,input.blocked);return json(res,200,{ok:true});}}
+    if(workerAccessBlocks){if(req.method==='GET')return json(res,200,store.workerAccessBlocks(workerAccessBlocks[1],url.searchParams.get('month')));if(req.method==='PUT'){const input=await body(req);store.setWorkerAccessBlock(workerAccessBlocks[1],input.date,input.kind,input.blocked,()=>{checkRequestSession(req);const now=new Date(),today=new Date(now.getTime()-now.getTimezoneOffset()*60000).toISOString().slice(0,10);if(input.kind==='ended'&&input.date!==today)throw new Error('작업 종료는 오늘만 설정할 수 있습니다.');});return json(res,200,{ok:true});}}
     const managerChecks=url.pathname.match(/^\/api\/sites\/(\d+)\/manager-checks$/);
     const managerDayOff=url.pathname.match(/^\/api\/sites\/(\d+)\/manager-checks\/day-off$/);
     if(managerDayOff && req.method==='POST'){const now=new Date(),date=new Date(now.getTime()-now.getTimezoneOffset()*60000).toISOString().slice(0,10);store.saveManagerDayOff(managerDayOff[1],date,()=>checkRequestSession(req));return json(res,201,{ok:true});}
@@ -769,11 +769,11 @@ const server = http.createServer(async (req, res) => {
     if(url.pathname==='/api/workers/preview'&&req.method==='POST'){const input=await body(req),result=store.previewWorkers(input.siteId,input.items,()=>checkRequestSession(req));return json(res,200,result);}
     const worker=url.pathname.match(/^\/api\/workers\/(\d+)$/);
     const workerPermissions=url.pathname.match(/^\/api\/workers\/(\d+)\/permissions$/);
-    if(workerPermissions){if(req.method==='GET')return json(res,200,store.workerPermissions(url.searchParams.get('siteId'),workerPermissions[1]));if(req.method==='PUT'){const input=await body(req);return json(res,200,store.setWorkerPermissions(input.siteId,workerPermissions[1],input.permissions));}}
+    if(workerPermissions){if(req.method==='GET')return json(res,200,store.workerPermissions(url.searchParams.get('siteId'),workerPermissions[1]));if(req.method==='PUT'){const input=await body(req);return json(res,200,store.setWorkerPermissions(input.siteId,workerPermissions[1],input.permissions,()=>checkRequestSession(req)));}}
     const workerActivity=url.pathname.match(/^\/api\/workers\/(\d+)\/activities$/);
     if(workerActivity&&req.method==='GET'){const raw=url.searchParams.get('offset')||'0';if(!/^\d+$/.test(raw))throw new Error('활동 검색 조건을 확인해 주세요.');return json(res,200,store.workerActivities(url.searchParams.get('siteId'),workerActivity[1],url.searchParams.getAll('kind'),Number(raw)));}
     const workerPassword=url.pathname.match(/^\/api\/workers\/(\d+)\/password$/);
-    if(workerPassword&&req.method==='PUT'){const input=await body(req),siteId=Number(input.siteId),id=Number(workerPassword[1]),loginId=store.resetWorkerPassword(siteId,id,input.password);for(const [key,session] of workerSessions)if(session.worker.id===id&&session.worker.site_id===siteId)workerSessions.delete(key);workerAccountFailures.delete(`${siteId}:${loginId}`);return json(res,200,{ok:true});}
+    if(workerPassword&&req.method==='PUT'){const input=await body(req),siteId=Number(input.siteId),id=Number(workerPassword[1]),loginId=store.resetWorkerPassword(siteId,id,input.password,()=>checkRequestSession(req));for(const [key,session] of workerSessions)if(session.worker.id===id&&session.worker.site_id===siteId)Map.prototype.delete.call(workerSessions,key);workerAccountFailures.delete(`${siteId}:${loginId}`);return json(res,200,{ok:true});}
     const workerFiles=url.pathname.match(/^\/api\/workers\/(\d+)\/files(?:\/(\d+))?$/);
     if(workerFiles){
       const [,workerId,fileId]=workerFiles,siteId=url.searchParams.get('siteId');
