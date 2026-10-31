@@ -4,6 +4,7 @@ import { siteQrSession, printSiteQr } from './site-qr.js';
 import { mountCommonWork } from './common-work-view.js';
 import { mountPersonalNoteTools } from './personal-notes-tools.js';
 import { dailyReportPhotos } from './daily-report-photos.js';
+import { showSitePhotoViewer } from './site-photo-viewer.js';
 import { selectTbmSources, mergeTbmSource } from './tbm-sources.js';
 import { trainingGroups, trainingRoster, filterEducationReport } from './training-groups.js';
 import { summarizeSiteAttendance } from './site-statistics.js';
@@ -24,6 +25,7 @@ import { documentRichLimits } from './rich-text.js';
 const $ = (s) => document.querySelector(s);
 const content = $('#content'), siteSelect = $('#site-select'), dialog = $('#dialog'), notice = $('#notice');
 const state = { page:'dashboard', siteId:null, types:{}, type:'', riskKind:'', riskContractorId:'', query:'', detail:null, attendanceDate:null, attendanceMonth:null, reportFrom:null, reportTo:null, reportGroup:'worker', workerFilters:{}, documentFrom:'', documentTo:'', statisticsMonth:null, statisticsDay:'' };
+let sitePhotoEpoch=0;
 const labels = {dashboard:'현장 현황','manager-check':'관리자 자가점검',workers:'출입자 관리',companies:'협력사 관리',equipment:'기계·장비',rigging:'줄걸이·체결장구','work-places':'작업장소','safety-costs':'산업안전보건관리비',attendance:'출역 관리',stops:'작업중지 요청',documents:'안전 문서',approval:'미결재 문서',statistics:'안전 활동 통계'};
 labels['hazards']='의견제안 및 위험신고';
 labels['incident-guide']='사고 대응 안내';
@@ -716,6 +718,7 @@ async function renderAllSiteStatistics(siteId,from,to,month,day){
   section.querySelectorAll('[data-site-education]').forEach(button=>button.onclick=async()=>{const target=Number(button.dataset.siteEducation);state.siteId=target;state.statisticsDay='';state.detail=null;state.workerFilters={};state.wageFilters={};try{await render();if(state.page==='statistics'&&state.siteId===target)content.querySelector('#education-report')?.scrollIntoView({block:'start'});}catch(error){showError(error);}});
 }
 async function render(){
+  sitePhotoEpoch++;document.querySelector('dialog.site-photo-viewer[open]')?.close();
   document.querySelector('dialog.personal-note-preview[open]')?.close();
   await loadSites(); $('#heading').textContent=labels[state.page];$('#crumb').textContent=labels[state.page];
   document.querySelectorAll('[data-page]').forEach(b=>b.classList.toggle('selected',b.dataset.page===state.page));
@@ -926,12 +929,13 @@ async function render(){
     content.querySelectorAll('[data-occupation]').forEach(b=>b.onclick=async()=>{if(!confirm('직종 후보를 삭제할까요?'))return;try{await api(`/api/site-occupations?siteId=${siteId}&id=${b.dataset.occupation}`,{method:'DELETE'});await render();}catch(error){showError(error);}});return;
   }
   if(state.page==='site-photos'){
-    const siteId=state.siteId,filters=state.photoFilters||{from:'',to:'',q:''},photos=await api(`/api/site-photos?${new URLSearchParams({siteId:String(siteId),...filters})}`);
-    content.innerHTML=`<section class="panel"><h2>가상 현장사진</h2><p class="muted">시험 사진만 사용하세요. 업로드 날짜를 기록하고 촬영일과 설명을 수정할 수 있습니다.</p><div class="filters"><label>시작일 <input id="photo-from" type="date" value="${esc(filters.from)}"></label><label>종료일 <input id="photo-to" type="date" value="${esc(filters.to)}"></label><label>검색어 <input id="photo-query" value="${esc(filters.q)}"></label><button id="photo-search">검색</button></div><label>사진 업로드 <input id="site-photo-add" type="file" accept="image/png,image/jpeg"></label>${photos.length?photos.map(p=>`<article><img src="/api/site-photos/${p.id}?siteId=${siteId}" alt="${esc(p.description||p.name)}" class="site-photo"><p>${esc(p.date)} · ${esc(p.name)}</p><p>${esc(p.description)}</p><button data-edit-photo="${p.id}">수정</button><button data-delete-photo="${p.id}">삭제</button></article>`).join(''):'<p>사진이 없습니다.</p>'}</section>`;
+    const epoch=sitePhotoEpoch,siteId=state.siteId,filters=state.photoFilters||{from:'',to:'',q:''},photos=await api(`/api/site-photos?${new URLSearchParams({siteId:String(siteId),...filters})}`);if(epoch!==sitePhotoEpoch||state.page!=='site-photos'||state.siteId!==siteId)return;
+    content.innerHTML=`<section class="panel"><h2>가상 현장사진</h2><p class="muted">시험 사진만 사용하세요. 업로드 날짜를 기록하고 촬영일과 설명을 수정할 수 있습니다.</p><div class="filters"><label>시작일 <input id="photo-from" type="date" value="${esc(filters.from)}"></label><label>종료일 <input id="photo-to" type="date" value="${esc(filters.to)}"></label><label>검색어 <input id="photo-query" value="${esc(filters.q)}"></label><button id="photo-search">검색</button></div><label>사진 업로드 <input id="site-photo-add" type="file" accept="image/png,image/jpeg"></label>${photos.length?photos.map(p=>`<article><img src="/api/site-photos/${p.id}?siteId=${siteId}&amp;version=${encodeURIComponent(p.version)}" alt="${esc(p.description||p.name)}" class="site-photo"><p>${esc(p.date)} · ${esc(p.name)}</p><p>${esc(p.description)}</p><button data-edit-photo="${p.id}">수정</button><button data-delete-photo="${p.id}">삭제</button></article>`).join(''):'<p>사진이 없습니다.</p>'}</section>`;
+    [...content.querySelectorAll('article')].forEach((article,index)=>{const photo=photos[index],image=article.querySelector('img'),button=document.createElement('button');button.type='button';button.className='site-photo-open';button.setAttribute('aria-label',`${photo.name} 크게 보기`);image.replaceWith(button);button.append(image,document.createTextNode(' 사진 보기'));button.onclick=()=>{try{showSitePhotoViewer(document,{photos,index,siteId,active:()=>state.page==='site-photos'&&state.siteId===siteId&&epoch===sitePhotoEpoch});}catch(error){showError(error);}};});
     $('#photo-search').onclick=()=>{state.photoFilters={from:$('#photo-from').value,to:$('#photo-to').value,q:$('#photo-query').value};render().catch(showError);};
     $('#site-photo-add').onchange=async e=>{const file=e.target.files[0];if(!file)return;try{const response=await fetch(`/api/site-photos?siteId=${siteId}`,{method:'POST',headers:{'x-file-name':encodeURIComponent(file.name)},body:file});if(!response.ok)throw Error((await response.json()).error);await render();}catch(error){showError(error);}};
-    content.querySelectorAll('[data-edit-photo]').forEach(b=>b.onclick=()=>{const photo=photos.find(p=>p.id===Number(b.dataset.editPhoto));showDialog('사진 정보 수정',`${field('date','촬영일',photo.date,'date')}${field('description','설명',photo.description,'text',false)}`,d=>api(`/api/site-photos/${photo.id}?siteId=${siteId}`,{method:'PUT',body:JSON.stringify(d)}));});
-    content.querySelectorAll('[data-delete-photo]').forEach(b=>b.onclick=async()=>{if(!confirm('가상 사진을 삭제할까요?'))return;try{await api(`/api/site-photos/${b.dataset.deletePhoto}?siteId=${siteId}`,{method:'DELETE'});await render();}catch(error){showError(error);}});return;
+    content.querySelectorAll('[data-edit-photo]').forEach(b=>b.onclick=()=>{const photo=photos.find(p=>p.id===Number(b.dataset.editPhoto));showDialog('사진 정보 수정',`${field('date','촬영일',photo.date,'date')}${field('description','설명',photo.description,'text',false)}`,d=>api(`/api/site-photos/${photo.id}?siteId=${siteId}`,{method:'PUT',body:JSON.stringify({...d,version:photo.version})}));});
+    content.querySelectorAll('[data-delete-photo]').forEach(b=>b.onclick=async()=>{if(!confirm('가상 사진을 삭제할까요?'))return;try{const photo=photos.find(p=>p.id===Number(b.dataset.deletePhoto));await api(`/api/site-photos/${photo.id}?${new URLSearchParams({siteId:String(siteId),version:photo.version})}`,{method:'DELETE'});await render();}catch(error){showError(error);}});return;
   }
   if(state.page==='common-work'){const siteId=state.siteId;content.innerHTML='<section class="panel" id="common-work-panel"></section>';await mountCommonWork({target:$('#common-work-panel'),base:'/api/common-work',siteId,api,active:()=>state.page==='common-work'&&state.siteId===siteId});return;}
   if(state.page==='personal-notes'){

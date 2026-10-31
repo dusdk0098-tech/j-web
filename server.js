@@ -49,6 +49,7 @@ assets.add('/client');assets.add('/client.js');
 assets.add('/common-work-print.js');
 assets.add('/personal-notes-tools.js');
 assets.add('/daily-report-photos.js');
+assets.add('/site-photo-viewer.js');
 function checkRequestSession(req){const failure=req.checkSession?.();if(failure)throw Object.assign(new Error(failure.error),{sessionStatus:failure.status});}
 function dailyReportPhoto(doc,kind,id){
   const file=kind==='site'?store.sitePhoto(doc.site_id,id):store.attachment(id);
@@ -621,11 +622,11 @@ const server = http.createServer(async (req, res) => {
     const sitePhoto=url.pathname.match(/^\/api\/site-photos(?:\/(\d+))?$/);
     if(sitePhoto){
       const id=sitePhoto[1],siteId=url.searchParams.get('siteId');
-      if(!id&&req.method==='GET')return json(res,200,store.sitePhotos(siteId,url.searchParams.get('from')||'',url.searchParams.get('to')||'',url.searchParams.get('q')||''));
-      if(!id&&req.method==='POST'){const chunks=[];let size=0;for await(const chunk of req){size+=chunk.length;if(size>2*1024*1024)throw new Error('사진은 2MB 이하여야 합니다.');chunks.push(chunk);}checkRequestSession(req);let name;try{name=decodeURIComponent(req.headers['x-file-name']||'');}catch{throw new Error('사진 이름을 확인해 주세요.');}return json(res,201,{id:store.addSitePhoto(siteId,name,Buffer.concat(chunks))});}
-      if(id&&req.method==='PUT'){store.updateSitePhoto(siteId,id,await body(req));return json(res,200,{ok:true});}
-      if(id&&req.method==='DELETE'){store.deleteSitePhoto(siteId,id);return json(res,200,{ok:true});}
-      if(id&&req.method==='GET'){const photo=store.sitePhoto(siteId,id);if(!photo)return json(res,404,{error:'사진을 찾을 수 없습니다.'});const bytes=Buffer.from(photo.data),type=bytes.subarray(0,8).equals(Buffer.from('89504e470d0a1a0a','hex'))?'image/png':'image/jpeg';res.writeHead(200,{'Content-Type':type,'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(bytes);}
+      if(!id&&req.method==='GET'){store.db.exec('BEGIN');try{const rows=store.sitePhotos(siteId,url.searchParams.get('from')||'',url.searchParams.get('to')||'',url.searchParams.get('q')||'').map(item=>{const photo=store.sitePhoto(siteId,item.id);return photo?{id:photo.id,name:photo.name,date:photo.date,description:photo.description,version:store.sitePhotoVersion(photo)}:null;}).filter(Boolean);checkRequestSession(req);store.db.exec('COMMIT');return json(res,200,rows);}catch(error){store.db.exec('ROLLBACK');throw error;}}
+      if(!id&&req.method==='POST'){const chunks=[];let size=0;for await(const chunk of req){size+=chunk.length;if(size>2*1024*1024)throw new Error('사진은 2MB 이하여야 합니다.');chunks.push(chunk);}checkRequestSession(req);let name;try{name=decodeURIComponent(req.headers['x-file-name']||'');}catch{throw new Error('사진 이름을 확인해 주세요.');}return json(res,201,{id:store.addSitePhoto(siteId,name,Buffer.concat(chunks),()=>checkRequestSession(req))});}
+      if(id&&req.method==='PUT'){store.updateSitePhoto(siteId,id,await body(req),()=>checkRequestSession(req));return json(res,200,{ok:true});}
+      if(id&&req.method==='DELETE'){store.deleteSitePhoto(siteId,id,url.searchParams.get('version'),()=>checkRequestSession(req));return json(res,200,{ok:true});}
+      if(id&&req.method==='GET'){const photo=store.sitePhoto(siteId,id);if(!photo)return json(res,404,{error:'사진을 찾을 수 없습니다.'});if(url.searchParams.has('version')&&url.searchParams.get('version')!==store.sitePhotoVersion(photo))return json(res,409,{error:'사진이 변경되었습니다. 다시 조회해 주세요.'});const bytes=Buffer.from(photo.data),type=bytes.subarray(0,8).equals(Buffer.from('89504e470d0a1a0a','hex'))?'image/png':'image/jpeg',download=url.searchParams.get('download')==='1',name=encodeURIComponent(photo.name).replace(/[!'()*]/g,c=>`%${c.charCodeAt(0).toString(16).toUpperCase()}`);checkRequestSession(req);res.writeHead(200,{'Content-Type':type,...(download?{'Content-Disposition':`attachment; filename="photo"; filename*=UTF-8''${name}`}:{ }),'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(bytes);}
     }
     const articleFile=url.pathname.match(/^\/api\/site-articles\/(\d+)\/files(?:\/(\d+))?$/);
     if(articleFile){

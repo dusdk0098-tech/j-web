@@ -259,20 +259,21 @@ export class Store {
     if(from)from=dateValue(from);if(to)to=dateValue(to);if(from&&to&&from>to)throw new Error('조회 기간을 확인해 주세요.');if(typeof query!=='string'||query.length>200)throw new Error('검색어를 확인해 주세요.');
     return this.db.prepare("SELECT id,name,date,description FROM site_photos WHERE site_id=? AND (?='' OR date>=?) AND (?='' OR date<=?) AND (instr(name,?)>0 OR instr(description,?)>0) ORDER BY date DESC,id DESC").all(Number(siteId),from,from,to,to,query,query);
   }
-  addSitePhoto(siteId,name,data){
-    siteId=Number(siteId);if(!this.db.prepare('SELECT 1 FROM sites WHERE id=?').get(siteId))throw new Error('현장을 선택해 주세요.');
+  addSitePhoto(siteId,name,data,onAuthorize=()=>{}){
+    siteId=Number(siteId);
     if(typeof name!=='string'||!name.trim()||name.length>200||/[\\/\x00-\x1f\x7f]/.test(name))throw new Error('사진 이름을 확인해 주세요.');
     if(!(data instanceof Uint8Array)||!data.length||data.length>2*1024*1024)throw new Error('사진은 1바이트 이상 2MB 이하여야 합니다.');
     const bytes=Buffer.from(data);if(!bytes.subarray(0,8).equals(Buffer.from('89504e470d0a1a0a','hex'))&&!bytes.subarray(0,3).equals(Buffer.from('ffd8ff','hex')))throw new Error('PNG 또는 JPEG 사진을 선택해 주세요.');
     const now=new Date(),date=new Date(now.getTime()-now.getTimezoneOffset()*60000).toISOString().slice(0,10);
-    return this.db.prepare('INSERT INTO site_photos(site_id,name,date,data) VALUES(?,?,?,?)').run(siteId,name,date,bytes).lastInsertRowid;
+    this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();if(!this.db.prepare('SELECT 1 FROM sites WHERE id=?').get(siteId))throw new Error('현장을 선택해 주세요.');const id=this.db.prepare('INSERT INTO site_photos(site_id,name,date,data) VALUES(?,?,?,?)').run(siteId,name,date,bytes).lastInsertRowid;this.db.exec('COMMIT');return id;}catch(error){this.db.exec('ROLLBACK');throw error;}
   }
   sitePhoto(siteId,id){return this.db.prepare('SELECT * FROM site_photos WHERE site_id=? AND id=?').get(Number(siteId),Number(id))||null;}
-  updateSitePhoto(siteId,id,input){
+  sitePhotoVersion(photo){return createHash('sha256').update(JSON.stringify([photo.id,photo.site_id,photo.name,photo.date,photo.description])).update(photo.data).digest('hex');}
+  updateSitePhoto(siteId,id,input,onAuthorize=()=>{}){
     const date=dateValue(input.date);if(typeof input.description!=='string'||input.description.length>2000)throw new Error('사진 설명을 확인해 주세요.');
-    if(!this.db.prepare('UPDATE site_photos SET date=?,description=? WHERE site_id=? AND id=?').run(date,input.description.trim(),Number(siteId),Number(id)).changes)throw new Error('사진을 찾을 수 없습니다.');
+    this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();const photo=this.sitePhoto(siteId,id);if(!photo)throw new Error('사진을 찾을 수 없습니다.');if(input.version!==undefined&&input.version!==this.sitePhotoVersion(photo))throw Object.assign(new Error('사진이 변경되었습니다. 다시 조회해 주세요.'),{sessionStatus:409});this.db.prepare('UPDATE site_photos SET date=?,description=? WHERE site_id=? AND id=?').run(date,input.description.trim(),Number(siteId),Number(id));this.db.exec('COMMIT');}catch(error){this.db.exec('ROLLBACK');throw error;}
   }
-  deleteSitePhoto(siteId,id){if(!this.db.prepare('DELETE FROM site_photos WHERE site_id=? AND id=?').run(Number(siteId),Number(id)).changes)throw new Error('사진을 찾을 수 없습니다.');}
+  deleteSitePhoto(siteId,id,version=null,onAuthorize=()=>{}){this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();const photo=this.sitePhoto(siteId,id);if(!photo)throw new Error('사진을 찾을 수 없습니다.');if(version!==null&&version!==this.sitePhotoVersion(photo))throw Object.assign(new Error('사진이 변경되었습니다. 다시 조회해 주세요.'),{sessionStatus:409});this.db.prepare('DELETE FROM site_photos WHERE site_id=? AND id=?').run(Number(siteId),Number(id));this.db.exec('COMMIT');}catch(error){this.db.exec('ROLLBACK');throw error;}}
   boardPosts(kind,query=''){
     if(!['notice','system_notice','question','general'].includes(kind)||typeof query!=='string'||query.length>200)throw new Error('게시판 또는 검색어를 확인해 주세요.');
     return this.db.prepare('SELECT * FROM board_posts WHERE kind=? AND (instr(title,?)>0 OR instr(body,?)>0) ORDER BY id DESC').all(kind,query,query);
