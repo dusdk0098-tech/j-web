@@ -16,6 +16,18 @@ test('가상 출입자 요약은 날짜 경계와 누락을 구분하고 내용�
   assert.throws(()=>summarizeWorkerCounts([], '2026-02-30'),/날짜/);
 });
 
+test('연령대는 70대 이상도 분리하고 기존 집계는 유지한다',()=>{
+  const births=['2026-03-01','2007-03-02','1956-03-01','1946-03-02','1946-03-01','1926-03-01','', '2026-03-02'];
+  const result=summarizeWorkerCounts(births.map(birthDate=>({birthDate,category:'직영'})),'2026-03-01');
+  assert.deepEqual(result.ageDecades.filter(item=>item.count).map(({label,count})=>[label,count]),[['10세 미만',1],['10대',1],['70대',2],['80대',1],['100세 이상',1],['미기록·확인 불가',2]]);
+  assert.deepEqual(result.ages.map(item=>item.count),[2,0,0,0,0,4,2]);
+  assert.ok(workerSummaryMarkup(result).includes('70대 2명 (25%)'));
+  const {ageDecades,...legacy}=result;assert.ok(workerSummaryMarkup(legacy).includes('60세 이상 4명 (50%)'));assert.throws(()=>workerSummaryMarkup({...result,total:0}),/집계/);
+  assert.equal((workerSummaryMarkup(result).match(/stroke-dasharray=/g)||[]).length,6);
+  assert.doesNotMatch(workerSummaryMarkup(result),/20대 0명/);
+  assert.match(workerSummaryMarkup(summarizeWorkerCounts([],'2026-03-01')),/가상 연령: 없음/);
+});
+
 test('가상 출입자 목록은 20명씩 자르고 페이지 전체를 선택할 수 있다',()=>{
   assert.deepEqual(paginateWorkers([],99),{rows:[],page:0,pages:1});
   const rows=Array.from({length:51},(_,index)=>index+1);

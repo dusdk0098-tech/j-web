@@ -8,6 +8,7 @@
 @media print{.schedule-calendar .schedule-day{display:flex!important;min-height:0;padding:0;border:0}.schedule-calendar .schedule-day span{display:none}}
 .plan-diagram{max-width:100%;height:auto}
 #signature, .signature-pad { display:block; max-width:100%; border:1px solid #7c8a95; background:#fff; touch-action:none; }
+.worker-age-visual{display:flex;align-items:center;gap:18px;flex-wrap:wrap}.worker-age-visual>svg{flex:none}.worker-age-visual ul{margin:0;padding-left:0;list-style:none}.worker-age-visual li{margin:4px 0}
 @media print{.batch-controls{display:none!important}.batch-document{break-after:page}.batch-document:last-child{break-after:auto}}
 .site-photo{max-width:min(240px,100%);height:auto}
 @media print{.meal-statement .table-wrap{overflow:visible}.meal-statement-table{min-width:0;table-layout:fixed;font-size:7px}.meal-statement-table th,.meal-statement-table td{padding:2px;overflow-wrap:anywhere}}
