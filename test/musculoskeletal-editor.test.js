@@ -9,6 +9,7 @@ function rowNode(){
   return {
     fields:[],
     set innerHTML(html){
+      this.markup=html;
       this.fields=[...html.matchAll(/<(input|select) data-mus-field="([^"]+)"([^>]*)>([\s\S]*?)(?=<label>|<\/label>)/g)].map(([,tag,key,attributes,content])=>{
         const options=tag==='select'?[...content.matchAll(/<option value="([^"]*)"([^>]*)>/g)].map(([,value,attrs])=>({value,selected:attrs.includes('selected')})):[];
         return {dataset:{musField:key},tag,options,value:tag==='input'?decode(attributes.match(/value="([^"]*)"/)?.[1]||''):(options.find(option=>option.selected)||options[0]).value};
@@ -20,14 +21,19 @@ function rowNode(){
     querySelector(selector){if(selector==='[data-mus-selected]')return this.selected;if(selector==='[data-mus-company]')return this.company;if(selector==='[data-mus-score]')return this.score;return this.fields.find(field=>selector===`[data-mus-field=${field.dataset.musField}]`);}
   };
 }
-function screen(t,rows=[]){
+function screen(t,rows=[],companies=[]){
   const previous=globalThis.document;globalThis.document={createElement:rowNode};t.after(()=>{if(previous===undefined)delete globalThis.document;else globalThis.document=previous;});
   const submit={disabled:false},events=[],list={children:[],append(row){this.children.push(row);},addEventListener(){},querySelectorAll(selector){return this.children.flatMap(row=>row.querySelectorAll(selector));}},controls={'[data-mus-list]':list,'[data-mus-status]':{textContent:''},'[data-mus-add]':{},'[data-mus-delete]':{}},direct={disabled:false,fieldsetDisabled:false,matches(selector){assert.equal(selector,':disabled');return this.disabled||this.fieldsetDisabled;}};
   controls['[data-mus-direct]']=direct;
   const form={querySelector(selector){assert.equal(selector,'button[type=submit]');return submit;}},container={querySelector(selector){return controls[selector];},closest(selector){assert.equal(selector,'form');return form;},dispatchEvent(event){events.push(event);}};
-  const editor=mountMusculoskeletal(container,{rows,companies:[],scale:()=> '3x3'});
+  const editor=mountMusculoskeletal(container,{rows,companies,scale:()=> '3x3'});
   return {editor,list,direct,submit,events,status:controls['[data-mus-status]']};
 }
+
+test('근골격계 업체 선택은 같은 이름도 번호로 구분하며 이름을 안전하게 표시한다',t=>{
+  const companies=[{id:1,name:'가상 <업체>'},{id:2,name:'가상 <업체>'}],ui=screen(t,[{contractorId:2,selected:true}],companies),html=ui.list.children[0].markup;
+  assert.match(html,/가상 &lt;업체&gt; · 등록번호 1/);assert.match(html,/가상 &lt;업체&gt; · 등록번호 2/);assert.doesNotMatch(html,/<업체>/);assert.equal(ui.editor.read()[0].contractorId,2);
+});
 
 test('직접 입력은 기존 값과 순서를 보존하며 독립적인 빈 항목 세 개를 추가한다',t=>{
   const ui=screen(t,[{task:'기존 <작업>',hazard:'가상 부담',likelihood:'2',severity:'3',selected:false}]),before=ui.editor.read();
