@@ -309,6 +309,14 @@ const server = http.createServer(async (req, res) => {
       if(req.method==='POST'&&!image){const input=await body(req);store.saveMeetingSignature(id,input.signature,authorize,input.expectedVersion);return json(res,200,{ok:true});}
       if(req.method==='GET'){const info=store.planSignatureInfo(doc);if(!image){authorize();return json(res,200,info);}const saved=store.meetingSignature(id);authorize();if(!saved)return json(res,404,{error:'시험 서명을 찾을 수 없습니다.'});res.writeHead(200,{'Content-Type':'image/png','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(saved.signature);}
     }
+    const workerTraining=url.pathname.match(/^\/api\/worker\/documents\/(\d+)\/training(?:\/(signature))?$/);
+    if(workerTraining){
+      const session=workerSessions.get(workerKey(workerToken));if(!session||session.expires<=Date.now())return json(res,401,{error:'근로자 로그인이 필요합니다.'});
+      const [,id,signature]=workerTraining,authorize=()=>{checkRequestSession(req);const doc=store.workerDocument(session.worker.site_id,session.worker.id,id);if(!['tbm','education'].includes(doc.type))throw new Error('교육 문서를 확인해 주세요.');return doc;},doc=authorize();
+      if(signature&&doc.type!=='tbm')throw new Error('TBM 문서를 확인해 주세요.');
+      if(req.method==='GET'){if(signature){const saved=store.tbmSignature(id);authorize();if(!saved)return json(res,404,{error:'시험 서명을 찾을 수 없습니다.'});res.writeHead(200,{'Content-Type':'image/png','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(saved.signature);}return json(res,200,store.trainingState(id,authorize));}
+      if((req.method==='PUT'&&!signature)||(req.method==='POST'&&signature)){const input=await body(req),check=()=>{authorize();if(typeof input.expectedVersion!=='string'||input.expectedVersion!==store.trainingStateVersion(id))throw Object.assign(new Error('교육 문서 또는 대상이 변경되었습니다. 다시 확인해 주세요.'),{sessionStatus:409});};if(signature)store.saveTbmSignature(id,input.signature,check);else store.setTrainingTargets(id,input.workerIds,check);return json(res,200,{ok:true});}
+    }
     const workerDocument=url.pathname.match(/^\/api\/worker\/documents\/(\d+)(?:\/(transition|attachments)(?:\/(\d+))?)?$/);
     if(workerDocument){
       const session=workerSessions.get(workerKey(workerToken));if(!session||session.expires<=Date.now())return json(res,401,{error:'근로자 로그인이 필요합니다.'});const [,id,part,fileId]=workerDocument,siteId=session.worker.site_id,workerId=session.worker.id,doc=store.workerDocument(siteId,workerId,id);
@@ -999,7 +1007,7 @@ const server = http.createServer(async (req, res) => {
       if (req.method === 'GET' && part === 'notice-reads') return json(res,200,store.noticeReads(id));
       if (req.method === 'GET' && part === 'training-checks') return json(res,200,store.trainingChecks(id));
       if (req.method === 'GET' && part === 'training-targets') return json(res,200,store.trainingTargets(id));
-      if (req.method === 'PUT' && part === 'training-targets') {const input=await body(req);store.setTrainingTargets(id,input.workerIds);return json(res,200,{ok:true});}
+      if (req.method === 'PUT' && part === 'training-targets') {const input=await body(req);store.setTrainingTargets(id,input.workerIds,()=>checkRequestSession(req));return json(res,200,{ok:true});}
       if (req.method === 'GET' && !part) { const d=store.document(id); return d ? json(res,200,d) : json(res,404,{error:'문서를 찾을 수 없습니다.'}); }
       if (req.method === 'PUT' && !part) {const input=await body(req,150000);return json(res,200,store.updateDocument(id,input,()=>checkRequestSession(req)));}
       if (req.method === 'DELETE' && !part) {const input=await body(req);store.deleteBasicDocument(input.siteId,id,input.expectedVersion);return json(res,200,{ok:true});}
