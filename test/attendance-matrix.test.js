@@ -8,7 +8,22 @@ import {spawn} from 'node:child_process';
 import {once} from 'node:events';
 import {runInNewContext} from 'node:vm';
 import {Store} from '../store.js';
-import {attendanceMatrix,attendanceMatrixMarkup,attendanceEditDeadline} from '../public/attendance-matrix.js';
+import {attendanceMatrix,attendanceMatrixMarkup,attendanceEditDeadline,matchesAttendanceQuery} from '../public/attendance-matrix.js';
+
+test('출역 검색은 가상 이름·생년월일·전화번호의 구분자를 처리한다',()=>{
+  const person={name:'가상 Kim',birth_date:'2000-01-02',phone:'010-1234-5678'};for(const query of ['kim','가상','000102','2000-01-02','0101234','1234-5678'])assert.equal(matchesAttendanceQuery(person,query),true,query);for(const query of ['010999','다른 이름','---'])assert.equal(matchesAttendanceQuery(person,query),false,query);assert.equal(matchesAttendanceQuery({name:'가상',birth_date:null,phone:null},'010'),false);assert.equal(matchesAttendanceQuery(person,' '),true);
+});
+
+test('출역 조회는 가상 가입 정보와 출역 당시 분류를 별도로 보존한다',()=>{
+  const s=new Store(':memory:');try{const site=s.createSite({name:'가상'}),invite=s.createInvitation(site.id),worker=s.join(invite.token,{name:'가상',category:'직영',company:'가상 업체',occupation:'목공',loginId:'search_user',password:'virtual-password-123',acknowledged:true,profile:{birthDate:'2000-01-02',phone:'010-1234-5678'}}),manual=s.createWorker({siteId:site.id,name:'미기록',category:'직영',company:'가상',occupation:'목공'}),date='2024-02-29';s.setAttendance({siteId:site.id,workerId:worker.id,date,present:true});s.db.prepare('UPDATE workers SET company=?,occupation=? WHERE id=?').run('새 소속','새 직종',worker.id);const rows=s.attendance(site.id,date),record=rows.find(row=>row.id===worker.id);assert.equal(record.company,'새 소속');assert.equal(record.attendance_company,'가상 업체');assert.equal(record.attendance_occupation,'목공');assert.equal(record.birth_date,'2000-01-02');assert.equal(record.phone,'010-1234-5678');assert.equal(rows.find(row=>row.id===manual.id).birth_date,null);assert.equal(s.monthlyAttendance(site.id,'2024-02').find(row=>row.id===worker.id).birth_date,'2000-01-02');
+    s.setWorkerPermissions(site.id,worker.id,['attendance']);const delegated=s.delegatedAttendance(site.id,worker.id,date).find(row=>row.id===worker.id);assert.equal('birth_date' in delegated,false);assert.equal('phone' in delegated,false);
+  }finally{s.close();}
+});
+
+test('출역 화면은 현재 정보 대신 출역일에 저장된 소속과 직종을 사용한다',async()=>{
+  const source=readFileSync(new URL('../public/app.js',import.meta.url),'utf8'),from=source.indexOf('    const siteId=state.siteId,epoch=detailEpoch,date=state.attendanceDate'),to=source.indexOf("    $('#report-group').insertAdjacentHTML",from);assert.ok(from>=0&&to>from);const state={page:'attendance',siteId:1,attendanceDate:'2026-11-01',attendanceMonth:'2026-11',reportFrom:'2026-11-01',reportTo:'2026-11-01',reportGroup:'worker'},content={innerHTML:''},row={id:1,name:'가상',birth_date:'2000-01-02',company:'현재 업체',occupation:'현재 직종',category:'직영',attendance_company:'당시 업체',attendance_occupation:'당시 직종',attendance_category:'협력업체 근로자',present:1,units_hundredths:null},api=async path=>path.startsWith('/api/attendance?')?[row]:[],context={state,content,detailEpoch:1,today:()=> '2026-11-01',encodeURIComponent,Promise,api,esc:value=>String(value)};
+  await runInNewContext(`(async()=>{${source.slice(from,to)}})()`,context);assert.match(content.innerHTML,/당시 업체/);assert.match(content.innerHTML,/당시 직종/);assert.match(content.innerHTML,/2000-01-02/);assert.doesNotMatch(content.innerHTML,/현재 업체/);
+});
 
 test('월별 수정 참고 날짜는 연도 경계를 포함해 다음 달 5일이다',()=>{
   assert.equal(attendanceEditDeadline('2024-02'),'2024-03-05');assert.equal(attendanceEditDeadline('2026-12'),'2027-01-05');assert.equal(attendanceEditDeadline('9999-12'),null);assert.throws(()=>attendanceEditDeadline('2026-13'),/월/);
