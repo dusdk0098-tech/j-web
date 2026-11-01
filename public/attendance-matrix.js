@@ -1,3 +1,5 @@
+import { salarySummary } from './salary-summary.js';
+
 const esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
 export function matchesAttendanceQuery(worker,query){
@@ -32,7 +34,8 @@ export function directAttendanceMarkup(workers){
     const direct=worker.units.filter(record=>record.category==='직영'),units=direct.filter(record=>record.units_hundredths!=null),pay=direct.filter(record=>record.estimated_pay!=null);
     const unitSum=units.length?(units.reduce((sum,record)=>sum+record.units_hundredths,0)/100).toFixed(2):direct.length?'미기록':'해당 없음';
     const paySum=pay.length?`${pay.reduce((sum,record)=>sum+record.estimated_pay,0)}원`:direct.length?'미기록':'해당 없음';
-    return `<tr><th>${esc(worker.name)}</th><td>${unitSum} (미기록 ${direct.length-units.length}일)</td><td>${paySum} (제외 ${direct.length-pay.length}일)</td><td>${worker.units.filter(record=>!record.category).length}일</td></tr>`;
+    const salary=salarySummary(direct),salaryText=!direct.length?'해당 없음':salary.total===null?`계산 불가: ${salary.reason}`:`${salary.total}원`;
+    return `<tr><th>${esc(worker.name)}</th><td>${unitSum} (미기록 ${direct.length-units.length}일)</td><td>${paySum} (제외 ${direct.length-pay.length}일)</td><td>${esc(salaryText)}</td><td>${worker.units.filter(record=>!record.category).length}일</td></tr>`;
   });
-  return `<section class="panel"><h2>월별 직영 시험 집계</h2><p>월별 전체 기록에서 출역 당시 구분이 직영인 날만 합산합니다. 일당과 공수가 있는 날의 시험 계산액을 더하며 월급·연봉과 미기록은 제외합니다. 구분 미기록은 직영 여부를 알 수 없어 별도 표시합니다. 월별 표 검색과 관계없이 전체 기록을 표시하며 실제 노무비가 아닙니다.</p>${rows.length?`<div class="table-wrap"><table><thead><tr><th>이름</th><th>직영 시험 공수</th><th>직영 일당 시험 계산액</th><th>구분 미기록</th></tr></thead><tbody>${rows.join('')}</tbody></table></div>`:'<p>해당 월의 시험 출역 기록이 없습니다.</p>'}</section>`;
+  return `<section class="panel"><h2>월별 직영 시험 집계</h2><p>월별 전체 기록에서 출역 당시 구분이 직영인 날만 합산합니다. 일당 시험 계산액은 일당과 공수가 있는 날만 더합니다. 급여 유형 반영 시험 합계는 같은 월급·연봉을 한 번 계산하며 급여 종류 혼합과 금액 불일치 등은 계산 불가로 표시합니다. 구분 미기록은 직영 여부를 알 수 없어 별도 표시합니다. 월별 표 검색과 관계없이 전체 기록을 표시하며 실제 노무비가 아닙니다.</p>${rows.length?`<div class="table-wrap"><table><thead><tr><th>이름</th><th>직영 시험 공수</th><th>직영 일당 시험 계산액</th><th>급여 유형 반영 시험 합계</th><th>구분 미기록</th></tr></thead><tbody>${rows.join('')}</tbody></table></div>`:'<p>해당 월의 시험 출역 기록이 없습니다.</p>'}</section>`;
 }
