@@ -12,6 +12,7 @@ import { normalizeRichText,richTextToPlain,richTextToHTML } from '../public/rich
 
 const rich=[{type:'p',children:[{type:'text',value:'가상 '},{type:'strong',children:[{type:'text',value:'위험'}]},{type:'text',value:' <script>alert</script>'},{type:'a',href:'https://example.test/?a=1&b=2',children:[{type:'text',value:'링크'}]}]},{type:'ul',children:[{type:'li',children:[{type:'text',value:'첫 항목'}]},{type:'li',children:[{type:'text',value:'두 항목'}]}]}];
 const input={date:'2026-10-30',title:'가상 업무',category:'공정회의',process:'가상 공정',status:'published'};
+rich[0].style={fontFamily:'맑은 고딕',fontSize:24,color:'#aabbcc',backgroundColor:'#ffff00',textAlign:'center',indent:2};
 
 test('서식 있는 본문은 허용된 구조만 표시하고 검색 가능한 문자를 보존한다',()=>{
   const normalized=normalizeRichText(rich),plain=richTextToPlain(normalized),html=richTextToHTML(normalized);

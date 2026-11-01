@@ -14,6 +14,8 @@ import { documentRichLimits,normalizeRichText,richTextToPlain,richTextToHTML } f
 const cell=(type,value)=>({type,children:[{type:'text',value}]});
 const rich=[{type:'p',children:[{type:'strong',children:[{type:'text',value:'가상 문서'}]}]},{type:'table',children:[{type:'tbody',children:[{type:'tr',children:[cell('th','구분'),cell('td','가상')]},{type:'tr',children:[cell('th','기간'),cell('td','10월')]}]}]}];
 const changed=[{type:'p',children:[{type:'text',value:'변경된 가상 본문'}]}];
+rich[0].style={fontFamily:'맑은 고딕',fontSize:24,color:'#aabbcc',backgroundColor:'#ffff00',textAlign:'center',indent:2};
+changed[0].style={fontSize:18,textAlign:'right',indent:1};
 const png=new PNG({width:1,height:1});png.data[3]=255;const signature=`data:image/png;base64,${PNG.sync.write(png).toString('base64')}`;
 const base={type:'office',title:'가상 업무',date:'2026-10-30',details:{kind:'품의서'}};
 

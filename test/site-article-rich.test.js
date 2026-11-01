@@ -13,6 +13,8 @@ import { richBody } from '../public/rich-editor.js';
 
 const rich=[{type:'p',children:[{type:'text',value:'가상 '},{type:'strong',children:[{type:'text',value:'자료'}]},{type:'text',value:' <script>본문</script>'},{type:'a',href:'https://example.test/?a=1&b=2',children:[{type:'text',value:'링크'}]}]},{type:'table',children:[{type:'tbody',children:[{type:'tr',children:[{type:'td',children:[{type:'text',value:'가상 표'}]}]}]}]}];
 
+rich[0].style={fontFamily:'맑은 고딕',fontSize:24,color:'#aabbcc',backgroundColor:'#ffff00',textAlign:'center',indent:2};
+
 test('기존 자료실과 첨부는 이관 뒤 보존되고 서식과 버전을 안전하게 저장한다',()=>{
   const dir=mkdtempSync(join(tmpdir(),'jweb-article-rich-')),path=join(dir,'data.sqlite');let store;try{
     store=new Store(path);const site=store.createSite({name:'가상 현장'}),other=store.createSite({name:'다른 현장'}),worker=store.createWorker({siteId:site.id,name:'가상 근로자',category:'직영',company:'가상 업체',occupation:'가상 직종'}),foreign=store.createWorker({siteId:other.id,name:'다른 근로자',category:'직영',company:'가상 업체',occupation:'가상 직종'}),input={siteId:site.id,category:'안전·보건',title:'이전 자료',body:'이전 일반 본문',visible:true},old=store.saveSiteArticle(input),file=store.addArticleFile(site.id,old.id,'가상.txt',Buffer.from('가상 첨부'));store.close();store=null;

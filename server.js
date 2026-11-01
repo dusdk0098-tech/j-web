@@ -62,6 +62,7 @@ const pdfAssets=new Map(['pdf.mjs','pdf.worker.mjs'].map(name=>[`/pdfjs/${name}`
 for(const folder of ['cmaps','standard_fonts','wasm'])for(const name of readdirSync(join(root,'node_modules/pdfjs-dist',folder)))if(/\.(bcmap|pfb|ttf|wasm)$/.test(name))pdfAssets.set(`/pdfjs/${folder}/${name}`,join(root,'node_modules/pdfjs-dist',folder,name));
 assets.add('/site-photo-viewer.js');
 assets.add('/board-comments.js');
+assets.add('/board-create.js');
 assets.add('/board-inline-image.js');
 assets.add('/worker-preview.js');
 assets.add('/worker-list.js');
@@ -212,7 +213,7 @@ const server = http.createServer(async (req, res) => {
         if(part==='attachments'&&!fileId&&req.method==='POST'){const chunks=[];let size=0;for await(const chunk of req){size+=chunk.length;if(size>2*1024*1024)throw new Error('파일은 2MB 이하여야 합니다.');chunks.push(chunk);}let name;try{name=decodeURIComponent(req.headers['x-file-name']||'');}catch{throw new Error('파일 이름을 확인해 주세요.');}store.addAttachment(id,name,Buffer.concat(chunks),'general',()=>authorize(url.searchParams.get('version')));return json(res,201,detail());}
         if(part==='attachments'&&fileId&&['GET','DELETE'].includes(req.method)){const file=store.attachment(fileId);if(!file||file.document_id!==doc.id)return json(res,404,{error:'첨부파일을 찾을 수 없습니다.'});if(req.method==='DELETE'){const input=await body(req);store.deleteAttachment(fileId,()=>{authorize(input.version);const current=store.attachment(fileId);if(!current||current.document_id!==Number(id))throw new Error('첨부파일을 찾을 수 없습니다.');});return json(res,200,detail());}const name=encodeURIComponent(file.name).replace(/[!'()*]/g,c=>`%${c.charCodeAt(0).toString(16).toUpperCase()}`);res.writeHead(200,{'Content-Type':'application/octet-stream','Content-Disposition':`attachment; filename="file"; filename*=UTF-8''${name}`,'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(file.data);}
       }
-      if(url.pathname==='/api/reviewer/board-posts'){if(req.method==='GET'){const rows=store.reviewerBoardPosts(reviewer,url.searchParams.get('kind'),url.searchParams.get('q')||'');checkRequestSession(req);return json(res,200,rows);}if(req.method==='POST'){const input=await body(req);return json(res,201,store.saveReviewerBoardPost(reviewer,input,null,()=>checkRequestSession(req)));}}
+      if(url.pathname==='/api/reviewer/board-posts'){if(req.method==='GET'){const rows=store.reviewerBoardPosts(reviewer,url.searchParams.get('kind'),url.searchParams.get('q')||'');checkRequestSession(req);return json(res,200,rows);}if(req.method==='POST'){const input=await body(req,29*1024*1024);return json(res,201,store.saveReviewerBoardPost(reviewer,input,null,()=>checkRequestSession(req)));}}
       const reviewerBoardComment=url.pathname.match(/^\/api\/reviewer\/board-posts\/(\d+)\/comments(?:\/(\d+))?$/);
       const reviewerBoardAttachment=url.pathname.match(/^\/api\/reviewer\/board-posts\/(\d+)\/attachments(?:\/(\d+))?$/);if(reviewerBoardAttachment)return await boardAttachmentRequest(req,res,url,reviewerBoardAttachment,reviewer);
       if(reviewerBoardComment){const [,id,commentId]=reviewerBoardComment;if(!commentId&&req.method==='GET')return json(res,200,store.boardComments(id,url.searchParams.get('version'),reviewer,()=>checkRequestSession(req)));if(!commentId&&req.method==='POST')return json(res,201,store.addBoardComment(id,await body(req),reviewer,()=>checkRequestSession(req)));if(commentId&&req.method==='DELETE'){store.deleteBoardComment(id,commentId,await body(req),reviewer,()=>checkRequestSession(req));return json(res,200,{ok:true});}}
@@ -761,7 +762,7 @@ const server = http.createServer(async (req, res) => {
     }
     if(url.pathname==='/api/board-posts'){
       if(req.method==='GET')return json(res,200,store.boardPosts(url.searchParams.get('kind'),url.searchParams.get('q')||''));
-      if(req.method==='POST')return json(res,201,store.saveBoardPost(await body(req),null,()=>checkRequestSession(req)));
+      if(req.method==='POST')return json(res,201,store.saveBoardPost(await body(req,29*1024*1024),null,()=>checkRequestSession(req)));
     }
     const boardComment=url.pathname.match(/^\/api\/board-posts\/(\d+)\/comments(?:\/(\d+))?$/);
     const boardAttachment=url.pathname.match(/^\/api\/board-posts\/(\d+)\/attachments(?:\/(\d+))?$/);if(boardAttachment)return await boardAttachmentRequest(req,res,url,boardAttachment,null);
