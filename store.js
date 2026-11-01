@@ -695,17 +695,15 @@ export class Store {
     return {rows,total:rows.reduce((sum,row)=>sum+BigInt(row.amount),0n).toString()};
   }
   safetyCostPhotos(siteId,costId){if(!this.db.prepare('SELECT 1 FROM safety_costs WHERE id=? AND site_id=?').get(Number(costId),Number(siteId)))throw new Error('선택한 현장의 사용내역을 확인해 주세요.');return this.db.prepare('SELECT id,name,kind,length(data) AS size FROM safety_cost_photos WHERE cost_id=? ORDER BY id').all(Number(costId));}
-  addSafetyCostPhoto(siteId,costId,name,data,kind='photo'){
-    const existing=this.safetyCostPhotos(siteId,costId);
+  addSafetyCostPhoto(siteId,costId,name,data,kind='photo',authorize=()=>{}){
     if(!['photo','receipt'].includes(kind))throw new Error('증빙 유형을 확인해 주세요.');
     if(typeof name!=='string'||!name.trim()||name.length>200||/[\\/\x00-\x1f\x7f]/.test(name))throw new Error('사진 이름을 확인해 주세요.');
     if(!(data instanceof Uint8Array)||!data.length||data.length>2*1024*1024)throw new Error('사진은 1바이트 이상 2MB 이하여야 합니다.');
     const bytes=Buffer.from(data);if(!costImageType(bytes))throw new Error('PNG, JPEG 또는 WebP 사진을 선택해 주세요.');
-    if(existing.length>=20)throw new Error('사용내역당 사진은 20개까지 가능합니다.');
-    return this.db.prepare('INSERT INTO safety_cost_photos(cost_id,name,data,kind) VALUES(?,?,?,?)').run(Number(costId),name,bytes,kind).lastInsertRowid;
+    this.db.exec('BEGIN IMMEDIATE');try{authorize();if(this.safetyCostPhotos(siteId,costId).length>=20)throw new Error('사용내역당 사진은 20개까지 가능합니다.');const id=this.db.prepare('INSERT INTO safety_cost_photos(cost_id,name,data,kind) VALUES(?,?,?,?)').run(Number(costId),name,bytes,kind).lastInsertRowid;this.db.exec('COMMIT');return id;}catch(error){this.db.exec('ROLLBACK');throw error;}
   }
   safetyCostPhoto(siteId,costId,id){return this.db.prepare('SELECT p.* FROM safety_cost_photos p JOIN safety_costs c ON c.id=p.cost_id WHERE c.site_id=? AND c.id=? AND p.id=?').get(Number(siteId),Number(costId),Number(id))||null;}
-  deleteSafetyCostPhoto(siteId,costId,id){if(!this.safetyCostPhoto(siteId,costId,id))throw new Error('사진을 찾을 수 없습니다.');this.db.prepare('DELETE FROM safety_cost_photos WHERE cost_id=? AND id=?').run(Number(costId),Number(id));}
+  deleteSafetyCostPhoto(siteId,costId,id,authorize=()=>{}){this.db.exec('BEGIN IMMEDIATE');try{authorize();if(!this.safetyCostPhoto(siteId,costId,id))throw new Error('사진을 찾을 수 없습니다.');this.db.prepare('DELETE FROM safety_cost_photos WHERE cost_id=? AND id=?').run(Number(costId),Number(id));this.db.exec('COMMIT');}catch(error){this.db.exec('ROLLBACK');throw error;}}
   safetyCostReportPhotos(id){const doc=this.document(id);if(!doc||doc.type!=='cost'||!Array.isArray(JSON.parse(doc.details).rows))throw new Error('월간 사용내역서를 확인해 주세요.');return this.db.prepare('SELECT id,cost_id,name,kind,source_date,note,length(data) AS size FROM safety_cost_report_photos WHERE document_id=? ORDER BY id').all(Number(id));}
   safetyCostReportPhoto(id,photoId){return this.db.prepare('SELECT * FROM safety_cost_report_photos WHERE document_id=? AND id=?').get(Number(id),Number(photoId))||null;}
   safetyCostMonthFiles(siteId,month){siteId=Number(siteId);if(!this.db.prepare('SELECT 1 FROM sites WHERE id=?').get(siteId))throw new Error('현장을 선택해 주세요.');if(typeof month!=='string'||!/^\d{4}-(0[1-9]|1[0-2])$/.test(month))throw new Error('조회 월을 확인해 주세요.');return this.db.prepare('SELECT id,date,note,name,length(data) AS size FROM safety_cost_month_files WHERE site_id=? AND date>=? AND date<? ORDER BY date,id').all(siteId,`${month}-01`,`${month}-32`);}
