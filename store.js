@@ -714,15 +714,24 @@ export class Store {
     this.db.exec('BEGIN IMMEDIATE');try{authorize();const existing=this.safetyCostMonthFiles(siteId,date.slice(0,7));if(existing.length>=20)throw new Error('월별 결재서류는 20개까지 가능합니다.');const id=this.db.prepare('INSERT INTO safety_cost_month_files(site_id,date,note,name,data) VALUES(?,?,?,?,?)').run(Number(siteId),date,note.trim(),name,bytes).lastInsertRowid;this.db.exec('COMMIT');return id;}catch(error){this.db.exec('ROLLBACK');throw error;}
   }
   deleteSafetyCostMonthFile(siteId,id,authorize=()=>{}){this.db.exec('BEGIN IMMEDIATE');try{authorize();if(!this.safetyCostMonthFile(siteId,id))throw new Error('파일을 찾을 수 없습니다.');this.db.prepare('DELETE FROM safety_cost_month_files WHERE site_id=? AND id=?').run(Number(siteId),Number(id));this.db.exec('COMMIT');}catch(error){this.db.exec('ROLLBACK');throw error;}}
-  createSafetyCost(input){
+  safetyCostInput(input){
     const siteId=Number(input.siteId);if(!this.db.prepare('SELECT 1 FROM sites WHERE id=?').get(siteId))throw new Error('현장을 선택해 주세요.');
     const category=Number(input.category);if(!Number.isInteger(category)||category<1||category>9)throw new Error('사용 항목을 확인해 주세요.');
     const date=dateValue(input.date),description=text(input.description,'사용내역'),unit=text(input.unit,'단위');
     if(typeof input.note!=='string'||input.note.length>2000)throw new Error('비고를 확인해 주세요.');
     const price=input.unitPrice,quantity=input.quantity;
     const amount=safetyCostAmount(price,quantity);
-    const id=this.db.prepare('INSERT INTO safety_costs(site_id,category,date,description,note,unit_price,quantity,unit,amount) VALUES(?,?,?,?,?,?,?,?,?)').run(siteId,category,date,description,input.note.trim(),price,quantity,unit,amount).lastInsertRowid;
+    return {siteId,category,date,description,note:input.note.trim(),price,quantity,unit,amount};
+  }
+  createSafetyCost(input){
+    const {siteId,category,date,description,note,price,quantity,unit,amount}=this.safetyCostInput(input);
+    const id=this.db.prepare('INSERT INTO safety_costs(site_id,category,date,description,note,unit_price,quantity,unit,amount) VALUES(?,?,?,?,?,?,?,?,?)').run(siteId,category,date,description,note,price,quantity,unit,amount).lastInsertRowid;
     return this.db.prepare('SELECT * FROM safety_costs WHERE id=?').get(id);
+  }
+  updateSafetyCost(id,input,onAuthorize=()=>{}){
+    const values=this.safetyCostInput(input),expected=input.expected,keys=['category','date','description','note','unit_price','quantity','unit','amount'];
+    if(!expected||typeof expected!=='object'||keys.some(key=>!Object.hasOwn(expected,key)))throw new Error('사용내역을 다시 조회해 주세요.');
+    this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();const current=this.db.prepare('SELECT * FROM safety_costs WHERE id=? AND site_id=?').get(Number(id),values.siteId);if(!current)throw new Error('선택한 현장의 사용내역을 확인해 주세요.');if(keys.some(key=>current[key]!==expected[key]))throw Object.assign(new Error('사용내역이 변경되었습니다. 다시 조회해 주세요.'),{sessionStatus:409});this.db.prepare('UPDATE safety_costs SET category=?,date=?,description=?,note=?,unit_price=?,quantity=?,unit=?,amount=? WHERE id=? AND site_id=?').run(values.category,values.date,values.description,values.note,values.price,values.quantity,values.unit,values.amount,Number(id),values.siteId);const result=this.db.prepare('SELECT * FROM safety_costs WHERE id=? AND site_id=?').get(Number(id),values.siteId);this.db.exec('COMMIT');return result;}catch(error){this.db.exec('ROLLBACK');throw error;}
   }
   createSafetyCostReport(input,onAuthorize=()=>{}){
     const siteId=Number(input.siteId),month=input.month;

@@ -777,6 +777,8 @@ const server = http.createServer(async (req, res) => {
       if(req.method==='GET')return json(res,200,store.safetyCosts(url.searchParams.get('siteId'),url.searchParams.get('month')));
       if(req.method==='POST')return json(res,201,store.createSafetyCost(await body(req)));
     }
+    const costItem=url.pathname.match(/^\/api\/safety-costs\/(\d+)$/);
+    if(costItem&&req.method==='PUT')return json(res,200,store.updateSafetyCost(costItem[1],await body(req),()=>checkRequestSession(req)));
     if(url.pathname==='/api/safety-cost-reports'&&req.method==='POST')return json(res,201,store.createSafetyCostReport(await body(req),()=>checkRequestSession(req)));
     const costMonthFile=url.pathname.match(/^\/api\/safety-cost-month-files(?:\/(\d+))?$/);
     if(costMonthFile){const siteId=url.searchParams.get('siteId'),month=url.searchParams.get('month'),id=costMonthFile[1];
