@@ -352,7 +352,7 @@ export class Store {
     if(!post||actor&&(!this.db.prepare('SELECT 1 FROM reviewers WHERE id=? AND site_id=? AND active=1').get(Number(actor.id),Number(actor.site_id))||!(post.author_id===actor.id||post.shared===1&&post.secret===0)))throw new Error('게시글을 찾을 수 없습니다.');
     if(typeof version!=='string'||version!==post.version)throw Object.assign(new Error('게시글이 변경되었습니다. 다시 조회해 주세요.'),{sessionStatus:409});return post;
   }
-  boardComments(id,version,actor=null){this.boardCommentsPost(id,version,actor);return this.db.prepare('SELECT id,author_id,author_name,body,created_at,version FROM board_comments WHERE post_id=? ORDER BY id').all(Number(id));}
+  boardComments(id,version,actor=null,onAuthorize=()=>{}){this.db.exec('BEGIN');try{onAuthorize();this.boardCommentsPost(id,version,actor);const comments=this.db.prepare('SELECT id,author_id,author_name,body,created_at,version FROM board_comments WHERE post_id=? ORDER BY id').all(Number(id));onAuthorize();this.db.exec('COMMIT');return comments;}catch(error){this.db.exec('ROLLBACK');throw error;}}
   addBoardComment(id,input,actor=null,onAuthorize=()=>{}){
     const body=text(input.body,'댓글',2000);this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();this.boardCommentsPost(id,input.postVersion,actor);const author=actor?this.db.prepare('SELECT name FROM reviewers WHERE id=?').get(actor.id).name:'관리자',result=this.db.prepare("INSERT INTO board_comments(post_id,author_id,author_name,body,version) VALUES(?,?,?,?,lower(hex(randomblob(16))))").run(Number(id),actor?.id??null,author,body);this.db.exec('COMMIT');return {id:result.lastInsertRowid};}catch(error){this.db.exec('ROLLBACK');throw error;}
   }
