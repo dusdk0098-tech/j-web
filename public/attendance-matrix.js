@@ -26,3 +26,13 @@ export function attendanceMatrix(workers,dates,field){
 export function attendanceMatrixMarkup(workers,dates){
   return [['occupation','직종'],['company','소속']].map(([field,title])=>{const rows=attendanceMatrix(workers,dates,field);return `<section class="panel"><h2>월별 ${title} 출역</h2><p>출역일에 저장된 ${title}별 시험 인원입니다. 합계는 일자별 인원을 더한 인일이며 실제 출입을 증명하지 않습니다.</p>${rows.length?`<div class="table-wrap"><table><thead><tr><th>${title}</th>${dates.map(date=>`<th>${Number(date.slice(-2))}일</th>`).join('')}<th>합계 (인일)</th></tr></thead><tbody>${rows.map(row=>`<tr><th>${esc(row.label)}</th>${row.days.map(count=>`<td>${count||'-'}</td>`).join('')}<td>${row.total}</td></tr>`).join('')}</tbody></table></div>`:'<p>해당 월의 시험 출역 기록이 없습니다.</p>'}</section>`;}).join('');
 }
+
+export function directAttendanceMarkup(workers){
+  const rows=workers.filter(worker=>worker.units.length).map(worker=>{
+    const direct=worker.units.filter(record=>record.category==='직영'),units=direct.filter(record=>record.units_hundredths!=null),pay=direct.filter(record=>record.estimated_pay!=null);
+    const unitSum=units.length?(units.reduce((sum,record)=>sum+record.units_hundredths,0)/100).toFixed(2):direct.length?'미기록':'해당 없음';
+    const paySum=pay.length?`${pay.reduce((sum,record)=>sum+record.estimated_pay,0)}원`:direct.length?'미기록':'해당 없음';
+    return `<tr><th>${esc(worker.name)}</th><td>${unitSum} (미기록 ${direct.length-units.length}일)</td><td>${paySum} (제외 ${direct.length-pay.length}일)</td><td>${worker.units.filter(record=>!record.category).length}일</td></tr>`;
+  });
+  return `<section class="panel"><h2>월별 직영 시험 집계</h2><p>월별 전체 기록에서 출역 당시 구분이 직영인 날만 합산합니다. 일당과 공수가 있는 날의 시험 계산액을 더하며 월급·연봉과 미기록은 제외합니다. 구분 미기록은 직영 여부를 알 수 없어 별도 표시합니다. 월별 표 검색과 관계없이 전체 기록을 표시하며 실제 노무비가 아닙니다.</p>${rows.length?`<div class="table-wrap"><table><thead><tr><th>이름</th><th>직영 시험 공수</th><th>직영 일당 시험 계산액</th><th>구분 미기록</th></tr></thead><tbody>${rows.join('')}</tbody></table></div>`:'<p>해당 월의 시험 출역 기록이 없습니다.</p>'}</section>`;
+}

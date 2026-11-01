@@ -8,7 +8,16 @@ import {spawn} from 'node:child_process';
 import {once} from 'node:events';
 import {runInNewContext} from 'node:vm';
 import {Store} from '../store.js';
-import {attendanceMatrix,attendanceMatrixMarkup,attendanceEditDeadline,matchesAttendanceQuery,matchesMonthlyAttendance} from '../public/attendance-matrix.js';
+import {attendanceMatrix,attendanceMatrixMarkup,attendanceEditDeadline,matchesAttendanceQuery,matchesMonthlyAttendance,directAttendanceMarkup} from '../public/attendance-matrix.js';
+
+test('월별 직영 시험 집계는 당시 구분과 미기록·제외 일수를 보존한다',()=>{
+  const html=directAttendanceMarkup([{name:'<가상>',units:[{category:'직영',units_hundredths:125,estimated_pay:150000},{category:'직영',units_hundredths:0,estimated_pay:0},{category:'직영',units_hundredths:null,estimated_pay:null},{category:'직영',units_hundredths:100,estimated_pay:null},{category:'외주',units_hundredths:900,estimated_pay:999999},{category:null,units_hundredths:900,estimated_pay:999999}]}]);
+  assert.match(html,/&lt;가상&gt;/);assert.doesNotMatch(html,/<가상>/);assert.match(html,/2\.25 \(미기록 1일\)/);assert.match(html,/150000원 \(제외 2일\)/);assert.match(html,/<td>1일<\/td>/);assert.doesNotMatch(html,/999999/);assert.match(directAttendanceMarkup([]),/기록이 없습니다/);
+});
+
+test('저장된 월별 출역은 직영 시험 집계에 기록 당시 구분과 계산액을 전달한다',()=>{
+  const s=new Store(':memory:');try{const site=s.createSite({name:'가상 현장'}),worker=s.createWorker({siteId:site.id,name:'가상',category:'직영',company:'가상',occupation:'목공'}),entry={siteId:site.id,workerId:worker.id,date:'2024-02-28'};s.setAttendance({...entry,present:true});s.setAttendanceUnits({...entry,units:'1.25'});s.setAttendanceDailyRate({...entry,dailyRate:'100000'});s.setAttendance({...entry,date:'2024-02-29',present:true});s.db.prepare('UPDATE attendance SET category_snapshot=? WHERE worker_id=? AND date=?').run('외주',worker.id,'2024-02-29');const html=directAttendanceMarkup(s.monthlyAttendance(site.id,'2024-02'));assert.match(html,/1\.25 \(미기록 0일\)/);assert.match(html,/125000원 \(제외 0일\)/);s.db.prepare('UPDATE attendance SET category_snapshot=NULL WHERE worker_id=? AND date=?').run(worker.id,entry.date);const missing=directAttendanceMarkup(s.monthlyAttendance(site.id,'2024-02'));assert.match(missing,/해당 없음/);assert.match(missing,/<td>1일<\/td>/);}finally{s.close();}
+});
 
 test('월별 검색 조건은 같은 날짜의 출역 기록에 함께 적용한다',()=>{
   const worker={name:'가상',birth_date:'2000-01-02',phone:'010-1234-5678',units:[{date:'2026-11-01',category:'직영',occupation:'목공',company:'가상 A'},{date:'2026-11-02',category:'협력업체 근로자',occupation:'철근',company:'가상 B'},{date:'2026-11-03',category:null,occupation:null,company:null}]},empty={name:'미출역',units:[]},base={date:'',category:'',occupation:'',company:'',query:''};

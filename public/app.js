@@ -20,7 +20,7 @@ import { restaurantPrice } from './restaurant-price.js';
 import { safetyCostAmount } from './safety-cost.js';
 import { salarySummary, salaryDay, groupWageRecords, wageEstimateCurrent } from './salary-summary.js';
 import { attendanceMealChange } from './attendance-meals.js';
-import { attendanceMatrixMarkup,attendanceEditDeadline,matchesAttendanceQuery,matchesMonthlyAttendance } from './attendance-matrix.js';
+import { attendanceMatrixMarkup,attendanceEditDeadline,matchesAttendanceQuery,matchesMonthlyAttendance,directAttendanceMarkup } from './attendance-matrix.js';
 import { jointExamples } from './joint-examples.js';
 import { mergeSafetyLogSources } from './safety-log-sources.js';
 import { mountMusculoskeletal } from './musculoskeletal.js';
@@ -1248,7 +1248,7 @@ async function render(){
     document.querySelectorAll('[data-save-units]').forEach(b=>b.onclick=async()=>{try{const input=b.closest('tr').querySelector('[data-attendance-units]');if(!input.checkValidity())throw new Error('시험 공수는 0부터 9.99까지 입력해 주세요.');const units=input.value;await api('/api/attendance/units',{method:'PUT',body:JSON.stringify({siteId,workerId:Number(b.dataset.saveUnits),date,units,expectedDayVersion:rows.find(row=>row.id===Number(b.dataset.saveUnits)).day_version})});flash('시험 공수를 저장했습니다.');await renderKeepingEdits(b.closest('tr'));}catch(e){showError(e);}});
     content.querySelectorAll('section:first-child tbody input,section:first-child tbody select').forEach(el=>el.dataset.initial=el.value);
     $('#report-search').onclick=()=>{const start=$('#report-from').value,end=$('#report-to').value;if(!start||!end||start>end){flash('조회 기간을 확인해 주세요.',true);return;}state.reportFrom=start;state.reportTo=end;state.reportGroup=$('#report-group').value;render().catch(showError);};
-    content.insertAdjacentHTML('beforeend',attendanceMatrixMarkup(monthly,dates));
+    content.insertAdjacentHTML('beforeend',directAttendanceMarkup(monthly)+attendanceMatrixMarkup(monthly,dates));
     return;
   }
   if(state.page==='workers'){
