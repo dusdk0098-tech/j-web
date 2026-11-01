@@ -197,7 +197,7 @@ export function recordInput(input) {
     const value=input.details ?? {};
     if(!value || typeof value!=='object' || Array.isArray(value))throw new Error('교육 항목을 확인해 주세요.');
     if(value.kind!==undefined && value.kind!=='' && !Object.hasOwn(educationKinds,value.kind))throw new Error('교육 종류를 확인해 주세요.');
-    for(const key of ['kind','otherTitle','audience','educationPlace','educationMethod']){
+    for(const key of ['kind','otherTitle','audience','instructor','educationPlace','educationMethod']){
       if(value[key]!==undefined){if(typeof value[key]!=='string' || value[key].length>2000)throw new Error('교육 항목을 확인해 주세요.');details[key]=value[key].trim();}
     }
     if(value.timeFrom!==undefined||value.timeTo!==undefined){const from=value.timeFrom??'',to=value.timeTo??'',valid=time=>typeof time==='string'&&/^(?:(?:[01]\d|2[0-3]):[0-5]\d|24:00)$/.test(time);if(typeof from!=='string'||typeof to!=='string'||(from||to)&&(!valid(from)||!valid(to)||from>to))throw new Error('교육시간을 확인해 주세요.');details.timeFrom=from;details.timeTo=to;}
