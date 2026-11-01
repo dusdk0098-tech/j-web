@@ -1254,6 +1254,11 @@ export class Store {
     const companies=this.companies(siteId).map(({id,name,trade})=>({id,name,trade}));if(type==='risk')return {companies};
     return {companies,equipment:this.equipment(siteId).map(({id,kind,model,registration})=>({id,kind,model,registration})),places:this.workPlaces(siteId).map(({id,name})=>({id,name})),rigging:this.rigging(siteId).map(({id,category,kind,name})=>({id,category,kind,name})),workers:this.workers(siteId).map(({id,name,company})=>({id,name,company}))};
   }
+  changeAttendance(kind,input,onAuthorize=()=>{}){
+    const actions={presence:()=>this.setAttendance(input),units:()=>this.setAttendanceUnits(input),dailyRate:()=>this.setAttendanceDailyRate(input),salary:()=>this.setAttendanceSalary(input)};
+    if(!Object.hasOwn(actions,kind))throw new Error('출역 변경 종류를 확인해 주세요.');
+    this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();actions[kind]();this.db.exec('COMMIT');}catch(error){this.db.exec('ROLLBACK');throw error;}
+  }
   setAttendance(input) {
     const date = dateValue(input.date);
     if (typeof input.present !== 'boolean') throw new Error('출역 상태를 확인해 주세요.');

@@ -853,13 +853,13 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === '/api/education/daily-report' && req.method === 'GET') return json(res,200,store.dailyTrainingReport(url.searchParams.get('siteId'),url.searchParams.get('from'),url.searchParams.get('to')));
     if (url.pathname === '/api/monthly-site-activity' && req.method === 'GET') return json(res,200,store.monthlySiteActivity(url.searchParams.get('month')));
     if (url.pathname === '/api/weekly-activity' && req.method === 'GET') return json(res,200,store.weeklyActivity(url.searchParams.get('siteId'),url.searchParams.get('start')));
-    if(url.pathname==='/api/attendance/units'&&req.method==='PUT'){store.setAttendanceUnits(await body(req));return json(res,200,{ok:true});}
-    if(url.pathname==='/api/attendance/daily-rate'&&req.method==='PUT'){store.setAttendanceDailyRate(await body(req));return json(res,200,{ok:true});}
-    if(url.pathname==='/api/attendance/salary'&&req.method==='PUT'){store.setAttendanceSalary(await body(req));return json(res,200,{ok:true});}
+    if(url.pathname==='/api/attendance/units'&&req.method==='PUT'){store.changeAttendance('units',await body(req),()=>checkRequestSession(req));return json(res,200,{ok:true});}
+    if(url.pathname==='/api/attendance/daily-rate'&&req.method==='PUT'){store.changeAttendance('dailyRate',await body(req),()=>checkRequestSession(req));return json(res,200,{ok:true});}
+    if(url.pathname==='/api/attendance/salary'&&req.method==='PUT'){store.changeAttendance('salary',await body(req),()=>checkRequestSession(req));return json(res,200,{ok:true});}
     if(url.pathname==='/api/attendance/month/details'&&req.method==='PUT')return json(res,200,{updated:store.updateMonthlyAttendanceDetails(await body(req),()=>checkRequestSession(req))});
     if (url.pathname === '/api/attendance') {
       if (req.method === 'GET') return json(res,200,store.attendance(url.searchParams.get('siteId'),url.searchParams.get('date')));
-      if (req.method === 'POST') {store.setAttendance(await body(req));return json(res,200,{ok:true});}
+      if (req.method === 'POST') {store.changeAttendance('presence',await body(req),()=>checkRequestSession(req));return json(res,200,{ok:true});}
     }
     if (url.pathname === '/api/attendance/report' && req.method === 'GET') return json(res,200,store.attendanceReport(url.searchParams.get('siteId'),url.searchParams.get('from'),url.searchParams.get('to'),url.searchParams.get('group')));
     if (url.pathname === '/api/attendance/sites-report' && req.method === 'GET') return json(res,200,store.attendanceSitesReport(url.searchParams.get('from'),url.searchParams.get('to')));
