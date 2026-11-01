@@ -1417,6 +1417,22 @@ export class Store {
     const result=this.db.prepare('UPDATE attendance SET salary_kind=?,salary_amount=?,updated_at=CURRENT_TIMESTAMP WHERE worker_id=? AND date=? AND present=1 AND EXISTS(SELECT 1 FROM workers WHERE workers.id=attendance.worker_id AND workers.site_id=?)').run(input.kind,value,Number(input.workerId),date,Number(input.siteId));
     if(!result.changes)throw new Error('같은 현장의 출역 기록을 확인해 주세요.');
   }
+  updateMonthlyAttendanceCells(input,onAuthorize=()=>{}){
+    const month=monthValue(input.month),positive=value=>(typeof value==='number'||typeof value==='string')&&/^[1-9]\d*$/.test(String(value))&&Number.isSafeInteger(Number(value));
+    if(!positive(input.siteId)||Object.keys(input).some(key=>!['siteId','month','changes'].includes(key))||!Array.isArray(input.changes)||!input.changes.length||input.changes.length>1000)throw new Error('월별 출역 변경 항목을 확인해 주세요.');
+    const seen=new Set();
+    for(const row of input.changes){
+      if(!row||typeof row!=='object'||Array.isArray(row)||Object.keys(row).some(key=>!['workerId','date','present','units','expectedDayVersion','expectedVersion'].includes(key))||!positive(row.workerId)||typeof row.present!=='boolean'||!Number.isSafeInteger(row.expectedDayVersion)||row.expectedDayVersion<0||typeof row.expectedVersion!=='string'||!/^[a-f0-9]{64}$/.test(row.expectedVersion)||row.units!==undefined&&(!row.present||typeof row.units!=='string'||!/^$|^\d(?:\.\d{1,2})?$/.test(row.units)))throw new Error('월별 출역 변경 항목을 확인해 주세요.');
+      const date=dateValue(row.date),key=Number(row.workerId)+':'+date;if(!date.startsWith(month+'-')||seen.has(key))throw new Error('변경 날짜와 중복 항목을 확인해 주세요.');seen.add(key);
+    }
+    this.db.exec('BEGIN IMMEDIATE');try{
+      onAuthorize();const workers=new Map(this.monthlyAttendance(input.siteId,month).map(worker=>[worker.id,worker]));
+      // 모든 이전 버전은 첫 변경 전에 비교해야 같은 근로자의 여러 날짜를 함께 저장할 수 있다.
+      for(const row of input.changes){const worker=workers.get(Number(row.workerId));if(!worker)throw new Error('선택한 현장의 출입자를 확인해 주세요.');if(worker.version!==row.expectedVersion)throw Object.assign(new Error('월별 출역 기록이 변경되었습니다. 다시 조회해 주세요.'),{sessionStatus:409});this.checkAttendanceDayVersion(input.siteId,row.workerId,row.date,row.expectedDayVersion);}
+      for(const row of input.changes){const value={...row,siteId:input.siteId};this.setAttendance(value);if(row.units!==undefined)this.setAttendanceUnits(value);}
+      onAuthorize();this.db.exec('COMMIT');return input.changes.length;
+    }catch(error){this.db.exec('ROLLBACK');throw error;}
+  }
   updateMonthlyAttendanceDetails(input,onAuthorize=()=>{}){
     const month=monthValue(input.month),fields=['category','company','occupation','dailyRate'].filter(key=>input[key]!==undefined);
     const salaryRequested=input.salaryKind!==undefined||input.salaryAmount!==undefined;

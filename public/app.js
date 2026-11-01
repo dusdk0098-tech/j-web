@@ -30,6 +30,7 @@ import { safetyCostAmount } from './safety-cost.js';
 import { salarySummary, salaryDay, groupWageRecords, wageEstimateCurrent } from './salary-summary.js';
 import { attendanceMealChange } from './attendance-meals.js';
 import { attendanceMatrixMarkup,attendanceEditDeadline,matchesAttendanceQuery,matchesMonthlyAttendance,directAttendanceMarkup } from './attendance-matrix.js';
+import { mountRestrictedMonthEditor } from './restricted-month-editor.js';
 import { educationKinds } from './education-kinds.js';
 import { jointExamples } from './joint-examples.js';
 import { mergeSafetyLogSources } from './safety-log-sources.js';
@@ -930,21 +931,36 @@ async function showRestrictedMonth(scope){
   const siteId=state.siteId;
   showDialog('배정 현장 월별 출역','<label>조회 월<input type="month" id="restricted-month" required value="'+esc(state.attendanceMonth||today().slice(0,7))+'"></label><button type="button" id="restricted-month-load">조회·새로고침</button><p id="restricted-month-status" role="status"></p><div id="restricted-month-results"></div>',async()=>{},scope);
   $('#dialog-form button[type=submit]').textContent='닫기';
-  const submit=$('#dialog-form').onsubmit,current=()=>scope()&&dialog.open&&$('#dialog-form').onsubmit===submit;let sequence=0;
+  const submit=$('#dialog-form').onsubmit,current=()=>scope()&&dialog.open&&$('#dialog-form').onsubmit===submit;let sequence=0,editor=null,loadedMonth=null,loading=false;
   $('#restricted-month-load').onclick=async()=>{
     if(!current())return;
+    if(loading||editor?.busy()){$('#restricted-month').value=loadedMonth||$('#restricted-month').value;return;}
+    if(editor?.dirty()&&!confirm('미저장 변경을 버리고 조회할까요?')){$('#restricted-month').value=loadedMonth;return;}
     const month=$('#restricted-month').value;
     if(!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)||Number(month.slice(0,4))<1){$('#dialog-error').textContent='올바른 조회 월을 선택해 주세요.';return;}
-    const request=++sequence;$('#restricted-month-results').innerHTML='';$('#restricted-month-status').textContent='조회 중입니다.';$('#dialog-error').textContent='';
-    try{const rows=await api(`/api/attendance/month?siteId=${siteId}&month=${month}`,{},current);if(!current()||request!==sequence)return;
+    const request=++sequence;loading=true;if(editor)$('#restricted-month-editor').inert=true;$('#restricted-month').disabled=true;$('#restricted-month-status').textContent='조회 중입니다.';$('#dialog-error').textContent='';
+    try{let rows=await api(`/api/attendance/month?siteId=${siteId}&month=${month}`,{},current);if(!current()||request!==sequence)return;
+      loadedMonth=month;
       state.attendanceMonth=month;$('#restricted-month-status').textContent=`${month} · ${rows.length}명`;
-      $('#restricted-month-results').innerHTML=rows.length?'<ul>'+rows.map(row=>`<li>${esc(row.name)} · ${row.days.length}일 <button type="button" data-restricted-month-worker="${row.id}">${esc(row.name)} 월 정보 변경</button><ul>${row.units.map(record=>`<li>${esc(record.date)} · ${esc(record.category)} · ${esc(record.company)} · ${esc(record.occupation)} · 공수 ${record.units_hundredths==null?'미입력':esc(record.units_hundredths/100)}</li>`).join('')}</ul></li>`).join('')+'</ul>':'<p>등록된 근로자가 없습니다.</p>';
+      const summary=row=>`${esc(row.name)} · ${row.days.length}일<ul>${row.units.map(record=>`<li>${esc(record.date)} · ${esc(record.category)} · ${esc(record.company)} · ${esc(record.occupation)} · 공수 ${record.units_hundredths==null?'미입력':esc(record.units_hundredths/100)}</li>`).join('')}</ul>`;
+      const details=()=>rows.length?'<ul>'+rows.map(row=>`<li><div id="restricted-month-summary-${row.id}">${summary(row)}</div><button type="button" data-restricted-month-worker="${row.id}">${esc(row.name)} 월 정보 변경</button></li>`).join('')+'</ul>':'<p>등록된 근로자가 없습니다.</p>';
+      $('#restricted-month-results').innerHTML='<div id="restricted-month-details">'+details()+'</div>';
+      $('#restricted-month-results').insertAdjacentHTML('afterbegin','<section id="restricted-month-editor"></section>');
+      editor=mountRestrictedMonthEditor({root:$('#restricted-month-editor'),rows,month,siteId,api,current:()=>current()&&!loading&&loadedMonth===month&&$('#restricted-month').value===month,onRows:latest=>{rows=latest;renderDetails();}});
+      function renderDetails(){
+      $('#restricted-month-details').innerHTML=details();$('#restricted-month-status').textContent=`${month} · ${rows.length}명`;
       document.querySelectorAll('[data-restricted-month-worker]').forEach(button=>button.onclick=()=>{
-        if(!current())return;const row=rows.find(row=>row.id===Number(button.dataset.restrictedMonthWorker));
+        if(!current()||loading||editor.busy()||$('#restricted-month').value!==month)return;
+        if(editor.dirty()&&!confirm('미저장 출역·공수 변경을 버리고 월 정보를 변경할까요?'))return;
+        const row=rows.find(row=>row.id===Number(button.dataset.restrictedMonthWorker));if(!row)return;
         showDialog('월별 출역 정보 변경',`<p>${esc(row.name)} · ${esc(month)}</p><p>이 달에 이미 등록된 출역 기록만 변경합니다. 빈 항목은 유지합니다. 일별 출역·공수는 출역 화면에서 날짜를 선택해 수정하세요.</p>${field('category','변경할 구분','','text',false)}${field('company','변경할 소속','','text',false)}${field('occupation','변경할 직종','','text',false)}<p>동시 변경 시 입력은 보존됩니다. 내용을 복사한 뒤 닫고 월별 출역을 다시 조회해 주세요.</p>`,data=>api('/api/attendance/month/details',{method:'PUT',body:JSON.stringify({siteId,workerId:row.id,month,expectedVersion:row.version,...Object.fromEntries(['category','company','occupation'].filter(key=>data[key]?.trim()).map(key=>[key,data[key]]))})},scope),scope);
       });
-    }catch(error){if(current()&&request===sequence){$('#restricted-month-status').textContent='조회하지 못했습니다. 다시 시도해 주세요.';$('#dialog-error').textContent=error.message;}}
+      }
+      renderDetails();
+    }catch(error){if(current()&&request===sequence){if(loadedMonth)$('#restricted-month').value=loadedMonth;$('#restricted-month-status').textContent='조회하지 못했습니다. 기존 입력을 유지합니다. 다시 시도해 주세요.';$('#dialog-error').textContent=error.message;}}
+    finally{loading=false;if(current()){$('#restricted-month').disabled=false;if(editor)$('#restricted-month-editor').inert=false;}}
   };
+  $('#restricted-month').onchange=()=>$('#restricted-month-load').onclick();
   await $('#restricted-month-load').onclick();
 }
 async function renderRestrictedWorkforce(){

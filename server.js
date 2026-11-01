@@ -73,6 +73,7 @@ assets.add('/board-inline-image.js');
 assets.add('/worker-preview.js');
 assets.add('/worker-list.js');
 assets.add('/attendance-matrix.js');
+assets.add('/restricted-month-editor.js');
 assets.add('/education-kinds.js');
 assets.add('/checklist-copy.js');
 assets.add('/permit-sources.js');
@@ -948,6 +949,7 @@ const server = http.createServer((req,res)=>adminRequests.run(req,async()=>{
     if (url.pathname === '/api/education/daily-report' && req.method === 'GET') return json(res,200,store.dailyTrainingReport(url.searchParams.get('siteId'),url.searchParams.get('from'),url.searchParams.get('to')));
     if (url.pathname === '/api/monthly-site-activity' && req.method === 'GET') return json(res,200,store.monthlySiteActivity(url.searchParams.get('month')));
     if (url.pathname === '/api/weekly-activity' && req.method === 'GET') return json(res,200,store.weeklyActivity(url.searchParams.get('siteId'),url.searchParams.get('start')));
+    if(url.pathname==='/api/attendance/month/cells'&&req.method==='PUT')return json(res,200,{updated:store.updateMonthlyAttendanceCells(await body(req,262144),()=>checkRequestSession(req))});
     if(url.pathname==='/api/attendance/units'&&req.method==='PUT'){store.changeAttendance('units',await body(req),()=>checkRequestSession(req));return json(res,200,{ok:true});}
     if(url.pathname==='/api/attendance/daily-rate'&&req.method==='PUT'){store.changeAttendance('dailyRate',await body(req),()=>checkRequestSession(req));return json(res,200,{ok:true});}
     if(url.pathname==='/api/attendance/salary'&&req.method==='PUT'){store.changeAttendance('salary',await body(req),()=>checkRequestSession(req));return json(res,200,{ok:true});}

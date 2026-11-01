@@ -26,6 +26,16 @@ export function adminSitePolicy(db,req,url,session){
     return valid&&(input===undefined||fields([]))?null:denied();
   }
   if(path==='/api/attendance/month'&&method==='GET'&&([...url.searchParams.keys()].some(key=>!['siteId','month'].includes(key))||url.searchParams.getAll('month').length!==1))return denied();
+  if(path==='/api/attendance/month/cells'&&method==='PUT'){
+    if([...url.searchParams.keys()].some(key=>key!=='siteId'))return denied();
+    if(input===undefined)return null;
+    if(!fields(['siteId','month','changes'])||!allowed(input.siteId)||typeof input.month!=='string'||!/^\d{4}-(0[1-9]|1[0-2])$/.test(input.month)||!Array.isArray(input.changes)||!input.changes.length||input.changes.length>1000)return denied();
+    const seen=new Set();
+    return input.changes.every(row=>{
+      if(!row||typeof row!=='object'||Array.isArray(row)||Object.keys(row).some(key=>!['workerId','date','present','units','expectedDayVersion','expectedVersion'].includes(key))||!workerSite(row.workerId,input.siteId)||typeof row.date!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(row.date)||!row.date.startsWith(input.month+'-')||!Number.isFinite(Date.parse(row.date))||new Date(row.date).toISOString().slice(0,10)!==row.date||typeof row.present!=='boolean'||!Number.isSafeInteger(row.expectedDayVersion)||row.expectedDayVersion<0||typeof row.expectedVersion!=='string'||!/^([a-f0-9]{64})$/.test(row.expectedVersion)||row.units!==undefined&&(!row.present||typeof row.units!=='string'||!/^$|^\d(?:\.\d{1,2})?$/.test(row.units)))return false;
+      const key=Number(row.workerId)+':'+row.date;if(seen.has(key))return false;seen.add(key);return true;
+    })?null:denied();
+  }
   if(path==='/api/attendance/month/details'&&method==='PUT'){
     if([...url.searchParams.keys()].some(key=>key!=='siteId'))return denied();
     if(input===undefined)return null;

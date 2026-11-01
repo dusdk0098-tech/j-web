@@ -27,6 +27,7 @@ function screen(fetcher=async()=>({ok:true,status:200,json:async()=>[]})){
   const dialog={open:false,showModal(){this.open=true;},close(){this.open=false;}};
   const context={state,content,dialog,siteSelect:get('#site-select'),detailEpoch:1,workerListEpoch:0,sitePhotoEpoch:0,permitRoleCleanup:null,labels:{documents:'안전 문서',admins:'관리자 계정'},statusLabels:{draft:'임시저장'},esc,URLSearchParams,today:()=> '2026-11-02',document:{querySelector:selector=>selector.startsWith('dialog')?null:get(selector),querySelectorAll:()=>pages},$:get,location:{assign:path=>redirects.push(path)},flash:message=>flashes.push(message),showError:error=>errors.push(error.message),confirm:()=>true,FormData:class{constructor(form){return Object.entries(form.values||{});}},fetch:async(path,options)=>{requests.push({path,options});return fetcher(path,options);}};
   context.siteQrSession=siteQrSession;
+  context.mountRestrictedMonthEditor=()=>({dirty:()=>false,busy:()=>false});
   context.siteSelect.selectedOptions=[{textContent:'가상 첫 현장'}];
   const oldQueryAll=context.document.querySelectorAll;
   context.document.querySelectorAll=selector=>{
@@ -50,6 +51,20 @@ function screen(fetcher=async()=>({ok:true,status:200,json:async()=>[]})){
   return {context,state,content,dialog,nodes,get,pages,requests,errors,redirects,flashes,submit:async values=>{const form=get('#dialog-form');form.values=values;await form.onsubmit({preventDefault(){},currentTarget:form});}};
 }
 const response=data=>({ok:true,status:200,json:async()=>data});
+
+test('월 편집기 통합: 미저장·저장 중 월 전환 방지, 조회 실패 보존, 저장 후 요약·인원 동기화',async()=>{
+  const row={id:3,name:'가상 근로자',days:['2024-02-29'],version:'v1',units:[{date:'2024-02-29',units_hundredths:75}]};
+  let fail=false,dirty=false,busy=false,mounted;
+  const ui=screen(async()=>{if(fail)throw Error('가상 조회 장애');return response([row]);});
+  ui.context.mountRestrictedMonthEditor=options=>{mounted=options;return {dirty:()=>dirty,busy:()=>busy};};
+  ui.get('#restricted-month').value='2024-02';await ui.context.showRestrictedMonth(()=>true);
+  dirty=true;ui.context.confirm=()=>false;const count=ui.requests.length;ui.get('#restricted-month').value='2024-03';await ui.get('#restricted-month').onchange();assert.equal(ui.get('#restricted-month').value,'2024-02');assert.equal(ui.requests.length,count);
+  busy=true;ui.context.confirm=()=>true;ui.get('#restricted-month').value='2024-03';await ui.get('#restricted-month').onchange();assert.equal(ui.get('#restricted-month').value,'2024-02');assert.equal(ui.requests.length,count);
+  busy=false;fail=true;ui.get('#restricted-month-editor').innerHTML='보존할 입력';ui.get('#restricted-month').value='2024-03';await ui.get('#restricted-month').onchange();assert.equal(ui.get('#restricted-month').value,'2024-02');assert.equal(ui.get('#restricted-month-editor').innerHTML,'보존할 입력');assert.equal(ui.get('#restricted-month-editor').inert,false);assert.match(ui.get('#dialog-error').textContent,/가상 조회 장애/);
+  mounted.onRows([{...row,days:[],units:[]},{id:4,name:'새 가상 근로자',days:[],units:[],version:'v2'}]);
+  assert.match(ui.get('#restricted-month-details').innerHTML,/0일/);assert.match(ui.get('#restricted-month-details').innerHTML,/새 가상 근로자/);assert.doesNotMatch(ui.get('#restricted-month-details').innerHTML,/공수 0.75/);assert.match(ui.get('#restricted-month-status').textContent,/2명/);
+  mounted.onRows([]);assert.match(ui.get('#restricted-month-details').innerHTML,/등록된 근로자가 없습니다/);
+});
 
 test('월별 조회 경계·버전 충돌 입력 보존·재조회 및 늦은 응답 차단',async()=>{
   const row={id:3,name:'가상 근로자',days:['2024-02-29'],version:'v1',units:[{date:'2024-02-29',units_hundredths:75,company:'가상 소속'}]};

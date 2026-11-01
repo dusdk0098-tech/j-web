@@ -44,6 +44,8 @@ test('마지막 전역 보호, 제한 관리자 거부, 배정 버전 충돌과 
 test('실제 두 연결 잠금 대기 후 권한 재검증 및 마지막 전역 경합',{timeout:15000},async()=>{
  const dir=mkdtempSync(join(tmpdir(),'jweb-admin-scope-race-')),path=join(dir,'test.sqlite'),db=new DatabaseSync(path);let child;
  try{
+ // 자식의 일시적인 읽기 잠금이 풀릴 때까지 부모 COMMIT도 운영 DB와 같이 기다린다.
+ db.exec('PRAGMA busy_timeout=3000');
  const auth=setup(db),first=auth.list()[0],second=auth.create({loginId:'second',name:'가상 전역',password}),token=auth.login('admin',password);
  const module=pathToFileURL(join(process.cwd(),'admin-accounts.js')).href;
  const start=async(id,version,actor)=>{const script=`import {DatabaseSync} from 'node:sqlite';import {AdminAccounts} from ${JSON.stringify(module)};const db=new DatabaseSync(${JSON.stringify(path)});db.exec('PRAGMA busy_timeout=5000');const auth=new AdminAccounts(db);process.stdout.write('READY');process.stdin.once('data',()=>{process.stdout.write('ATTEMPT');try{auth.update(${id},{version:${JSON.stringify(version)},scope:'restricted'},()=>auth.requireGlobal(${JSON.stringify(actor)}));process.stdout.write('ACCEPTED')}catch(e){process.stdout.write('REJECTED:'+e.message)}finally{db.close()}});`;
