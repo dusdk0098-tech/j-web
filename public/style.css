@@ -37,3 +37,6 @@
 .rich-editor,.rich-body{overflow-x:auto}.rich-editor table,.rich-body table{min-width:0;width:100%;border-collapse:collapse}.rich-editor th,.rich-editor td,.rich-body th,.rich-body td{min-width:60px;border:1px solid #c2ccda;padding:8px}
 .fields label.office-setup-option{display:flex;align-items:center;gap:8px;font-weight:400}.fields label.office-setup-option input{width:auto;flex:none}
 .block-weekday{text-align:center;font-weight:600}
+.plan-pdf-status{padding:12px;color:#234985}.plan-pdf-page{margin:16px 0;break-inside:avoid}.plan-pdf-page canvas{display:block;max-width:100%;height:auto;margin:auto}.plan-pdf-page figcaption{overflow-wrap:anywhere}
+@media print{.plan-pdf-status{display:none!important}.plan-pdf-page{break-before:page;page-break-before:always;margin:0}.plan-pdf-page canvas{max-width:180mm;max-height:245mm;width:auto;height:auto}.plan-pdf-page figcaption{font-size:10pt;max-height:10mm;overflow:hidden}}
+@media print{.plan-pdf-output:not([data-ready]){display:none!important}}

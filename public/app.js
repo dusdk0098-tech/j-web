@@ -1,3 +1,4 @@
+import { mountPlanPdfPrint,planPdfSnapshot } from './plan-pdf.js';
 import { riskScaleOptions, riskScore, copyRiskItem, copyRiskImprovement, groupRiskItems, selectedMusculoskeletalItems } from './risk-scale.js';
 import { selectBatchDocuments, selectBatchItems, siteDocumentsForDay } from './batch-print.js';
 import { paginateWorkers, workerSummaryMarkup } from './worker-list.js';
@@ -616,6 +617,8 @@ async function renderDetail(){
   const request=++detailEpoch,detailId=state.detail,siteId=state.siteId,page=state.page,currentDetail=()=>request===detailEpoch&&state.detail===detailId&&state.siteId===siteId&&state.page===page;
   const [doc,events,attachments,line]=await Promise.all([api(`/api/documents/${state.detail}`),api(`/api/documents/${state.detail}/events`),api(`/api/documents/${state.detail}/attachments`),api(`/api/documents/${state.detail}/approval-line`)]);
   if(!currentDetail())return;
+  const pdfSnapshot=doc.type==='work_plan'?await planPdfSnapshot(api,doc,attachments,currentDetail):null;
+  if(!currentDetail())return;
   const actions=({draft:[['submit','결재 요청']],pending:[['approve','승인'],['reject','반려'],['withdraw','요청 취소']],rejected:[['revise','다시 작성']],approved:[]}[doc.status]).filter(([action])=>!line.length||!['approve','reject'].includes(action));
   const fields=doc.type==='daily_report'?dailyFields:doc.type==='tbm'?tbmFields:doc.type==='education'?{otherTitle:'기타 교육명',audience:'출력용 교육대상',timeFrom:'교육 시작',timeTo:'교육 종료',instructor:'교육 강사',educationPlace:'교육 장소',educationMethod:'교육 방법'}:doc.type==='work_plan'?planFields:doc.type==='permit'?permitFields:doc.type==='incident'?{severity:'사고유형',...incidentFields,technicalGuidance:'기술지도관계',preventionPlan:'방지계획서관계'}:{};
   const details=JSON.parse(doc.details||'{}');
@@ -810,6 +813,7 @@ async function renderDetail(){
     if(!currentDetail())return;
   }
   $('#back').onclick=()=>{state.detail=null;render().catch(showError);};if($('#edit'))$('#edit').onclick=()=>editDocument(doc);$('#print').onclick=()=>{if([...content.querySelectorAll('img')].some(img=>!img.complete||!img.naturalWidth)){flash('이미지가 아직 준비되지 않았거나 불러오지 못했습니다. 확인 후 다시 인쇄해 주세요.',true);return;}window.print();};
+  if(pdfSnapshot){const button=document.createElement('button');button.type='button';button.className='outline';button.textContent='PDF 포함 인쇄';$('#print').after(button);mountPlanPdfPrint({content,button,snapshot:pdfSnapshot,api,active:currentDetail,onError:showError});}
   document.querySelectorAll('[data-action]').forEach(b=>b.onclick=async()=>{const action=b.dataset.action;if(['approve','reject'].includes(action)){let getSignature;showDialog(action==='approve'?'승인 검토 의견':'반려 의견',`<label>의견<textarea name="opinion" maxlength="2000" ${doc.type==='risk'&&action==='reject'?'required':''}></textarea></label>${action==='approve'?'<p>가상 서명 입력</p><canvas id="approval-signature" class="signature-pad" width="320" height="120" aria-label="승인 시험 서명 입력 영역"></canvas><button type="button" id="approval-signature-clear">서명 지우기</button>':''}`,d=>api(`/api/documents/${doc.id}/transition`,{method:'POST',body:JSON.stringify({action,opinion:d.opinion,...(getSignature?{signature:getSignature()}:{})})}));if(action==='approve')getSignature=signaturePad($('#approval-signature'),$('#approval-signature-clear'));return;}try{await api(`/api/documents/${doc.id}/transition`,{method:'POST',body:JSON.stringify({action})});flash('상태를 변경했습니다.');await render();}catch(e){showError(e);}});
   if(doc.type==='permit')for(const control of content.querySelectorAll('button,input[type=file]')){if(['back','print'].includes(control.id))continue;const handler=control.onclick;if(handler)control.onclick=function(...args){if(this.disabled||!currentDetail())return;return handler.apply(this,args);};}
   return doc;

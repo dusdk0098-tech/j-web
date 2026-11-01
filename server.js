@@ -1,5 +1,5 @@
 import http from 'node:http';
-import { readFileSync, mkdirSync } from 'node:fs';
+import { readFileSync, mkdirSync, readdirSync } from 'node:fs';
 import { dirname, extname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Store } from './store.js';
@@ -52,6 +52,9 @@ assets.add('/client');assets.add('/client.js');
 assets.add('/common-work-print.js');
 assets.add('/personal-notes-tools.js');
 assets.add('/daily-report-photos.js');
+assets.add('/plan-pdf.js');assets.add('/plan-pdf-worker.js');
+const pdfAssets=new Map(['pdf.mjs','pdf.worker.mjs'].map(name=>[`/pdfjs/${name}`,join(root,'node_modules/pdfjs-dist/legacy/build',name)]));
+for(const folder of ['cmaps','standard_fonts','wasm'])for(const name of readdirSync(join(root,'node_modules/pdfjs-dist',folder)))if(/\.(bcmap|pfb|ttf|wasm)$/.test(name))pdfAssets.set(`/pdfjs/${folder}/${name}`,join(root,'node_modules/pdfjs-dist',folder,name));
 assets.add('/site-photo-viewer.js');
 assets.add('/board-comments.js');
 assets.add('/board-inline-image.js');
@@ -494,9 +497,26 @@ const server = http.createServer(async (req, res) => {
       }catch(error){if(error.aiStatus)return json(res,error.aiStatus,{error:error.message});throw error;}
     }
     if(await handleCommonWork(req,res,url,'/api/common-work'))return;
+    if(req.method==='GET'&&pdfAssets.has(url.pathname)){
+      res.writeHead(200,{'Content-Type':url.pathname.endsWith('.mjs')?'text/javascript; charset=utf-8':url.pathname.endsWith('.wasm')?'application/wasm':'application/octet-stream','X-Content-Type-Options':'nosniff','Cache-Control':'no-cache'});return res.end(readFileSync(pdfAssets.get(url.pathname)));
+    }
+    const planPdf=url.pathname.match(/^\/api\/documents\/(\d+)\/print-pdfs(?:\/(\d+))?$/);
+    if(planPdf&&req.method==='GET'){
+      const doc=store.document(planPdf[1]);if(!doc||doc.type!=='work_plan')return json(res,404,{error:'작업계획서를 찾을 수 없습니다.'});
+      const files=store.attachments(doc.id).filter(file=>/\.pdf$/i.test(file.name)).sort((a,b)=>a.id-b.id);
+      const version=createHash('sha256').update(JSON.stringify(doc)).update(store.planSignatureVersion(doc)).update(store.meetingSignature(doc.id)?.signature||'').digest('hex');
+      if(url.searchParams.has('version')&&url.searchParams.get('version')!==version)return json(res,409,{error:'계획서 또는 연결 자료가 변경되었습니다. 다시 조회해 주세요.'});
+      checkRequestSession(req);
+      if(!planPdf[2])return json(res,200,{document:doc,version,files:files.map(({id,name})=>({id,name}))});
+      if(url.searchParams.get('version')!==version)return json(res,409,{error:'계획서를 다시 조회해 주세요.'});
+      const file=files.some(item=>item.id===Number(planPdf[2]))&&store.attachment(planPdf[2]);
+      if(!file||file.document_id!==doc.id)return json(res,404,{error:'이 계획서의 PDF 첨부를 찾을 수 없습니다.'});
+      const bytes=Buffer.from(file.data);if(bytes.length>2*1024*1024||bytes.subarray(0,5).toString()!=='%PDF-')return json(res,415,{error:'2MB 이하의 올바른 PDF 파일을 사용해 주세요.'});
+      res.writeHead(200,{'Content-Type':'application/pdf','Content-Length':bytes.length,'Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Content-Disposition':'attachment'});return res.end(bytes);
+    }
     if (req.method === 'GET' && assets.has(url.pathname)) {
       const path = url.pathname === '/' ? '/index.html' : url.pathname === '/join' ? '/join.html' : url.pathname === '/login' ? '/login.html' : url.pathname === '/review' ? '/review.html' : url.pathname === '/client' ? '/client.html' : url.pathname === '/employment-certificate' ? '/employment-certificate.html' : url.pathname;
-      res.writeHead(200, {'Content-Type':mime[extname(path)],'X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer','Content-Security-Policy':`default-src 'self'; img-src 'self' data:; style-src 'self'${url.pathname==='/offline-forms.html'?" 'unsafe-inline'":''}; script-src 'self'; object-src 'none'; frame-ancestors 'none'`});
+      res.writeHead(200, {'Content-Type':mime[extname(path)],'X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer','Content-Security-Policy':`default-src 'self'; img-src 'self' data:; style-src 'self'${url.pathname==='/offline-forms.html'?" 'unsafe-inline'":''}; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; object-src 'none'; frame-ancestors 'none'`});
       return res.end(readFileSync(join(root,'public',path.slice(1))));
     }
     const dailyPrintPhotos=url.pathname.match(/^\/api\/sites\/(\d+)\/daily-reports\/(\d+)\/print-photos(?:\/(attachment|site)\/(\d+))?$/);
