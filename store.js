@@ -316,7 +316,7 @@ export class Store {
     siteId=Number(siteId);
     if(typeof name!=='string'||!name.trim()||name.length>200||/[\\/\x00-\x1f\x7f]/.test(name))throw new Error('사진 이름을 확인해 주세요.');
     if(!(data instanceof Uint8Array)||!data.length||data.length>2*1024*1024)throw new Error('사진은 1바이트 이상 2MB 이하여야 합니다.');
-    const bytes=Buffer.from(data);if(!bytes.subarray(0,8).equals(Buffer.from('89504e470d0a1a0a','hex'))&&!bytes.subarray(0,3).equals(Buffer.from('ffd8ff','hex')))throw new Error('PNG 또는 JPEG 사진을 선택해 주세요.');
+    const bytes=Buffer.from(data);if(!costImageType(bytes))throw new Error('PNG, JPEG 또는 WebP 사진을 선택해 주세요.');
     const now=new Date(),date=metadata.date?dateValue(metadata.date):new Date(now.getTime()-now.getTimezoneOffset()*60000).toISOString().slice(0,10),description=metadata.description??'';if(typeof description!=='string'||description.length>2000)throw new Error('사진 설명을 확인해 주세요.');
     this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();if(!this.db.prepare('SELECT 1 FROM sites WHERE id=?').get(siteId))throw new Error('현장을 선택해 주세요.');const id=this.db.prepare('INSERT INTO site_photos(site_id,name,date,description,data) VALUES(?,?,?,?,?)').run(siteId,name,date,description.trim(),bytes).lastInsertRowid;this.db.exec('COMMIT');return id;}catch(error){this.db.exec('ROLLBACK');throw error;}
   }
