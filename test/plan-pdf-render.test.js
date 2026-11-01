@@ -1,8 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdirSync,writeFileSync} from 'node:fs';
+import {mkdirSync,readFileSync,writeFileSync} from 'node:fs';
 import {resolve} from 'node:path';
 import {createHash} from 'node:crypto';
+import {PNG} from 'pngjs';
 import {createCanvas,DOMMatrix,ImageData,Path2D} from '@napi-rs/canvas';
 import {renderPlanPdfs} from '../public/plan-pdf.js';
 
@@ -37,6 +38,45 @@ function run(bytes){
   return {nodes,promise};
 }
 const pixel=(canvas,x,y)=>Array.from(canvas.getContext('2d').getImageData(x,y,1,1).data);
+test('실제 PDF.js 캔버스: 내장 한글 글꼴과 한글 인쇄 도장',{timeout:10000},async()=>{
+  const bytes=readFileSync(new URL('./fixtures/korean-pdf/synthetic-korean.pdf',import.meta.url));
+  artifact('korean-fixture.pdf',bytes);
+  const task=pdfjs.getDocument({data:new Uint8Array(bytes),useSystemFonts:false});
+  try{
+    const document=await task.promise,page=await document.getPage(1);
+    const text=await page.getTextContent();
+    assert.equal(text.items.map(item=>item.str).join(''),'작업계획서가상시험');
+    const annotations=await page.getAnnotations({intent:'print'});
+    assert.equal(annotations.length,1);assert.equal(annotations[0].subtype,'Stamp');
+    assert.equal(annotations[0].hasAppearance,true);
+  }finally{await task.destroy();}
+  const {nodes,promise}=run(bytes);assert.equal(await promise,1);
+  const canvas=nodes[0].children[1];assert.deepEqual([canvas.width,canvas.height],[450,300]);
+  const expected=PNG.sync.read(readFileSync(new URL('./fixtures/korean-pdf/expected.png',import.meta.url)));
+  assert.deepEqual([expected.width,expected.height],[450,300]);
+  const regions=[...Array.from('작업계획서',(char,i)=>({char,x:30+i*34,y:45})),...Array.from('가상시험',(char,i)=>({char,x:30+i*34,y:105}))];
+  const observations=regions.map(({char,x,y})=>{
+    const pixels=canvas.getContext('2d').getImageData(x,y,33,40).data;
+    const mask=Buffer.from(Array.from({length:pixels.length/4},(_,i)=>pixels[i*4]<100&&pixels[i*4+1]<100&&pixels[i*4+2]<100?1:0));
+    const ink=mask.reduce((sum,value)=>sum+value,0);
+    assert.ok(ink>50&&ink<650,`${char}: 한글 글자별 실제 픽셀 ${ink}`);
+    let mismatch=0;
+    for(let i=0;i<mask.length;i++){
+      const offset=((y+Math.floor(i/33))*expected.width+x+i%33)*4;
+      const wanted=expected.data[offset]<100&&expected.data[offset+1]<100&&expected.data[offset+2]<100?1:0;
+      if(mask[i]!==wanted)mismatch++;
+    }
+    assert.ok(mismatch<=30,`${char}: 확인한 글자 모양과 다른 픽셀 ${mismatch}`);
+    return {char,ink,mismatch,hash:createHash('sha256').update(mask).digest('hex')};
+  });
+  assert.equal(new Set(observations.map(item=>item.hash)).size,9,'각 글자가 같은 누락 글리프 상자가 아니어야 한다');
+  const stamp=canvas.getContext('2d').getImageData(310,210,70,40).data;
+  let red=0;for(let i=0;i<stamp.length;i+=4)if(stamp[i]>180&&stamp[i+1]<100&&stamp[i+2]<100)red++;
+  assert.ok(red>100,`테두리를 제외한 한글 도장 내부의 빨간 글자: ${red}`);
+  assert.deepEqual(pixel(canvas,288,240),[255,0,0,255]);
+  artifact('korean-page.png',canvas.toBuffer('image/png'));
+  artifact('korean-pixels.json',JSON.stringify({observations,stampTextRedPixels:red},null,2));
+});
 test('실제 PDF.js 캔버스: 글자·색상·이미지·인쇄 도장·2쪽 순서',async()=>{
   const bytes=fixture();artifact('render-fixture.pdf',bytes);
   const {nodes,promise}=run(bytes);assert.equal(await promise,2);
