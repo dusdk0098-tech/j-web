@@ -560,14 +560,14 @@ test('공유 기본 서류는 승인 뒤에만 다른 현장 목록에 표시한
 });
 
 test('기본 서류 분류를 현장별로 저장하고 검색한다',()=>{
-  const s=new Store(':memory:');try{const a=s.createSite({name:'가상 현장 A'}),b=s.createSite({name:'가상 현장 B'}),input={siteId:a.id,type:'basic',title:'가상 서류',date:'2026-10-29',details:{category:'안전·보건 조직도'}};const doc=s.createDocument(input);assert.equal(JSON.parse(doc.details).category,'안전·보건 조직도');assert.equal(s.documents(a.id,'basic','조직도').length,1);assert.equal(s.documents(b.id,'basic','조직도').length,0);assert.throws(()=>s.updateDocument(doc.id,{...input,details:{category:'가'.repeat(201)}}),/분류/);assert.equal(JSON.parse(s.document(doc.id).details).category,'안전·보건 조직도');}finally{s.close();}
+  const s=new Store(':memory:');try{const a=s.createSite({name:'가상 현장 A'}),b=s.createSite({name:'가상 현장 B'}),input={siteId:a.id,type:'basic',title:'가상 서류',date:'2026-10-29',details:{category:'안전·보건 조직도'}};const doc=s.createDocument(input);assert.equal(JSON.parse(doc.details).category,'안전·보건 조직도');assert.equal(s.documents(a.id,'basic','조직도').length,1);assert.equal(s.documents(b.id,'basic','조직도').length,0);assert.throws(()=>s.updateDocument(doc.id,{...input,expectedBasicVersion:s.document(doc.id).basic_version,details:{category:'가'.repeat(201)}}),/분류/);assert.equal(JSON.parse(s.document(doc.id).details).category,'안전·보건 조직도');}finally{s.close();}
 });
 
 test('기본 서류는 분류와 첨부가 있어야 시험 결재를 요청한다',()=>{
   const s=new Store(':memory:');try{
     const site=s.createSite({name:'가상 현장'}),input={siteId:site.id,type:'basic',title:'가상 문서',date:'2026-10-29',details:{}},doc=s.createDocument(input);
     assert.throws(()=>s.transition(doc.id,'submit'),/분류/);const file=s.addAttachment(doc.id,'시험.txt',Buffer.from('자료'));assert.throws(()=>s.transition(doc.id,'submit'),/분류/);
-    s.updateDocument(doc.id,{...input,details:{category:'분류'}});s.deleteAttachment(file);assert.throws(()=>s.transition(doc.id,'submit'),/첨부파일/);
+    s.updateDocument(doc.id,{...input,expectedBasicVersion:s.document(doc.id).basic_version,details:{category:'분류'}});s.deleteAttachment(file);assert.throws(()=>s.transition(doc.id,'submit'),/첨부파일/);
     assert.equal(s.document(doc.id).status,'draft');assert.equal(s.events(doc.id).length,0);assert.equal(s.db.prepare('SELECT count(*) AS n FROM approval_cycles WHERE document_id=?').get(doc.id).n,0);
     const savedFile=s.addAttachment(doc.id,'시험.txt',Buffer.from('자료')),submitted=s.transition(doc.id,'submit'),cycle=s.approvalCycle(doc.id,submitted.approval_cycle_id);
     assert.equal(submitted.status,'pending');assert.deepEqual(cycle.attachments.map(row=>row.id),[savedFile]);
@@ -600,7 +600,7 @@ test('계층형 기본 서류 분류는 현장별로 관리하고 확인된 문�
     const doc=s.createDocument(input),file=s.addAttachment(doc.id,'가상.txt',Buffer.from('가상'));
     assert.equal(JSON.parse(doc.details).category,'안전 / 교육자료');
     assert.throws(()=>s.createDocument({...input,details:{categoryId:foreign}}),/분류/);
-    assert.throws(()=>s.updateDocument(doc.id,{...input,details:{category:'기존 클라이언트'}}),/새로고침/);
+    assert.throws(()=>s.updateDocument(doc.id,{...input,expectedBasicVersion:s.document(doc.id).basic_version,details:{category:'기존 클라이언트'}}),/새로고침/);
     s.transition(doc.id,'submit');s.transition(doc.id,'approve');
     const legacy=s.createDocument({...input,title:'직접 입력',details:{category:'교육자료'}}),elsewhere=s.createDocument({...input,siteId:b.id,details:{categoryId:foreign}});
     const snapshot=()=>{const selected=s.basicCategories(a.id).filter(row=>row.id===root||row.parent_id===root);return {expectedCategories:selected,expectedDocumentVersions:selected.flatMap(row=>row.documentVersions)};};
@@ -622,7 +622,7 @@ test('기본 서류 개별 삭제는 표시 후 문서와 첨부의 변경을 �
   const s=new Store(':memory:');try{
     const a=s.createSite({name:'가상 A'}),b=s.createSite({name:'가상 B'}),category=s.saveBasicCategory(a.id,{name:'분류'}),input={siteId:a.id,type:'basic',title:'가상 문서',date:'2026-10-29',details:{categoryId:category}};
     let doc=s.createDocument(input),stale=doc.basic_version,categorySnapshot=()=>{const selected=s.basicCategories(a.id);return {expectedCategories:selected,expectedDocumentVersions:selected.flatMap(row=>row.documentVersions)};};
-    const beforeChange=categorySnapshot();s.updateDocument(doc.id,{...input,title:'바뀐 문서'});assert.throws(()=>s.deleteBasicCategory(a.id,category,beforeChange),/변경/);assert.throws(()=>s.deleteBasicDocument(a.id,doc.id,stale),/변경/);
+    const beforeChange=categorySnapshot();s.updateDocument(doc.id,{...input,expectedBasicVersion:s.document(doc.id).basic_version,title:'바뀐 문서'});assert.throws(()=>s.deleteBasicCategory(a.id,category,beforeChange),/변경/);assert.throws(()=>s.deleteBasicDocument(a.id,doc.id,stale),/변경/);
     stale=s.document(doc.id).basic_version;const beforeFile=categorySnapshot(),file=s.addAttachment(doc.id,'가상.txt',Buffer.from('내용'));assert.throws(()=>s.deleteBasicDocument(a.id,doc.id,stale),/변경/);assert.throws(()=>s.deleteBasicCategory(a.id,category,beforeFile),/변경/);
     stale=s.document(doc.id).basic_version;s.deleteAttachment(file);s.addAttachment(doc.id,'가상.txt',Buffer.from('내용'));assert.throws(()=>s.deleteBasicDocument(a.id,doc.id,stale),/변경/);
     doc=s.document(doc.id);assert.throws(()=>s.deleteBasicDocument(b.id,doc.id,doc.basic_version),/현장/);

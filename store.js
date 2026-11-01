@@ -2125,6 +2125,7 @@ export class Store {
     this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();
     const current = this.document(id);
     if (!current) throw new Error('문서를 찾을 수 없습니다.');
+    if(current.type==='basic'&&(typeof input.expectedBasicVersion!=='string'||input.expectedBasicVersion!==current.basic_version))throw Object.assign(new Error('기본 서류가 변경되었습니다. 입력 내용은 유지됩니다. 필요한 내용을 복사한 뒤 문서를 다시 열어 주세요.'),{sessionStatus:409});
     if(input.expectedEditVersion!==undefined&&(!Number.isSafeInteger(input.expectedEditVersion)||input.expectedEditVersion!==current.edit_version))throw Object.assign(new Error('문서가 변경되었습니다. 입력 내용은 유지됩니다. 필요한 내용을 복사한 뒤 문서를 다시 열어 주세요.'),{sessionStatus:409});
     if(current.type==='cost' && Array.isArray(JSON.parse(current.details).rows))throw new Error('월간 사용내역서는 보존된 내역을 변경할 수 없습니다. 새 문서를 작성해 주세요.');
     if (current.status !== 'draft' && current.status !== 'rejected') throw new Error('임시저장 또는 반려된 문서만 수정할 수 있습니다.');

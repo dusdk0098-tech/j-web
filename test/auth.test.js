@@ -86,7 +86,7 @@ test('기본 서류 분류 API는 관리자 인증과 변경 확인을 적용한
     const site=await (await send('/api/sites','POST',{name:'가상 현장'},cookie)).json(),url=`/api/basic-categories?siteId=${site.id}`;
     const draftInput={siteId:site.id,type:'basic',title:'미완성 시험 서류',date:'2026-10-29',details:{}},draft=await (await send('/api/documents','POST',draftInput,cookie)).json(),transition=`/api/documents/${draft.id}/transition`;
     assert.equal((await send(transition,'POST',{action:'submit'},cookie)).status,400);
-    assert.equal((await send(`/api/documents/${draft.id}`,'PUT',{...draftInput,expectedEditVersion:draft.edit_version,details:{category:'가상 분류'}},cookie)).status,200);
+    assert.equal((await send(`/api/documents/${draft.id}`,'PUT',{...draftInput,expectedBasicVersion:draft.basic_version,expectedEditVersion:draft.edit_version,details:{category:'가상 분류'}},cookie)).status,200);
     assert.equal((await send(transition,'POST',{action:'submit'},cookie)).status,400);
     assert.equal((await fetch(base+`/api/documents/${draft.id}/attachments`,{method:'POST',headers:{cookie,'x-file-name':encodeURIComponent('시험.txt')},body:'가상 자료'})).status,201);
     assert.equal((await send(transition,'POST',{action:'submit'},cookie)).status,200);
@@ -99,7 +99,7 @@ test('기본 서류 분류 API는 관리자 인증과 변경 확인을 적용한
     const expectedCategories=list.filter(row=>row.id===root.id||row.parent_id===root.id),expectedDocumentVersions=expectedCategories.flatMap(row=>row.documentVersions);
     assert.equal((await send(path,'DELETE',{expectedCategories,expectedDocumentVersions:[]},cookie)).status,400);
     assert.equal((await send(`/api/documents/${doc.id}`,'DELETE',{siteId:site.id,expectedVersion:doc.basic_version})).status,401);
-    const changed=await (await send(`/api/documents/${doc.id}`,'PUT',{expectedEditVersion:doc.edit_version,siteId:site.id,type:'basic',title:'바뀐 문서',date:'2026-10-29',details:{categoryId:childCategory.id}},cookie)).json();
+    const changed=await (await send(`/api/documents/${doc.id}`,'PUT',{expectedBasicVersion:doc.basic_version,expectedEditVersion:doc.edit_version,siteId:site.id,type:'basic',title:'바뀐 문서',date:'2026-10-29',details:{categoryId:childCategory.id}},cookie)).json();
     assert.equal((await send(path,'DELETE',{expectedCategories,expectedDocumentVersions},cookie)).status,400);
     assert.equal((await send(`/api/documents/${doc.id}`,'DELETE',{siteId:site.id,expectedVersion:doc.basic_version},cookie)).status,400);
     assert.equal((await send(`/api/documents/${doc.id}`,'DELETE',{siteId:site.id,expectedVersion:changed.basic_version},cookie)).status,200);
