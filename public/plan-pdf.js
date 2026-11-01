@@ -1,3 +1,4 @@
+import { reservePlanPrint } from './plan-print-lock.js';
 const pdfWarningListeners=new Set();
 let originalWarn;
 function pdfWarningHandler(...values) {
@@ -77,13 +78,14 @@ export function mountPlanPdfPrint({content,button,snapshot,api,active,onError,lo
   const doc=content.ownerDocument,view=doc.defaultView,base=`/api/documents/${snapshot.document.id}/print-pdfs`;
   button.onclick=async()=>{
     if(button.disabled||!active())return;
+    const release=reservePlanPrint(view);if(!release){onError(Error('다른 작업계획서 인쇄가 진행 중입니다. 기존 인쇄를 닫은 뒤 다시 시도해 주세요.'));return;}
     const controller=new AbortController(),area=doc.createElement('section'),status=doc.createElement('p');
     area.className='plan-pdf-output';status.className='plan-pdf-status';status.setAttribute('role','status');status.textContent='첨부 PDF의 모든 페이지를 준비하고 있습니다…';content.append(status,area);button.disabled=true;
     let nativeWorker,pdfWorker,printed=false,pdfWarning=false;
     const aborted=new Promise((_,reject)=>controller.signal.addEventListener('abort',()=>{nativeWorker?.terminate();reject(Error('PDF 준비가 취소되었거나 60초를 초과했습니다.'));},{once:true})),wait=promise=>Promise.race([promise,aborted]);
     const restoreWarnings=capturePdfWarnings(()=>{pdfWarning=true;controller.abort();});
     const observer=new view.MutationObserver(()=>{if(!area.isConnected)cleanup();});observer.observe(content,{childList:true});
-    const cleanup=()=>{observer.disconnect();area.querySelectorAll('canvas').forEach(canvas=>{canvas.width=canvas.height=0;});area.remove();status.remove();button.disabled=false;view.removeEventListener('afterprint',cleanup);};
+    const cleanup=()=>{release();observer.disconnect();area.querySelectorAll('canvas').forEach(canvas=>{canvas.width=canvas.height=0;});area.remove();status.remove();button.disabled=false;view.removeEventListener('afterprint',cleanup);};
     const check=()=>{if(pdfWarning)throw Error('PDF의 이미지 또는 글꼴을 완전히 읽지 못했습니다. 파일을 확인해 주세요.');if(controller.signal.aborted||!active()||!button.isConnected)throw Error('화면이 변경되었거나 PDF 준비 시간이 초과되었습니다. 다시 시도해 주세요.');};
     const interval=setInterval(()=>{if(!active()||!button.isConnected)controller.abort();},100),timeout=setTimeout(()=>controller.abort(),pdfPrintLimits.timeout);
     try{

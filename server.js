@@ -58,6 +58,7 @@ assets.add('/personal-notes-tools.js');
 assets.add('/sticker-requests.js');
 assets.add('/daily-report-photos.js');
 assets.add('/plan-pdf.js');assets.add('/plan-pdf-worker.js');
+assets.add('/plan-manual-print.js');assets.add('/plan-manual-print.css');assets.add('/plan-print-lock.js');
 const pdfAssets=new Map(['pdf.mjs','pdf.worker.mjs'].map(name=>[`/pdfjs/${name}`,join(root,'node_modules/pdfjs-dist/legacy/build',name)]));
 for(const folder of ['cmaps','standard_fonts','wasm'])for(const name of readdirSync(join(root,'node_modules/pdfjs-dist',folder)))if(/\.(bcmap|pfb|ttf|wasm)$/.test(name))pdfAssets.set(`/pdfjs/${folder}/${name}`,join(root,'node_modules/pdfjs-dist',folder,name));
 assets.add('/site-photo-viewer.js');

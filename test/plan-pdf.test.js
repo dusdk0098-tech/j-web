@@ -125,3 +125,15 @@ test('경고 구독은 중첩된 작업의 정리 순서와 중복 정리에 안
   const {capturePdfWarnings}=await import('../public/plan-pdf.js');
   for(const reverse of [false,true]){const original=console.warn;let a=0,b=0;const first=capturePdfWarnings(()=>a++),second=capturePdfWarnings(()=>b++);console.warn('Warning: nested test');assert.equal(a,1);assert.equal(b,1);(reverse?second:first)();console.warn('Warning: remaining test');assert.equal(a,reverse?2:1);assert.equal(b,reverse?1:2);(reverse?first:second)();first();second();assert.equal(console.warn,original);}
 });
+
+test('PDF/수기 양방향 경합: 실제 두 mount가 인쇄 화면 소유권 공유',async()=>{
+ const {mountPlanPdfPrint}=await import('../public/plan-pdf.js'),{mountManualPlanPrint}=await import('../public/plan-manual-print.js'),{reservePlanPrint}=await import('../public/plan-print-lock.js');
+ const previous=globalThis.fetch;globalThis.fetch=async()=>new Response(syntheticPdf());
+ try{
+  const h=printHarness();mountPlanPdfPrint(h);const pending=h.button.onclick();await new Promise(resolve=>setImmediate(resolve));let manualCalls=0;const manualErrors=[],manual={disabled:false,isConnected:true};mountManualPlanPrint({content:h.content,button:manual,planId:1,api:async()=>{manualCalls++;},active:()=>true,fields:{},onError:error=>manualErrors.push(error)});await manual.onclick();assert.equal(manualCalls,0);assert.equal(manualErrors.length,1);assert.equal(h.prints,0);h.release();await pending;assert.equal(h.prints,1);const free=reservePlanPrint(h.content.ownerDocument.defaultView);assert.equal(typeof free,'function');free();
+  const nodes=new Map(['[data-close]','[data-status]','[data-output]','[data-print]'].map(key=>[key,{}])),doc=h.content.ownerDocument,create=doc.createElement;let dialog;
+  doc.body={append(node){node.isConnected=true;}};doc.createElement=tag=>tag==='dialog'?(dialog={open:false,isConnected:false,setAttribute(){},querySelector:key=>nodes.get(key),addEventListener(){},showModal(){this.open=true;},close(){this.open=false;},remove(){this.isConnected=false;}}):create(tag);
+  let answer;const manualPendingApi=new Promise(resolve=>answer=resolve);mountManualPlanPrint({content:h.content,button:manual,planId:1,api:()=>manualPendingApi,active:()=>true,fields:{},onError:error=>manualErrors.push(error)});const preparing=manual.onclick();await h.button.onclick();assert.equal(h.prints,1);assert.match(h.errors.at(-1).message,/다른 작업계획서/);nodes.get('[data-close]').onclick();answer({type:'work_plan'});await preparing;assert.equal(dialog.isConnected,false);await h.button.onclick();assert.equal(h.prints,2);
+  const failed=printHarness({apiFailure:1});mountPlanPdfPrint(failed);await failed.button.onclick();const retry=reservePlanPrint(failed.content.ownerDocument.defaultView);assert.equal(typeof retry,'function');retry();
+ }finally{globalThis.fetch=previous;}
+});
