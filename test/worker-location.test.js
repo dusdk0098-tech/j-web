@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync,rmSync } from 'node:fs';
+import { mkdtempSync,rmSync,readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join,resolve,sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -9,6 +9,7 @@ import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { DatabaseSync } from 'node:sqlite';
 import { Store } from '../store.js';
+import { runInNewContext } from 'node:vm';
 import { verifyWorkerLocation } from '../geo.js';
 import { captureWorkerLocation } from '../public/worker-location.js';
 
@@ -48,6 +49,14 @@ test('현장별 위치 설정과 출역 확인은 함께 저장되고 실패하�
   }finally{s.close();}
 });
 
+test('첫 시험 접속은 위치 설정과 무관하게 날짜별로 보존하고 실패 시 되돌린다',()=>{
+  const dir=mkdtempSync(join(tmpdir(),'jweb-arrivals-')),file=join(dir,'data.sqlite');let s=new Store(file);try{const site=s.createSite({name:'가상'}),other=s.createSite({name:'다른 현장'}),worker=s.createWorker({siteId:site.id,name:'가상',category:'직영',company:'가상',occupation:'목공'}),date='2026-10-30';s.setAttendance({siteId:site.id,workerId:worker.id,date,present:true});assert.deepEqual(s.workerArrivals(site.id,date),[]);assert.throws(()=>s.recordWorkerLogin(worker.id,date,null,()=>{throw Error('권한 회수');}),/권한 회수/);assert.deepEqual(s.workerArrivals(site.id,date),[]);s.recordWorkerLogin(worker.id,date);const first=s.workerArrivals(site.id,date);assert.equal(first.length,1);assert.equal(first[0].worker_id,worker.id);assert.equal(typeof first[0].checked_at,'number');s.recordWorkerLogin(worker.id,date);assert.deepEqual(s.workerArrivals(site.id,date),first);assert.deepEqual(s.workerArrivals(other.id,date),[]);s.recordWorkerLogin(worker.id,'2026-10-31');assert.equal(s.workerArrivals(site.id,'2026-10-31').length,1);s.close();s=new Store(file);assert.deepEqual(s.workerArrivals(site.id,date),first);s.db.exec('DROP TABLE worker_arrivals');s.close();s=new Store(file);assert.deepEqual(s.workerArrivals(site.id,date),[]);assert.equal(s.attendance(site.id,date)[0].present,1);}finally{s.close();rmSync(dir,{recursive:true,force:true});}
+});
+
+test('첫 접속 화면은 시험 기록을 표시하고 이름을 안전하게 처리한다',()=>{
+  const source=readFileSync(new URL('../public/app.js',import.meta.url),'utf8'),marker='<h3>시험 첫 접속 시각</h3>',at=source.indexOf(marker),start=source.lastIndexOf("    content.insertAdjacentHTML('beforeend'",at),end=source.indexOf('\n',at);assert.ok(start>=0&&end>at);let html='';const content={insertAdjacentHTML(_position,value){html=value;}},esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));runInNewContext(source.slice(start,end),{content,esc,arrivals:[{name:'<가상>',checked_at:Date.UTC(2026,9,30)}],Date});assert.match(html,/&lt;가상&gt;/);assert.doesNotMatch(html,/<가상>/);assert.match(html,/2026/);
+});
+
 test('QR 가입 계정은 설정된 위치 확인을 통과해야 시험 출역한다',{timeout:30000},async()=>{
   const dir=mkdtempSync(join(tmpdir(),'jweb-worker-location-')),reservation=createServer();await new Promise(resolve=>reservation.listen(0,'127.0.0.1',resolve));const port=reservation.address().port;await new Promise(resolve=>reservation.close(resolve));
   const child=spawn(process.execPath,['server.js'],{cwd:process.cwd(),env:{...process.env,PORT:String(port),JWEB_DATA_DIR:dir,JWEB_ADMIN_PASSWORD:'virtual-admin-password'},stdio:['ignore','pipe','pipe']});
@@ -62,9 +71,10 @@ test('QR 가입 계정은 설정된 위치 확인을 통과해야 시험 출역�
     const inviteInfo=await (await send(`/api/join?token=${encodeURIComponent(token)}`)).json();assert.equal(inviteInfo.locationRequired,true);assert.equal(Object.hasOwn(inviteInfo,'latitude'),false);const siteInfo=await (await send(`/api/worker/site?key=${encodeURIComponent(inviteInfo.siteKey)}`)).json();assert.equal(siteInfo.locationRequired,true);assert.equal(Object.hasOwn(siteInfo,'latitude'),false);
     const credentials={token,loginId:registration.loginId,password:registration.password},identity={token,method:'identity',name:registration.name,birthDigits:'000101',password:registration.password};assert.equal((await send('/api/worker/login','POST',credentials)).status,400);assert.equal((await send('/api/worker/login','POST',{...credentials,location:position(0.01)})).status,400);assert.equal((await send('/api/worker/login','POST',identity)).status,400);
     const login=await send('/api/worker/login','POST',{...credentials,location:position()});assert.equal(login.status,200);const cookie=login.headers.get('set-cookie').split(';')[0];
-    const day=new Date(Date.now()-new Date().getTimezoneOffset()*60000).toISOString().slice(0,10),eventsPath=path+`/location-events?date=${day}`;
+    const day=new Date(Date.now()-new Date().getTimezoneOffset()*60000).toISOString().slice(0,10),eventsPath=path+`/location-events?date=${day}`,arrivalsPath=path+`/worker-arrivals?date=${day}`;
+    assert.equal((await send(arrivalsPath)).status,401);assert.equal((await send(arrivalsPath,'GET',undefined,cookie)).status,401);const arrivals=await (await send(arrivalsPath,'GET',undefined,admin)).json();assert.equal(arrivals.length,1);assert.equal(arrivals[0].name,'가상 근로자');assert.equal('latitude' in arrivals[0],false);
     assert.equal((await send(eventsPath)).status,401);assert.equal((await send(eventsPath,'GET',undefined,cookie)).status,401);assert.equal((await (await send(eventsPath,'GET',undefined,admin)).json()).length,1);
-    assert.equal((await send('/api/worker/access','POST',{siteId:site.id,token},cookie)).status,400);assert.equal((await send('/api/worker/access','POST',{siteId:site.id,token,location:position()},cookie)).status,200);
+    assert.equal((await send('/api/worker/access','POST',{siteId:site.id,token},cookie)).status,400);assert.equal((await send('/api/worker/access','POST',{siteId:site.id,token,location:position()},cookie)).status,200);assert.deepEqual(await (await send(arrivalsPath,'GET',undefined,admin)).json(),arrivals);
     assert.equal((await send('/api/worker/login','POST',{...identity,location:position()})).status,200);assert.equal((await send('/api/worker/login','POST',{siteKey:inviteInfo.siteKey,loginId:registration.loginId,password:registration.password,location:position()})).status,200);const events=await (await send(eventsPath,'GET',undefined,admin)).json();assert.equal(events.length,4);assert.equal((await send(path+`/location-events/${events[0].id}`,'DELETE',{},cookie)).status,401);assert.equal((await send(path+`/location-events/${events[0].id}`,'DELETE',{},admin)).status,200);
     assert.equal((await send(path+'/location-policy','PUT',{enabled:false,expectedVersion:configured.version},admin)).status,200);assert.equal((await send('/api/worker/login','POST',credentials)).status,200);
   }finally{if(child.exitCode===null){const exited=once(child,'exit');child.kill();await exited;}assert.ok(resolve(dir).startsWith(resolve(tmpdir())+sep));rmSync(dir,{recursive:true,force:true});}
