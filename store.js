@@ -93,6 +93,7 @@ export class Store {
       CREATE TABLE IF NOT EXISTS site_registration (site_id INTEGER PRIMARY KEY REFERENCES sites(id),expires_at INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS schedules (id INTEGER PRIMARY KEY,site_id INTEGER NOT NULL REFERENCES sites(id),kind TEXT NOT NULL,start_date TEXT NOT NULL,end_date TEXT NOT NULL,start_time TEXT NOT NULL,end_time TEXT NOT NULL,content TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS board_posts (id INTEGER PRIMARY KEY,kind TEXT NOT NULL,title TEXT NOT NULL,body TEXT NOT NULL,secret INTEGER NOT NULL CHECK(secret IN (0,1)),created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+      CREATE TABLE IF NOT EXISTS board_comments (id INTEGER PRIMARY KEY AUTOINCREMENT,post_id INTEGER NOT NULL REFERENCES board_posts(id) ON DELETE CASCADE,author_id INTEGER REFERENCES reviewers(id),author_name TEXT NOT NULL,body TEXT NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,version TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS site_worker_blocks (site_id INTEGER NOT NULL REFERENCES sites(id),date TEXT NOT NULL,kind TEXT NOT NULL CHECK(kind IN ('holiday','ended')),PRIMARY KEY(site_id,date,kind));
       CREATE TABLE IF NOT EXISTS site_articles (id INTEGER PRIMARY KEY,site_id INTEGER NOT NULL REFERENCES sites(id),category TEXT NOT NULL,title TEXT NOT NULL,body TEXT NOT NULL,rich_body TEXT,visible INTEGER NOT NULL CHECK(visible IN (0,1)),version TEXT NOT NULL DEFAULT '',created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
       CREATE TABLE IF NOT EXISTS site_photos (id INTEGER PRIMARY KEY,site_id INTEGER NOT NULL REFERENCES sites(id),name TEXT NOT NULL,date TEXT NOT NULL,description TEXT NOT NULL DEFAULT '',data BLOB NOT NULL);
@@ -342,6 +343,18 @@ export class Store {
   reviewerBoardPosts(actor,kind,query=''){
     if(!['notice','system_notice','question','general'].includes(kind)||typeof query!=='string'||query.length>200)throw new Error('게시판 또는 검색어를 확인해 주세요.');
     return this.db.prepare('SELECT id,kind,title,body,secret,created_at,author_id,author_name,version FROM board_posts WHERE kind=? AND (author_id=? OR (shared=1 AND secret=0)) AND (instr(title,?)>0 OR instr(body,?)>0) ORDER BY id DESC').all(kind,Number(actor.id),query,query);
+  }
+  boardCommentsPost(id,version,actor=null){
+    const post=this.db.prepare('SELECT * FROM board_posts WHERE id=?').get(Number(id));
+    if(!post||actor&&(!this.db.prepare('SELECT 1 FROM reviewers WHERE id=? AND site_id=? AND active=1').get(Number(actor.id),Number(actor.site_id))||!(post.author_id===actor.id||post.shared===1&&post.secret===0)))throw new Error('게시글을 찾을 수 없습니다.');
+    if(typeof version!=='string'||version!==post.version)throw Object.assign(new Error('게시글이 변경되었습니다. 다시 조회해 주세요.'),{sessionStatus:409});return post;
+  }
+  boardComments(id,version,actor=null){this.boardCommentsPost(id,version,actor);return this.db.prepare('SELECT id,author_id,author_name,body,created_at,version FROM board_comments WHERE post_id=? ORDER BY id').all(Number(id));}
+  addBoardComment(id,input,actor=null,onAuthorize=()=>{}){
+    const body=text(input.body,'댓글',2000);this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();this.boardCommentsPost(id,input.postVersion,actor);const author=actor?this.db.prepare('SELECT name FROM reviewers WHERE id=?').get(actor.id).name:'관리자',result=this.db.prepare("INSERT INTO board_comments(post_id,author_id,author_name,body,version) VALUES(?,?,?,?,lower(hex(randomblob(16))))").run(Number(id),actor?.id??null,author,body);this.db.exec('COMMIT');return {id:result.lastInsertRowid};}catch(error){this.db.exec('ROLLBACK');throw error;}
+  }
+  deleteBoardComment(id,commentId,input,actor=null,onAuthorize=()=>{}){
+    this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();this.boardCommentsPost(id,input.postVersion,actor);const row=this.db.prepare('SELECT * FROM board_comments WHERE post_id=? AND id=?').get(Number(id),Number(commentId));if(!row||actor&&row.author_id!==actor.id)throw new Error('댓글을 찾을 수 없습니다.');if(typeof input.version!=='string'||input.version!==row.version)throw Object.assign(new Error('댓글이 변경되었습니다. 다시 조회해 주세요.'),{sessionStatus:409});this.db.prepare('DELETE FROM board_comments WHERE id=?').run(Number(commentId));this.db.exec('COMMIT');}catch(error){this.db.exec('ROLLBACK');throw error;}
   }
   saveReviewerBoardPost(actor,input,id=null,onAuthorize=()=>{}){
     if(!['notice','question','general'].includes(input.kind)||typeof input.secret!=='boolean'||(input.secret&&input.kind!=='question'))throw new Error('게시판과 비밀글 설정을 확인해 주세요.');const title=text(input.title,'제목'),body=text(input.body,'내용',10000);
