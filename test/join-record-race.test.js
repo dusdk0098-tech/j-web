@@ -14,7 +14,7 @@ function screen(){
   for(const key of ['#dialog-form','#dialog-form button[type=submit]','#dialog-title','#dialog-body','#dialog-error','#dialog-close','#dialog-cancel','#sidebar','#menu-toggle'])nodes.set(key,node());
   const state={page:'workers',siteId:1},siteSelect={value:'1'},dialog={open:false,showModal(){this.open=true;},close(){this.open=false;}};
   const document={querySelector:()=>null,querySelectorAll:selector=>selector==='[data-page]'?pages:buttons,createElement:node};
-  const context={state,siteSelect,dialog,document,$:key=>nodes.get(key),fetch:(url,options)=>new Promise((resolve,reject)=>requests.push({url,options,resolve:data=>resolve({status:200,ok:true,json:async()=>data}),reject,http:status=>resolve({status,ok:false,json:async()=>({error:'가상 HTTP 오류'})})})),showError:error=>errors.push(error.message),flash:message=>flashes.push(message),location:{assign:path=>redirects.push(path)},FormData:class{constructor(){return [];}}};
+  const context={state,siteSelect,dialog,document,content:{...node(),innerHTML:"가상 이전 화면"},$:key=>nodes.get(key),fetch:(url,options)=>new Promise((resolve,reject)=>requests.push({url,options,resolve:data=>resolve({status:200,ok:true,json:async()=>data}),reject,http:status=>resolve({status,ok:false,json:async()=>({error:'가상 HTTP 오류'})})})),showError:error=>errors.push(error.message),flash:message=>flashes.push(message),location:{assign:path=>redirects.push(path)},FormData:class{constructor(){return [];}}};
   const renderIntro=slice('async function render(){','  await loadSites();');
   runInNewContext([
     source.match(/^let sitePhotoEpoch=.*$/m)[0],
@@ -61,8 +61,8 @@ for(const outcome of ['성공','오류','401']){
     '다른 대화상자 닫기':ui=>{ui.other();ui.close();},
     '다른 대화상자 취소':ui=>{ui.other();ui.cancel();},
     '다른 대화상자 Escape 닫기':ui=>{ui.other();ui.dialog.close();},
-    '로그아웃 응답 대기':ui=>{ui.logoutPending=ui.logout();},
-    '로그아웃 완료':async ui=>{const pending=ui.logout();ui.requests[1].resolve({});await pending;}
+    '로그아웃 응답 대기':ui=>{ui.logoutPending=ui.logout();assert.equal(ui.context.content.innerHTML,'');},
+    '로그아웃 완료':async ui=>{const pending=ui.logout();assert.equal(ui.context.content.innerHTML,'');ui.requests[1].resolve({});await pending;assert.equal(ui.context.content.innerHTML,'');}
   }))test(`${name} 뒤 이전 가입기록 ${outcome}은 창과 오류를 바꾸지 않는다`,async()=>{
     const ui=screen(),old=ui.open(11);await change(ui);const before=ui.snapshot();settle(ui.requests[0],outcome);await old;
     assert.deepEqual(ui.snapshot(),before);assert.deepEqual(ui.errors,[]);assert.deepEqual(ui.flashes,[]);

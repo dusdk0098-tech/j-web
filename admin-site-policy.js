@@ -17,6 +17,23 @@ export function adminSitePolicy(db,req,url,session){
   if(input?.siteId!==undefined&&url.searchParams.has('siteId')&&Number(input.siteId)!==Number(url.searchParams.get('siteId')))return denied();
   const worker=path.match(/^\/api\/workers\/([1-9]\d*)$/);
   const fields=keys=>input&&Object.keys(input).every(key=>keys.includes(key));
+  if(path==='/api/equipment'&&method==='GET')return [...url.searchParams.keys()].every(key=>key==='siteId')?site(url.searchParams.get('siteId')):denied();
+  const equipmentAttendance=path.match(/^\/api\/equipment-attendance(?:\/([1-9]\d*))?$/);
+  if(equipmentAttendance){
+    const id=equipmentAttendance[1];
+    if(!id&&method==='GET')return [...url.searchParams.keys()].every(key=>['siteId','month'].includes(key))&&url.searchParams.getAll('month').length===1&&/^\d{4}-(0[1-9]|1[0-2])$/.test(url.searchParams.get('month'))?site(url.searchParams.get('siteId')):denied();
+    if(!(!id&&method==='POST'||id&&['PUT','DELETE'].includes(method))||[...url.searchParams.keys()].some(key=>key!=='siteId'))return denied();
+    // 삭제 응답 재검증은 잠금 안에서 삭제를 완료한 요청의 현장만 재사용한다.
+    const row=id?(db.prepare('SELECT site_id FROM equipment_attendance WHERE id=?').get(Number(id))||(method==='DELETE'&&req.adminDeletedEquipment?.id===Number(id)?{site_id:req.adminDeletedEquipment.siteId}:null)):null;
+    if(id&&owned(row))return denied();
+    if(input===undefined)return null;
+    const keys=method==='DELETE'?['siteId','expectedVersion']:['siteId','date','driverName','note',id?'expectedVersion':'equipmentId'];
+    if(!fields(keys)||!allowed(input.siteId)||id&&Number(input.siteId)!==row.site_id)return denied();
+    if(id&&(!Number.isSafeInteger(input.expectedVersion)||input.expectedVersion<1))return denied();
+    if(!id&&(!positive(input.equipmentId)||!db.prepare('SELECT 1 FROM equipment WHERE id=? AND site_id=?').get(Number(input.equipmentId),Number(input.siteId))))return denied();
+    if(method!=='DELETE'&&(typeof input.date!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(input.date)||!Number.isFinite(Date.parse(input.date))||new Date(input.date).toISOString().slice(0,10)!==input.date||['driverName','note'].some(key=>typeof input[key]!=='string'||input[key].length>200||/[\x00-\x1f\x7f]/.test(input[key]))))return denied();
+    return null;
+  }
   const workerSite=(id,siteId)=>positive(id)&&allowed(siteId)&&db.prepare('SELECT 1 FROM workers WHERE id=? AND site_id=?').get(Number(id),Number(siteId));
   const qr=path.match(/^\/api\/sites\/([1-9]\d*)\/(access(?:\/(?:status|rotate|registration))?|invitation)$/);
   if(qr){
@@ -76,4 +93,11 @@ export function adminAttendanceRows(req,rows){
   if(!req.adminRestricted)return rows;
   const pick=(row,keys)=>Object.fromEntries(keys.filter(key=>Object.hasOwn(row,key)).map(key=>[key,row[key]]));
   return rows.map(row=>({...pick(row,['id','name','category','company','occupation','present','day_version','source','units_hundredths','attendance_category','attendance_company','attendance_occupation','days','version','dayVersions']),...(row.units?{units:row.units.map(unit=>pick(unit,['date','units_hundredths','category','company','occupation']))}:{})}));
+}
+
+export function adminEquipmentRows(req,rows,attendance=false){
+  if(!req.adminRestricted)return rows;
+  const pick=(row,keys)=>Object.fromEntries(keys.map(key=>[key,row[key]]));
+  const equipment=row=>pick(row,['id','kind','model','registration']);
+  return rows.map(row=>attendance?{...pick(row,['id','site_id','equipment_id','date','driver_name','note','version']),equipment_snapshot:equipment(row.equipment_snapshot)}:equipment(row));
 }
