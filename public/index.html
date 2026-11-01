@@ -11,13 +11,15 @@
 <section id="ai-panel" hidden aria-labelledby="ai-title">
 <div class="ai-head"><h2 id="ai-title">AI 상담</h2><button id="ai-close" class="outline" type="button">닫기</button></div>
 <p id="ai-status" role="status">연결 상태를 확인해 주세요.</p>
-<p class="ai-help">전송을 누르면 입력한 질문과 선택한 사진만 설정된 AI 제공업체에 전달됩니다. 실제 개인정보 대신 가상 자료를 사용하세요. 답변은 오류가 있을 수 있습니다.</p>
+<p class="ai-help">전송을 누르면 입력한 질문과 선택한 사진만 설정된 AI 제공업체에 전달됩니다. 각 질문은 독립적으로 처리되며 이전 대화는 제공업체에 전송되지 않습니다. 실제 개인정보 대신 가상 자료를 사용하세요. 답변은 오류가 있을 수 있습니다.</p>
 <div id="ai-messages" role="log" aria-label="상담 답변" aria-live="polite"></div>
 <form id="ai-form">
 <label for="ai-text">질문 (최대 4,000자)</label><textarea id="ai-text" maxlength="4000" rows="3"></textarea>
 <label for="ai-file">사진 한 장 (JPEG·PNG·WebP, 최대 5MB)</label><input id="ai-file" type="file" accept="image/jpeg,image/png,image/webp">
-<div id="ai-attachment" hidden><img id="ai-preview" alt="전송할 사진 미리보기"><span id="ai-filename"></span><button id="ai-remove" type="button" class="outline">사진 제거</button></div>
+<div id="ai-attachment" hidden><button id="ai-preview-open" type="button" class="outline ai-image-open" aria-label="선택한 사진 확대 보기" aria-haspopup="dialog" aria-controls="ai-image-dialog"><img id="ai-preview" alt="전송할 사진 미리보기"></button><span id="ai-filename"></span><button id="ai-remove" type="button" class="outline">사진 제거</button></div>
 <p id="ai-error" role="alert"></p><button id="ai-send" class="primary" type="submit" disabled>전송</button>
 </form><p class="ai-help">대화는 이 화면에서만 유지됩니다. 새로고침하거나 페이지를 나가면 사라집니다. 답변 평가는 로컬에 저장됩니다.</p>
-</section></div>
+</section>
+<dialog id="ai-image-dialog" aria-labelledby="ai-image-title" aria-describedby="ai-image-name"><div class="ai-head"><h2 id="ai-image-title">사진 확대 보기</h2><button id="ai-image-close" type="button" class="outline" autofocus>사진 닫기</button></div><p id="ai-image-name"></p><img id="ai-image-full" alt=""></dialog>
+</div>
 </body></html>
