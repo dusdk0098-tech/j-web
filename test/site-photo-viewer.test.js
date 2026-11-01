@@ -1,11 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync,rmSync } from 'node:fs';
+import { mkdtempSync,rmSync,readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createServer } from 'node:net';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
+import { runInNewContext } from 'node:vm';
 import { PNG } from 'pngjs';
 import { Store } from '../store.js';
 import { showSitePhotoViewer } from '../public/site-photo-viewer.js';
@@ -13,6 +14,16 @@ import { showSitePhotoViewer } from '../public/site-photo-viewer.js';
 function fakeDocument(){
   const state={last:null},doc={body:{append(dialog){state.last=dialog;}},querySelector(){return state.last?.open?state.last:null;},createElement(){const controls={};for(const key of ['image','status','previous','next','download','close','name','date','description'])controls[`[data-photo-view-${key}]`]={};return {controls,open:false,removed:false,setAttribute(){},querySelector(selector){return controls[selector];},addEventListener(type,callback){if(type==='close')this.onclose=callback;},showModal(){this.open=true;},close(){this.open=false;this.onclose?.();},remove(){this.removed=true;}};}};return {doc,state};
 }
+
+test('복수 사진 선택은 순서대로 저장하고 부분 실패와 화면 전환을 구분한다',async()=>{
+  const source=readFileSync(new URL('../public/app.js',import.meta.url),'utf8'),start=source.indexOf("    $('#site-photo-add').onchange="),end=source.indexOf('\n',start);assert.ok(start>=0&&end>start);
+  const make=(files,fetch)=>{const input={files,disabled:false,value:'선택'},state={page:'site-photos',siteId:3},calls=[],messages=[],context={$:()=>input,state,siteId:3,epoch:1,sitePhotoEpoch:1,fetch:(url,options)=>{calls.push({url,options});return fetch(calls.length,state);},render:async()=>{},flash:value=>messages.push(value),showError:error=>messages.push(error.message),encodeURIComponent,Error};runInNewContext(source.slice(start,end),context);return {input,state,calls,messages};},file=name=>({name,size:12}),ok=async()=>({ok:true});
+  const success=make([file('첫째.png'),file('둘째.jpg')],ok);await success.input.onchange({target:success.input});assert.equal(success.calls.length,2);assert.equal(success.calls[0].options.headers['x-file-name'],encodeURIComponent('첫째.png'));assert.match(success.messages[0],/2장의 시험 사진/);assert.equal(success.input.disabled,false);
+  const partial=make([file('1.png'),file('2.png'),file('3.png')],async n=>n===2?{ok:false,json:async()=>({error:'시험 실패'})}:{ok:true});await partial.input.onchange({target:partial.input});assert.equal(partial.calls.length,2);assert.match(partial.messages[0],/확인된 저장 1장/);assert.match(partial.messages[0],/저장 여부를 확인/);assert.match(partial.messages[0],/시험 실패/);
+  const oversized=make([{name:'큰 사진',size:2*1024*1024+1}],ok);await oversized.input.onchange({target:oversized.input});assert.equal(oversized.calls.length,0);assert.match(oversized.messages[0],/2MB/);
+  const switched=make([file('1.png'),file('2.png')],async(_n,state)=>{state.siteId=4;return {ok:true};});await switched.input.onchange({target:switched.input});assert.equal(switched.calls.length,1);assert.equal(switched.messages.length,0);
+  const tooMany=make(Array.from({length:11},()=>file('가상.png')),ok);await tooMany.input.onchange({target:tooMany.input});assert.equal(tooMany.calls.length,0);assert.match(tooMany.messages[0],/최대 10장/);
+});
 
 test('현장사진 보기는 검색된 사진을 이동하고 안전한 내려받기 주소를 제공한다',()=>{
   const {doc,state}=fakeDocument(),photos=[{id:1,name:'<가상 사진>.png',date:'2026-10-30',description:'<설명>',version:'a'.repeat(64)},{id:2,name:'다음.png',date:'2026-10-31',description:'',version:'b'.repeat(64)}];let active=true;
