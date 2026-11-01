@@ -1,3 +1,4 @@
+import { adminSession } from './admin-session.js';
 import { faqPage,faqPager } from './faq-pages.js';
 import { mountManualPlanPrint } from './plan-manual-print.js';
 import { boardCreateMarkup,boardCreation } from './board-create.js';
@@ -61,6 +62,7 @@ labels['basic-categories']='기본 서류 분류';
 labels['ppe-issues']='보호구 지급';
 labels['reviewers']='시험 결재자';
 labels['clients']='발주처 시험 계정';
+labels['admins']='관리자 계정';
 labels['worker-access-blocks']='출입자 접속 차단';
 labels['worker-permissions']='출입자 시험 권한';
 labels['worker-locations']='접속 위치 확인';
@@ -91,7 +93,7 @@ document.querySelector('[data-page=site-occupations]').insertAdjacentHTML('after
 document.querySelector('[data-page=documents]').insertAdjacentHTML('afterend','<button data-page="basic-categories">기본 서류 분류</button>');
 document.querySelector('[data-page=documents]').insertAdjacentHTML('afterend','<button data-page="site-print">현장별 서류 출력</button>');
 document.querySelector('[data-page=approval]').insertAdjacentHTML('afterend','<button data-page="reviewers">시험 결재자</button>');
-document.querySelector('[data-page=reviewers]').insertAdjacentHTML('afterend','<button data-page="clients">발주처 시험 계정</button>');
+document.querySelector('[data-page=reviewers]').insertAdjacentHTML('afterend','<button data-page="clients">발주처 시험 계정</button><button data-page="admins">관리자 계정</button>');
 document.querySelector('[data-page=documents]').insertAdjacentHTML('beforebegin','<button data-page="schedules">일정 관리</button>');
 document.querySelector('[data-page=schedules]').insertAdjacentHTML('afterend','<button data-page="board">게시판</button>');
 document.querySelector('[data-page=board]').insertAdjacentHTML('beforebegin','<button data-page="office-documents">업무 문서</button>');
@@ -100,7 +102,7 @@ const esc = (v) => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&
 const today = () => new Date(Date.now() - new Date().getTimezoneOffset()*60000).toISOString().slice(0,10);
 async function api(path, options={}, currentScope=()=>true) {
   const res=await fetch(path,{...options,headers:{'Content-Type':'application/json',...(options.headers||{})}});
-  const data=await res.json();if(!currentScope())return; if(res.status===401){if(dialog.open||document.querySelector('dialog[open]'))throw new Error('로그인이 만료되었습니다. 다른 탭에서 다시 로그인한 뒤 저장해 주세요.');location.assign('/login');throw new Error('관리자 로그인이 필요합니다.');} if(!res.ok) throw new Error(data.error || '요청에 실패했습니다.'); return data;
+  const data=await res.json();if(!currentScope())return; if(res.status===401){if(dialog.open||document.querySelector('dialog[open]'))throw new Error('로그인이 만료되었습니다. 입력 내용을 복사한 뒤 다시 로그인하고 새로고침해 주세요.');location.assign('/login');throw new Error('관리자 로그인이 필요합니다.');} if(!res.ok) throw new Error(data.error || '요청에 실패했습니다.'); return data;
 }
 function flash(message, error=false) { notice.textContent=message; notice.className=error?'error':''; }
 // 출역 표를 다시 그려도 저장한 행 외의 다른 행에서 고치던 값은 유지한다.
@@ -901,7 +903,7 @@ async function render(){
   document.querySelector('dialog.personal-note-preview[open]')?.close();
   await loadSites(); $('#heading').textContent=labels[state.page];$('#crumb').textContent=labels[state.page];
   document.querySelectorAll('[data-page]').forEach(b=>b.classList.toggle('selected',b.dataset.page===state.page));
-  if(!state.siteId&&state.page!=='board'&&state.page!=='clients'){content.innerHTML='<section class="panel empty">먼저 현장을 추가해 주세요. 시험을 위해 가상의 현장명을 사용하세요.</section>';return;}
+  if(!state.siteId&&state.page!=='board'&&state.page!=='clients'&&state.page!=='admins'){content.innerHTML='<section class="panel empty">먼저 현장을 추가해 주세요. 시험을 위해 가상의 현장명을 사용하세요.</section>';return;}
   if(state.detail)return renderDetail();
   if(state.page==='site-print'){
     const epoch=detailEpoch,sites=await api('/api/sites');if(state.page!=='site-print'||detailEpoch!==epoch)return;
@@ -913,6 +915,19 @@ async function render(){
     const clearResults=()=>{target.replaceChildren();};content.querySelectorAll('[data-print-site]').forEach(input=>{input.onchange=clearResults;});$('#site-print-date').onchange=clearResults;
     $('#site-print-all').onclick=()=>{content.querySelectorAll('[data-print-site]').forEach(input=>{input.checked=true;});clearResults();};
     $('#site-print-search').onclick=async event=>{const button=event.currentTarget,ids=chosen(),day=$('#site-print-date').value,requested=sites.filter(site=>ids.includes(site.id));try{button.disabled=true;target.textContent='문서를 조회하는 중입니다.';const docs=await siteDocumentsForDay(requested,day,api);if(!target.isConnected||state.page!=='site-print'||detailEpoch!==epoch||$('#site-print-date').value!==day||chosen().join(',')!==ids.join(','))return;state.sitePrintSites=ids;state.sitePrintDate=day;target.innerHTML=docs.length?`<p>선택한 가상 문서 ${docs.length}건</p><button type="button" id="site-print-select-all">문서 전체 선택</button> <button type="button" id="site-print-preview">선택 문서 미리보기</button><div class="table-wrap"><table><thead><tr><th>선택</th><th>현장</th><th>유형</th><th>제목</th><th>상태</th></tr></thead><tbody>${docs.map(doc=>`<tr><td><input type="checkbox" data-print-document="${doc.id}" aria-label="${esc(doc.title)} 선택"></td><td>${esc(doc.site_name)}</td><td>${esc(state.types[doc.type]||doc.type)}</td><td>${esc(doc.title)}</td><td>${esc(statusLabels[doc.status]||doc.status)}</td></tr>`).join('')}</tbody></table></div>`:'<p>해당 날짜에 작성된 시험 문서가 없습니다.</p>';if(docs.length){$('#site-print-select-all').onclick=()=>target.querySelectorAll('[data-print-document]').forEach(input=>{input.checked=true;});$('#site-print-preview').onclick=async()=>{try{const picked=selectBatchDocuments(docs,[...target.querySelectorAll('[data-print-document]:checked')].map(input=>input.dataset.printDocument));await showBatchPreview(picked,[],state.siteId,false,docs);}catch(error){showError(error);}};}}catch(error){if(target.isConnected)target.textContent=error.message;}finally{if(button.isConnected)button.disabled=false;}};return;
+  }
+  if(state.page==='admins'){
+    const people=await api('/api/admin-accounts');if(state.page!=='admins')return;
+    content.innerHTML='<section class="panel"><h2>관리자 계정</h2><p>모든 관리자는 전 현장과 다른 관리자 계정을 관리할 수 있습니다. 현장별 접근 제한과 문서 작성자 개인 식별은 제공하지 않습니다.</p><button type="button" id="admin-add">관리자 추가</button><ul>'+people.map(p=>'<li>'+esc(p.name)+' · '+esc(p.login_id)+' · '+(p.active?'사용 중':'중지됨')+' <button data-admin-name="'+p.id+'">이름 변경</button> <button data-admin-active="'+p.id+'">'+(p.active?'중지':'재개')+'</button> <button data-admin-password="'+p.id+'">암호 초기화</button> <button data-admin-revoke="'+p.id+'">모든 세션 종료</button></li>').join('')+'</ul></section>';
+    const passwordFields='<label>새 암호<input name="password" type="password" minlength="12" maxlength="256" autocomplete="new-password" required></label><label>암호 확인<input name="confirm" type="password" minlength="12" maxlength="256" autocomplete="new-password" required></label>';
+    const checkPassword=data=>{if(data.password!==data.confirm)throw Error('암호 확인이 일치하지 않습니다.');};
+    $('#admin-add').onclick=()=>showDialog('관리자 추가',field('loginId','아이디 (영문·숫자·밑줄 3~50자)')+field('name','이름')+passwordFields,data=>{checkPassword(data);return api('/api/admin-accounts',{method:'POST',body:JSON.stringify(data)});});
+    for(const person of people){
+      const update=data=>api('/api/admin-accounts/'+person.id,{method:'PUT',body:JSON.stringify({version:person.version,...data})});
+      content.querySelector('[data-admin-name="'+person.id+'"]').onclick=()=>showDialog('관리자 이름 변경',field('name','이름',person.name),data=>update({name:data.name}));
+      content.querySelector('[data-admin-password="'+person.id+'"]').onclick=()=>showDialog('관리자 암호 초기화','<p>이 계정의 모든 세션이 종료됩니다.</p>'+passwordFields,data=>{checkPassword(data);return update({password:data.password});});
+      for(const action of ['active','revoke'])content.querySelector('[data-admin-'+action+'="'+person.id+'"]').onclick=async()=>{if(!confirm(person.name+'의 '+(action==='revoke'?'모든 세션을 종료':person.active?'계정을 중지':'계정을 재개')+'할까요?'))return;try{await update(action==='revoke'?{revoke:true}:{active:!person.active});await render();}catch(error){showError(error);}};
+    }return;
   }
   if(state.page==='clients'){
     const people=await api('/api/client-accounts');if(state.page!=='clients')return;
@@ -1431,4 +1446,4 @@ async function render(){
     if(reports.length){$('#hazard-select-all').onclick=()=>section.querySelectorAll('[data-hazard-document]').forEach(input=>{input.checked=true;});$('#hazard-preview').onclick=()=>{try{preview([...section.querySelectorAll('[data-hazard-document]:checked')].map(input=>input.dataset.hazardDocument));}catch(error){showError(error);}};section.querySelectorAll('[data-hazard-preview]').forEach(button=>button.onclick=()=>{try{preview([button.dataset.hazardPreview]);}catch(error){showError(error);}});if(filtered.length){const button=document.createElement('button');button.type='button';button.textContent='선택 문서와 신고 함께 미리보기';section.querySelector('.batch-controls').append(button);button.onclick=async()=>{try{const chosen=selectBatchItems(filtered,reports,[...content.querySelectorAll('[data-batch-document]:checked')].map(input=>input.dataset.batchDocument),[...section.querySelectorAll('[data-hazard-document]:checked')].map(input=>input.dataset.hazardDocument));await showBatchPreview(chosen.documents,chosen.reports.map(id=>reports.find(report=>report.id===id)),siteId);}catch(error){showError(error);}};}}
   }
 }
-try {const session=await api('/api/session');if(session.enabled){const logout=document.createElement('button');logout.className='outline';logout.textContent='로그아웃';logout.onclick=async()=>{joinRecordEpoch++;await api('/api/logout',{method:'POST',body:'{}'});location.assign('/login');};document.querySelector('.top').append(logout);}state.types=await api('/api/types'); await render();} catch(e) {showError(e);}
+try {const session=await adminSession;if(!session?.authenticated||!session.context){location.assign('/login');throw Error('관리자 로그인이 필요합니다.');}if(session.enabled){const identity=document.createElement('span');identity.textContent=(session.admin?.name||'관리자')+' · 전 현장 권한';document.querySelector('.top').append(identity);const logout=document.createElement('button');logout.className='outline';logout.textContent='로그아웃';logout.onclick=async()=>{joinRecordEpoch++;await api('/api/logout',{method:'POST',body:'{}'});location.assign('/login');};document.querySelector('.top').append(logout);}state.types=await api('/api/types'); await render();} catch(e) {showError(e);}

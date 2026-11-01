@@ -27,7 +27,7 @@ function screen(){
 test('실제 API 401: 스티커 창의 모든 입력·동의를 보존하고 재로그인 안내 후 같은 값으로 재시도한다',async()=>{
   const ui=screen();await ui.open();assert.equal(ui.main.open,false);
   ui.reply=async()=>response(401);await ui.save();
-  assert.deepEqual(ui.redirects,[]);assert.equal(ui.dialog.open,true);assert.equal(ui.dialog.isConnected,true);assert.deepEqual(ui.form.values,values);assert.equal(ui.resets(),0);assert.match(ui.message.textContent,/다른 탭에서 다시 로그인한 뒤 저장/);
+  assert.deepEqual(ui.redirects,[]);assert.equal(ui.dialog.open,true);assert.equal(ui.dialog.isConnected,true);assert.deepEqual(ui.form.values,values);assert.equal(ui.resets(),0);assert.match(ui.message.textContent,/입력 내용을 복사한 뒤 다시 로그인하고 새로고침/);
   const failed=JSON.parse(ui.calls.at(-1).options.body);assert.deepEqual(failed,{...values,quantity:2,consent:true});
   ui.reply=async(_path,options)=>response(200,options.method?{}:[]);await ui.save();
   const posts=ui.calls.filter(call=>call.options.method==='POST');assert.equal(posts.length,2);assert.deepEqual(JSON.parse(posts[1].options.body),failed);assert.equal(ui.resets(),1);assert.deepEqual(ui.form.values,{quantity:'1'});assert.match(ui.message.textContent,/처리했습니다/);assert.deepEqual(ui.redirects,[]);
@@ -35,7 +35,7 @@ test('실제 API 401: 스티커 창의 모든 입력·동의를 보존하고 재
 
 test('실제 API 401: 기본 대화상자가 열려 있어도 기존 재로그인 안내를 유지한다',async()=>{
   const ui=screen();ui.main.open=true;ui.reply=async()=>response(401);
-  await assert.rejects(ui.api('/api/sites'),/다른 탭에서 다시 로그인/);assert.deepEqual(ui.redirects,[]);assert.equal(ui.main.open,true);
+  await assert.rejects(ui.api('/api/sites'),/다시 로그인하고 새로고침/);assert.deepEqual(ui.redirects,[]);assert.equal(ui.main.open,true);
 });
 
 test('실제 API 401: 열린 대화상자가 없거나 이미 닫혔으면 기존 로그인 이동을 유지한다',async()=>{

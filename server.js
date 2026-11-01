@@ -1,3 +1,4 @@
+import { adminWriteGuard } from './admin-write-guard.js';
 import http from 'node:http';
 import { readFileSync, mkdirSync, readdirSync } from 'node:fs';
 import { dirname, extname, join } from 'node:path';
@@ -9,12 +10,13 @@ import { CommonWork } from './common-work.js';
 import { Messages } from './messages.js';
 import { EmploymentCertificates } from './employment-certificates.js';
 import { ReviewerProfile } from './reviewer-profile.js';
+import { AdminAccounts } from './admin-accounts.js';
 import { ClientAccounts } from './client-accounts.js';
 import { types } from './domain.js';
 import QRCode from 'qrcode';
 import { issueAccessQr,issueInvitationQr } from './qr-issue.js';
 import { workerSpreadsheet, wageSpreadsheet } from './exports.js';
-import { LocalAuth, sessionToken, WorkerSessions, ReviewerSessions } from './auth.js';
+import { sessionToken, WorkerSessions, ReviewerSessions } from './auth.js';
 import { workerSitePath } from './public/worker-link.js';
 import { createHash, randomBytes } from 'node:crypto';
 import { costImageType } from './cost-image.js';
@@ -29,9 +31,10 @@ if(process.env.JWEB_PUBLIC_ORIGIN){
 }
 const secureCookie=publicOrigin?'; Secure':'';
 const dataDir = process.env.JWEB_DATA_DIR || join(root, 'data');
-const auth=new LocalAuth(process.env.JWEB_ADMIN_PASSWORD);
+
 mkdirSync(dataDir, { recursive: true });
 const store = new Store(join(dataDir, 'jweb.sqlite'));
+const auth=new AdminAccounts(store.db);auth.bootstrap(process.env.JWEB_ADMIN_PASSWORD);
 const aiChat = new AiChat(store.db);
 const personalNotes = new PersonalNotes(store.db);
 const stickerRequests = new StickerRequests(store.db);
@@ -52,6 +55,7 @@ delete process.env.JWEB_ADMIN_PASSWORD;
 const mime = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg':'image/svg+xml', '.png':'image/png' };
 const assets = new Set(['/','/app.js','/office-template.js','/common-work-view.js','/rich-text.js','/rich-editor.js','/reviewer-office.js','/reviewer-profile.js','/employment-view.js','/employment-certificate','/employment-certificate.js','/messages-view.js','/board-view.js','/faq-pages.js','/schedule.js','/batch-print.js','/date-range.js','/daily-quantities.js','/risk-scale.js','/musculoskeletal.js','/worker-link.js','/worker-location.js','/remember-worker.js','/worker-documents.js','/worker-loads.js','/join-choices.js','/join-flow.js','/worker-fields.js','/site-qr.js','/tbm-sources.js','/training-groups.js','/site-statistics.js','/restaurant-price.js','/salary-summary.js','/attendance-meals.js','/joint-examples.js','/safety-log-sources.js','/style.css','/jweb-icon.svg','/jweb-icon-192.png','/jweb-icon-512.png','/worker-guide.html','/offline-forms.html','/join','/join.js','/login','/login.js','/review','/review.js']);
 const json = (res, code, value) => { res.writeHead(code, {'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}); res.end(JSON.stringify(value)); };
+assets.add('/admin-session.js');
 assets.add('/client');assets.add('/client.js');
 assets.add('/common-work-print.js');
 assets.add('/personal-notes-tools.js');
@@ -124,7 +128,8 @@ async function handleCommonWork(req,res,url,prefix,actor=null){
   if(parts[1]==='files'&&parts.length===3&&/^\d+$/.test(parts[2])&&req.method==='DELETE'){const input=await body(req);commonWork.removeFile(site(input),id,parts[2],input.version,authorize,actor);json(res,200,{ok:true});return true;}
   json(res,404,{error:'요청한 경로가 없습니다.'});return true;
 }
-const server = http.createServer(async (req, res) => {
+const adminRequests=adminWriteGuard(store.db);
+const server = http.createServer((req,res)=>adminRequests.run(req,async()=>{
   try {
     const host = req.headers.host || '';
     if (publicOrigin ? host!==new URL(publicOrigin).host : !/^(localhost|127\.0\.0\.1)(:\d+)?$/.test(host)) return json(res,403,{error:'허용된 접속 주소가 아닙니다.'});
@@ -133,13 +138,14 @@ const server = http.createServer(async (req, res) => {
     if (origin && origin !== requestOrigin) return json(res,403,{error:'다른 출처의 요청은 허용되지 않습니다.'});
     const url = new URL(req.url, requestOrigin);
     const token=sessionToken(req.headers.cookie);
-    if(url.pathname==='/api/session' && req.method==='GET')return json(res,200,{enabled:true,authenticated:auth.valid(token)});
+    if(url.pathname==='/api/session' && req.method==='GET')return json(res,200,{enabled:true,authenticated:auth.valid(token),admin:auth.session(token),context:auth.context(token)});
     if(url.pathname==='/api/login' && req.method==='POST'){
-      const input=await body(req),newToken=auth.login(input.password);
+      const input=await body(req),newToken=auth.login(input.loginId,input.password,token);
       if(!newToken)return json(res,401,{error:'암호가 올바르지 않거나 잠시 로그인할 수 없습니다.'});
       auth.logout(token);res.setHeader('Set-Cookie',`jweb_session=${newToken}; HttpOnly; SameSite=Strict; Path=/; Max-Age=28800${secureCookie}`);return json(res,200,{ok:true});
     }
     if(url.pathname==='/api/logout' && req.method==='POST'){
+      if((req.headers['x-admin-context']||req.headers.origin||req.headers['sec-fetch-site'])&&req.headers['x-admin-context']!==auth.context(token))return json(res,409,{error:'관리자 세션이 변경되었습니다. 새로고침해 주세요.'});
       auth.logout(token);res.setHeader('Set-Cookie',`jweb_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0${secureCookie}`);return json(res,200,{ok:true});
     }
     const clientToken=(req.headers.cookie||'').split(';').map(x=>x.trim()).find(x=>x.startsWith('jweb_client='))?.slice(12)||'';
@@ -499,7 +505,13 @@ const server = http.createServer(async (req, res) => {
       workerSessions.delete(workerKey(workerToken));res.setHeader('Set-Cookie',`jweb_worker=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0${secureCookie}`);return json(res,200,{ok:true});
     }
     if(url.pathname.startsWith('/api/') && url.pathname!=='/api/join' && !auth.valid(token))return json(res,401,{error:'관리자 로그인이 필요합니다.'});
-    if(url.pathname.startsWith('/api/')&&url.pathname!=='/api/join')req.checkSession=()=>auth.valid(token)?null:{status:401,error:'관리자 로그인이 필요합니다.'};
+    if(url.pathname.startsWith('/api/')&&url.pathname!=='/api/join'){
+      req.checkSession=()=>{if(!auth.valid(token))return {status:401,error:'관리자 로그인이 필요합니다.'};if(!['GET','HEAD'].includes(req.method)&&(req.headers['x-admin-context']||req.headers.origin||req.headers['sec-fetch-site'])&&req.headers['x-admin-context']!==auth.context(token))return {status:409,error:'관리자 세션이 변경되었습니다. 입력 내용을 복사하고 새로고침해 주세요.'};return null;};checkRequestSession(req);req.adminProtected=true;
+    }
+    if(url.pathname==='/api/admin-accounts'&&req.method==='GET')return json(res,200,auth.list());
+    if(url.pathname==='/api/admin-accounts'&&req.method==='POST')return json(res,201,auth.create(await body(req),()=>checkRequestSession(req)));
+    const adminAccount=url.pathname.match(/^\/api\/admin-accounts\/(\d+)$/);
+    if(adminAccount&&req.method==='PUT')return json(res,200,auth.update(adminAccount[1],await body(req),()=>checkRequestSession(req)));
     if(url.pathname.startsWith('/api/ai/')){
       try{
         if(url.pathname==='/api/ai/status'&&req.method==='GET')return json(res,200,aiChat.status());
@@ -1106,10 +1118,11 @@ const server = http.createServer(async (req, res) => {
     }
     return json(res,404,{error:'요청한 경로가 없습니다.'});
   } catch (e) {
+    if(req.adminWriteFailure)return json(res,req.adminWriteFailure.status,{error:req.adminWriteFailure.error});
     // 의도한 오류는 일반 Error나 코드가 있는 오류(SQLite, URL)로 던져지고, TypeError 등 코드 없는 오류는 버그다.
     if(!(e instanceof Error)||e.constructor!==Error&&!e.code){console.error(e);return json(res,500,{error:'요청을 처리하지 못했습니다.'});}
     if(e.code==='ERR_SQLITE_ERROR'&&Number.isInteger(e.errcode)&&[5,6].includes(e.errcode&255))return json(res,503,{error:'데이터베이스가 사용 중입니다. 잠시 후 다시 시도해 주세요.'});return json(res,[401,403,409,429].includes(e.sessionStatus)?e.sessionStatus:400,{error:e.message || '요청을 처리하지 못했습니다.',...(e.sessionChanged?{sessionChanged:true}:{})}); }
-});
+}));
 const port = Number(process.env.PORT || 4173);
 server.listen(port, '127.0.0.1', () => console.log(`J웹: http://127.0.0.1:${port} (관리자 로그인 활성)`));
 function stop() { server.close(() => { store.close(); process.exit(0); }); }

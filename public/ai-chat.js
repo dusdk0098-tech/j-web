@@ -1,3 +1,4 @@
+import './admin-session.js';
 export function validateAiImage(file) {
   if (!['image/jpeg','image/png','image/webp'].includes(file.type)) throw Error('JPEG, PNG, WebP 사진만 선택해 주세요.');
   if (!file.size || file.size > 5 * 1024 * 1024) throw Error('사진은 0바이트보다 크고 5MB 이하여야 합니다.');

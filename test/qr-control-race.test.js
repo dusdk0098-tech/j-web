@@ -26,8 +26,8 @@ test('가입 열기와 초대 중지는 권한 검사가 실패하면 변경하�
 test('QR 가입 제어가 DB 잠금을 기다리는 동안 관리자가 만료되면 변경하지 않는다',{timeout:30000},async()=>{
   const dir=mkdtempSync(join(tmpdir(),'jweb-qr-control-')),flag=join(dir,'expired'),reservation=createServer();
   await new Promise(resolve=>reservation.listen(0,'127.0.0.1',resolve));const port=reservation.address().port;await new Promise(resolve=>reservation.close(resolve));
-  const storeUrl=pathToFileURL(join(process.cwd(),'store.js')).href,authUrl=pathToFileURL(join(process.cwd(),'auth.js')).href;
-  const trace=`import {existsSync} from 'node:fs';import {Store} from ${JSON.stringify(storeUrl)};import {LocalAuth} from ${JSON.stringify(authUrl)};const valid=LocalAuth.prototype.valid;LocalAuth.prototype.valid=function(...args){return existsSync(${JSON.stringify(flag)})?false:valid.apply(this,args)};for(const name of ['openSiteRegistration','revokeInvitations']){const original=Store.prototype[name];Store.prototype[name]=function(...args){process.stdout.write('QR_CONTROL_STARTED\\n');return original.apply(this,args)}}`;
+  const storeUrl=pathToFileURL(join(process.cwd(),'store.js')).href,authUrl=pathToFileURL(join(process.cwd(),'admin-accounts.js')).href;
+  const trace=`import {existsSync} from 'node:fs';import {Store} from ${JSON.stringify(storeUrl)};import {AdminAccounts} from ${JSON.stringify(authUrl)};const valid=AdminAccounts.prototype.valid;AdminAccounts.prototype.valid=function(...args){return existsSync(${JSON.stringify(flag)})?false:valid.apply(this,args)};for(const name of ['openSiteRegistration','revokeInvitations']){const original=Store.prototype[name];Store.prototype[name]=function(...args){process.stdout.write('QR_CONTROL_STARTED\\n');return original.apply(this,args)}}`;
   const child=spawn(process.execPath,['--import',`data:text/javascript,${encodeURIComponent(trace)}`,'server.js'],{cwd:process.cwd(),env:{...process.env,PORT:String(port),JWEB_DATA_DIR:dir,JWEB_ADMIN_PASSWORD:'virtual-admin-password'},stdio:['ignore','pipe','pipe']});let db,locked=false;
   try{
     await Promise.race([once(child.stdout,'data'),once(child,'exit').then(()=>{throw Error('시험 서버가 종료됐습니다.');})]);
