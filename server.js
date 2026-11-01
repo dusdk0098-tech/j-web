@@ -52,6 +52,7 @@ assets.add('/personal-notes-tools.js');
 assets.add('/daily-report-photos.js');
 assets.add('/site-photo-viewer.js');
 assets.add('/board-comments.js');
+assets.add('/board-inline-image.js');
 assets.add('/worker-preview.js');
 assets.add('/worker-list.js');
 assets.add('/attendance-matrix.js');

@@ -10,12 +10,16 @@ export function normalizeRichLink(value){
   return url.href;
 }
 
-export function normalizeRichText(value,{maxText=10000,maxBytes=50000}={}){
+export function normalizeRichText(value,{maxText=10000,maxBytes=50000,allowBoardImages=false}={}){
   if(!Array.isArray(value))throw Error('본문 서식을 확인해 주세요.');
   let count=0,length=0;
   const visit=(node,depth,parent='')=>{
     if(++count>1024||depth>16||!node||typeof node!=='object'||Array.isArray(node))throw Error('본문 서식을 확인해 주세요.');
     const keys=Object.keys(node),type=node.type;
+    if(type==='image'){
+      if(!allowBoardImages||keys.some(key=>!['type','attachmentId','fileVersion','alt'].includes(key))||!Number.isSafeInteger(node.attachmentId)||node.attachmentId<=0||typeof node.fileVersion!=='string'||!/^[a-f0-9]{32}$/.test(node.fileVersion)||typeof node.alt!=='string'||node.alt.length>200||(length+=node.alt.length)>maxText)throw Error('본문 이미지를 확인해 주세요.');
+      return {type,attachmentId:node.attachmentId,fileVersion:node.fileVersion,alt:node.alt};
+    }
     if(type==='text'){
       if(keys.some(key=>!['type','value'].includes(key))||typeof node.value!=='string'||(length+=node.value.length)>maxText)throw Error('본문 내용을 확인해 주세요.');
       return {type,value:node.value};
@@ -30,19 +34,27 @@ export function normalizeRichText(value,{maxText=10000,maxBytes=50000}={}){
 export function richTextToPlain(value,limits){
   const nodes=normalizeRichText(value,limits),blocks=new Set(['p','div','li']);let result='',blockEnd=false,cellStart=-1;
   const append=value=>{result+=value;blockEnd=false;},breakBlock=()=>{if(result&&result.length!==cellStart&&!result.endsWith('\n')){result+='\n';blockEnd=true;}};
-  const walk=node=>{if(node.type==='text')append(node.value);else if(node.type==='br')append('\n');else if(node.type==='tr'){breakBlock();node.children.forEach((cell,index)=>{if(index)append('\t');blockEnd=false;const previous=cellStart;cellStart=result.length;walk(cell);if(blockEnd){result=result.slice(0,-1);blockEnd=false;}cellStart=previous;});breakBlock();}else{if(blocks.has(node.type))breakBlock();node.children.forEach(walk);if(blocks.has(node.type))breakBlock();}};
+  const walk=node=>{if(node.type==='text')append(node.value);else if(node.type==='image')append(node.alt);else if(node.type==='br')append('\n');else if(node.type==='tr'){breakBlock();node.children.forEach((cell,index)=>{if(index)append('\t');blockEnd=false;const previous=cellStart;cellStart=result.length;walk(cell);if(blockEnd){result=result.slice(0,-1);blockEnd=false;}cellStart=previous;});breakBlock();}else{if(blocks.has(node.type))breakBlock();node.children.forEach(walk);if(blocks.has(node.type))breakBlock();}};
   nodes.forEach(walk);return blockEnd?result.slice(0,-1):result;
 }
 
 export function richTextToHTML(value,limits){
-  const render=node=>node.type==='text'?escape(node.value):node.type==='br'?'<br>':`<${node.type}${node.type==='a'?` href="${escape(node.href)}" target="_blank" rel="noopener noreferrer"`:''}>${node.children.map(render).join('')}</${node.type}>`;
+  const render=node=>node.type==='text'?escape(node.value):node.type==='br'?'<br>':node.type==='image'?`<img src="${escape(boardImageUrl(node,limits))}" data-board-image-id="${node.attachmentId}" data-board-image-version="${node.fileVersion}" alt="${escape(node.alt)}" style="max-width:100%;height:auto">`:`<${node.type}${node.type==='a'?` href="${escape(node.href)}" target="_blank" rel="noopener noreferrer"`:''}>${node.children.map(render).join('')}</${node.type}>`;
   return normalizeRichText(value,limits).map(render).join('');
+}
+
+export function boardImageUrl(image,limits){
+  if(typeof limits?.imageUrl!=='function')throw Error('본문 이미지 주소를 확인해 주세요.');
+  const url=limits.imageUrl(image);
+  if(typeof url!=='string'||!/^\/(?!\/)/.test(url)||/[\\\x00-\x20\x7f]/.test(url))throw Error('본문 이미지 주소를 확인해 주세요.');
+  return url;
 }
 
 export function richTextFromEditor(root,limits){
   const names={P:'p',DIV:'div',STRONG:'strong',B:'strong',EM:'em',I:'em',U:'u',S:'s',STRIKE:'s',UL:'ul',OL:'ol',LI:'li',A:'a',BR:'br',TABLE:'table',THEAD:'thead',TBODY:'tbody',TR:'tr',TH:'th',TD:'td'};
   const convert=node=>{
     if(node.nodeType===3)return [{type:'text',value:node.nodeValue||''}];
+    if(node.nodeType===1&&node.tagName==='IMG'&&limits?.allowBoardImages&&node.hasAttribute('data-board-image-id')&&node.hasAttribute('data-board-image-version'))return [{type:'image',attachmentId:Number(node.getAttribute('data-board-image-id')),fileVersion:node.getAttribute('data-board-image-version'),alt:node.getAttribute('alt')||''}];
     if(node.nodeType!==1||['SCRIPT','STYLE','IFRAME','OBJECT','IMG','SVG'].includes(node.tagName))return [];
     const type=names[node.tagName],emptyCell=['td','th'].includes(type)&&node.childNodes.length===1&&node.firstChild?.tagName==='BR',children=emptyCell?[]:[...node.childNodes].flatMap(convert);if(type==='br')return [{type:'br'}];
     if(type==='a'){try{return [{type,href:normalizeRichLink(node.getAttribute('href')),children}];}catch{return children;}}

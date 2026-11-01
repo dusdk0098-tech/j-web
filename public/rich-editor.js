@@ -1,4 +1,4 @@
-import { normalizeRichLink,richTextFromEditor,richTextToHTML,richTextToPlain } from './rich-text.js';
+import { normalizeRichLink,normalizeRichText,boardImageUrl,richTextFromEditor,richTextToHTML,richTextToPlain } from './rich-text.js';
 
 const escape=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 export function richBody(rich,plain,limits){try{return rich==null?escape(plain):richTextToHTML(rich,limits);}catch{return escape(plain);}}
@@ -9,6 +9,18 @@ export function richEditorMarkup(label,{tables=false}={}){
 
 export function mountRichEditor(root,{limits,onError=()=>{}}={}){
   const editor=root.querySelector('[data-rich-editor]'),toolbar=root.querySelector('[data-rich-toolbar]'),doc=editor.ownerDocument;
+  let savedSelection=null;
+  const validRange=range=>range&&editor.isConnected!==false&&editor.contentEditable!=='false'&&editor.contains(range.startContainer)&&editor.contains(range.endContainer);
+  const rememberSelection=()=>{const selection=doc.getSelection(),range=selection?.rangeCount?selection.getRangeAt(0):null;if(validRange(range))savedSelection={range:range.cloneRange(),start:range.startContainer,end:range.endContainer};};
+  editor.onmouseup=editor.onkeyup=editor.onblur=rememberSelection;
+  const insertBoardImage=image=>{
+    if(editor.contentEditable==='false')throw Error('본문을 편집할 수 없는 상태입니다.');
+    const normalized=normalizeRichText([image],limits)[0];if(normalized.type!=='image')throw Error('본문 이미지를 확인해 주세요.');
+    const src=boardImageUrl(normalized,limits),node=doc.createElement('img');node.setAttribute('src',src);node.setAttribute('data-board-image-id',String(normalized.attachmentId));node.setAttribute('data-board-image-version',normalized.fileVersion);node.setAttribute('alt',normalized.alt);node.style.maxWidth='100%';node.style.height='auto';
+    const selection=doc.getSelection(),current=selection?.rangeCount?selection.getRangeAt(0):null,selected=validRange(current)?current:savedSelection&&editor.contains(savedSelection.start)&&editor.contains(savedSelection.end)&&validRange(savedSelection.range)?savedSelection.range:null,range=selected?selected.cloneRange():doc.createRange();
+    if(!selected){range.selectNodeContents(editor);range.collapse(false);}
+    range.deleteContents();range.insertNode(node);range.setStartAfter(node);range.collapse(true);editor.focus();selection?.removeAllRanges();selection?.addRange(range);rememberSelection();
+  };
   const insertPlain=value=>{const selection=doc.getSelection(),range=selection?.rangeCount?selection.getRangeAt(0):null,node=doc.createTextNode(value);if(!range||!editor.contains(range.commonAncestorContainer)){editor.append(node);editor.focus();return;}range.deleteContents();range.insertNode(node);range.setStartAfter(node);range.collapse(true);selection.removeAllRanges();selection.addRange(range);};
   editor.onpaste=event=>{event.preventDefault();insertPlain(event.clipboardData?.getData('text/plain')||'');};
   editor.ondrop=event=>{event.preventDefault();insertPlain(event.dataTransfer?.getData('text/plain')||'');};
@@ -32,5 +44,5 @@ export function mountRichEditor(root,{limits,onError=()=>{}}={}){
   editor.onkeydown=event=>{if(event.key!=='Tab')return;try{const {cell,table}=currentCell(),cells=[...table.querySelectorAll('th,td')],next=cells[cells.indexOf(cell)+(event.shiftKey?-1:1)];if(next){event.preventDefault();focusCell(next);}}catch{}};
   toolbar.onmousedown=event=>{if(event.target.closest('button'))event.preventDefault();};
   toolbar.onclick=event=>{const button=event.target.closest('[data-format]');if(!button)return;try{const command=button.dataset.format;if(['insertTable','addRow','removeRow','addColumn','removeColumn','removeTable'].includes(command)){tableAction(command);return;}const selection=doc.getSelection();if(!selection?.rangeCount||!editor.contains(selection.getRangeAt(0).commonAncestorContainer))throw Error('서식을 적용할 본문을 선택해 주세요.');const range=selection.getRangeAt(0).cloneRange();let value=null;if(command==='createLink'){if(range.collapsed)throw Error('링크를 적용할 글자를 선택해 주세요.');const entered=prompt('HTTP 또는 HTTPS 링크 주소를 입력하세요.');if(entered===null)return;value=normalizeRichLink(entered);}editor.focus();selection.removeAllRanges();selection.addRange(range);if(!doc.execCommand(command,false,value))throw Error('이 브라우저에서 해당 서식을 적용할 수 없습니다.');}catch(error){onError(error);}};
-  return {value:()=>richTextFromEditor(editor,limits),plain:()=>richTextToPlain(richTextFromEditor(editor,limits),limits),set:(rich,plain='')=>{if(rich==null)editor.textContent=plain;else{editor.innerHTML=richTextToHTML(rich,limits);editor.querySelectorAll('td:empty,th:empty').forEach(cell=>cell.append(doc.createElement('br')));}},clear:()=>editor.replaceChildren(),focus:()=>editor.focus(),hasTable:()=>!!editor.querySelector('table')};
+  return {insertBoardImage,value:()=>richTextFromEditor(editor,limits),plain:()=>richTextToPlain(richTextFromEditor(editor,limits),limits),set:(rich,plain='')=>{savedSelection=null;if(rich==null)editor.textContent=plain;else{editor.innerHTML=richTextToHTML(rich,limits);editor.querySelectorAll('td:empty,th:empty').forEach(cell=>cell.append(doc.createElement('br')));}},clear:()=>{savedSelection=null;editor.replaceChildren();},focus:()=>editor.focus(),hasTable:()=>!!editor.querySelector('table')};
 }
