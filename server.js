@@ -69,6 +69,7 @@ assets.add('/attendance-matrix.js');
 assets.add('/education-kinds.js');
 assets.add('/checklist-copy.js');
 assets.add('/permit-sources.js');
+assets.add('/permit-measures.js');
 assets.add('/safety-cost.js');
 assets.add('/weekly-ppe.js');
 assets.add('/reviewer-manager-check.js');
@@ -706,6 +707,12 @@ const server = http.createServer(async (req, res) => {
     }
     const equipmentAttendance=url.pathname.match(/^\/api\/equipment-attendance(?:\/(\d+))?$/);
     if(equipmentAttendance){const id=equipmentAttendance[1];if(!id&&req.method==='GET')return json(res,200,store.equipmentAttendance(url.searchParams.get('siteId'),url.searchParams.get('month')));if(!id&&req.method==='POST')return json(res,201,store.saveEquipmentAttendance(await body(req),null,()=>checkRequestSession(req)));if(id&&req.method==='PUT')return json(res,200,store.saveEquipmentAttendance(await body(req),id,()=>checkRequestSession(req)));if(id&&req.method==='DELETE'){const input=await body(req);store.deleteEquipmentAttendance(input.siteId,id,input.expectedVersion,()=>checkRequestSession(req));return json(res,200,{ok:true});}}
+    const permitMeasure=url.pathname.match(/^\/api\/equipment\/(\d+)\/permit-measures(?:\/(\d+))?$/);
+    if(permitMeasure){const [,equipmentId,id]=permitMeasure,siteId=url.searchParams.get('siteId');
+      if(!id&&req.method==='GET'){const rows=store.permitMeasures(siteId,equipmentId);checkRequestSession(req);return json(res,200,rows);}
+      if(!id&&req.method==='POST')return json(res,201,store.savePermitMeasure(siteId,equipmentId,null,await body(req),false,()=>checkRequestSession(req)));
+      if(id&&['PUT','DELETE'].includes(req.method))return json(res,200,store.savePermitMeasure(siteId,equipmentId,id,await body(req),req.method==='DELETE',()=>checkRequestSession(req)));
+    }
     const equipmentCopy=url.pathname.match(/^\/api\/equipment\/(\d+)\/copy$/);
     if(equipmentCopy&&req.method==='GET')return json(res,200,store.equipmentCopySource(url.searchParams.get('siteId'),equipmentCopy[1]));
     if(equipmentCopy&&req.method==='POST'){const input=await body(req);return json(res,201,store.copyEquipment(input.siteId,equipmentCopy[1],input,()=>checkRequestSession(req)));}

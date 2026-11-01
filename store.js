@@ -1,3 +1,4 @@
+import { listPermitMeasures,savePermitMeasure,validatePermitMeasureSources } from './permit-measures.js';
 import { DatabaseSync } from 'node:sqlite';
 import { createHash, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
 import { dateValue, officeKinds, recordInput, muscleReferenceInput, text, transitions } from './domain.js';
@@ -130,6 +131,7 @@ export class Store {
       CREATE TABLE IF NOT EXISTS safety_cost_report_photos (id INTEGER PRIMARY KEY,document_id INTEGER NOT NULL REFERENCES documents(id),cost_id INTEGER NOT NULL,name TEXT NOT NULL,data BLOB NOT NULL);
       CREATE TABLE IF NOT EXISTS safety_cost_month_files (id INTEGER PRIMARY KEY,site_id INTEGER NOT NULL REFERENCES sites(id),date TEXT NOT NULL,note TEXT NOT NULL,name TEXT NOT NULL,data BLOB NOT NULL);
       CREATE TABLE IF NOT EXISTS equipment (id INTEGER PRIMARY KEY,site_id INTEGER NOT NULL REFERENCES sites(id),kind TEXT NOT NULL,model TEXT NOT NULL,capacity TEXT NOT NULL,manufacturer TEXT NOT NULL,registration TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS permit_equipment_measures (id INTEGER PRIMARY KEY AUTOINCREMENT,equipment_id INTEGER NOT NULL REFERENCES equipment(id),accidentType TEXT NOT NULL,hazard TEXT NOT NULL,measure TEXT NOT NULL,version TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS equipment_attendance (id INTEGER PRIMARY KEY,site_id INTEGER NOT NULL REFERENCES sites(id),equipment_id INTEGER NOT NULL REFERENCES equipment(id),date TEXT NOT NULL,equipment_snapshot TEXT NOT NULL,driver_name TEXT NOT NULL,driver_birth TEXT NOT NULL,driver_phone TEXT NOT NULL,note TEXT NOT NULL,version INTEGER NOT NULL DEFAULT 1);
       CREATE TABLE IF NOT EXISTS work_places (id INTEGER PRIMARY KEY,site_id INTEGER NOT NULL REFERENCES sites(id),name TEXT NOT NULL,details TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS rigging (id INTEGER PRIMARY KEY,site_id INTEGER NOT NULL REFERENCES sites(id),category TEXT NOT NULL,kind TEXT NOT NULL,name TEXT NOT NULL,details TEXT NOT NULL);
@@ -312,6 +314,8 @@ export class Store {
     if(!attendanceColumns.includes('day_version'))this.db.exec('ALTER TABLE attendance ADD COLUMN day_version INTEGER NOT NULL DEFAULT 1');
     this.db.exec('CREATE TRIGGER IF NOT EXISTS attendance_day_version AFTER UPDATE ON attendance WHEN NEW.day_version=OLD.day_version BEGIN UPDATE attendance SET day_version=OLD.day_version+1 WHERE worker_id=NEW.worker_id AND date=NEW.date; END');
   }
+  permitMeasures(siteId,equipmentId){return listPermitMeasures(this.db,siteId,equipmentId);}
+  savePermitMeasure(siteId,equipmentId,id,input,remove=false,onAuthorize=()=>{}){return savePermitMeasure(this.db,siteId,equipmentId,id,input,remove,onAuthorize);}
   close() { this.db.close(); }
   managerChecks(siteId) {
     return this.db.prepare("SELECT date,answers,created_at,'check' AS kind FROM manager_self_checks WHERE site_id=? UNION ALL SELECT date,NULL AS answers,created_at,'day_off' AS kind FROM manager_days_off WHERE site_id=? ORDER BY date DESC LIMIT 30").all(Number(siteId),Number(siteId));
@@ -1880,6 +1884,7 @@ export class Store {
   reviewerPlanEquipmentSignature(doc,checkId,position){if(doc.type!=='work_plan')return null;if(doc.approval_cycle_id)return this.approvalCycleFile(doc.id,doc.approval_cycle_id,'equipment-review-signature',checkId,position)?.data||null;const check=this.equipmentChecks(doc.id).find(item=>item.id===Number(checkId)),step=check?.approval?.steps.find(item=>item.position===Number(position)&&item.has_signature);return step?this.equipmentCheckApprovalSignature(doc.id,checkId,check.approval.id,position):null;}
   reviewerAttachment(doc,fileId){return doc.approval_cycle_id?this.approvalCycleFile(doc.id,doc.approval_cycle_id,'document',0,fileId):this.attachment(fileId);}
   createDocument(input) {
+    validatePermitMeasureSources(this.db,input);
     const d = recordInput(input);
     if (!this.db.prepare('SELECT id FROM sites WHERE id=?').get(d.siteId)) throw new Error('현장을 선택해 주세요.');
     this.validateBasicCategory(d);
@@ -2140,6 +2145,7 @@ export class Store {
     if(current.type==='office'&&JSON.parse(current.details).referenceId>0&&input.details?.referenceId===undefined)throw new Error('참조 품의서를 보존하려면 화면을 새로고침해 주세요.');
     if(current.type==='office'&&JSON.parse(current.details).referenceDocId>0&&input.details?.referenceDocId===undefined)throw new Error('참조 문서를 보존하려면 화면을 새로고침해 주세요.');
     if(current.type==='office'){const previous=JSON.parse(current.details);if(previous.bodyRich!==undefined&&input.details?.bodyRich===undefined){if(input.body!==current.body)throw Object.assign(new Error('서식 있는 본문을 수정하려면 화면을 새로고침해 주세요.'),{sessionStatus:409});input={...input,details:{...input.details,bodyRich:previous.bodyRich}};}}
+    validatePermitMeasureSources(this.db,input);
     const d = recordInput(input);
     if (d.siteId !== current.site_id || d.type !== current.type) throw new Error('문서의 현장과 유형은 변경할 수 없습니다.');
     this.validatePermitCompany(d,current);

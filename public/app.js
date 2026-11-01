@@ -1,3 +1,4 @@
+import { mountPermitMeasures } from './permit-measures.js';
 import { mountPlanPdfPrint,planPdfSnapshot } from './plan-pdf.js';
 import { riskScaleOptions, riskScore, copyRiskItem, copyRiskImprovement, groupRiskItems, selectedMusculoskeletalItems } from './risk-scale.js';
 import { selectBatchDocuments, selectBatchItems, siteDocumentsForDay } from './batch-print.js';
@@ -96,7 +97,7 @@ const esc = (v) => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&
 const today = () => new Date(Date.now() - new Date().getTimezoneOffset()*60000).toISOString().slice(0,10);
 async function api(path, options={}, currentScope=()=>true) {
   const res=await fetch(path,{...options,headers:{'Content-Type':'application/json',...(options.headers||{})}});
-  const data=await res.json();if(!currentScope())return; if(res.status===401){if(dialog.open)throw new Error('로그인이 만료되었습니다. 다른 탭에서 다시 로그인한 뒤 저장해 주세요.');location.assign('/login');throw new Error('관리자 로그인이 필요합니다.');} if(!res.ok) throw new Error(data.error || '요청에 실패했습니다.'); return data;
+  const data=await res.json();if(!currentScope())return; if(res.status===401){if(dialog.open||document.querySelector('dialog[open]'))throw new Error('로그인이 만료되었습니다. 다른 탭에서 다시 로그인한 뒤 저장해 주세요.');location.assign('/login');throw new Error('관리자 로그인이 필요합니다.');} if(!res.ok) throw new Error(data.error || '요청에 실패했습니다.'); return data;
 }
 function flash(message, error=false) { notice.textContent=message; notice.className=error?'error':''; }
 // 출역 표를 다시 그려도 저장한 행 외의 다른 행에서 고치던 값은 유지한다.
@@ -314,6 +315,7 @@ async function editDocument(doc=null,initialDetails={},initialType=null) {
       data.details=Object.fromEntries(Object.keys(permitFields).map(key=>[key,data[key]||'']));data.details.companyId=companyId;data.details.directWork=directWork;if(directWork)data.details.company='';else if(company)data.details.company=company.name;
       data.details.kinds=[...document.querySelectorAll('[data-permit-kind]:checked')].map(input=>input.value);data.details.safetyMeasures=[...document.querySelectorAll('[data-permit-safety]')].map(row=>Object.fromEntries(['accidentType','hazard','measure'].map(key=>[key,row.querySelector(`[data-permit-safety-field="${key}"]`).value])));
       for(const [key,selector] of [['permitWorkerIds','[data-permit-worker]:checked'],['permitEquipmentIds','[data-permit-equipment]:checked'],['permitRiggingIds','[data-permit-rigging]:checked']])data.details[key]=[...document.querySelectorAll(selector)].map(input=>Number(input.value));
+      if($('#dialog-form').permitMeasureSources?.length)data.permitMeasureSources=$('#dialog-form').permitMeasureSources;
       delete data.permitCompany;
     }
     if(data.type==='work_plan'){data.details=Object.fromEntries(Object.keys(planFields).map(key=>[key,data[key]||'']));data.details.equipmentIds=[...document.querySelectorAll('[data-plan-equipment]:checked')].map(input=>Number(input.value));data.details.riggingIds=[...document.querySelectorAll('[data-plan-rigging]:checked')].map(input=>Number(input.value));data.details.workPlaceId=Number(data.workPlaceId||0);data.details.workKinds=[...document.querySelectorAll('[data-work-kind]:checked')].map(input=>input.value);data.details.timeFrom=data.timeFrom||'';data.details.timeTo=data.timeTo||'';}
@@ -509,6 +511,7 @@ async function editDocument(doc=null,initialDetails={},initialType=null) {
       $('#daily-fields').insertAdjacentHTML('beforeend','<fieldset><legend>시험 위험요인과 안전대책</legend><p>직접 입력한 가상 기록이며 위험작업별 점검표가 자동 생성되지는 않습니다.</p><button type="button" id="permit-source-load">승인된 이전 허가서 조회</button><div id="permit-source-list" aria-live="polite"></div><div id="permit-safety"></div><button type="button" id="permit-safety-add">항목 추가</button></fieldset>');
       const addSafety=row=>{const container=$('#permit-safety');container.insertAdjacentHTML('beforeend',`<fieldset data-permit-safety>${[['accidentType','재해 유형'],['hazard','위험요인'],['measure','안전대책']].map(([key,label])=>`<label>${label}<textarea data-permit-safety-field="${key}" maxlength="2000">${esc(row[key]||'')}</textarea></label>`).join('')}<button type="button" data-remove-permit-safety>삭제</button></fieldset>`);container.lastElementChild.querySelector('[data-remove-permit-safety]').onclick=e=>e.currentTarget.closest('[data-permit-safety]').remove();};
       (details.safetyMeasures||[]).forEach(addSafety);$('#permit-safety-add').onclick=()=>addSafety({});
+      if(typeof mountPermitMeasures==='function')mountPermitMeasures({host:$('#daily-fields'),api,siteId,contextTargets:[[siteSelect,'change'],[dialog,'close'],[select,'change']],current:()=>dialog.open&&state.siteId===siteId&&state.page===page&&select.value==='permit',addSafety,count:()=>document.querySelectorAll('[data-permit-safety]').length,onSources:rows=>{$('#dialog-form').permitMeasureSources=rows;},esc});
       const sourceList=$('#permit-source-list');let sourceSequence=0,sources=[],sourceContext=null;
       const sourceCurrent=()=>sourceContext&&dialog.open&&sourceList.isConnected&&state.siteId===siteId&&state.page===page&&select.value==='permit'&&$('#dialog-form input[name=date]').value===sourceContext.date;
       $('#permit-source-load').onclick=async()=>{const date=$('#dialog-form input[name=date]').value,sequence=++sourceSequence;sourceContext=null;sources=[];sourceList.textContent='';if(!date){sourceList.textContent='작성일을 먼저 입력해 주세요.';return;}sourceContext={date};sourceList.textContent='불러오는 중';try{const params=new URLSearchParams({siteId:String(siteId),type:'permit',to:date}),rows=await api('/api/documents?'+params);if(sequence!==sourceSequence||!sourceCurrent())return;sources=permitSources(rows,siteId,date,doc?.id);sourceList.innerHTML=sources.length?sources.map((item,i)=>'<p>'+esc(item.date)+' · '+esc(item.title)+' <button type="button" data-permit-source="'+i+'">안전대책 추가</button></p>').join(''):'<p>같은 현장의 승인된 이전 허가서가 없습니다.</p>';}catch(error){if(sequence===sourceSequence&&sourceCurrent())sourceList.textContent=error.message;}};
