@@ -18,6 +18,19 @@ export function adminSitePolicy(db,req,url,session){
   const worker=path.match(/^\/api\/workers\/([1-9]\d*)$/);
   const fields=keys=>input&&Object.keys(input).every(key=>keys.includes(key));
   const workerSite=(id,siteId)=>positive(id)&&allowed(siteId)&&db.prepare('SELECT 1 FROM workers WHERE id=? AND site_id=?').get(Number(id),Number(siteId));
+  const qr=path.match(/^\/api\/sites\/([1-9]\d*)\/(access(?:\/(?:status|rotate|registration))?|invitation)$/);
+  if(qr){
+    if([...url.searchParams.keys()].some(key=>key!=='siteId'))return denied();
+    if(!allowed(qr[1])||url.searchParams.has('siteId')&&Number(url.searchParams.get('siteId'))!==Number(qr[1]))return denied();
+    const valid=qr[2]==='access/status'?method==='GET':qr[2]==='invitation'?['POST','DELETE'].includes(method):method==='POST';
+    return valid&&(input===undefined||fields([]))?null:denied();
+  }
+  if(path==='/api/attendance/month'&&method==='GET'&&([...url.searchParams.keys()].some(key=>!['siteId','month'].includes(key))||url.searchParams.getAll('month').length!==1))return denied();
+  if(path==='/api/attendance/month/details'&&method==='PUT'){
+    if([...url.searchParams.keys()].some(key=>key!=='siteId'))return denied();
+    if(input===undefined)return null;
+    return fields(['siteId','workerId','month','expectedVersion','category','company','occupation'])&&workerSite(input.workerId,input.siteId)&&typeof input.month==='string'&&/^\d{4}-(0[1-9]|1[0-2])$/.test(input.month)&&typeof input.expectedVersion==='string'&&/^[a-f0-9]{64}$/.test(input.expectedVersion)?null:denied();
+  }
   if(method==='GET'&&['/api/workers','/api/workers/list','/api/attendance','/api/attendance/month'].includes(path))return site(url.searchParams.get('siteId'));
   if(worker&&method==='GET')return workerSite(worker[1],url.searchParams.get('siteId'))?null:denied();
   if(path==='/api/workers'&&method==='POST'||worker&&method==='PUT'){

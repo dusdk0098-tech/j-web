@@ -49,7 +49,7 @@ function applyAdminScope(admin) {
   state.admin={...admin,scope:admin?.scope==='global'?'global':'restricted'};
   const global=admin?.scope==='global';
   document.querySelectorAll('[data-page]').forEach(button=>{button.hidden=!global&&!['documents','workers','attendance'].includes(button.dataset.page);});
-  for(const selector of ['#site-add','#site-qr','#sticker-requests','#ai-chat'])$(selector).hidden=!global;
+  for(const selector of ['#site-add','#sticker-requests','#ai-chat'])$(selector).hidden=!global;
   if(!global){state.page='documents';state.detail=null;document.querySelector('.sidebar-help').textContent='배정 현장의 문서 요약·일반 공지 임시저장, 근로자 기본정보, 날짜별 출역·공수를 관리합니다. 다른 기능은 전역 관리자에게 요청하세요.';}
 }
 let sitePhotoEpoch=0,workerListEpoch=0,detailEpoch=0,workerSelfCheckEpoch=0,ppeDetailEpoch=0,workerEditEpoch=0,joinRecordEpoch=0;
@@ -157,6 +157,7 @@ $('#site-qr').textContent='현장 QR';
 $('#site-qr').insertAdjacentHTML('afterend','<button type="button" id="sticker-requests" class="outline">QR 스티커 신청</button>');
 mountStickerRequests({button:$('#sticker-requests'),api,siteSelect,site:()=>state.siteId?{id:state.siteId,name:siteSelect.selectedOptions[0].textContent}:null,currentSite:()=>state.siteId});
 $('#site-qr').onclick=async event=>{
+  if(state.admin?.scope==='restricted')return showRestrictedQr();
   if(!state.siteId){flash('먼저 현장을 선택해 주세요.',true);return;}
   const button=event.currentTarget;button.disabled=true;
   try {
@@ -904,6 +905,48 @@ async function renderAllSiteStatistics(siteId,from,to,month,day){
   section.innerHTML=`<h2>전체 현장 가상 출역</h2><p class="muted">${esc(from)} ~ ${esc(to)}의 기록 당시 구분별 출역 인일입니다. 외주는 협력업체 근로자와 기존 외주 기록이며, 협력업체 관리자 등 다른 구분은 별도로 표시합니다.</p><div class="table-wrap"><table><thead><tr><th>현장</th><th>교육 통계</th><th>직영</th><th>외주</th><th>그 외 구분</th><th>합계</th></tr></thead><tbody>${sites.map(row=>`<tr><td>${esc(row.name)}</td><td><button type="button" data-site-education="${row.id}">상세보기</button></td><td>${row.direct}</td><td>${row.external}</td><td>${describe(row.other)}</td><td>${row.total}</td></tr>`).join('')}<tr><th>전체 합계</th><td></td><td>${totals.direct}</td><td>${totals.external}</td><td>${describe(totals.other)}</td><td>${totals.total}</td></tr></tbody></table></div>`;anchor.before(section);
   section.querySelectorAll('[data-site-education]').forEach(button=>button.onclick=async()=>{const target=Number(button.dataset.siteEducation);state.siteId=target;state.statisticsDay='';state.detail=null;state.workerFilters={};state.wageFilters={};try{await render();if(state.page==='statistics'&&state.siteId===target)content.querySelector('#education-report')?.scrollIntoView({block:'start'});}catch(error){showError(error);}});
 }
+async function showRestrictedQr(){
+  if(!state.siteId){flash('먼저 현장을 선택해 주세요.',true);return;}
+  const siteId=state.siteId,admin=state.admin,epoch=detailEpoch;
+  const scope=()=>state.siteId===siteId&&state.admin===admin&&detailEpoch===epoch;
+  showDialog('배정 현장 QR·가입 관리','<p>교체하면 기존 접속 주소가 중지됩니다.</p><div id="restricted-qr-result"></div><p id="restricted-qr-status" role="status"></p><div class="filters">'+[['access','현장 QR 조회'],['status','상태 확인'],['openRegistration','현장 QR 가입 열기'],['invite','별도 가입 QR 발급'],['rotate','현장 QR 교체'],['revoke','가입 QR 모두 중지']].map(([key,label])=>`<button type="button" data-restricted-qr="${key}">${label}</button>`).join('')+'</div>',async()=>{},scope);
+  $('#dialog-form button[type=submit]').textContent='닫기';
+  const submit=$('#dialog-form').onsubmit,current=()=>scope()&&dialog.open&&$('#dialog-form').onsubmit===submit;
+  const session=siteQrSession(siteId,siteSelect.selectedOptions[0].textContent,(path,options)=>api(path,options,current));let busy=false;
+  for(const button of document.querySelectorAll('[data-restricted-qr]'))button.onclick=async()=>{
+    if(!current()||busy)return;
+    const kind=button.dataset.restrictedQr;
+    if(['rotate','revoke'].includes(kind)&&!confirm(kind==='rotate'?'기존 접속 주소가 중지됩니다. 새 QR을 다시 전달해야 합니다. 교체할까요?':'이 현장의 모든 가입 QR과 현장 QR 가입을 중지할까요?'))return;
+    busy=true;$('#restricted-qr-result').innerHTML='';$('#restricted-qr-status').textContent='확인 중입니다.';$('#dialog-error').textContent='';
+    try{const result=await session[kind]();if(!current())return;
+      if(result?.image&&result?.link)$('#restricted-qr-result').innerHTML=`<img alt="배정 현장 ${kind==='invite'?'가입':'접속'} QR" style="max-width:100%;height:auto" src="${esc(result.image)}"><p style="overflow-wrap:anywhere">${esc(result.link)}</p>`;
+      $('#restricted-qr-status').textContent=kind==='revoke'?'가입을 중지했습니다.':result?.registrationExpiresAt||result?.expiresAt?`가입 가능 기한: ${new Date(result.registrationExpiresAt||result.expiresAt).toLocaleString('ko-KR')}`:kind==='status'?'상태를 확인했습니다. 현재 현장 QR 가입은 닫혀 있습니다.':'처리했습니다. 상태 확인으로 가입 기한을 확인할 수 있습니다.';
+    }catch(error){if(current()){$('#restricted-qr-result').innerHTML='';$('#restricted-qr-status').textContent='확인하지 못했습니다. 다시 시도해 주세요.';$('#dialog-error').textContent=error.message;}}
+    finally{busy=false;}
+  };
+}
+async function showRestrictedMonth(scope){
+  if(!scope())return;
+  const siteId=state.siteId;
+  showDialog('배정 현장 월별 출역','<label>조회 월<input type="month" id="restricted-month" required value="'+esc(state.attendanceMonth||today().slice(0,7))+'"></label><button type="button" id="restricted-month-load">조회·새로고침</button><p id="restricted-month-status" role="status"></p><div id="restricted-month-results"></div>',async()=>{},scope);
+  $('#dialog-form button[type=submit]').textContent='닫기';
+  const submit=$('#dialog-form').onsubmit,current=()=>scope()&&dialog.open&&$('#dialog-form').onsubmit===submit;let sequence=0;
+  $('#restricted-month-load').onclick=async()=>{
+    if(!current())return;
+    const month=$('#restricted-month').value;
+    if(!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)||Number(month.slice(0,4))<1){$('#dialog-error').textContent='올바른 조회 월을 선택해 주세요.';return;}
+    const request=++sequence;$('#restricted-month-results').innerHTML='';$('#restricted-month-status').textContent='조회 중입니다.';$('#dialog-error').textContent='';
+    try{const rows=await api(`/api/attendance/month?siteId=${siteId}&month=${month}`,{},current);if(!current()||request!==sequence)return;
+      state.attendanceMonth=month;$('#restricted-month-status').textContent=`${month} · ${rows.length}명`;
+      $('#restricted-month-results').innerHTML=rows.length?'<ul>'+rows.map(row=>`<li>${esc(row.name)} · ${row.days.length}일 <button type="button" data-restricted-month-worker="${row.id}">${esc(row.name)} 월 정보 변경</button><ul>${row.units.map(record=>`<li>${esc(record.date)} · ${esc(record.category)} · ${esc(record.company)} · ${esc(record.occupation)} · 공수 ${record.units_hundredths==null?'미입력':esc(record.units_hundredths/100)}</li>`).join('')}</ul></li>`).join('')+'</ul>':'<p>등록된 근로자가 없습니다.</p>';
+      document.querySelectorAll('[data-restricted-month-worker]').forEach(button=>button.onclick=()=>{
+        if(!current())return;const row=rows.find(row=>row.id===Number(button.dataset.restrictedMonthWorker));
+        showDialog('월별 출역 정보 변경',`<p>${esc(row.name)} · ${esc(month)}</p><p>이 달에 이미 등록된 출역 기록만 변경합니다. 빈 항목은 유지합니다. 일별 출역·공수는 출역 화면에서 날짜를 선택해 수정하세요.</p>${field('category','변경할 구분','','text',false)}${field('company','변경할 소속','','text',false)}${field('occupation','변경할 직종','','text',false)}<p>동시 변경 시 입력은 보존됩니다. 내용을 복사한 뒤 닫고 월별 출역을 다시 조회해 주세요.</p>`,data=>api('/api/attendance/month/details',{method:'PUT',body:JSON.stringify({siteId,workerId:row.id,month,expectedVersion:row.version,...Object.fromEntries(['category','company','occupation'].filter(key=>data[key]?.trim()).map(key=>[key,data[key]]))})},scope),scope);
+      });
+    }catch(error){if(current()&&request===sequence){$('#restricted-month-status').textContent='조회하지 못했습니다. 다시 시도해 주세요.';$('#dialog-error').textContent=error.message;}}
+  };
+  await $('#restricted-month-load').onclick();
+}
 async function renderRestrictedWorkforce(){
   const epoch=detailEpoch,siteId=state.siteId,page=state.page,admin=state.admin,date=state.attendanceDate||today();
   const current=()=>detailEpoch===epoch&&state.siteId===siteId&&state.page===page&&state.admin===admin;
@@ -918,6 +961,8 @@ async function renderRestrictedWorkforce(){
     content.querySelectorAll('[data-restricted-worker]').forEach(button=>button.onclick=()=>editWorker(rows.find(row=>row.id===Number(button.dataset.restrictedWorker))));return;
   }
   content.innerHTML=`<section class="panel"><h2>배정 현장 출역</h2><label>조회일<input type="date" id="restricted-attendance-date" value="${esc(date)}" required></label><button type="button" id="restricted-attendance-search">조회</button><p>근로자별 출역 여부와 공수를 저장합니다. 공수는 출역 등록 후 입력할 수 있습니다.</p>${rows.length?'<ul>'+rows.map(row=>`<li>${esc(row.name)} · ${row.present?'출역':'미출역'} · 공수 ${row.units_hundredths==null?'미입력':esc(row.units_hundredths/100)} <button type="button" data-restricted-presence="${row.id}" aria-label="${esc(row.name)} 출역 수정">출역 등록·수정</button> ${row.present?`<button type="button" data-restricted-units="${row.id}" aria-label="${esc(row.name)} 공수 수정">공수 수정</button>`:''}</li>`).join('')+'</ul>':'<p>등록된 근로자가 없습니다. 근로자를 먼저 등록해 주세요.</p>'}</section>`;
+  content.insertAdjacentHTML('afterbegin','<button type="button" id="restricted-month-open">월별 출역 보기·변경</button>');
+  $('#restricted-month-open').onclick=()=>showRestrictedMonth(current);
   $('#restricted-attendance-search').onclick=()=>{if(!current())return;const input=$('#restricted-attendance-date');if(!input.value){flash('조회일을 선택해 주세요.',true);return;}state.attendanceDate=input.value;render().catch(showError);};
   for(const kind of ['presence','units'])content.querySelectorAll(`[data-restricted-${kind}]`).forEach(button=>button.onclick=()=>{
     if(!current())return;const row=rows.find(row=>row.id===Number(button.dataset[kind==='presence'?'restrictedPresence':'restrictedUnits']));
@@ -941,7 +986,7 @@ async function render(){
   permitRoleCleanup?.();permitRoleCleanup=null;
   detailEpoch++;
   const renderEpoch=detailEpoch;
-  if(state.admin?.scope==='restricted'&&dialog.open)dialog.close();
+  if(state.admin?.scope==='restricted'&&dialog.open){dialog.close();$('#dialog-body').innerHTML='';}
   if(state.admin?.scope==='restricted'||state.page==='admins')content.textContent='접근 가능한 자료를 확인하는 중입니다.';
   workerListEpoch++;document.querySelector('dialog.worker-preview[open]')?.close();
   sitePhotoEpoch++;document.querySelector('dialog.site-photo-viewer[open]')?.close();

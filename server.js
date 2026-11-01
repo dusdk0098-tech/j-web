@@ -106,11 +106,11 @@ function dailyReportPhoto(doc,kind,id){
   const version=createHash('sha256').update(JSON.stringify([doc.id,doc.site_id,doc.date,kind,file.id,file.name,file.description||''])).update(bytes).digest('hex');
   return {id:file.id,kind,name:file.name,description:kind==='site'?file.description:'',type,version,bytes};
 }
-async function body(req,max=65536) {
+async function body(req,max=65536,allowEmpty=false) {
   const chunks=[];let size=0;
   for await (const chunk of req) { size+=chunk.length;if(size>max)throw new Error('입력 내용이 너무 깁니다.');chunks.push(chunk); }
   checkRequestSession(req);
-  let parsed;try { const raw=new TextDecoder('utf-8',{fatal:true}).decode(Buffer.concat(chunks));const value = JSON.parse(raw); if (!value || typeof value !== 'object' || Array.isArray(value)) throw Error(); parsed=value; } catch { throw new Error('입력 형식이 올바르지 않습니다.'); }
+  let parsed;try { const raw=new TextDecoder('utf-8',{fatal:true}).decode(Buffer.concat(chunks));const value = raw===''&&allowEmpty?{}:JSON.parse(raw); if (!value || typeof value !== 'object' || Array.isArray(value)) throw Error(); parsed=value; } catch { throw new Error('입력 형식이 올바르지 않습니다.'); }
   req.adminInput=parsed;checkRequestSession(req);return parsed;
 }
 async function handleCommonWork(req,res,url,prefix,actor=null){
@@ -651,6 +651,7 @@ const server = http.createServer((req,res)=>adminRequests.run(req,async()=>{
     const registrationSite=url.pathname.match(/^\/api\/sites\/(\d+)\/access\/registration$/);
     const accessSite=url.pathname.match(/^\/api\/sites\/(\d+)\/access(?:\/(rotate))?$/);
     const accessStatus=url.pathname.match(/^\/api\/sites\/(\d+)\/access\/status$/);
+    if(req.adminRestricted&&((registrationSite||accessSite||inviteSite)&&['POST','DELETE'].includes(req.method)))await body(req,65536,true);
     if(accessStatus&&req.method==='GET'){const key=store.siteAccessForIssue(accessStatus[1]),registrationExpiresAt=store.siteRegistrationExpiry(accessStatus[1]);checkRequestSession(req);return json(res,200,{accessFingerprint:key?createHash('sha256').update(key).digest('hex'):null,registrationExpiresAt});}
     if(registrationSite&&req.method==='POST')return json(res,200,{expiresAt:store.openSiteRegistration(registrationSite[1],()=>checkRequestSession(req))});
     if(accessSite&&req.method==='POST'){const result=await issueAccessQr(store,accessSite[1],requestOrigin,!!accessSite[2],link=>QRCode.toDataURL(link,{errorCorrectionLevel:'M',margin:4,width:512}),()=>checkRequestSession(req));checkRequestSession(req);return result?json(res,200,result):json(res,409,{error:'현장 주소가 변경되었습니다. QR을 다시 열어 주세요.'});}
