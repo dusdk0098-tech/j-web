@@ -571,6 +571,8 @@ const server = http.createServer(async (req, res) => {
     if(locationEvents){if(!locationEvents[2]&&req.method==='GET')return json(res,200,store.workerLocationEvents(locationEvents[1],url.searchParams.get('date')));if(locationEvents[2]&&req.method==='DELETE'){store.deleteWorkerLocationEvent(locationEvents[1],locationEvents[2],()=>checkRequestSession(req));return json(res,200,{ok:true});}}
     const registrationSite=url.pathname.match(/^\/api\/sites\/(\d+)\/access\/registration$/);
     const accessSite=url.pathname.match(/^\/api\/sites\/(\d+)\/access(?:\/(rotate))?$/);
+    const accessStatus=url.pathname.match(/^\/api\/sites\/(\d+)\/access\/status$/);
+    if(accessStatus&&req.method==='GET'){const key=store.siteAccessForIssue(accessStatus[1]),registrationExpiresAt=store.siteRegistrationExpiry(accessStatus[1]);checkRequestSession(req);return json(res,200,{accessFingerprint:key?createHash('sha256').update(key).digest('hex'):null,registrationExpiresAt});}
     if(registrationSite&&req.method==='POST')return json(res,200,{expiresAt:store.openSiteRegistration(registrationSite[1],()=>checkRequestSession(req))});
     if(accessSite&&req.method==='POST'){const result=await issueAccessQr(store,accessSite[1],requestOrigin,!!accessSite[2],link=>QRCode.toDataURL(link,{errorCorrectionLevel:'M',margin:4,width:512}),()=>checkRequestSession(req));checkRequestSession(req);return result?json(res,200,result):json(res,409,{error:'현장 주소가 변경되었습니다. QR을 다시 열어 주세요.'});}
     if (inviteSite && req.method === 'POST') {

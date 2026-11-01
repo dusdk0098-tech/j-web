@@ -7,6 +7,7 @@ test('현장 QR 조회는 초대를 발급하지 않고 해당 현장의 명시�
   assert.deepEqual(calls,[]);await session.access();assert.deepEqual(calls,[{path:'/api/sites/7/access',method:'POST'}]);
   await session.openRegistration();await session.invite();await session.rotate();await session.revoke();
   assert.deepEqual(calls.slice(1),[{path:'/api/sites/7/access/registration',method:'POST'},{path:'/api/sites/7/invitation',method:'POST'},{path:'/api/sites/7/access/rotate',method:'POST'},{path:'/api/sites/7/invitation',method:'DELETE'}]);
+  await session.status();assert.deepEqual(calls.at(-1),{path:'/api/sites/7/access/status',method:'GET'});
 });
 
 test('응답을 기다리는 동안 다른 현장을 선택해도 원래 현장의 QR 동작을 유지한다',async()=>{
@@ -17,7 +18,7 @@ test('응답을 기다리는 동안 다른 현장을 선택해도 원래 현장�
 
 test('같은 QR 창의 요청이 끝나기 전에는 다른 변경을 시작하지 않는다',async()=>{
   let release;const calls=[],session=siteQrSession(1,'가상 현장',(path)=>{calls.push(path);return new Promise(resolve=>{release=resolve;});});
-  const pending=session.access();await assert.rejects(session.rotate(),/처리 중/);await assert.rejects(session.revoke(),/처리 중/);assert.deepEqual(calls,['/api/sites/1/access']);
+  const pending=session.access();await assert.rejects(session.rotate(),/처리 중/);await assert.rejects(session.revoke(),/처리 중/);await assert.rejects(session.status(),/처리 중/);assert.deepEqual(calls,['/api/sites/1/access']);
   release({});await pending;const next=session.rotate();release({});await next;assert.deepEqual(calls,['/api/sites/1/access','/api/sites/1/access/rotate']);
 });
 
