@@ -25,6 +25,7 @@ test('실행 중 DB의 일관된 사본을 만들고 별도 폴더에서 문서�
   const path=join(sourceDir,'jweb.sqlite'),archive=join(backupDir,'copy.sqlite');let store=new Store(path),child,locked=false;
   try{
     const site=store.createSite({name:'가상 현장'}),worker=store.createWorker({siteId:site.id,name:'가상 근로자',category:'직영',company:'가상 업체',occupation:'가상 직종'}),reviewer=store.createReviewer({siteId:site.id,loginId:'virtual_reviewer',name:'가상 직원',password:'virtual-password-123'}),doc=store.createDocument({siteId:site.id,type:'tbm',title:'가상 문서',date:'2026-10-01',body:'가상 내용'}),attachment=store.addAttachment(doc.id,'가상.txt',Buffer.from('가상 첨부'));
+    const equipment=store.createEquipment({siteId:site.id,kind:'가상 장비',model:'가상 모델',capacity:'',manufacturer:'',registration:'가상 번호'}),attendance=store.saveEquipmentAttendance({siteId:site.id,equipmentId:equipment.id,date:'2026-10-01',driverName:'가상 운전원',driverBirth:'2000-01-01',driverPhone:'010-0000-0000',note:'가상 비고'});store.updateEquipment(equipment.id,{siteId:site.id,kind:'가상 장비',model:'변경된 모델',capacity:'',manufacturer:'',registration:'가상 번호'});
     const invitation=store.createInvitation(site.id),siteKey=store.siteAccessKey(site.id);store.openSiteRegistration(site.id);
     const salt=Buffer.alloc(16,1);store.db.prepare('INSERT INTO worker_accounts(worker_id,site_id,login_id,salt,password_hash) VALUES(?,?,?,?,?)').run(worker.id,site.id,'virtual_worker',salt,scryptSync('virtual-password-123',salt,32));
     const workerToken='A'.repeat(43),reviewerToken='B'.repeat(43),hash=token=>createHash('sha256').update(token).digest('hex'),workerHash=hash(workerToken),reviewerHash=hash(reviewerToken),expires=Date.now()+3600000;
@@ -50,6 +51,7 @@ test('실행 중 DB의 일관된 사본을 만들고 별도 폴더에서 문서�
     const restore=documented(sourceDir,'restore',archive,restoreDir);assert.equal(restore.status,0,restore.stderr);
     const restored=new Store(join(restoreDir,'jweb.sqlite'));try{
       assert.equal(restored.document(doc.id).title,'가상 문서');assert.deepEqual(Buffer.from(restored.attachment(attachment).data),Buffer.from('가상 첨부'));
+      const restoredAttendance=restored.equipmentAttendance(site.id,'2026-10');assert.equal(restoredAttendance.length,1);assert.equal(restoredAttendance[0].id,attendance.id);assert.equal(restoredAttendance[0].equipment_snapshot.model,'가상 모델');assert.equal(restoredAttendance[0].driver_name,'가상 운전원');assert.equal(restored.equipment(site.id)[0].model,'변경된 모델');
       assert.equal(restored.db.prepare('SELECT count(*) AS n FROM worker_sessions').get().n,0);assert.equal(restored.db.prepare('SELECT count(*) AS n FROM reviewer_sessions').get().n,0);
       assert.equal(restored.db.prepare('SELECT count(*) AS n FROM client_sessions').get().n,0);
       assert.equal(restored.siteFromAccess(siteKey),null);assert.match(restored.siteAccessKey(site.id),/^[\w-]{43}$/);assert.notEqual(restored.siteAccessKey(site.id),siteKey);
@@ -61,6 +63,7 @@ test('실행 중 DB의 일관된 사본을 만들고 별도 폴더에서 문서�
     await Promise.race([once(child.stdout,'data'),once(child,'exit').then(()=>{throw Error('복원 시험 서버가 종료됐습니다.');})]);
     const root=`http://127.0.0.1:${port}`,login=await fetch(root+'/api/login',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({password:'virtual-admin-password'})}),cookie=login.headers.get('set-cookie').split(';')[0],sites=await (await fetch(root+'/api/sites',{headers:{cookie}})).json();
     assert.equal(login.status,200);assert.equal(sites[0].name,'가상 현장');
+    const attendanceResponse=await fetch(root+`/api/equipment-attendance?siteId=${site.id}&month=2026-10`,{headers:{cookie}});assert.equal(attendanceResponse.status,200);const attendanceRows=await attendanceResponse.json();assert.equal(attendanceRows.length,1);assert.equal(attendanceRows[0].equipment_snapshot.model,'가상 모델');assert.equal(attendanceRows[0].driver_name,'가상 운전원');
     assert.equal((await fetch(root+'/api/worker/session',{headers:{cookie:`jweb_worker=${workerToken}`}})).status,401);
     assert.equal((await fetch(root+'/api/reviewer/session',{headers:{cookie:`jweb_reviewer=${reviewerToken}`}})).status,401);
     assert.equal((await fetch(root+'/api/client/session',{headers:{cookie:`jweb_client=${clientToken}`}})).status,401);
