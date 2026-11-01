@@ -15,14 +15,18 @@ import { runInNewContext } from 'node:vm';
 test('FAQ 이관과 분류·검색·구형 수정·첨부·댓글·충돌 보존',()=>{
   const dir=mkdtempSync(join(tmpdir(),'jweb-faq-')),file=join(dir,'test.sqlite');let store=new Store(file);
   try{
-    const legacy=store.saveBoardPost({kind:'notice',title:'가상 기존 공지',body:'기존 내용',secret:false});store.close();const old=new DatabaseSync(file);old.exec('ALTER TABLE board_posts DROP COLUMN category');old.close();store=new Store(file);
+    const legacy=store.saveBoardPost({kind:'notice',title:'가상 기존 공지',body:'기존 내용',secret:false});store.close();const old=new DatabaseSync(file);old.exec('ALTER TABLE board_posts DROP COLUMN category; ALTER TABLE board_posts DROP COLUMN highlighted');old.close();store=new Store(file);
     assert.equal(store.boardPosts('notice')[0].id,legacy.id);assert.equal(store.boardPosts('notice')[0].shared,0);
     const site=store.createSite({name:'가상 현장'}),actor=store.createReviewer({siteId:site.id,loginId:'faq_actor',name:'가상 직원',password:'virtual-password-123'}),input={kind:'faq',title:'가상 검색 안내',body:'가상 내용',secret:false};
-    const hidden=store.saveBoardPost({...input,category:'결제'}),visible=store.saveBoardPost({...input,category:'서비스이용',shared:true});
+    const hidden=store.saveBoardPost({...input,category:'결제',highlighted:true}),visible=store.saveBoardPost({...input,category:'서비스이용',shared:true});
     assert.deepEqual(store.reviewerBoardPosts(actor,'faq','검색','결제'),[]);assert.deepEqual(store.reviewerBoardPosts(actor,'faq','검색','서비스이용').map(r=>r.id),[visible.id]);assert.deepEqual(store.boardPosts('faq','검색','결제').map(r=>r.id),[hidden.id]);assert.deepEqual(store.boardPosts('faq','없는말','결제'),[]);assert.equal(store.boardPosts('notice').length,1);
-    const updated=store.saveBoardPost({...input,title:'가상 구형 수정',expectedVersion:hidden.version},hidden.id);assert.equal(updated.category,'결제');assert.equal(updated.shared,0);assert.throws(()=>store.saveBoardPost({...input,category:'서비스이용',expectedVersion:hidden.version},hidden.id),e=>e.sessionStatus===409);assert.equal(store.boardPosts('faq','','결제')[0].title,'가상 구형 수정');
+    const updated=store.saveBoardPost({...input,title:'가상 구형 수정',expectedVersion:hidden.version},hidden.id);assert.equal(updated.highlighted,1);assert.equal(updated.category,'결제');assert.deepEqual(store.faqPosts('무일치','서비스이용').map(r=>r.id),[hidden.id]);assert.deepEqual(store.faqPosts('무일치','서비스이용',actor),[]);assert.equal(store.boardPosts('notice')[0].highlighted,0);assert.throws(()=>store.saveBoardPost({...input,highlighted:'on'}));assert.throws(()=>store.saveBoardPost({...input,kind:'notice',highlighted:true}));assert.equal(updated.shared,0);assert.throws(()=>store.saveBoardPost({...input,category:'서비스이용',expectedVersion:hidden.version},hidden.id),e=>e.sessionStatus===409);assert.equal(store.boardPosts('faq','','결제')[0].title,'가상 구형 수정');
     for(const category of ['전체','비밀분류',null,{},''])assert.throws(()=>store.saveBoardPost({...input,category}));assert.throws(()=>store.boardPosts('faq','','비밀분류'));assert.throws(()=>store.saveReviewerBoardPost(actor,input));assert.throws(()=>store.deleteReviewerBoardPost(actor,'faq',visible.id,visible.version));
     store.addBoardComment(visible.id,{body:'가상 댓글',postVersion:visible.version},actor);assert.equal(store.boardComments(visible.id,visible.version,actor).length,1);store.addBoardAttachment(visible.id,visible.version,'가상.txt',Buffer.from('virtual'));assert.equal(store.boardAttachments(visible.id,visible.version,actor).length,1);assert.throws(()=>store.boardAttachments(hidden.id,updated.version,actor));assert.throws(()=>store.boardComments(hidden.id,updated.version,actor));assert.throws(()=>store.addBoardAttachment(visible.id,visible.version,'가상.txt',Buffer.from('virtual'),actor));
+    const tops=Array.from({length:3},(_,i)=>store.saveBoardPost({...input,title:'가상 상단 '+i,category:i===1?'결제':'서비스이용',highlighted:true,shared:true}));
+    store.saveBoardPost({...input,kind:'general',title:'가상 일반글',shared:true});
+    for(const category of ['','서비스이용','결제'])for(const query of ['','무일치'])assert.deepEqual(store.faqPosts(query,category,actor).filter(r=>r.highlighted).map(r=>r.id),tops.map(r=>r.id).reverse());
+    assert.equal(store.faqPosts('', '',actor).some(r=>r.kind!=='faq'),false);assert.equal(store.boardPosts('general').length,1);
     store.close();store=new Store(file);assert.equal(store.boardPosts('faq','','결제')[0].category,'결제');
   }finally{store.close();rmSync(dir,{recursive:true,force:true});}
 });
@@ -63,6 +67,18 @@ test('FAQ HTTP는 관리자 공개·직원 조회와 쓰기 거부를 보장한�
     for(const rows of [adminFaq,staffFaq]){assert.deepEqual([1,2,3].flatMap(page=>faqPage(rows,page).rows.map(row=>row.id)),rows.map(row=>row.id));assert.equal(faqPage(rows,3).rows.length,rows.length-20);}
     const filtered=await (await send(path+'?'+new URLSearchParams({kind:'faq',category:'서비스이용',q:'페이지'}),'GET',undefined,one)).json();assert.equal(filtered.length,12);assert.equal(faqPage(filtered,2).rows.length,2);assert.equal(filtered.every(row=>row.category==='서비스이용'),true);
     const searched=await (await send(path+'?'+new URLSearchParams({kind:'faq',category:'결제',q:'페이지 가상 23'}),'GET',undefined,one)).json();assert.equal(searched.length,1);assert.equal(faqPage(searched,3).page,1);
+    const highlightInput={kind:'faq',title:'가상 상단',body:'상단 내용',secret:false,shared:true,highlighted:true,category:'결제'};
+    const highlighted=await (await send('/api/board-posts','POST',highlightInput,admin)).json();
+    for(const cookie of [one,two]){const top=await (await send('/api/reviewer/faq-posts?'+new URLSearchParams({q:'무일치',category:'서비스이용'}),'GET',undefined,cookie)).json();assert.deepEqual(top.map(r=>r.id),[highlighted.id]);}
+    assert.deepEqual(await (await send(path+'?kind=faq&q='+encodeURIComponent('무일치'),'GET',undefined,one)).json(),[]);
+    const legacyEdit={kind:'faq',title:'가상 상단 수정',body:'상단 내용',secret:false,expectedVersion:highlighted.version};
+    const legacyTop=await (await send('/api/board-posts/'+highlighted.id,'PUT',legacyEdit,admin)).json();assert.equal(legacyTop.highlighted,1);assert.equal(legacyTop.shared,1);assert.equal(legacyTop.category,'결제');
+    assert.equal((await send('/api/board-posts/'+highlighted.id,'PUT',{...highlightInput,highlighted:false,expectedVersion:highlighted.version},admin)).status,409);
+    assert.equal((await send(path+'/'+highlighted.id+'/comments','POST',{body:'가상 댓글',postVersion:legacyTop.version},one)).status,201);
+    const privateTop=await (await send('/api/board-posts/'+highlighted.id,'PUT',{...legacyEdit,shared:false,expectedVersion:legacyTop.version},admin)).json();assert.equal(privateTop.highlighted,1);
+    assert.deepEqual(await (await send('/api/reviewer/faq-posts?q='+encodeURIComponent('무일치'),'GET',undefined,one)).json(),[]);
+    for(const suffix of ['comments','attachments'])assert.notEqual((await send(path+'/'+highlighted.id+'/'+suffix+'?version='+legacyTop.version,'GET',undefined,one)).status,200);
+    assert.equal((await send('/api/reviewer/faq-posts')).status,401);assert.equal((await send('/api/faq-posts')).status,401);
     const publicRow=await (await send('/api/board-posts','POST',{kind:'notice',title:'가상 공개 공지',body:'공지',secret:false,shared:true},admin)).json();assert.equal((await (await send(`${path}?kind=notice`,'GET',undefined,two)).json())[0].id,publicRow.id);assert.equal((await send(`/api/reviewers/${other.id}`,'PUT',{siteId:otherSite.id,active:false},admin)).status,200);assert.equal((await send(`${path}?kind=notice`,'GET',undefined,two)).status,401);
   }finally{if(child.exitCode===null){const exited=once(child,'exit');child.kill();await exited;}rmSync(dir,{recursive:true,force:true});}
 });

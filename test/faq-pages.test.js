@@ -53,3 +53,11 @@ test('FAQ 페이지 범위는 빈 목록·음수·큰 값·비정수 요청을 �
 test('관리자 FAQ 실제 삭제 핸들러: 마지막 한 건 삭제 후 3에서 2페이지로 보정',async()=>{
  const h=harness('admin');h.setRows(generated.slice(0,21));h.setPage(3);await h.load();let deleted;h.context.api=async(url,options)=>{assert.equal(options.method,'DELETE');deleted={url,body:JSON.parse(options.body)};h.setRows(generated.slice(0,20));};await h.surface.querySelectorAll('[data-board-delete]')[0].onclick();assert.match(deleted.url,/21$/);assert.equal(deleted.body.expectedVersion,'v21');assert.equal(h.renders,1);h.context.api=async()=>generated.slice(0,20);await h.load();assert.equal(h.page(),2);assert.equal(h.surface.articles.length,10);
 });
+
+for(const role of ['admin','staff'])test(role+' 상단 안내 DOM 대역: 페이지·무일치·중복 제외·오류·이탈',async()=>{
+ const h=harness(role),top=[{...generated[0],id:99,title:'가상 상단 하나',highlighted:1},{...generated[1],id:98,title:'가상 상단 둘',highlighted:1}];h.setRows([...top,...generated]);await h.load();assert.equal(h.surface.articles.length,12);assert.match(h.surface.innerHTML,/일반 FAQ/);assert.equal((h.surface.innerHTML.match(/가상 상단 하나/g)||[]).length,1);assert.equal(h.options[0].row.id,99);
+ await h.surface.querySelector('[data-faq-next]').onclick();if(role==='admin')await h.load();assert.equal(h.surface.articles.length,12);assert.equal(h.options.at(-24).row.id,99);assert.match(h.surface.innerHTML,/현재 2 \/ 총 3 페이지/);
+ h.setRows(top);if(role==='admin'){h.context.state.query='무일치';h.context.state.boardCategory='결제';}else{h.context.query.value='무일치';h.context.category.value='결제';}await h.load();assert.equal(h.surface.articles.length,2);assert.equal(h.page(),1);assert.match(h.surface.innerHTML,/가상 상단 둘/);
+ const prior=h.options.at(-1);h.context.api=async()=>{throw Error('가상 조회 실패');};if(role==='admin')await assert.rejects(h.load(),/가상 조회 실패/);else{await h.load();assert.match(h.surface.innerHTML,/가상 조회 실패/);}assert.doesNotMatch(h.surface.innerHTML,/가상 상단 하나/);
+ if(role==='admin')h.context.state.siteId=88;else h.setActive(false);assert.equal(prior.active(),false);
+});
