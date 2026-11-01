@@ -41,13 +41,15 @@ test('두 회의 유형은 같은 현장 활성 직원만 선택해 숫자 emplo
 });
 
 test('노사협의체 시간은 역순 선택 시 정렬해 저장한다',async()=>{
-  const ui=await screen({type:'work_council'}),from=ui.controls.get('meetingFrom'),to=ui.controls.get('meetingTo');from.value='14:30';to.value='09:00';to.onchange();assert.equal(from.value,'09:00');assert.equal(to.value,'14:30');await ui.save();assert.equal(ui.payload().details.timeFrom,'09:00');assert.equal(ui.payload().details.timeTo,'14:30');from.value='24:00';to.value='23:55';from.onchange();assert.equal(from.value,'23:55');assert.equal(to.value,'24:00');
+  for(const [start,end,changed] of [['14:30','09:00','meetingTo'],['24:00','23:55','meetingFrom']]){
+    const ui=await screen({type:'work_council'}),from=ui.controls.get('meetingFrom'),to=ui.controls.get('meetingTo');from.value=start;to.value=end;ui.controls.get(changed).onchange();assert.equal(from.value,end);assert.equal(to.value,start);await ui.save();assert.equal(ui.payload().details.timeFrom,end);assert.equal(ui.payload().details.timeTo,start);
+  }
 });
 
 test('수정 시 당시 이름과 비활성·누락 직원의 이전 선택을 보존하고 해제도 저장한다',async()=>{
-  const ui=await screen({existing:true,details:{employeeSnapshot:[{id:1,name:'당시 이름'},{id:2,name:'중지 당시 이름'},{id:9,name:'누락 당시 이름'}]},people:[person(1,'바뀐 이름'),person(2,'중지 이름',0)]});
+  const options={existing:true,details:{employeeSnapshot:[{id:1,name:'당시 이름'},{id:2,name:'중지 당시 이름'},{id:9,name:'누락 당시 이름'}]},people:[person(1,'바뀐 이름'),person(2,'중지 이름',0)]},ui=await screen(options);
   assert.match(ui.box().innerHTML,/당시 이름/);assert.doesNotMatch(ui.box().innerHTML,/바뀐 이름/);assert.equal((ui.box().innerHTML.match(/이전 선택/g)||[]).length,2);assert.ok(ui.box().checks.every(input=>input.checked));
-  await ui.save();assert.equal(ui.writes()[0].options.method,'PUT');assert.deepEqual(ui.payload().details.employeeIds,[1,2,9]);ui.box().checks[1].checked=false;await ui.save();assert.deepEqual(ui.payload().details.employeeIds,[1,9]);
+  await ui.save();assert.equal(ui.writes()[0].options.method,'PUT');assert.deepEqual(ui.payload().details.employeeIds,[1,2,9]);assert.equal(ui.dialog.open,false);const reopened=await screen(options);reopened.box().checks[1].checked=false;await reopened.save();assert.deepEqual(reopened.payload().details.employeeIds,[1,9]);
 });
 
 test('직원이 없거나 과거 직원 정보가 없는 문서도 빈 선택을 명시적으로 저장한다',async()=>{

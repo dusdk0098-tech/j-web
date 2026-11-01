@@ -22,7 +22,7 @@ async function screen({details={},companies=[company(11),company(12)],existing=f
   for(const key of ['#dialog-title','#dialog-body','#dialog-error','#dialog-form','#dialog-form button[type=submit]'])nodes.set(key,node());
   const find=selector=>{const name=selector.match(/\[name=["']?([^\]"']+)/)?.[1];return name?controls.get(name):nodes.get(selector);};
   const state={siteId:7,page:'documents',type:'permit',types:{permit:'가상 작업허가서'}};
-  const context={state,$:find,document:{querySelector:find,querySelectorAll:()=>[]},dialog:{showModal(){},close(){closed++;}},FormData:class{*[Symbol.iterator](){for(const control of controls.values())if(!control.disabled)yield [control.name,control.value];}},api:async(path,options)=>{calls.push({path,options});if(options){if(failSave)throw Error('가상 저장 실패');return {id:5};}if(path.startsWith('/api/companies?')){if(failLoad)throw Error('가상 목록 실패');return companies;}return [];},today:()=> '2026-10-31',flash(){},render:async()=>{},showError:error=>{nodes.get('#dialog-error').textContent=error.message;}};
+  const context={state,$:find,document:{querySelector:find,querySelectorAll:()=>[]},dialog:{open:false,showModal(){this.open=true;},close(){this.open=false;closed++;}},FormData:class{*[Symbol.iterator](){for(const control of controls.values())if(!control.disabled)yield [control.name,control.value];}},api:async(path,options)=>{calls.push({path,options});if(options){if(failSave)throw Error('가상 저장 실패');return {id:5};}if(path.startsWith('/api/companies?')){if(failLoad)throw Error('가상 목록 실패');return companies;}return [];},today:()=> '2026-10-31',flash(){},render:async()=>{},showError:error=>{nodes.get('#dialog-error').textContent=error.message;}};
   const parts=[source.match(/^const esc = .*$/m)[0],source.slice(source.indexOf('function field('),source.indexOf('function signaturePad(')),source.slice(source.indexOf('function showDialog('),source.indexOf("$('#dialog-close')")),source.match(/^const permitKinds=.*$/m)[0],source.match(/^const permitFields=.*$/m)[0],source.slice(source.indexOf('async function editDocument('),source.indexOf('async function loadDocuments('))];
   runInNewContext(parts.join('\n')+'\nglobalThis.open=editDocument;',context);
   await context.open(existing?{id:5,site_id:7,type:'permit',title:'가상 기존 문서',date:'2026-10-31',details:JSON.stringify(details)}:null,details,'permit');
@@ -47,7 +47,7 @@ test('기존 시간과 편집 중 시간은 끄고 다시 켜도 보존되며 �
   assert.equal(toggle.checked,true);assert.equal(ui.nodes.get('#permit-times').hidden,false);assert.equal(from.value,'09:30');assert.equal(to.value,'24:00');
   from.value='10:30';to.value='23:30';toggle.checked=false;toggle.onchange();assert.equal(from.disabled,true);assert.equal(to.disabled,true);toggle.checked=true;toggle.onchange();assert.equal(from.value,'10:30');assert.equal(to.value,'23:30');
   await ui.save();assert.equal(ui.payload().details.timeFrom,'10:30');assert.equal(ui.payload().details.timeTo,'23:30');
-  toggle.checked=false;toggle.onchange();await ui.save();assert.equal(ui.payload().details.timeFrom,'');assert.equal(ui.payload().details.timeTo,'');assert.equal(Object.hasOwn(ui.payload(),'timeFrom'),false);assert.equal(Object.hasOwn(ui.payload(),'timeTo'),false);
+  const reopened=await screen({existing:true,details:ui.payload().details}),reopenedToggle=reopened.nodes.get('#permit-use-time');reopenedToggle.checked=false;reopenedToggle.onchange();await reopened.save();assert.equal(reopened.payload().details.timeFrom,'');assert.equal(reopened.payload().details.timeTo,'');assert.equal(Object.hasOwn(reopened.payload(),'timeFrom'),false);assert.equal(Object.hasOwn(reopened.payload(),'timeTo'),false);
 });
 
 test('부분 시간은 기존 값을 덮지 않고 그대로 전송하며 저장 오류에서도 보존한다',async()=>{
@@ -116,8 +116,10 @@ test('신규 직영 작업은 업체명 없이 저장하고 기존 직영 문서
 });
 
 test('직접입력과 등록업체 사이에서 직영 작업을 거쳐도 저장 전 입력과 업체 선택이 유지된다',async()=>{
-  const ui=await screen({existing:true,details:{company:'가상 원래 업체'}});ui.input().value='가상 편집 중 업체';ui.choose(12);ui.choose(-1);assert.equal(ui.input().value,'가상 편집 중 업체');ui.choose(12);await ui.save();assert.equal(ui.payload().details.companyId,12);assert.equal(ui.payload().details.directWork,false);ui.choose(-1);ui.choose(0);assert.equal(ui.input().disabled,false);assert.equal(ui.input().value,'가상 편집 중 업체');await ui.save();assert.equal(ui.payload().details.company,'가상 편집 중 업체');assert.equal(ui.payload().details.directWork,false);
-  const direct=await screen({existing:true,details:{directWork:true,companyId:0,company:''}});direct.choose(11);assert.match(direct.status(),/먼저 문서 상세의 역할 설정에서 협력사 현장소장을 지정/);await direct.save();assert.equal(direct.payload().details.directWork,false);assert.equal(direct.payload().details.companyId,11);direct.choose(0);assert.doesNotMatch(direct.status(),/협력사 현장소장을 지정/);direct.choose(-1);assert.doesNotMatch(direct.status(),/먼저 문서 상세/);
+  for(const selected of [12,0]){
+    const ui=await screen({existing:true,details:{company:'가상 원래 업체'}});ui.input().value='가상 편집 중 업체';ui.choose(12);ui.choose(-1);assert.equal(ui.input().value,'가상 편집 중 업체');ui.choose(12);if(selected===0){ui.choose(-1);ui.choose(0);assert.equal(ui.input().disabled,false);assert.equal(ui.input().value,'가상 편집 중 업체');}await ui.save();assert.equal(ui.payload().details.companyId,selected);assert.equal(ui.payload().details.company,selected===0?'가상 편집 중 업체':'가상 협력사');assert.equal(ui.payload().details.directWork,false);
+  }
+  const direct=await screen({existing:true,details:{directWork:true,companyId:0,company:''}});direct.choose(11);assert.match(direct.status(),/먼저 문서 상세의 역할 설정에서 협력사 현장소장을 지정/);direct.choose(0);assert.doesNotMatch(direct.status(),/협력사 현장소장을 지정/);direct.choose(-1);assert.doesNotMatch(direct.status(),/먼저 문서 상세/);direct.choose(11);await direct.save();assert.equal(direct.payload().details.directWork,false);assert.equal(direct.payload().details.companyId,11);
 });
 
 test('기존 직영의 업체 전환 안내는 업체 선택 또는 공백이 아닌 직접입력에만 표시되고 입력·지우기에 갱신된다',async()=>{
