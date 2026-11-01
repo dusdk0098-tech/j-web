@@ -165,7 +165,23 @@ async function editWorker(worker=null){
   const siteId=state.siteId,epoch=workerListEpoch,request=++workerEditEpoch,previousSubmit=$('#dialog-form').onsubmit,current=()=>state.siteId===siteId&&state.page==='workers'&&workerListEpoch===epoch&&workerEditEpoch===request;
   try {
     const [companies,occupations]=await Promise.all([api(`/api/companies?siteId=${siteId}`),api(`/api/site-occupations?siteId=${siteId}`)]);
-    if(!current()||$('#dialog-form').onsubmit!==previousSubmit)return;showDialog(worker?'출입자 정보 수정':'출입자 등록',`${worker?`<p>등록 방식: <strong>${worker.registration_type==='self'?'자기 등록':'일반등록'}</strong></p>${worker.registration_type==='self'?'<p>직접 자기 등록한 출입자입니다. 관리자가 출입자 정보를 저장하면 일반등록으로 변경됩니다.</p><p><button type="button" data-worker-registration="general">일반등록으로 전환</button> 등록 방식만 바꾸며 아래에서 편집한 내용은 저장하지 않습니다.</p>':''}<p class="muted">가상 기능입니다. 일반등록으로 전환해도 계정과 과거 기록은 유지됩니다.</p>`:''}<div class="fields">${field('name','이름',worker?.name||'')}${field('category','구분',worker?.category||'직영')}${field('company','소속',worker?.company||'')}${field('occupation','직종',worker?.occupation||'')}<label>가상 메모<textarea name="memo" maxlength="2000">${esc(worker?.memo||'')}</textarea></label></div><datalist id="worker-companies">${companies.map(c=>`<option value="${esc(c.name)}"></option>`).join('')}</datalist>`,d=>api(worker?`/api/workers/${worker.id}`:'/api/workers',{method:worker?'PUT':'POST',body:JSON.stringify({...d,siteId,...(worker?{version:worker.version}:{})})}),current);
+    const licenseRows=[];
+    if(!current()||$('#dialog-form').onsubmit!==previousSubmit)return;showDialog(worker?'출입자 정보 수정':'출입자 등록',`${worker?`<p>등록 방식: <strong>${worker.registration_type==='self'?'자기 등록':'일반등록'}</strong></p>${worker.registration_type==='self'?'<p>직접 자기 등록한 출입자입니다. 관리자가 출입자 정보를 저장하면 일반등록으로 변경됩니다.</p><p><button type="button" data-worker-registration="general">일반등록으로 전환</button> 등록 방식만 바꾸며 아래에서 편집한 내용은 저장하지 않습니다.</p>':''}<p class="muted">가상 기능입니다. 일반등록으로 전환해도 계정과 과거 기록은 유지됩니다.</p>`:''}<div class="fields">${field('name','이름',worker?.name||'')}${field('category','구분',worker?.category||'직영')}${field('company','소속',worker?.company||'')}${field('occupation','직종',worker?.occupation||'')}<label>가상 메모<textarea name="memo" maxlength="2000">${esc(worker?.memo||'')}</textarea></label></div><datalist id="worker-companies">${companies.map(c=>`<option value="${esc(c.name)}"></option>`).join('')}</datalist>`,d=>api(worker?`/api/workers/${worker.id}`:'/api/workers',{method:worker?'PUT':'POST',body:JSON.stringify({...d,siteId,licenses:licenseRows.map(row=>({name:row.name.value.trim(),number:row.number.value.trim()})).filter(row=>row.name||row.number),...(worker?{version:worker.version}:{})})}),current);
+    const licenseSection=document.createElement('fieldset'),licenseTitle=document.createElement('legend'),licenseHelp=document.createElement('p'),licenseList=document.createElement('div'),licenseAdd=document.createElement('button'),licenseForm=$('#dialog-form'),licenseSave=licenseForm.onsubmit;
+    licenseTitle.textContent='면허';licenseHelp.textContent='면허 이름과 번호는 선택 입력입니다. 한쪽만 입력해도 저장하며, 모두 비운 행은 저장하지 않습니다. 최대 20개, 각 100자까지 입력할 수 있습니다.';
+    licenseAdd.type='button';licenseAdd.textContent='면허 추가';
+    const canEditLicenses=()=>current()&&dialog.open&&licenseForm.onsubmit===licenseSave&&!$('#dialog-form button[type=submit]').disabled;
+    const addLicense=(license={})=>{
+      const element=document.createElement('div'),nameLabel=document.createElement('label'),numberLabel=document.createElement('label'),name=document.createElement('input'),number=document.createElement('input'),remove=document.createElement('button'),row={element,name,number};
+      element.className='fields';nameLabel.textContent='면허 이름';numberLabel.textContent='면허 번호';name.type=number.type='text';name.maxLength=number.maxLength=100;name.value=license.name||'';number.value=license.number||'';
+      nameLabel.append(name);numberLabel.append(number);remove.type='button';remove.textContent='면허 삭제';
+      remove.onclick=()=>{if(!canEditLicenses())return;licenseRows.splice(licenseRows.indexOf(row),1);element.remove();licenseAdd.disabled=false;};
+      element.append(nameLabel,numberLabel,remove);licenseList.append(element);licenseRows.push(row);licenseAdd.disabled=licenseRows.length>=20;
+      return name;
+    };
+    licenseAdd.onclick=()=>{if(canEditLicenses()&&licenseRows.length<20)addLicense().focus();};
+    for(const license of worker?.licenses||[])addLicense(license);
+    licenseSection.append(licenseTitle,licenseHelp,licenseList,licenseAdd);$('#dialog-body').append(licenseSection);
     if(worker?.registration_type==='self'){
       const submit=$('#dialog-form button[type=submit]'),convert=$('[data-worker-registration]'),form=$('#dialog-form'),save=form.onsubmit,active=()=>current()&&dialog.open&&form.onsubmit===save;
       submit.textContent='정보 저장 · 일반등록으로 전환';

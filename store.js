@@ -20,7 +20,15 @@ const communityKinds=['community_notice','community_info','community_question','
 const boardKinds=['notice','system_notice','question','general',...communityKinds];
 const reviewerBoardKinds=['notice','question','general','community_info','community_question','community_general'];
 const workerDocumentPermission={risk:'risk',work_plan:'work_plan',tbm:'training',education:'training'};
-const workerVersion=worker=>createHash('sha256').update(JSON.stringify([worker.id,worker.site_id,worker.name,worker.category,worker.company,worker.occupation,worker.created_date,worker.memo,worker.registration_type])).digest('hex');
+const workerVersion=worker=>createHash('sha256').update(JSON.stringify([worker.id,worker.site_id,worker.name,worker.category,worker.company,worker.occupation,worker.created_date,worker.memo,worker.registration_type,worker.licenses_json])).digest('hex');
+const workerRow=({licenses_json,...row})=>({...row,licenses:JSON.parse(licenses_json),version:workerVersion({...row,licenses_json})});
+function workerLicenses(value){
+  if(!Array.isArray(value)||value.length>20)throw new Error('면허는 최대 20개까지 입력해 주세요.');
+  return value.map(item=>{
+    if(!item||typeof item!=='object'||Array.isArray(item)||Object.keys(item).some(key=>!['name','number'].includes(key)))throw new Error('면허 이름과 번호를 확인해 주세요.');
+    const result={};for(const key of ['name','number']){const field=item[key]===undefined?'':item[key];if(typeof field!=='string'||field.length>100||/[\x00-\x1f\x7f]/.test(field))throw new Error('면허 이름과 번호는 각각 100자 이내로 입력해 주세요.');result[key]=field.trim();}return result;
+  }).filter(item=>item.name||item.number);
+}
 const basicSampleTargetVersion=(row,parent)=>createHash('sha256').update(JSON.stringify([row.id,row.parent_id,row.name,row.description,parent?.name??null,parent?.description??null])).digest('hex');
 const reviewerBasicAccess="r.id=? AND r.active=1 AND d.type='basic' AND d.status='approved' AND (d.site_id=r.site_id OR json_extract(d.details,'$.shared')=1)";
 const permitRoleLabels={contractorLead:'협력사 현장소장',coordinator:'담당자',supervisor:'관리감독자',safetyOfficer:'안전관리자',siteManager:'현장소장',inspector:'감리'};
@@ -222,6 +230,7 @@ export class Store {
       if(!this.db.prepare('PRAGMA table_info(board_posts)').all().some(c=>c.name==='shared'))this.db.exec('ALTER TABLE board_posts ADD COLUMN shared INTEGER NOT NULL DEFAULT 0 CHECK(shared IN (0,1))');
       if(!this.db.prepare('PRAGMA table_info(site_articles)').all().some(c=>c.name==='rich_body'))this.db.exec('ALTER TABLE site_articles ADD COLUMN rich_body TEXT');
       if(!this.db.prepare('PRAGMA table_info(site_articles)').all().some(c=>c.name==='version'))this.db.exec("ALTER TABLE site_articles ADD COLUMN version TEXT NOT NULL DEFAULT ''");
+      if(!this.db.prepare('PRAGMA table_info(workers)').all().some(c=>c.name==='licenses_json'))this.db.exec("ALTER TABLE workers ADD COLUMN licenses_json TEXT NOT NULL DEFAULT '[]'");
       if(!this.db.prepare('PRAGMA table_info(workers)').all().some(c=>c.name==='memo'))this.db.exec("ALTER TABLE workers ADD COLUMN memo TEXT NOT NULL DEFAULT ''");
       if(!this.db.prepare('PRAGMA table_info(workers)').all().some(c=>c.name==='registration_type')){
         this.db.exec("ALTER TABLE workers ADD COLUMN registration_type TEXT NOT NULL DEFAULT 'general' CHECK(registration_type IN ('self','general'))");
@@ -1021,13 +1030,13 @@ export class Store {
     }catch(error){this.db.exec('ROLLBACK');throw error;}
   }
   createWorker(input,onAuthorize=null) {
-    const siteId=Number(input.siteId),fields=workerFields(input),memo=workerMemo(input.memo??'');
-    const save=()=>{if(!this.db.prepare('SELECT id FROM sites WHERE id=?').get(siteId))throw new Error('현장을 선택해 주세요.');const now=new Date(),date=new Date(now.getTime()-now.getTimezoneOffset()*60000).toISOString().slice(0,10),id=this.db.prepare('INSERT INTO workers(site_id,name,category,company,occupation,created_date,memo) VALUES(?,?,?,?,?,?,?)').run(siteId,fields.name,fields.category,fields.company,fields.occupation,date,memo).lastInsertRowid;return this.db.prepare('SELECT * FROM workers WHERE id=?').get(id);};
+    const siteId=Number(input.siteId),fields=workerFields(input),memo=workerMemo(input.memo??''),licenses=JSON.stringify(workerLicenses(input.licenses===undefined?[]:input.licenses));
+    const save=()=>{if(!this.db.prepare('SELECT id FROM sites WHERE id=?').get(siteId))throw new Error('현장을 선택해 주세요.');const now=new Date(),date=new Date(now.getTime()-now.getTimezoneOffset()*60000).toISOString().slice(0,10),id=this.db.prepare('INSERT INTO workers(site_id,name,category,company,occupation,created_date,memo,licenses_json) VALUES(?,?,?,?,?,?,?,?)').run(siteId,fields.name,fields.category,fields.company,fields.occupation,date,memo,licenses).lastInsertRowid;return workerRow(this.db.prepare('SELECT * FROM workers WHERE id=?').get(id));};
     if(!onAuthorize)return save();this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();const row=save();this.db.exec('COMMIT');return row;}catch(error){this.db.exec('ROLLBACK');throw error;}
   }
   updateWorker(id,input,onAuthorize=()=>{}) {
-    const siteId=Number(input.siteId),fields=workerFields(input),memo=input.memo===undefined?undefined:workerMemo(input.memo);
-    this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();const previous=this.db.prepare('SELECT * FROM workers WHERE id=? AND site_id=?').get(Number(id),siteId);if(!previous)throw new Error('선택한 현장의 출입자를 확인해 주세요.');if(input.version!==undefined&&input.version!==workerVersion(previous))throw Object.assign(new Error('출입자 정보가 변경되었습니다. 다시 조회해 주세요.'),{sessionStatus:409});this.db.prepare("UPDATE workers SET name=?,category=?,company=?,occupation=?,memo=?,registration_type='general' WHERE id=? AND site_id=?").run(fields.name,fields.category,fields.company,fields.occupation,memo===undefined?previous.memo:memo,Number(id),siteId);const row=this.db.prepare('SELECT * FROM workers WHERE id=? AND site_id=?').get(Number(id),siteId);this.db.exec('COMMIT');return {...row,version:workerVersion(row)};}catch(error){this.db.exec('ROLLBACK');throw error;}
+    const siteId=Number(input.siteId),fields=workerFields(input),memo=input.memo===undefined?undefined:workerMemo(input.memo),licenses=input.licenses===undefined?undefined:JSON.stringify(workerLicenses(input.licenses));
+    this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();const previous=this.db.prepare('SELECT * FROM workers WHERE id=? AND site_id=?').get(Number(id),siteId);if(!previous)throw new Error('선택한 현장의 출입자를 확인해 주세요.');if(input.version!==undefined&&input.version!==workerVersion(previous))throw Object.assign(new Error('출입자 정보가 변경되었습니다. 다시 조회해 주세요.'),{sessionStatus:409});this.db.prepare("UPDATE workers SET name=?,category=?,company=?,occupation=?,memo=?,licenses_json=?,registration_type='general' WHERE id=? AND site_id=?").run(fields.name,fields.category,fields.company,fields.occupation,memo===undefined?previous.memo:memo,licenses===undefined?previous.licenses_json:licenses,Number(id),siteId);const row=this.db.prepare('SELECT * FROM workers WHERE id=? AND site_id=?').get(Number(id),siteId);this.db.exec('COMMIT');return workerRow(row);}catch(error){this.db.exec('ROLLBACK');throw error;}
   }
   convertWorkerRegistration(id,input,onAuthorize=()=>{}) {
     this.db.exec('BEGIN IMMEDIATE');
@@ -1038,7 +1047,7 @@ export class Store {
       if(typeof input.version!=='string'||input.version!==workerVersion(row))throw Object.assign(new Error('출입자 정보가 변경되었습니다. 다시 조회해 주세요.'),{sessionStatus:409});
       this.db.prepare("UPDATE workers SET registration_type='general' WHERE id=? AND site_id=?").run(row.id,row.site_id);
       row.registration_type='general';
-      this.db.exec('COMMIT');return {...row,version:workerVersion(row)};
+      this.db.exec('COMMIT');return workerRow(row);
     }catch(error){this.db.exec('ROLLBACK');throw error;}
   }
   workers(siteId, query = '', filters = {}) {
@@ -1047,7 +1056,7 @@ export class Store {
     const category=filters.category || '',company=filters.company || '',occupation=filters.occupation || '';
     const from=filters.from?dateValue(filters.from):'',to=filters.to?dateValue(filters.to):'';
     if(from && to && from>to)throw new Error('조회 시작일은 종료일보다 늦을 수 없습니다.');
-    const ordering=order==='recent'?'workers.created_date IS NULL,workers.created_date DESC,workers.id DESC':'workers.id DESC';return this.db.prepare("SELECT workers.*,EXISTS(SELECT 1 FROM worker_accounts a WHERE a.worker_id=workers.id AND a.site_id=workers.site_id) AS has_account FROM workers LEFT JOIN join_acknowledgements j ON j.worker_id=workers.id WHERE workers.site_id=? AND (workers.name LIKE ? OR workers.company LIKE ? OR workers.occupation LIKE ? OR workers.memo LIKE ? OR (?<>'' AND (instr(replace(COALESCE(json_extract(j.profile,'$.birthDate'),''),'-',''),?)>0 OR instr(replace(replace(replace(replace(replace(COALESCE(json_extract(j.profile,'$.phone'),''),'-',''),' ',''),'(',''),')',''),'+',''),?)>0))) AND (?='' OR workers.category=?) AND (?='' OR workers.company=?) AND (?='' OR workers.occupation=?) AND (?='' OR workers.created_date>=?) AND (?='' OR workers.created_date<=?) ORDER BY "+ordering).all(Number(siteId),...Array(4).fill(`%${query}%`),digits,digits,digits,category,category,company,company,occupation,occupation,from,from,to,to).map(row=>({...row,version:workerVersion(row)}));
+    const ordering=order==='recent'?'workers.created_date IS NULL,workers.created_date DESC,workers.id DESC':'workers.id DESC';return this.db.prepare("SELECT workers.*,EXISTS(SELECT 1 FROM worker_accounts a WHERE a.worker_id=workers.id AND a.site_id=workers.site_id) AS has_account FROM workers LEFT JOIN join_acknowledgements j ON j.worker_id=workers.id WHERE workers.site_id=? AND (workers.name LIKE ? OR workers.company LIKE ? OR workers.occupation LIKE ? OR workers.memo LIKE ? OR (?<>'' AND (instr(replace(COALESCE(json_extract(j.profile,'$.birthDate'),''),'-',''),?)>0 OR instr(replace(replace(replace(replace(replace(COALESCE(json_extract(j.profile,'$.phone'),''),'-',''),' ',''),'(',''),')',''),'+',''),?)>0))) AND (?='' OR workers.category=?) AND (?='' OR workers.company=?) AND (?='' OR workers.occupation=?) AND (?='' OR workers.created_date>=?) AND (?='' OR workers.created_date<=?) ORDER BY "+ordering).all(Number(siteId),...Array(4).fill(`%${query}%`),digits,digits,digits,category,category,company,company,occupation,occupation,from,from,to,to).map(workerRow);
   }
   workerListing(siteId,query='',filters={},onAuthorize=()=>{},asOf=null){
     siteId=Number(siteId);if(!Number.isSafeInteger(siteId)||siteId<1)throw new Error('현장을 선택해 주세요.');const now=new Date(),date=dateValue(asOf??new Date(now.getTime()-now.getTimezoneOffset()*60000).toISOString().slice(0,10));
@@ -1055,7 +1064,7 @@ export class Store {
   }
   previewWorkers(siteId,items,onAuthorize=()=>{}){
     siteId=Number(siteId);if(!Number.isSafeInteger(siteId)||siteId<1||!Array.isArray(items)||!items.length||items.length>20||items.some(item=>!item||!Number.isSafeInteger(item.id)||item.id<1||typeof item.version!=='string'||!/^[a-f0-9]{64}$/.test(item.version))||new Set(items.map(item=>item.id)).size!==items.length)throw new Error('선택한 출입자를 확인해 주세요.');
-    this.db.exec('BEGIN');try{onAuthorize();const site=this.db.prepare('SELECT name FROM sites WHERE id=?').get(siteId);if(!site)throw new Error('현장을 선택해 주세요.');const workers=items.map(item=>{const row=this.db.prepare('SELECT * FROM workers WHERE id=? AND site_id=?').get(item.id,siteId);if(!row)throw new Error('선택한 현장의 출입자를 확인해 주세요.');if(workerVersion(row)!==item.version)throw Object.assign(new Error('출입자 정보가 변경되었습니다. 다시 조회해 주세요.'),{sessionStatus:409});const signature=this.joinSignature(siteId,row.id);return {...row,join:this.joinAcknowledgement(siteId,row.id),files:this.workerFiles(siteId,row.id),ppe:this.workerPpeIssues(siteId,row.id),signature:signature?'data:image/png;base64,'+Buffer.from(signature).toString('base64'):null};});onAuthorize();this.db.exec('COMMIT');return {siteName:site.name,workers};}catch(error){this.db.exec('ROLLBACK');throw error;}
+    this.db.exec('BEGIN');try{onAuthorize();const site=this.db.prepare('SELECT name FROM sites WHERE id=?').get(siteId);if(!site)throw new Error('현장을 선택해 주세요.');const workers=items.map(item=>{const row=this.db.prepare('SELECT * FROM workers WHERE id=? AND site_id=?').get(item.id,siteId);if(!row)throw new Error('선택한 현장의 출입자를 확인해 주세요.');if(workerVersion(row)!==item.version)throw Object.assign(new Error('출입자 정보가 변경되었습니다. 다시 조회해 주세요.'),{sessionStatus:409});const signature=this.joinSignature(siteId,row.id);return {...workerRow(row),join:this.joinAcknowledgement(siteId,row.id),files:this.workerFiles(siteId,row.id),ppe:this.workerPpeIssues(siteId,row.id),signature:signature?'data:image/png;base64,'+Buffer.from(signature).toString('base64'):null};});onAuthorize();this.db.exec('COMMIT');return {siteName:site.name,workers};}catch(error){this.db.exec('ROLLBACK');throw error;}
   }
   attendance(siteId, date) {
     date = dateValue(date);
@@ -1518,11 +1527,11 @@ export class Store {
       const current=input.siteKey?this.siteFromAccess(input.siteKey):this.invitation(token);
       if(!current||current.id!==invite.id)throw new Error('유효하지 않거나 만료된 가입 링크입니다.');
       if(input.siteKey&&!this.siteRegistrationOpen(current.id))throw new Error('이 현장의 시험 가입이 중지되었거나 만료되었습니다.');
-      const worker=this.createWorker({...input,siteId:invite.id,memo:''});
+      const worker=this.createWorker({...input,siteId:invite.id,memo:'',licenses:[]});
       this.db.prepare("UPDATE workers SET registration_type='self' WHERE id=?").run(worker.id);worker.registration_type='self';
       this.db.prepare('INSERT INTO worker_accounts(worker_id,site_id,login_id,salt,password_hash) VALUES(?,?,?,?,?)').run(worker.id,invite.id,input.loginId,salt,passwordHash);
       this.db.prepare('INSERT INTO join_acknowledgements(worker_id,notice_version,equipment,signature,profile) VALUES(?,?,?,?,?)').run(worker.id,'demo-v1',JSON.stringify(equipment),signature,profile?JSON.stringify(profile):null);
-      this.db.exec('COMMIT');return worker;
+      const result=workerRow(this.db.prepare('SELECT * FROM workers WHERE id=?').get(worker.id));this.db.exec('COMMIT');return result;
     } catch(error) {this.db.exec('ROLLBACK');throw error;}
   }
   joinAcknowledgement(siteId,workerId){
