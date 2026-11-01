@@ -20,7 +20,7 @@ const communityKinds=['community_notice','community_info','community_question','
 const boardKinds=['notice','system_notice','question','general',...communityKinds];
 const reviewerBoardKinds=['notice','question','general','community_info','community_question','community_general'];
 const workerDocumentPermission={risk:'risk',work_plan:'work_plan',tbm:'training',education:'training'};
-const workerVersion=worker=>createHash('sha256').update(JSON.stringify([worker.id,worker.site_id,worker.name,worker.category,worker.company,worker.occupation,worker.created_date,worker.memo])).digest('hex');
+const workerVersion=worker=>createHash('sha256').update(JSON.stringify([worker.id,worker.site_id,worker.name,worker.category,worker.company,worker.occupation,worker.created_date,worker.memo,worker.registration_type])).digest('hex');
 const basicSampleTargetVersion=(row,parent)=>createHash('sha256').update(JSON.stringify([row.id,row.parent_id,row.name,row.description,parent?.name??null,parent?.description??null])).digest('hex');
 const reviewerBasicAccess="r.id=? AND r.active=1 AND d.type='basic' AND d.status='approved' AND (d.site_id=r.site_id OR json_extract(d.details,'$.shared')=1)";
 const permitRoleLabels={contractorLead:'협력사 현장소장',coordinator:'담당자',supervisor:'관리감독자',safetyOfficer:'안전관리자',siteManager:'현장소장',inspector:'감리'};
@@ -223,6 +223,11 @@ export class Store {
       if(!this.db.prepare('PRAGMA table_info(site_articles)').all().some(c=>c.name==='rich_body'))this.db.exec('ALTER TABLE site_articles ADD COLUMN rich_body TEXT');
       if(!this.db.prepare('PRAGMA table_info(site_articles)').all().some(c=>c.name==='version'))this.db.exec("ALTER TABLE site_articles ADD COLUMN version TEXT NOT NULL DEFAULT ''");
       if(!this.db.prepare('PRAGMA table_info(workers)').all().some(c=>c.name==='memo'))this.db.exec("ALTER TABLE workers ADD COLUMN memo TEXT NOT NULL DEFAULT ''");
+      if(!this.db.prepare('PRAGMA table_info(workers)').all().some(c=>c.name==='registration_type')){
+        this.db.exec("ALTER TABLE workers ADD COLUMN registration_type TEXT NOT NULL DEFAULT 'general' CHECK(registration_type IN ('self','general'))");
+        // 가상 서비스의 과거 가입 기록으로만 최초 이관하며, 이후 전환 상태는 다시 추론하지 않는다.
+        this.db.exec("UPDATE workers SET registration_type='self' WHERE EXISTS(SELECT 1 FROM join_acknowledgements j JOIN worker_accounts a ON a.worker_id=j.worker_id WHERE j.worker_id=workers.id AND a.site_id=workers.site_id)");
+      }
       for(const table of ['safety_cost_photos','safety_cost_report_photos'])if(!this.db.prepare(`PRAGMA table_info(${table})`).all().some(c=>c.name==='kind'))this.db.exec(`ALTER TABLE ${table} ADD COLUMN kind TEXT NOT NULL DEFAULT 'photo' CHECK(kind IN ('photo','receipt'))`);
       if(!this.db.prepare('PRAGMA table_info(safety_cost_photos)').all().some(c=>c.name==='version'))this.db.exec("ALTER TABLE safety_cost_photos ADD COLUMN version TEXT NOT NULL DEFAULT ''");
       this.db.exec("UPDATE safety_cost_photos SET version=lower(hex(randomblob(16))) WHERE version=''");
@@ -1022,7 +1027,19 @@ export class Store {
   }
   updateWorker(id,input,onAuthorize=()=>{}) {
     const siteId=Number(input.siteId),fields=workerFields(input),memo=input.memo===undefined?undefined:workerMemo(input.memo);
-    this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();const previous=this.db.prepare('SELECT * FROM workers WHERE id=? AND site_id=?').get(Number(id),siteId);if(!previous)throw new Error('선택한 현장의 출입자를 확인해 주세요.');if(input.version!==undefined&&input.version!==workerVersion(previous))throw Object.assign(new Error('출입자 정보가 변경되었습니다. 다시 조회해 주세요.'),{sessionStatus:409});this.db.prepare('UPDATE workers SET name=?,category=?,company=?,occupation=?,memo=? WHERE id=? AND site_id=?').run(fields.name,fields.category,fields.company,fields.occupation,memo===undefined?previous.memo:memo,Number(id),siteId);const row=this.db.prepare('SELECT * FROM workers WHERE id=? AND site_id=?').get(Number(id),siteId);this.db.exec('COMMIT');return row;}catch(error){this.db.exec('ROLLBACK');throw error;}
+    this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();const previous=this.db.prepare('SELECT * FROM workers WHERE id=? AND site_id=?').get(Number(id),siteId);if(!previous)throw new Error('선택한 현장의 출입자를 확인해 주세요.');if(input.version!==undefined&&input.version!==workerVersion(previous))throw Object.assign(new Error('출입자 정보가 변경되었습니다. 다시 조회해 주세요.'),{sessionStatus:409});this.db.prepare("UPDATE workers SET name=?,category=?,company=?,occupation=?,memo=?,registration_type='general' WHERE id=? AND site_id=?").run(fields.name,fields.category,fields.company,fields.occupation,memo===undefined?previous.memo:memo,Number(id),siteId);const row=this.db.prepare('SELECT * FROM workers WHERE id=? AND site_id=?').get(Number(id),siteId);this.db.exec('COMMIT');return {...row,version:workerVersion(row)};}catch(error){this.db.exec('ROLLBACK');throw error;}
+  }
+  convertWorkerRegistration(id,input,onAuthorize=()=>{}) {
+    this.db.exec('BEGIN IMMEDIATE');
+    try{
+      onAuthorize();
+      const row=this.db.prepare('SELECT * FROM workers WHERE id=? AND site_id=?').get(Number(id),Number(input.siteId));
+      if(!row)throw new Error('선택한 현장의 출입자를 확인해 주세요.');
+      if(typeof input.version!=='string'||input.version!==workerVersion(row))throw Object.assign(new Error('출입자 정보가 변경되었습니다. 다시 조회해 주세요.'),{sessionStatus:409});
+      this.db.prepare("UPDATE workers SET registration_type='general' WHERE id=? AND site_id=?").run(row.id,row.site_id);
+      row.registration_type='general';
+      this.db.exec('COMMIT');return {...row,version:workerVersion(row)};
+    }catch(error){this.db.exec('ROLLBACK');throw error;}
   }
   workers(siteId, query = '', filters = {}) {
     if(typeof query!=='string'||query.length>200)throw new Error('검색어를 확인해 주세요.');const digits=/^[0-9()+\-\s]+$/.test(query)?query.replace(/\D/g,''):'';
@@ -1502,6 +1519,7 @@ export class Store {
       if(!current||current.id!==invite.id)throw new Error('유효하지 않거나 만료된 가입 링크입니다.');
       if(input.siteKey&&!this.siteRegistrationOpen(current.id))throw new Error('이 현장의 시험 가입이 중지되었거나 만료되었습니다.');
       const worker=this.createWorker({...input,siteId:invite.id,memo:''});
+      this.db.prepare("UPDATE workers SET registration_type='self' WHERE id=?").run(worker.id);worker.registration_type='self';
       this.db.prepare('INSERT INTO worker_accounts(worker_id,site_id,login_id,salt,password_hash) VALUES(?,?,?,?,?)').run(worker.id,invite.id,input.loginId,salt,passwordHash);
       this.db.prepare('INSERT INTO join_acknowledgements(worker_id,notice_version,equipment,signature,profile) VALUES(?,?,?,?,?)').run(worker.id,'demo-v1',JSON.stringify(equipment),signature,profile?JSON.stringify(profile):null);
       this.db.exec('COMMIT');return worker;

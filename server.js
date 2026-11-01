@@ -868,6 +868,8 @@ const server = http.createServer(async (req, res) => {
     }
     if(url.pathname==='/api/workers/preview'&&req.method==='POST'){const input=await body(req),result=store.previewWorkers(input.siteId,input.items,()=>checkRequestSession(req));return json(res,200,result);}
     const worker=url.pathname.match(/^\/api\/workers\/(\d+)$/);
+    const workerRegistration=url.pathname.match(/^\/api\/workers\/(\d+)\/registration\/general$/);
+    if(workerRegistration&&req.method==='POST'){const input=await body(req);return json(res,200,store.convertWorkerRegistration(workerRegistration[1],input,()=>checkRequestSession(req)));}
     const workerPermissions=url.pathname.match(/^\/api\/workers\/(\d+)\/permissions$/);
     if(workerPermissions){if(req.method==='GET')return json(res,200,store.workerPermissions(url.searchParams.get('siteId'),workerPermissions[1]));if(req.method==='PUT'){const input=await body(req);return json(res,200,store.setWorkerPermissions(input.siteId,workerPermissions[1],input.permissions,()=>checkRequestSession(req),input.expectedPermissions));}}
     const workerPermissionOverview=url.pathname.match(/^\/api\/sites\/(\d+)\/worker-permissions$/);
