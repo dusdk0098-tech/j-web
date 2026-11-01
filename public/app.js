@@ -321,7 +321,7 @@ async function editDocument(doc=null,initialDetails={},initialType=null) {
     if(data.type==='work_plan'){data.details.routeDescription=data.routeDescription||'';data.details.workSequence=data.workSequence||'';}
     if(data.type==='risk') data.details={kind:data.riskKind||'',scale:data.riskScale||'',periodFrom:data.periodFrom||'',periodTo:data.periodTo||'',items:[...document.querySelectorAll('.risk-row')].map(row=>{const fields=Object.fromEntries(Object.keys(riskFields).map(key=>[key,row.querySelector(`[data-risk-field="${key}"]`).value])),contractorId=Number(row.querySelector('[data-risk-contractor]').value);return contractorId?{...fields,contractorId}:fields;}).filter(row=>Object.values(row).some(value=>typeof value==='string'?value.trim():value)),musculoskeletalItems:muscleEditor.read()};
     if(data.type==='daily_report') for(const key of Object.keys(dailyRows)) data.details[key]=[...document.querySelectorAll(`[data-row-group="${key}"] .daily-row`)].map(readDailyRow).filter(row=>Object.values(row).some(value=>value.trim()));
-    const result=await api(doc?`/api/documents/${doc.id}`:'/api/documents',{method:doc?'PUT':'POST',body:JSON.stringify({...data,siteId:state.siteId})}); state.detail=result.id;
+    const result=await api(doc?`/api/documents/${doc.id}`:'/api/documents',{method:doc?'PUT':'POST',body:JSON.stringify({...data,siteId:state.siteId,...(doc?{expectedEditVersion:doc.edit_version}:{})})}); state.detail=result.id;
   });
   if(currentType==='office'){officeEditor=mountRichEditor($('#dialog-body'),{limits:documentRichLimits,onError:error=>$('#dialog-error').textContent=error.message});officeEditor.set(details.bodyRich,doc?.body||'');}
   const select=$('#dialog-form select[name=type]');

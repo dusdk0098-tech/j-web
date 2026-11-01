@@ -40,7 +40,7 @@ test('회의 임직원 API는 관리자 권한과 현장 경계를 검사하고 
     for(const type of ['safety_meeting','work_council']){
       const input=meeting(site.id,type,[one.id]);assert.equal((await send('/api/documents','POST',input)).status,401);assert.equal((await send('/api/documents','POST',input,reviewer)).status,401);assert.equal((await send('/api/documents','POST',meeting(site.id,type,[foreign.id]),admin)).status,400);
       const response=await send('/api/documents','POST',input,admin);assert.equal(response.status,201);const doc=await response.json(),path=`/api/documents/${doc.id}`;assert.deepEqual(JSON.parse(doc.details).employeeSnapshot,[{id:one.id,name:'api_employee'}]);
-      assert.equal((await send(path,'PUT',meeting(site.id,type,[foreign.id]),admin)).status,400);assert.equal((await send(path,'PUT',meeting(site.id,type,undefined),admin)).status,200);
+      assert.equal((await send(path,'PUT',{...meeting(site.id,type,[foreign.id]),expectedEditVersion:doc.edit_version},admin)).status,400);assert.equal((await send(path,'PUT',{...meeting(site.id,type,undefined),expectedEditVersion:doc.edit_version},admin)).status,200);
       assert.equal((await send(path+'/approval-line','PUT',{reviewerIds:[one.id]},admin)).status,200);assert.equal((await send(path+'/transition','POST',{action:'submit'},admin)).status,200);
       const viewed=await send(`/api/reviewer/documents/${doc.id}`,'GET',undefined,reviewer);assert.equal(viewed.status,200);const frozen=await viewed.json();assert.deepEqual(JSON.parse(frozen.document.details).employeeSnapshot,[{id:one.id,name:'api_employee'}]);saved.push(doc.id);
     }

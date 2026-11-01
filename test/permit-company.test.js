@@ -96,7 +96,7 @@ test('HTTP 허가서 작성은 잠금 대기 중 보관된 업체를 거절한�
     const directResponse=await send('/api/documents','POST',input(site.id,{directWork:true,companyId:0,company:''}),admin);assert.equal(directResponse.status,201);const direct=await directResponse.json(),directPath=`/api/documents/${direct.id}`;
     const reviewer=await (await send('/api/reviewers','POST',{siteId:site.id,loginId:'direct_http_manager',name:'가상 직원',password:'virtual-password-123'},admin)).json(),roles=await (await send(`${directPath}/permit-roles`,'GET',null,admin)).json();
     assert.equal((await send(`${directPath}/permit-roles`,'PUT',{expectedVersion:roles.version,roles:{...emptyRoles(),siteManager:reviewer.id}},admin)).status,200);
-    assert.equal((await send(directPath,'PUT',input(site.id,{...required,directWork:true}),admin)).status,200);
+    assert.equal((await send(directPath,'PUT',{...input(site.id,{...required,directWork:true}),expectedEditVersion:(await (await send(directPath,'GET',null,admin)).json()).edit_version},admin)).status,200);
     assert.equal((await send(`${directPath}/transition`,'POST',{action:'submit'},admin)).status,200);const submitted=await (await send(directPath,'GET',null,admin)).json();assert.equal(JSON.parse(submitted.details).directWork,true);
   }finally{lines?.close();if(db){if(locked)db.exec('ROLLBACK');db.close();}if(child.exitCode===null){const exited=once(child,'exit');child.kill();await exited;}assert.ok(resolve(dir).startsWith(resolve(tmpdir())+sep));rmSync(dir,{recursive:true,force:true});}
 });

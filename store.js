@@ -207,6 +207,15 @@ export class Store {
       CREATE INDEX IF NOT EXISTS notice_edits_document ON notice_edits(document_id,id);
       CREATE TABLE IF NOT EXISTS notice_edit_reads (edit_id INTEGER NOT NULL REFERENCES notice_edits(id),worker_id INTEGER NOT NULL REFERENCES workers(id),read_at TEXT NOT NULL,signature BLOB,PRIMARY KEY(edit_id,worker_id));`);
     if (!this.db.prepare('PRAGMA table_info(documents)').all().some(c=>c.name==='details')) this.db.exec("ALTER TABLE documents ADD COLUMN details TEXT NOT NULL DEFAULT '{}'");
+    this.db.exec('BEGIN IMMEDIATE');try{
+      if(!this.db.prepare('PRAGMA table_info(documents)').all().some(column=>column.name==='edit_version'))this.db.exec('ALTER TABLE documents ADD COLUMN edit_version INTEGER NOT NULL DEFAULT 0');
+      this.db.exec('CREATE TRIGGER IF NOT EXISTS document_edit_version AFTER UPDATE ON documents WHEN NEW.edit_version=OLD.edit_version BEGIN UPDATE documents SET edit_version=OLD.edit_version+1 WHERE id=NEW.id; END;');
+      // 서명·첨부·결재 변경 뒤 오래된 편집이 새 자료를 지우지 않도록 같은 버전을 올린다.
+      for(const table of ['attachments','events','approval_steps','approval_cycles','office_reference_recipients','checklist_signatures','tbm_signatures','joint_inspection_signatures','meeting_signatures','training_targets','training_target_config'])for(const action of ['INSERT','UPDATE','DELETE']){
+        const ids=action==='INSERT'?'NEW.document_id':action==='DELETE'?'OLD.document_id':'OLD.document_id,NEW.document_id';
+        this.db.exec('CREATE TRIGGER IF NOT EXISTS document_edit_'+table+'_'+action.toLowerCase()+' AFTER '+action+' ON '+table+' BEGIN UPDATE documents SET edit_version=edit_version+1 WHERE id IN ('+ids+'); END;');
+      }this.db.exec('COMMIT');
+    }catch(error){this.db.exec('ROLLBACK');throw error;}
     this.db.exec(`CREATE TRIGGER IF NOT EXISTS basic_category_insert BEFORE INSERT ON documents WHEN NEW.type='basic' AND COALESCE(json_extract(NEW.details,'$.categoryId'),0)>0 AND NOT EXISTS(SELECT 1 FROM basic_categories WHERE id=json_extract(NEW.details,'$.categoryId') AND site_id=NEW.site_id) BEGIN SELECT RAISE(ABORT,'기본 서류 분류를 확인해 주세요.'); END;
       CREATE TRIGGER IF NOT EXISTS basic_category_update BEFORE UPDATE OF details,site_id,type ON documents WHEN NEW.type='basic' AND COALESCE(json_extract(NEW.details,'$.categoryId'),0)>0 AND NOT EXISTS(SELECT 1 FROM basic_categories WHERE id=json_extract(NEW.details,'$.categoryId') AND site_id=NEW.site_id) BEGIN SELECT RAISE(ABORT,'기본 서류 분류를 확인해 주세요.'); END;`);
     this.db.exec('BEGIN IMMEDIATE');try{
@@ -1325,7 +1334,7 @@ export class Store {
   createWorkerDocument(siteId,workerId,input,onAuthorize=()=>{}){
     this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();if(!Object.hasOwn(workerDocumentPermission,input.type)||!this.workerPermissions(siteId,workerId).includes(workerDocumentPermission[input.type]))throw new Error('문서 작성 시험 권한이 필요합니다.');const doc=this.createDocument({...input,siteId:Number(siteId)});this.db.prepare('INSERT INTO worker_authored_documents(document_id,worker_id) VALUES(?,?)').run(doc.id,Number(workerId));this.db.exec('COMMIT');return doc;}catch(error){this.db.exec('ROLLBACK');throw error;}
   }
-  updateWorkerDocument(siteId,workerId,id,input,onAuthorize=()=>{}){const doc=this.workerDocument(siteId,workerId,id);return this.updateDocument(doc.id,{...input,siteId:Number(siteId),type:doc.type},()=>{onAuthorize();const current=this.workerDocument(siteId,workerId,id);if(['status','title','date','body','details','updated_at'].some(key=>current[key]!==doc[key]))throw new Error('문서가 변경되었습니다. 다시 조회해 주세요.');});}
+  updateWorkerDocument(siteId,workerId,id,input,onAuthorize=()=>{}){const doc=this.workerDocument(siteId,workerId,id);return this.updateDocument(doc.id,{...input,siteId:Number(siteId),type:doc.type},()=>{onAuthorize();const current=this.workerDocument(siteId,workerId,id);if(['status','title','date','body','details','updated_at'].some(key=>current[key]!==doc[key]))throw Object.assign(new Error('문서가 변경되었습니다. 입력 내용을 복사한 뒤 문서를 다시 열어 주세요.'),{sessionStatus:409});});}
   transitionWorkerDocument(siteId,workerId,id,action,onAuthorize=()=>{}){this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();const doc=this.workerDocument(siteId,workerId,id);if(!['submit','withdraw','revise'].includes(action))throw new Error('허용된 문서 상태 변경을 확인해 주세요.');const result=this.transition(doc.id,action);this.db.exec('COMMIT');return result;}catch(error){this.db.exec('ROLLBACK');throw error;}}
   workerDocumentOptions(siteId,workerId,type){
     if(!Object.hasOwn(workerDocumentPermission,type)||!this.workerPermissions(siteId,workerId).includes(workerDocumentPermission[type]))throw new Error('문서 작성 시험 권한이 필요합니다.');
@@ -2116,6 +2125,7 @@ export class Store {
     this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();
     const current = this.document(id);
     if (!current) throw new Error('문서를 찾을 수 없습니다.');
+    if(input.expectedEditVersion!==undefined&&(!Number.isSafeInteger(input.expectedEditVersion)||input.expectedEditVersion!==current.edit_version))throw Object.assign(new Error('문서가 변경되었습니다. 입력 내용은 유지됩니다. 필요한 내용을 복사한 뒤 문서를 다시 열어 주세요.'),{sessionStatus:409});
     if(current.type==='cost' && Array.isArray(JSON.parse(current.details).rows))throw new Error('월간 사용내역서는 보존된 내역을 변경할 수 없습니다. 새 문서를 작성해 주세요.');
     if (current.status !== 'draft' && current.status !== 'rejected') throw new Error('임시저장 또는 반려된 문서만 수정할 수 있습니다.');
     if(current.type==='risk'){const previous=JSON.parse(current.details),rows=Array.isArray(previous.items)?previous.items:[previous],keys=['improvedGrade','improvedLikelihood','improvedSeverity'];if(rows.some(row=>keys.some(key=>row[key]))){const next=input.details,items=next&&Array.isArray(next.items)?next.items:next&&typeof next==='object'?[next]:null;if(!items||items.some(item=>!item||keys.some(key=>item[key]===undefined)))throw new Error('개선 후 위험성 정보를 보존하려면 화면을 새로고침해 주세요.');}}

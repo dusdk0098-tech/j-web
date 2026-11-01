@@ -70,7 +70,7 @@ export async function mountWorkerDocuments(parent,permissions,signaturePad){
           });
         }
         else input.details=Object.fromEntries((type==='tbm'?['weather','instructor','work','hazards']:['kind','otherTitle','audience','timeFrom','timeTo','instructor','educationPlace','educationMethod']).map(key=>[key,form.elements[key].value]));
-        await send(doc?`/api/worker/documents/${doc.id}`:'/api/worker/documents',doc?'PUT':'POST',input);if(form.isConnected)editor.replaceChildren();status.textContent='시험 문서를 저장했습니다.';await updateList();
+        await send(doc?`/api/worker/documents/${doc.id}`:'/api/worker/documents',doc?'PUT':'POST',{...input,...(doc?{expectedEditVersion:doc.edit_version}:{})});if(form.isConnected)editor.replaceChildren();status.textContent='시험 문서를 저장했습니다.';await updateList();
       }catch(error){message(error);}finally{submit.disabled=false;}
     };
     if(doc&&type==='work_plan'){

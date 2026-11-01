@@ -15,7 +15,7 @@ test('일보 수량은 서버 재시작 후 보존되고 잘못된 수정은 저
     await start();const base=`http://127.0.0.1:${port}`,call=(path,method='GET',data,cookie)=>fetch(base+path,{method,headers:{...(data?{'content-type':'application/json'}:{}),...(cookie?{cookie}:{})},...(data?{body:JSON.stringify(data)}:{})}),login=async()=>(await call('/api/login','POST',{password:'test-password-12345'})).headers.get('set-cookie').split(';')[0];
     let admin=await login();const site=await (await call('/api/sites','POST',{name:'가상 현장'},admin)).json(),row={name:'가상 자재',quantity:'',previous:'12.3',day:'0.4',unit:'개',specification:'가상 규격'},input={siteId:site.id,type:'daily_report',title:'가상 일보',date:'2026-10-30',details:{materials:[row]}};
     const created=await call('/api/documents','POST',input,admin);assert.equal(created.status,201);const doc=await created.json();assert.deepEqual(JSON.parse(doc.details).materials,[row]);
-    assert.equal((await call(`/api/documents/${doc.id}`,'PUT',{...input,details:{materials:[{...row,day:'-4'}]}},admin)).status,400);
+    assert.equal((await call(`/api/documents/${doc.id}`,'PUT',{...input,expectedEditVersion:doc.edit_version,details:{materials:[{...row,day:'-4'}]}},admin)).status,400);
     await stop();await start();admin=await login();const loaded=await call(`/api/documents/${doc.id}`,'GET',undefined,admin);assert.equal(loaded.status,200);assert.deepEqual(JSON.parse((await loaded.json()).details).materials,[row]);
   }finally{await stop();rmSync(dir,{recursive:true,force:true});}
 });

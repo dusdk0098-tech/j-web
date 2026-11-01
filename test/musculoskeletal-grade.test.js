@@ -60,8 +60,8 @@ test('관리자·근로자 HTTP 저장은 개선 등급 누락을 거부하고 �
     for(const [path,cookie] of [['/api/documents',admin],['/api/worker/documents',worker]]){
       const response=await call(path,'POST',input,cookie);assert.equal(response.status,201);const doc=await response.json();assert.equal(JSON.parse(doc.details).musculoskeletalItems[0].improvedGrade,'중');documents.push({path,id:doc.id});
       const omitted=structuredClone(input);delete omitted.details.musculoskeletalItems[0].improvedGrade;
-      const rejected=await call(`${path}/${doc.id}`,'PUT',omitted,cookie);assert.equal(rejected.status,400);assert.match((await rejected.json()).error,/근골격계 개선 후 등급/);
-      const updated=structuredClone(input);updated.details.musculoskeletalItems[0].improvedGrade='하';assert.equal((await call(`${path}/${doc.id}`,'PUT',updated,cookie)).status,200);
+      const rejected=await call(`${path}/${doc.id}`,'PUT',{...omitted,expectedEditVersion:doc.edit_version},cookie);assert.equal(rejected.status,400);assert.match((await rejected.json()).error,/근골격계 개선 후 등급/);
+      const updated=structuredClone(input);updated.details.musculoskeletalItems[0].improvedGrade='하';assert.equal((await call(`${path}/${doc.id}`,'PUT',{...updated,expectedEditVersion:doc.edit_version},cookie)).status,200);
     }
     await stop();await start();admin=await login();worker=await workerLogin();
     for(const doc of documents){const response=await call(`${doc.path}/${doc.id}`,'GET',undefined,doc.path.includes('/worker/')?worker:admin);assert.equal(response.status,200);assert.equal(JSON.parse((await response.json()).details).musculoskeletalItems[0].improvedGrade,'하');}
