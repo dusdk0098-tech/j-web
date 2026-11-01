@@ -27,6 +27,7 @@ export function pdfPageSize(page) {
   if(!Number.isFinite(base.width)||!Number.isFinite(base.height)||base.width<=0||base.height<=0||base.width>14400||base.height>14400)throw Error('지원 범위를 벗어난 PDF 페이지 크기입니다.');
   const scale=Math.min(1.5,Math.sqrt(pdfPrintLimits.pagePixels/(base.width*base.height)),2000/base.width,2000/base.height);
   const viewport=page.getViewport({scale});
+  if(viewport.width<1||viewport.height<1)throw Error('지원 범위를 벗어난 PDF 페이지 크기입니다.');
   return {viewport,width:Math.floor(viewport.width),height:Math.floor(viewport.height)};
 }
 
