@@ -1,3 +1,4 @@
+import { adminSitePolicy } from './admin-site-policy.js';
 import { adminWriteGuard } from './admin-write-guard.js';
 import http from 'node:http';
 import { readFileSync, mkdirSync, readdirSync } from 'node:fs';
@@ -109,7 +110,8 @@ async function body(req,max=65536) {
   const chunks=[];let size=0;
   for await (const chunk of req) { size+=chunk.length;if(size>max)throw new Error('입력 내용이 너무 깁니다.');chunks.push(chunk); }
   checkRequestSession(req);
-  try { const raw=new TextDecoder('utf-8',{fatal:true}).decode(Buffer.concat(chunks));const value = JSON.parse(raw); if (!value || typeof value !== 'object' || Array.isArray(value)) throw Error(); return value; } catch { throw new Error('입력 형식이 올바르지 않습니다.'); }
+  let parsed;try { const raw=new TextDecoder('utf-8',{fatal:true}).decode(Buffer.concat(chunks));const value = JSON.parse(raw); if (!value || typeof value !== 'object' || Array.isArray(value)) throw Error(); parsed=value; } catch { throw new Error('입력 형식이 올바르지 않습니다.'); }
+  req.adminInput=parsed;checkRequestSession(req);return parsed;
 }
 async function handleCommonWork(req,res,url,prefix,actor=null){
   if(url.pathname!==prefix&&!url.pathname.startsWith(prefix+'/'))return false;
@@ -506,12 +508,12 @@ const server = http.createServer((req,res)=>adminRequests.run(req,async()=>{
     }
     if(url.pathname.startsWith('/api/') && url.pathname!=='/api/join' && !auth.valid(token))return json(res,401,{error:'관리자 로그인이 필요합니다.'});
     if(url.pathname.startsWith('/api/')&&url.pathname!=='/api/join'){
-      req.checkSession=()=>{if(!auth.valid(token))return {status:401,error:'관리자 로그인이 필요합니다.'};if(!['GET','HEAD'].includes(req.method)&&(req.headers['x-admin-context']||req.headers.origin||req.headers['sec-fetch-site'])&&req.headers['x-admin-context']!==auth.context(token))return {status:409,error:'관리자 세션이 변경되었습니다. 입력 내용을 복사하고 새로고침해 주세요.'};return null;};checkRequestSession(req);req.adminProtected=true;
+      req.checkSession=()=>{if(!auth.valid(token))return {status:401,error:'관리자 로그인이 필요합니다.'};if((req.headers['x-admin-context']||!['GET','HEAD'].includes(req.method)&&(req.headers.origin||req.headers['sec-fetch-site']))&&req.headers['x-admin-context']!==auth.context(token))return {status:409,error:'관리자 세션이 변경되었습니다. 입력 내용을 복사하고 새로고침해 주세요.'};return adminSitePolicy(store.db,req,url,()=>auth.session(token));};checkRequestSession(req);req.adminProtected=true;const writeHead=res.writeHead;res.writeHead=function(...args){if(args[0]<400&&!url.pathname.startsWith('/api/admin-accounts'))checkRequestSession(req);return writeHead.apply(this,args);};
     }
-    if(url.pathname==='/api/admin-accounts'&&req.method==='GET')return json(res,200,auth.list());
-    if(url.pathname==='/api/admin-accounts'&&req.method==='POST')return json(res,201,auth.create(await body(req),()=>checkRequestSession(req)));
+    if(url.pathname==='/api/admin-accounts'&&req.method==='GET'){let rows;store.db.exec('BEGIN IMMEDIATE');try{checkRequestSession(req);auth.requireGlobal(token);rows=auth.list();store.db.exec('COMMIT');}catch(error){store.db.exec('ROLLBACK');throw error;}checkRequestSession(req);return json(res,200,rows);}
+    if(url.pathname==='/api/admin-accounts'&&req.method==='POST')return json(res,201,auth.create(await body(req),()=>{checkRequestSession(req);auth.requireGlobal(token);}));
     const adminAccount=url.pathname.match(/^\/api\/admin-accounts\/(\d+)$/);
-    if(adminAccount&&req.method==='PUT')return json(res,200,auth.update(adminAccount[1],await body(req),()=>checkRequestSession(req)));
+    if(adminAccount&&req.method==='PUT')return json(res,200,auth.update(adminAccount[1],await body(req),()=>{checkRequestSession(req);auth.requireGlobal(token);}));
     if(url.pathname.startsWith('/api/ai/')){
       try{
         if(url.pathname==='/api/ai/status'&&req.method==='GET')return json(res,200,aiChat.status());
@@ -662,7 +664,7 @@ const server = http.createServer((req,res)=>adminRequests.run(req,async()=>{
       if (req.method === 'POST') {const input=await body(req),worker=store.join(input.token,input);return json(res,201,{ok:true,siteKey:store.siteAccessKey(worker.site_id)});}
     }
     if (url.pathname === '/api/sites') {
-      if (req.method === 'GET') return json(res,200,store.sites());
+      if (req.method === 'GET') {const actor=auth.session(token),rows=store.sites();checkRequestSession(req);return json(res,200,actor.scope==='global'?rows:rows.filter(site=>actor.siteIds.includes(site.id)));}
       if (req.method === 'POST') return json(res,201,store.createSite(await body(req)));
     }
     const placeCopy=url.pathname.match(/^\/api\/work-places\/(\d+)\/copy$/);
@@ -958,7 +960,7 @@ const server = http.createServer((req,res)=>adminRequests.run(req,async()=>{
     if(url.pathname==='/api/office-approval-default'&&req.method==='GET'){const result=store.officeApprovalDefault(url.searchParams.get('siteId'),url.searchParams.get('kind'),url.searchParams.get('otherKind')||'');checkRequestSession(req);return json(res,200,result);}
     if(url.pathname==='/api/office-reference-preview'&&req.method==='GET'){const siteId=Number(url.searchParams.get('siteId')),id=Number(url.searchParams.get('id'));if(!Number.isSafeInteger(siteId)||siteId<1||!Number.isSafeInteger(id)||id<1)throw new Error('현장과 참조 문서를 확인해 주세요.');const result=store.officeReferenceInfo(siteId,id);checkRequestSession(req);return json(res,200,result);}
     if (url.pathname === '/api/documents') {
-      if (req.method === 'GET') return json(res,200,store.documents(url.searchParams.get('siteId'),url.searchParams.get('type') || '',url.searchParams.get('q') || '',url.searchParams.get('from') || '',url.searchParams.get('to') || '',url.searchParams.get('riskKind') || '',url.searchParams.get('riskContractorId') || '',url.searchParams.get('instructionCompanyId') || '',url.searchParams.get('permitCompany') || '',url.searchParams.get('permitFrom') || '',url.searchParams.get('permitTo') || '',url.searchParams.get('educationKind') || ''));
+      if (req.method === 'GET') {const rows=store.documents(url.searchParams.get('siteId'),url.searchParams.get('type') || '',url.searchParams.get('q') || '',url.searchParams.get('from') || '',url.searchParams.get('to') || '',url.searchParams.get('riskKind') || '',url.searchParams.get('riskContractorId') || '',url.searchParams.get('instructionCompanyId') || '',url.searchParams.get('permitCompany') || '',url.searchParams.get('permitFrom') || '',url.searchParams.get('permitTo') || '',url.searchParams.get('educationKind') || '');checkRequestSession(req);const actor=auth.session(token);return json(res,200,actor.scope==='global'?rows:rows.filter(row=>actor.siteIds.includes(row.site_id)));}
       if (req.method === 'POST') {const input=await body(req,220000);return json(res,201,input.officeSetup===undefined?store.createAuthorizedDocument(input,()=>checkRequestSession(req)):store.createOfficeDraft(input,()=>checkRequestSession(req)));}
     }
     const copyWorkPlan=url.pathname.match(/^\/api\/documents\/(\d+)\/copy-work-plan$/);

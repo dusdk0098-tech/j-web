@@ -45,6 +45,13 @@ import { permitSources,permitSourceItems } from './permit-sources.js';
 const $ = (s) => document.querySelector(s);
 const content = $('#content'), siteSelect = $('#site-select'), dialog = $('#dialog'), notice = $('#notice');
 const state = { page:'dashboard', siteId:null, types:{}, type:'', riskKind:'', riskContractorId:'', instructionCompanyId:'', permitCompany:'', query:'', detail:null, attendanceDate:null, attendanceMonth:null, reportFrom:null, reportTo:null, reportGroup:'worker', workerFilters:{}, workerOrder:'default', workerPage:0, documentFrom:'', documentTo:'', statisticsMonth:null, statisticsDay:'' };
+function applyAdminScope(admin) {
+  state.admin={...admin,scope:admin?.scope==='global'?'global':'restricted'};
+  const global=admin?.scope==='global';
+  document.querySelectorAll('[data-page]').forEach(button=>{button.hidden=!global&&button.dataset.page!=='documents';});
+  for(const selector of ['#site-add','#site-qr','#sticker-requests','#ai-chat'])$(selector).hidden=!global;
+  if(!global){state.page='documents';state.detail=null;document.querySelector('.sidebar-help').textContent='배정 현장의 문서 요약 조회와 일반 공지 임시저장만 지원합니다. 다른 기능은 전역 관리자에게 요청하세요.';}
+}
 let sitePhotoEpoch=0,workerListEpoch=0,detailEpoch=0,workerSelfCheckEpoch=0,ppeDetailEpoch=0,workerEditEpoch=0,joinRecordEpoch=0;
 let permitRoleCleanup=null;
 const labels = {dashboard:'현장 현황','manager-check':'관리자 자가점검',workers:'출입자 관리',companies:'협력사 관리',equipment:'기계·장비',rigging:'줄걸이·체결장구','work-places':'작업장소','safety-costs':'산업안전보건관리비',attendance:'출역 관리',stops:'작업중지 요청',documents:'안전 문서',approval:'미결재 문서',statistics:'안전 활동 통계'};
@@ -137,9 +144,12 @@ $('#menu-toggle').onclick=()=>{const open=$('#sidebar').classList.toggle('open')
 document.querySelectorAll('[data-page]').forEach(button=>button.onclick=()=>{state.page=button.dataset.page;state.detail=null;state.query='';state.type='';state.riskKind='';state.riskContractorId='';state.instructionCompanyId='';state.permitCompany='';state.permitFrom='';state.permitTo='';$('#sidebar').classList.remove('open');$('#menu-toggle').setAttribute('aria-expanded','false');render().catch(showError);});
 function showError(err){flash(err.message,true);}
 async function loadSites() {
-  const sites=await api('/api/sites');
-  if(!sites.some(s=>s.id===state.siteId)) state.siteId=sites[0]?.id ?? null;
-  siteSelect.innerHTML=sites.length?sites.map(s=>`<option value="${s.id}" ${s.id===state.siteId?'selected':''}>${esc(s.name)}</option>`).join(''):'<option value="">현장을 추가하세요</option>';
+  const epoch=detailEpoch,sites=await api('/api/sites',{},()=>detailEpoch===epoch);
+  if(detailEpoch!==epoch)return;
+  state.sites=sites;
+  if(!sites.some(s=>s.id===state.siteId)){state.siteId=sites[0]?.id ?? null;state.detail=null;}
+  siteSelect.disabled=!sites.length;
+  siteSelect.innerHTML=sites.length?sites.map(s=>`<option value="${s.id}" ${s.id===state.siteId?'selected':''}>${esc(s.name)}</option>`).join(''):state.admin?.scope==='global'?'<option value="">현장을 추가하세요</option>':'<option value="">배정된 현장이 없습니다</option>';
 }
 siteSelect.onchange=()=>{state.siteId=Number(siteSelect.value);state.detail=null;state.riskKind='';state.riskContractorId='';state.instructionCompanyId='';state.permitCompany='';state.permitFrom='';state.permitTo='';state.workerFilters={};state.workerPage=0;state.wageFilters={};render().catch(showError);};
 $('#site-add').onclick=()=>showDialog('현장 추가',`<div class="fields">${field('name','현장명')}</div>`,async d=>{const site=await api('/api/sites',{method:'POST',body:JSON.stringify(d)});state.siteId=site.id;state.riskKind='';state.riskContractorId='';state.instructionCompanyId='';state.permitCompany='';state.permitFrom='';state.permitTo='';});
@@ -894,15 +904,36 @@ async function renderAllSiteStatistics(siteId,from,to,month,day){
   section.innerHTML=`<h2>전체 현장 가상 출역</h2><p class="muted">${esc(from)} ~ ${esc(to)}의 기록 당시 구분별 출역 인일입니다. 외주는 협력업체 근로자와 기존 외주 기록이며, 협력업체 관리자 등 다른 구분은 별도로 표시합니다.</p><div class="table-wrap"><table><thead><tr><th>현장</th><th>교육 통계</th><th>직영</th><th>외주</th><th>그 외 구분</th><th>합계</th></tr></thead><tbody>${sites.map(row=>`<tr><td>${esc(row.name)}</td><td><button type="button" data-site-education="${row.id}">상세보기</button></td><td>${row.direct}</td><td>${row.external}</td><td>${describe(row.other)}</td><td>${row.total}</td></tr>`).join('')}<tr><th>전체 합계</th><td></td><td>${totals.direct}</td><td>${totals.external}</td><td>${describe(totals.other)}</td><td>${totals.total}</td></tr></tbody></table></div>`;anchor.before(section);
   section.querySelectorAll('[data-site-education]').forEach(button=>button.onclick=async()=>{const target=Number(button.dataset.siteEducation);state.siteId=target;state.statisticsDay='';state.detail=null;state.workerFilters={};state.wageFilters={};try{await render();if(state.page==='statistics'&&state.siteId===target)content.querySelector('#education-report')?.scrollIntoView({block:'start'});}catch(error){showError(error);}});
 }
+async function renderRestrictedDocuments(){
+  const epoch=detailEpoch,siteId=state.siteId,detailId=state.detail,current=()=>detailEpoch===epoch&&state.page==='documents'&&state.siteId===siteId&&state.detail===detailId;
+  content.textContent='배정 현장의 문서를 불러오는 중입니다.';
+  if(detailId){
+    const doc=await api('/api/documents/'+detailId,{},current);if(!current())return;
+    content.innerHTML=`<section class="panel"><button type="button" id="restricted-back">목록으로</button><h2>${esc(doc.title)}</h2><p>${esc(state.types[doc.type]||doc.type)} · ${esc(doc.date)} · ${esc(statusLabels[doc.status]||doc.status)}</p><p class="detail-body">${esc(doc.body)}</p><p>문서 제목·본문 요약입니다. 세부 서식, 첨부·서명, 결재·수정은 이 화면에서 지원하지 않습니다.</p></section>`;
+    $('#restricted-back').onclick=()=>{state.detail=null;render().catch(showError);};return;
+  }
+  const docs=await api('/api/documents?'+new URLSearchParams({siteId:String(siteId)}),{},current);if(!current())return;
+  content.innerHTML=`<section class="panel"><h2>배정 현장 문서</h2><p>배정된 현장의 문서 요약 조회와 일반 공지 임시저장만 지원합니다. 결재·게시·다른 문서 작성은 전역 관리자에게 요청하세요.</p><button type="button" id="restricted-notice-add">일반 공지 임시저장</button>${docs.length?'<ul>'+docs.map(doc=>`<li><button type="button" data-restricted-doc="${doc.id}">${esc(doc.title)}</button> · ${esc(doc.date)} · ${esc(statusLabels[doc.status]||doc.status)}</li>`).join('')+'</ul>':'<p>등록된 문서가 없습니다.</p>'}</section>`;
+  content.querySelectorAll('[data-restricted-doc]').forEach(button=>button.onclick=()=>{if(!current())return;state.detail=Number(button.dataset.restrictedDoc);render().catch(showError);});
+  $('#restricted-notice-add').onclick=()=>showDialog('일반 공지 임시저장',field('title','제목')+field('date','작성일',today(),'date')+'<label>본문<textarea name="body" maxlength="20000"></textarea></label><p>임시저장만 합니다. 게시·결재는 전역 관리자에게 요청하세요.</p>',data=>api('/api/documents',{method:'POST',body:JSON.stringify({siteId,type:'notice',title:data.title,date:data.date,body:data.body})},current),current);
+}
 async function render(){
   permitRoleCleanup?.();permitRoleCleanup=null;
   detailEpoch++;
   const renderEpoch=detailEpoch;
+  if(state.admin?.scope==='restricted'||state.page==='admins')content.textContent='접근 가능한 자료를 확인하는 중입니다.';
   workerListEpoch++;document.querySelector('dialog.worker-preview[open]')?.close();
   sitePhotoEpoch++;document.querySelector('dialog.site-photo-viewer[open]')?.close();
   document.querySelector('dialog.personal-note-preview[open]')?.close();
-  await loadSites(); $('#heading').textContent=labels[state.page];$('#crumb').textContent=labels[state.page];
+  await loadSites();
+  if(detailEpoch!==renderEpoch)return;
+  if(state.admin?.scope==='restricted'&&state.page!=='documents'){state.page='documents';state.detail=null;}
+  $('#heading').textContent=labels[state.page];$('#crumb').textContent=labels[state.page];
   document.querySelectorAll('[data-page]').forEach(b=>b.classList.toggle('selected',b.dataset.page===state.page));
+  if(state.admin?.scope==='restricted'){
+    if(!state.siteId){content.innerHTML='<section class="panel empty">현재 이용할 수 있는 배정 현장이 없습니다. 전역 관리자에게 현장 배정을 요청한 뒤 다시 로그인해 주세요.</section>';return;}
+    return renderRestrictedDocuments();
+  }
   if(!state.siteId&&state.page!=='board'&&state.page!=='clients'&&state.page!=='admins'){content.innerHTML='<section class="panel empty">먼저 현장을 추가해 주세요. 시험을 위해 가상의 현장명을 사용하세요.</section>';return;}
   if(state.detail)return renderDetail();
   if(state.page==='site-print'){
@@ -917,16 +948,24 @@ async function render(){
     $('#site-print-search').onclick=async event=>{const button=event.currentTarget,ids=chosen(),day=$('#site-print-date').value,requested=sites.filter(site=>ids.includes(site.id));try{button.disabled=true;target.textContent='문서를 조회하는 중입니다.';const docs=await siteDocumentsForDay(requested,day,api);if(!target.isConnected||state.page!=='site-print'||detailEpoch!==epoch||$('#site-print-date').value!==day||chosen().join(',')!==ids.join(','))return;state.sitePrintSites=ids;state.sitePrintDate=day;target.innerHTML=docs.length?`<p>선택한 가상 문서 ${docs.length}건</p><button type="button" id="site-print-select-all">문서 전체 선택</button> <button type="button" id="site-print-preview">선택 문서 미리보기</button><div class="table-wrap"><table><thead><tr><th>선택</th><th>현장</th><th>유형</th><th>제목</th><th>상태</th></tr></thead><tbody>${docs.map(doc=>`<tr><td><input type="checkbox" data-print-document="${doc.id}" aria-label="${esc(doc.title)} 선택"></td><td>${esc(doc.site_name)}</td><td>${esc(state.types[doc.type]||doc.type)}</td><td>${esc(doc.title)}</td><td>${esc(statusLabels[doc.status]||doc.status)}</td></tr>`).join('')}</tbody></table></div>`:'<p>해당 날짜에 작성된 시험 문서가 없습니다.</p>';if(docs.length){$('#site-print-select-all').onclick=()=>target.querySelectorAll('[data-print-document]').forEach(input=>{input.checked=true;});$('#site-print-preview').onclick=async()=>{try{const picked=selectBatchDocuments(docs,[...target.querySelectorAll('[data-print-document]:checked')].map(input=>input.dataset.printDocument));await showBatchPreview(picked,[],state.siteId,false,docs);}catch(error){showError(error);}};}}catch(error){if(target.isConnected)target.textContent=error.message;}finally{if(button.isConnected)button.disabled=false;}};return;
   }
   if(state.page==='admins'){
-    const people=await api('/api/admin-accounts');if(state.page!=='admins')return;
-    content.innerHTML='<section class="panel"><h2>관리자 계정</h2><p>모든 관리자는 전 현장과 다른 관리자 계정을 관리할 수 있습니다. 현장별 접근 제한과 문서 작성자 개인 식별은 제공하지 않습니다.</p><button type="button" id="admin-add">관리자 추가</button><ul>'+people.map(p=>'<li>'+esc(p.name)+' · '+esc(p.login_id)+' · '+(p.active?'사용 중':'중지됨')+' <button data-admin-name="'+p.id+'">이름 변경</button> <button data-admin-active="'+p.id+'">'+(p.active?'중지':'재개')+'</button> <button data-admin-password="'+p.id+'">암호 초기화</button> <button data-admin-revoke="'+p.id+'">모든 세션 종료</button></li>').join('')+'</ul></section>';
+    if(state.admin?.scope!=='global'){content.textContent='관리자 계정 관리는 전역 관리자만 사용할 수 있습니다.';return;}
+    const current=()=>detailEpoch===renderEpoch&&state.page==='admins'&&state.admin?.scope==='global';
+    content.textContent='관리자 계정을 불러오는 중입니다.';
+    const people=await api('/api/admin-accounts',{},current);if(!current())return;
+    const sites=state.sites,assignment=p=>p.scope==='global'?'전역 · 모든 현장':`현장 제한 · ${(p.siteIds||[]).map(id=>sites.find(site=>site.id===id)?.name||'이용 불가 현장 #'+id).join(', ')||'배정 없음'}`;
+    content.innerHTML='<section class="panel"><h2>관리자 계정</h2><p>전역 관리자는 계정과 모든 현장을 관리합니다. 현장 제한 관리자는 배정 현장의 문서 요약 조회와 일반 공지 임시저장만 지원합니다. 권한·배정을 변경하면 해당 계정의 모든 로그인이 종료됩니다. 마지막 활성 전역 관리자의 중지·제한 전환은 허용되지 않습니다.</p><button type="button" id="admin-add">관리자 추가</button><ul>'+people.map(p=>'<li>'+esc(p.name)+' · '+esc(p.login_id)+' · '+(p.active?'사용 중':'중지됨')+' · '+esc(assignment(p))+' <button data-admin-scope="'+p.id+'">권한·현장 배정</button> <button data-admin-name="'+p.id+'">이름 변경</button> <button data-admin-active="'+p.id+'">'+(p.active?'중지':'재개')+'</button> <button data-admin-password="'+p.id+'">암호 초기화</button> <button data-admin-revoke="'+p.id+'">모든 세션 종료</button></li>').join('')+'</ul></section>';
+    const scopeFields=p=>`<label>관리 범위<select name="scope" id="admin-scope"><option value="restricted" ${p.scope==='restricted'?'selected':''}>배정 현장만</option><option value="global" ${p.scope==='global'?'selected':''}>전역 (모든 현장·계정 관리)</option></select></label><fieldset id="admin-site-options"><legend>배정 현장</legend>${sites.length?sites.map(site=>`<label><input type="checkbox" name="siteId_${site.id}" ${(p.siteIds||[]).includes(site.id)?'checked':''}>${esc(site.name)}</label>`).join(''):'<p>등록된 현장이 없습니다.</p>'}</fieldset><p>현장을 선택하지 않은 제한 계정은 현장 자료를 볼 수 없습니다. 배정 변경 후 다시 로그인해야 합니다.</p>`;
+    const wireScope=()=>{const select=$('#admin-scope'),fieldset=$('#admin-site-options');select.onchange=()=>{fieldset.disabled=select.value==='global';};select.onchange();};
+    const scopeInput=data=>({scope:data.scope,siteIds:data.scope==='global'?[]:sites.filter(site=>Object.hasOwn(data,'siteId_'+site.id)).map(site=>site.id)});
     const passwordFields='<label>새 암호<input name="password" type="password" minlength="12" maxlength="256" autocomplete="new-password" required></label><label>암호 확인<input name="confirm" type="password" minlength="12" maxlength="256" autocomplete="new-password" required></label>';
     const checkPassword=data=>{if(data.password!==data.confirm)throw Error('암호 확인이 일치하지 않습니다.');};
-    $('#admin-add').onclick=()=>showDialog('관리자 추가',field('loginId','아이디 (영문·숫자·밑줄 3~50자)')+field('name','이름')+passwordFields,data=>{checkPassword(data);return api('/api/admin-accounts',{method:'POST',body:JSON.stringify(data)});});
+    $('#admin-add').onclick=()=>{if(!current())return;showDialog('관리자 추가',field('loginId','아이디 (영문·숫자·밑줄 3~50자)')+field('name','이름')+passwordFields+scopeFields({scope:'restricted',siteIds:[]}),data=>{checkPassword(data);return api('/api/admin-accounts',{method:'POST',body:JSON.stringify({loginId:data.loginId,name:data.name,password:data.password,...scopeInput(data)})},current);},current);wireScope();};
     for(const person of people){
-      const update=data=>api('/api/admin-accounts/'+person.id,{method:'PUT',body:JSON.stringify({version:person.version,...data})});
-      content.querySelector('[data-admin-name="'+person.id+'"]').onclick=()=>showDialog('관리자 이름 변경',field('name','이름',person.name),data=>update({name:data.name}));
-      content.querySelector('[data-admin-password="'+person.id+'"]').onclick=()=>showDialog('관리자 암호 초기화','<p>이 계정의 모든 세션이 종료됩니다.</p>'+passwordFields,data=>{checkPassword(data);return update({password:data.password});});
-      for(const action of ['active','revoke'])content.querySelector('[data-admin-'+action+'="'+person.id+'"]').onclick=async()=>{if(!confirm(person.name+'의 '+(action==='revoke'?'모든 세션을 종료':person.active?'계정을 중지':'계정을 재개')+'할까요?'))return;try{await update(action==='revoke'?{revoke:true}:{active:!person.active});await render();}catch(error){showError(error);}};
+      const update=async data=>{if(!current())return;const result=await api('/api/admin-accounts/'+person.id,{method:'PUT',body:JSON.stringify({version:person.version,...data})},current);if(!current())return;const revoked=data.revoke||data.password||data.active===false||data.scope&&data.scope!==person.scope||data.siteIds&&JSON.stringify([...data.siteIds].sort((a,b)=>a-b))!==JSON.stringify(person.siteIds);if(person.id===state.admin.id&&revoked){dialog.close();detailEpoch++;content.textContent='로그인이 종료되었습니다. 변경된 권한으로 다시 로그인해 주세요.';location.assign('/login');}return result;};
+      content.querySelector('[data-admin-scope="'+person.id+'"]').onclick=()=>{if(!current())return;showDialog('관리자 권한·현장 배정',scopeFields(person),data=>update(scopeInput(data)),current);wireScope();};
+      content.querySelector('[data-admin-name="'+person.id+'"]').onclick=()=>showDialog('관리자 이름 변경',field('name','이름',person.name),data=>update({name:data.name}),current);
+      content.querySelector('[data-admin-password="'+person.id+'"]').onclick=()=>showDialog('관리자 암호 초기화','<p>이 계정의 모든 세션이 종료됩니다. 다시 로그인해야 합니다.</p>'+passwordFields,data=>{checkPassword(data);return update({password:data.password});},current);
+      for(const action of ['active','revoke'])content.querySelector('[data-admin-'+action+'="'+person.id+'"]').onclick=async()=>{if(!current()||!confirm(person.name+'의 '+(action==='revoke'?'모든 세션을 종료':person.active?'계정을 중지':'계정을 재개')+'할까요?'))return;try{await update(action==='revoke'?{revoke:true}:{active:!person.active});if(current())await render();}catch(error){if(current())showError(error);}};
     }return;
   }
   if(state.page==='clients'){
@@ -1446,4 +1485,4 @@ async function render(){
     if(reports.length){$('#hazard-select-all').onclick=()=>section.querySelectorAll('[data-hazard-document]').forEach(input=>{input.checked=true;});$('#hazard-preview').onclick=()=>{try{preview([...section.querySelectorAll('[data-hazard-document]:checked')].map(input=>input.dataset.hazardDocument));}catch(error){showError(error);}};section.querySelectorAll('[data-hazard-preview]').forEach(button=>button.onclick=()=>{try{preview([button.dataset.hazardPreview]);}catch(error){showError(error);}});if(filtered.length){const button=document.createElement('button');button.type='button';button.textContent='선택 문서와 신고 함께 미리보기';section.querySelector('.batch-controls').append(button);button.onclick=async()=>{try{const chosen=selectBatchItems(filtered,reports,[...content.querySelectorAll('[data-batch-document]:checked')].map(input=>input.dataset.batchDocument),[...section.querySelectorAll('[data-hazard-document]:checked')].map(input=>input.dataset.hazardDocument));await showBatchPreview(chosen.documents,chosen.reports.map(id=>reports.find(report=>report.id===id)),siteId);}catch(error){showError(error);}};}}
   }
 }
-try {const session=await adminSession;if(!session?.authenticated||!session.context){location.assign('/login');throw Error('관리자 로그인이 필요합니다.');}if(session.enabled){const identity=document.createElement('span');identity.textContent=(session.admin?.name||'관리자')+' · 전 현장 권한';document.querySelector('.top').append(identity);const logout=document.createElement('button');logout.className='outline';logout.textContent='로그아웃';logout.onclick=async()=>{joinRecordEpoch++;await api('/api/logout',{method:'POST',body:'{}'});location.assign('/login');};document.querySelector('.top').append(logout);}state.types=await api('/api/types'); await render();} catch(e) {showError(e);}
+try {const session=await adminSession;if(!session?.authenticated||!session.context){location.assign('/login');throw Error('관리자 로그인이 필요합니다.');}applyAdminScope(session.admin);if(session.enabled){const identity=document.createElement('span');identity.textContent=(session.admin?.name||'관리자')+(state.admin.scope==='global'?' · 전역 권한':' · 배정 현장만');document.querySelector('.top').append(identity);const logout=document.createElement('button');logout.className='outline';logout.textContent='로그아웃';logout.onclick=async()=>{joinRecordEpoch++;await api('/api/logout',{method:'POST',body:'{}'});location.assign('/login');};document.querySelector('.top').append(logout);}state.types=await api('/api/types'); await render();} catch(e) {showError(e);}
