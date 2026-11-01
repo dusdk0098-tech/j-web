@@ -1,4 +1,4 @@
-import { adminSitePolicy } from './admin-site-policy.js';
+import { adminSitePolicy, adminAttendanceRows } from './admin-site-policy.js';
 import { adminWriteGuard } from './admin-write-guard.js';
 import http from 'node:http';
 import { readFileSync, mkdirSync, readdirSync } from 'node:fs';
@@ -899,9 +899,9 @@ const server = http.createServer((req,res)=>adminRequests.run(req,async()=>{
     const ppeIssue=url.pathname.match(/^\/api\/ppe-issues\/(\d+)$/);
     if(ppeIssue&&req.method==='PUT'){store.updatePpeIssue(ppeIssue[1],await body(req),()=>checkRequestSession(req));return json(res,200,{ok:true});}
     if(ppeIssue&&req.method==='DELETE'){store.deletePpeIssue(url.searchParams.get('siteId'),ppeIssue[1],url.searchParams.has('expectedVersion')?url.searchParams.get('expectedVersion'):undefined,()=>checkRequestSession(req));return json(res,200,{ok:true});}
-    if(url.pathname==='/api/workers/list'&&req.method==='GET'){const result=store.workerListing(url.searchParams.get('siteId'),url.searchParams.get('q')||'',Object.fromEntries(url.searchParams),()=>checkRequestSession(req));return json(res,200,result);}
+    if(url.pathname==='/api/workers/list'&&req.method==='GET'){const result=store.workerListing(url.searchParams.get('siteId'),url.searchParams.get('q')||'',Object.fromEntries(url.searchParams),()=>checkRequestSession(req),null,!req.adminRestricted);return json(res,200,result);}
     if (url.pathname === '/api/workers') {
-      if (req.method === 'GET'){const rows=store.workers(url.searchParams.get('siteId'),url.searchParams.get('q') || '',Object.fromEntries(url.searchParams));checkRequestSession(req);return json(res,200,rows);}
+      if (req.method === 'GET'){const rows=store.workers(url.searchParams.get('siteId'),url.searchParams.get('q') || '',Object.fromEntries(url.searchParams),!req.adminRestricted);checkRequestSession(req);return json(res,200,rows);}
       if (req.method === 'POST') return json(res,201,store.createWorker(await body(req),()=>checkRequestSession(req)));
     }
     if(url.pathname==='/api/workers/preview'&&req.method==='POST'){const input=await body(req),result=store.previewWorkers(input.siteId,input.items,()=>checkRequestSession(req));return json(res,200,result);}
@@ -935,13 +935,14 @@ const server = http.createServer((req,res)=>adminRequests.run(req,async()=>{
       const signature=store.joinSignature(siteId,workerJoin[1]);if(!signature)return json(res,404,{error:'시험 서명을 찾을 수 없습니다.'});
       res.writeHead(200,{'Content-Type':'application/octet-stream','Content-Disposition':'attachment; filename="test-join-signature.png"','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(signature);
     }
+    if(worker && req.method==='GET'){const row=store.workers(url.searchParams.get('siteId')).find(row=>row.id===Number(worker[1]));return json(res,row?200:404,row||{error:'근로자를 찾을 수 없습니다.'});}
     if(worker && req.method==='PUT')return json(res,200,store.updateWorker(worker[1],await body(req),()=>checkRequestSession(req)));
     if (url.pathname === '/api/workers/export' && req.method === 'GET') {
-      const data=await workerSpreadsheet(store.workers(url.searchParams.get('siteId'),url.searchParams.get('q') || '',Object.fromEntries(url.searchParams)));
+      const data=await workerSpreadsheet(store.workers(url.searchParams.get('siteId'),url.searchParams.get('q') || '',Object.fromEntries(url.searchParams),!req.adminRestricted));
       res.writeHead(200,{'Content-Type':'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet','Content-Disposition':"attachment; filename=workers.xlsx",'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});
       return res.end(data);
     }
-    if (url.pathname === '/api/attendance/month' && req.method === 'GET') return json(res,200,store.monthlyAttendance(url.searchParams.get('siteId'),url.searchParams.get('month')));
+    if (url.pathname === '/api/attendance/month' && req.method === 'GET') return json(res,200,adminAttendanceRows(req,store.monthlyAttendance(url.searchParams.get('siteId'),url.searchParams.get('month'))));
     if (url.pathname === '/api/education/report' && req.method === 'GET') return json(res,200,store.educationReport(url.searchParams.get('siteId'),url.searchParams.get('from'),url.searchParams.get('to')));
     if (url.pathname === '/api/education/daily-report' && req.method === 'GET') return json(res,200,store.dailyTrainingReport(url.searchParams.get('siteId'),url.searchParams.get('from'),url.searchParams.get('to')));
     if (url.pathname === '/api/monthly-site-activity' && req.method === 'GET') return json(res,200,store.monthlySiteActivity(url.searchParams.get('month')));
@@ -951,7 +952,7 @@ const server = http.createServer((req,res)=>adminRequests.run(req,async()=>{
     if(url.pathname==='/api/attendance/salary'&&req.method==='PUT'){store.changeAttendance('salary',await body(req),()=>checkRequestSession(req));return json(res,200,{ok:true});}
     if(url.pathname==='/api/attendance/month/details'&&req.method==='PUT')return json(res,200,{updated:store.updateMonthlyAttendanceDetails(await body(req),()=>checkRequestSession(req))});
     if (url.pathname === '/api/attendance') {
-      if (req.method === 'GET') return json(res,200,store.attendance(url.searchParams.get('siteId'),url.searchParams.get('date')));
+      if (req.method === 'GET') return json(res,200,adminAttendanceRows(req,store.attendance(url.searchParams.get('siteId'),url.searchParams.get('date'))));
       if (req.method === 'POST') {store.changeAttendance('presence',await body(req),()=>checkRequestSession(req));return json(res,200,{ok:true});}
     }
     if (url.pathname === '/api/attendance/report' && req.method === 'GET') return json(res,200,store.attendanceReport(url.searchParams.get('siteId'),url.searchParams.get('from'),url.searchParams.get('to'),url.searchParams.get('group')));

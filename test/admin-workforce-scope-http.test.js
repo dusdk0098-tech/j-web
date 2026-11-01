@@ -1,0 +1,57 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {mkdtempSync,rmSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join,resolve,sep} from 'node:path';
+import {pathToFileURL} from 'node:url';
+import {spawn} from 'node:child_process';
+import {once} from 'node:events';
+import {createServer} from 'node:net';
+import http from 'node:http';
+import {Store} from '../store.js';
+import {AdminAccounts} from '../admin-accounts.js';
+const password='virtual-workforce-password-123';
+test('제한 관리자 근로자·출역 HTTP: 소유 현장, 필드 경계, 지연·잠금·철회',{timeout:60000},async()=>{
+ const dir=mkdtempSync(join(tmpdir(),'jweb-workforce-')),store=new Store(join(dir,'jweb.sqlite')),auth=new AdminAccounts(store.db);auth.bootstrap(password);
+ const a=store.createSite({name:'가상 하나'}),b=store.createSite({name:'가상 둘'}),fields={name:'가상 근로자',category:'근로자',company:'가상 소속',occupation:'가상 직종'},wa=store.createWorker({...fields,siteId:a.id}),wb=store.createWorker({...fields,siteId:b.id});
+ const account=auth.create({loginId:'limited',name:'가상 제한',password,scope:'restricted',siteIds:[a.id]}),both=auth.create({loginId:'both',name:'가상 복수',password,scope:'restricted',siteIds:[a.id,b.id]});
+ const reserve=createServer();await new Promise(r=>reserve.listen(0,'127.0.0.1',r));const port=reserve.address().port;await new Promise(r=>reserve.close(r));
+ const hook=`import {Store} from ${JSON.stringify(pathToFileURL(join(process.cwd(),'store.js')).href)};for(const name of ['createWorker','updateWorker','changeAttendance']){const original=Store.prototype[name];Store.prototype[name]=function(...args){process.stdout.write('WRITE_START\\n');return original.apply(this,args)}}const original=Store.prototype.attendance;Store.prototype.attendance=function(site,date){const result=original.call(this,site,date);if(date==='2026-11-30')this.db.exec('DELETE FROM admin_sessions');return result};`;
+ const child=spawn(process.execPath,['--import',`data:text/javascript,${encodeURIComponent(hook)}`,'server.js'],{cwd:process.cwd(),env:{...process.env,PORT:String(port),JWEB_DATA_DIR:dir},stdio:['ignore','pipe','pipe']});let locked=false;
+ try{
+  await Promise.race([once(child.stdout,'data'),once(child,'exit').then(()=>{throw Error('서버 시작 실패');})]);
+  const base=`http://127.0.0.1:${port}`,send=(path,method='GET',data,cookie,headers={})=>fetch(base+path,{method,headers:{...headers,...(cookie?{cookie}:{}),...(data?{'content-type':'application/json'}:{})},...(data?{body:JSON.stringify(data)}:{})});
+  const login=async id=>(await send('/api/login','POST',{loginId:id,password})).headers.get('set-cookie').split(';')[0];let cookie=await login('limited');const global=await login('admin'),multi=await login('both');
+  const read=async(path,c=cookie)=>{const r=await send(path,'GET',null,c);assert.equal(r.status,200,await r.clone().text());return r.json();};
+  assert.deepEqual((await read(`/api/workers?siteId=${a.id}`)).map(w=>w.id),[wa.id]);assert.deepEqual((await read(`/api/workers/list?siteId=${a.id}`)).workers.map(w=>w.id),[wa.id]);assert.equal((await read(`/api/workers/${wa.id}?siteId=${a.id}`)).id,wa.id);
+  for(const path of ['/api/workers',`/api/workers?siteId=${b.id}`,`/api/workers?siteId=${a.id}&siteId=${b.id}`,`/api/workers/${wb.id}?siteId=${a.id}`,`/api/workers/${wa.id}?siteId=${b.id}`,`/api/workers/${wa.id}/files?siteId=${a.id}`,`/api/workers/${wa.id}/join-record?siteId=${a.id}`,'/api/not-registered'])assert.equal((await send(path,'GET',null,cookie)).status,403,path);
+  assert.equal((await send(`/api/workers/${wb.id}?siteId=${a.id}`,'GET',null,multi)).status,403);
+  let r=await send('/api/workers','POST',{...fields,siteId:a.id},cookie);assert.equal(r.status,201);const created=await r.json();
+  r=await send(`/api/workers/${created.id}`,'PUT',{...fields,name:'가상 수정',siteId:a.id,version:created.version},cookie);assert.equal(r.status,200);assert.equal((await r.json()).name,'가상 수정');
+  assert.equal((await send(`/api/workers/${created.id}`,'PUT',{...fields,siteId:a.id,version:created.version},cookie)).status,409);
+  for(const extra of [{siteId:b.id},{siteId:[a.id]},{siteId:{id:a.id}},{password:'forbidden'},{address:'forbidden'},{items:[wa.id,wb.id]},{workerIds:[wa.id,wb.id]}])assert.equal((await send('/api/workers','POST',{...fields,siteId:a.id,...extra},cookie)).status,403);
+  for(const [siteId,id] of [[a.id,wb.id],[b.id,wa.id]])assert.equal((await send(`/api/workers/${id}`,'PUT',{...fields,siteId,version:wa.version},multi)).status,403);
+  assert.equal((await send(`/api/workers?siteId=${b.id}`,'POST',{...fields,siteId:a.id},multi)).status,403);
+  store.db.prepare('INSERT INTO join_acknowledgements(worker_id,notice_version,equipment,signature,profile) VALUES(?,?,?,?,?)').run(wa.id,'virtual','[]',Buffer.from('virtual'),JSON.stringify({birthDate:'2000-01-02',phone:'010-1234-5678'}));
+  const ownSummary=(await read(`/api/workers/list?siteId=${a.id}&q=${encodeURIComponent(fields.name)}`)).summary;assert.equal(Object.hasOwn(ownSummary,'ages'),false);assert.equal(Object.hasOwn(ownSummary,'ageDecades'),false);assert.equal(ownSummary.total,1);assert.equal((await read(`/api/workers/list?siteId=${a.id}`,global)).summary.ages.find(group=>group.label==='20대').count,1);assert.deepEqual((await read(`/api/workers?siteId=${a.id}&q=${encodeURIComponent(fields.company)}`)).map(w=>w.id),[created.id,wa.id]);assert.equal((await read(`/api/workers/${wa.id}?siteId=${a.id}`)).name,fields.name);
+  for(const query of ['20000102','01012345678']){assert.deepEqual(await read(`/api/workers?siteId=${a.id}&q=${query}`),[]);assert.deepEqual((await read(`/api/workers/list?siteId=${a.id}&q=${query}`)).workers,[]);assert.equal((await read(`/api/workers?siteId=${a.id}&q=${query}`,global)).length,1);}
+  const day='2026-11-02',attendance={siteId:a.id,workerId:wa.id,date:day,present:true,expectedDayVersion:0};
+  assert.equal((await send('/api/attendance','POST',attendance,cookie)).status,200);
+  let daily=(await read(`/api/attendance?siteId=${a.id}&date=${day}`)).find(w=>w.id===wa.id);assert.equal(daily.present,1);
+  for(const key of ['birth_date','phone','daily_rate','salary_kind','salary_amount'])assert.equal(Object.hasOwn(daily,key),false,key);
+  assert.equal((await send('/api/attendance/units','PUT',{siteId:a.id,workerId:wa.id,date:day,units:'1.25',expectedDayVersion:daily.day_version},cookie)).status,200);
+  const monthly=(await read(`/api/attendance/month?siteId=${a.id}&month=2026-11`)).find(w=>w.id===wa.id);assert.deepEqual(monthly.days,[day]);assert.equal(monthly.units[0].units_hundredths,125);for(const key of ['daily_rate','salary_kind','salary_amount','estimated_pay'])assert.equal(Object.hasOwn(monthly.units[0],key),false,key);
+  assert.equal(Object.hasOwn((await read(`/api/attendance?siteId=${a.id}&date=${day}`,global))[0],'daily_rate'),true);
+  for(const extra of [{workerId:wb.id},{workerId:[wa.id]},{siteId:[a.id]},{workerIds:[wa.id,wb.id]},{dailyRate:'10'}])assert.equal((await send('/api/attendance','POST',{...attendance,...extra},cookie)).status,403);
+  for(const [path,method] of [['/api/workers/preview','POST'],['/api/attendance/daily-rate','PUT'],['/api/attendance/salary','PUT'],['/api/attendance/month/details','PUT']])assert.equal((await send(path,method,attendance,cookie)).status,403);
+  assert.equal((await send('/api/attendance','POST',attendance,cookie)).status,409);
+  assert.equal((await send('/api/workers','POST',{...fields,siteId:a.id},cookie,{'X-Admin-Context':'stale'})).status,409);
+  const before=store.workers(a.id).length,delayed=http.request(base+'/api/workers',{method:'POST',headers:{cookie,'content-type':'application/json'}}),answer=new Promise((r,j)=>{delayed.on('response',res=>{res.resume();r(res.statusCode)});delayed.on('error',j)});delayed.write('{');await new Promise(r=>setTimeout(r,100));auth.update(account.id,{version:auth.list().find(x=>x.id===account.id).version,siteIds:[b.id]});delayed.end(JSON.stringify({...fields,siteId:a.id}).slice(1));assert.equal(await answer,401);assert.equal(store.workers(a.id).length,before);
+  auth.update(account.id,{version:auth.list().find(x=>x.id===account.id).version,siteIds:[a.id]});cookie=await login('limited');
+  store.db.exec('BEGIN IMMEDIATE');locked=true;const started=once(child.stdout,'data'),pending=send(`/api/workers/${wa.id}`,'PUT',{...fields,siteId:a.id,version:wa.version},cookie);assert.match(String((await started)[0]),/WRITE_START/);store.db.prepare('UPDATE workers SET site_id=? WHERE id=?').run(b.id,wa.id);store.db.exec('COMMIT');locked=false;assert.equal((await pending).status,403);assert.equal(store.workers(b.id).find(w=>w.id===wa.id).name,fields.name);
+  store.db.exec('BEGIN IMMEDIATE');locked=true;const attendanceStart=once(child.stdout,'data'),attendancePending=send('/api/attendance','POST',{...attendance,workerId:created.id},cookie);assert.match(String((await attendanceStart)[0]),/WRITE_START/);store.db.prepare('UPDATE workers SET site_id=? WHERE id=?').run(b.id,created.id);store.db.exec('COMMIT');locked=false;assert.equal((await attendancePending).status,403);assert.equal(store.attendance(b.id,day).find(w=>w.id===created.id).present,0);store.db.prepare('UPDATE workers SET site_id=? WHERE id=?').run(a.id,created.id);
+  store.db.exec('BEGIN IMMEDIATE');locked=true;const revokedStart=once(child.stdout,'data'),revoked=send('/api/workers','POST',{...fields,siteId:a.id},cookie);assert.match(String((await revokedStart)[0]),/WRITE_START/);store.db.prepare('DELETE FROM admin_sessions WHERE admin_id=?').run(account.id);store.db.exec('COMMIT');locked=false;assert.equal((await revoked).status,401);
+  cookie=await login('limited');const disabled=http.request(base+'/api/attendance',{method:'POST',headers:{cookie,'content-type':'application/json'}}),disabledAnswer=new Promise((r,j)=>{disabled.on('response',res=>{res.resume();r(res.statusCode)});disabled.on('error',j)});disabled.write('{');await new Promise(r=>setTimeout(r,100));auth.update(account.id,{version:auth.list().find(x=>x.id===account.id).version,active:false});disabled.end(JSON.stringify({...attendance,workerId:created.id}).slice(1));assert.equal(await disabledAnswer,401);assert.equal(store.attendance(a.id,day).find(w=>w.id===created.id).present,0);auth.update(account.id,{version:auth.list().find(x=>x.id===account.id).version,active:true});
+  cookie=await login('limited');assert.equal((await send(`/api/attendance?siteId=${a.id}&date=2026-11-30`,'GET',null,cookie)).status,401);
+ }finally{if(locked)store.db.exec('ROLLBACK');store.close();if(child.exitCode===null){const done=once(child,'exit');child.kill();await done;}assert.ok(resolve(dir).startsWith(resolve(tmpdir())+sep));rmSync(dir,{recursive:true,force:true});}
+});

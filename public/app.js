@@ -48,9 +48,9 @@ const state = { page:'dashboard', siteId:null, types:{}, type:'', riskKind:'', r
 function applyAdminScope(admin) {
   state.admin={...admin,scope:admin?.scope==='global'?'global':'restricted'};
   const global=admin?.scope==='global';
-  document.querySelectorAll('[data-page]').forEach(button=>{button.hidden=!global&&button.dataset.page!=='documents';});
+  document.querySelectorAll('[data-page]').forEach(button=>{button.hidden=!global&&!['documents','workers','attendance'].includes(button.dataset.page);});
   for(const selector of ['#site-add','#site-qr','#sticker-requests','#ai-chat'])$(selector).hidden=!global;
-  if(!global){state.page='documents';state.detail=null;document.querySelector('.sidebar-help').textContent='배정 현장의 문서 요약 조회와 일반 공지 임시저장만 지원합니다. 다른 기능은 전역 관리자에게 요청하세요.';}
+  if(!global){state.page='documents';state.detail=null;document.querySelector('.sidebar-help').textContent='배정 현장의 문서 요약·일반 공지 임시저장, 근로자 기본정보, 날짜별 출역·공수를 관리합니다. 다른 기능은 전역 관리자에게 요청하세요.';}
 }
 let sitePhotoEpoch=0,workerListEpoch=0,detailEpoch=0,workerSelfCheckEpoch=0,ppeDetailEpoch=0,workerEditEpoch=0,joinRecordEpoch=0;
 let permitRoleCleanup=null;
@@ -904,6 +904,26 @@ async function renderAllSiteStatistics(siteId,from,to,month,day){
   section.innerHTML=`<h2>전체 현장 가상 출역</h2><p class="muted">${esc(from)} ~ ${esc(to)}의 기록 당시 구분별 출역 인일입니다. 외주는 협력업체 근로자와 기존 외주 기록이며, 협력업체 관리자 등 다른 구분은 별도로 표시합니다.</p><div class="table-wrap"><table><thead><tr><th>현장</th><th>교육 통계</th><th>직영</th><th>외주</th><th>그 외 구분</th><th>합계</th></tr></thead><tbody>${sites.map(row=>`<tr><td>${esc(row.name)}</td><td><button type="button" data-site-education="${row.id}">상세보기</button></td><td>${row.direct}</td><td>${row.external}</td><td>${describe(row.other)}</td><td>${row.total}</td></tr>`).join('')}<tr><th>전체 합계</th><td></td><td>${totals.direct}</td><td>${totals.external}</td><td>${describe(totals.other)}</td><td>${totals.total}</td></tr></tbody></table></div>`;anchor.before(section);
   section.querySelectorAll('[data-site-education]').forEach(button=>button.onclick=async()=>{const target=Number(button.dataset.siteEducation);state.siteId=target;state.statisticsDay='';state.detail=null;state.workerFilters={};state.wageFilters={};try{await render();if(state.page==='statistics'&&state.siteId===target)content.querySelector('#education-report')?.scrollIntoView({block:'start'});}catch(error){showError(error);}});
 }
+async function renderRestrictedWorkforce(){
+  const epoch=detailEpoch,siteId=state.siteId,page=state.page,admin=state.admin,date=state.attendanceDate||today();
+  const current=()=>detailEpoch===epoch&&state.siteId===siteId&&state.page===page&&state.admin===admin;
+  const rows=await api(page==='workers'?`/api/workers?siteId=${siteId}`:`/api/attendance?siteId=${siteId}&date=${encodeURIComponent(date)}`,{},current);if(!current())return;
+  const editWorker=worker=>{
+    if(!current())return;
+    showDialog(worker?'배정 현장 근로자 수정':'배정 현장 근로자 등록',`<div class="fields">${field('name','이름',worker?.name||'')}${field('category','구분',worker?.category||'직영')}${field('company','소속',worker?.company||'','text',false)}${field('occupation','직종',worker?.occupation||'','text',false)}<label>메모<textarea name="memo" maxlength="2000">${esc(worker?.memo||'')}</textarea></label></div><p>구분에 따라 소속·직종이 필수입니다. 자기 등록 정보를 저장하면 일반등록으로 변경됩니다. 면허·계정·가입정보는 이 화면에서 변경하지 않습니다.</p>`,data=>{if(!current())return;return api(worker?`/api/workers/${worker.id}`:'/api/workers',{method:worker?'PUT':'POST',body:JSON.stringify({...data,siteId,...(worker?{version:worker.version}:{})})},current);},current);
+  };
+  if(page==='workers'){
+    content.innerHTML=`<section class="panel"><h2>배정 현장 근로자</h2><button type="button" id="restricted-worker-add">근로자 등록</button>${rows.length?'<ul>'+rows.map(row=>`<li>${esc(row.name)} · ${esc(row.category)} · ${esc(row.company)} · ${esc(row.occupation)} <button type="button" data-restricted-worker="${row.id}" aria-label="${esc(row.name)} 정보 수정">정보 수정</button></li>`).join('')+'</ul>':'<p>등록된 근로자가 없습니다.</p>'}</section>`;
+    $('#restricted-worker-add').onclick=()=>editWorker(null);
+    content.querySelectorAll('[data-restricted-worker]').forEach(button=>button.onclick=()=>editWorker(rows.find(row=>row.id===Number(button.dataset.restrictedWorker))));return;
+  }
+  content.innerHTML=`<section class="panel"><h2>배정 현장 출역</h2><label>조회일<input type="date" id="restricted-attendance-date" value="${esc(date)}" required></label><button type="button" id="restricted-attendance-search">조회</button><p>근로자별 출역 여부와 공수를 저장합니다. 공수는 출역 등록 후 입력할 수 있습니다.</p>${rows.length?'<ul>'+rows.map(row=>`<li>${esc(row.name)} · ${row.present?'출역':'미출역'} · 공수 ${row.units_hundredths==null?'미입력':esc(row.units_hundredths/100)} <button type="button" data-restricted-presence="${row.id}" aria-label="${esc(row.name)} 출역 수정">출역 등록·수정</button> ${row.present?`<button type="button" data-restricted-units="${row.id}" aria-label="${esc(row.name)} 공수 수정">공수 수정</button>`:''}</li>`).join('')+'</ul>':'<p>등록된 근로자가 없습니다. 근로자를 먼저 등록해 주세요.</p>'}</section>`;
+  $('#restricted-attendance-search').onclick=()=>{if(!current())return;const input=$('#restricted-attendance-date');if(!input.value){flash('조회일을 선택해 주세요.',true);return;}state.attendanceDate=input.value;render().catch(showError);};
+  for(const kind of ['presence','units'])content.querySelectorAll(`[data-restricted-${kind}]`).forEach(button=>button.onclick=()=>{
+    if(!current())return;const row=rows.find(row=>row.id===Number(button.dataset[kind==='presence'?'restrictedPresence':'restrictedUnits']));
+    showDialog(kind==='presence'?'출역 등록·수정':'공수 수정',`<p>${esc(row.name)} · ${esc(date)}</p>`+(kind==='presence'?`<label>출역 여부<select name="present"><option value="1" ${row.present?'selected':''}>출역</option><option value="0" ${row.present?'':'selected'}>미출역</option></select></label>`:`<label>공수 (0~9.99, 빈칸은 미입력)<input name="units" type="number" min="0" max="9.99" step="0.01" value="${row.units_hundredths==null?'':esc(row.units_hundredths/100)}"></label>`),data=>{if(!current())return;return api(kind==='presence'?'/api/attendance':'/api/attendance/units',{method:kind==='presence'?'POST':'PUT',body:JSON.stringify({siteId,workerId:row.id,date,expectedDayVersion:row.day_version,...(kind==='presence'?{present:data.present==='1'}:{units:data.units})})},current);},current);
+  });
+}
 async function renderRestrictedDocuments(){
   const epoch=detailEpoch,siteId=state.siteId,detailId=state.detail,current=()=>detailEpoch===epoch&&state.page==='documents'&&state.siteId===siteId&&state.detail===detailId;
   content.textContent='배정 현장의 문서를 불러오는 중입니다.';
@@ -921,17 +941,19 @@ async function render(){
   permitRoleCleanup?.();permitRoleCleanup=null;
   detailEpoch++;
   const renderEpoch=detailEpoch;
+  if(state.admin?.scope==='restricted'&&dialog.open)dialog.close();
   if(state.admin?.scope==='restricted'||state.page==='admins')content.textContent='접근 가능한 자료를 확인하는 중입니다.';
   workerListEpoch++;document.querySelector('dialog.worker-preview[open]')?.close();
   sitePhotoEpoch++;document.querySelector('dialog.site-photo-viewer[open]')?.close();
   document.querySelector('dialog.personal-note-preview[open]')?.close();
   await loadSites();
   if(detailEpoch!==renderEpoch)return;
-  if(state.admin?.scope==='restricted'&&state.page!=='documents'){state.page='documents';state.detail=null;}
+  if(state.admin?.scope==='restricted'&&!['documents','workers','attendance'].includes(state.page)){state.page='documents';state.detail=null;}
   $('#heading').textContent=labels[state.page];$('#crumb').textContent=labels[state.page];
   document.querySelectorAll('[data-page]').forEach(b=>b.classList.toggle('selected',b.dataset.page===state.page));
   if(state.admin?.scope==='restricted'){
     if(!state.siteId){content.innerHTML='<section class="panel empty">현재 이용할 수 있는 배정 현장이 없습니다. 전역 관리자에게 현장 배정을 요청한 뒤 다시 로그인해 주세요.</section>';return;}
+    if(state.page!=='documents')return renderRestrictedWorkforce();
     return renderRestrictedDocuments();
   }
   if(!state.siteId&&state.page!=='board'&&state.page!=='clients'&&state.page!=='admins'){content.innerHTML='<section class="panel empty">먼저 현장을 추가해 주세요. 시험을 위해 가상의 현장명을 사용하세요.</section>';return;}

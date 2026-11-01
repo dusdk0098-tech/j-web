@@ -20,8 +20,8 @@ function screen(fetcher=async()=>({ok:true,status:200,json:async()=>[]})){
   const nodes=new Map(),requests=[],errors=[],redirects=[],flashes=[];
   const node=()=>({innerHTML:'',textContent:'',value:'restricted',disabled:false,hidden:false,classList:{toggle(){},remove(){}},setAttribute(){}});
   const get=key=>{if(!nodes.has(key))nodes.set(key,node());return nodes.get(key);};
-  const pages=['dashboard','documents','admins','clients','site-activity','statistics','board','new-unverified-menu'].map(page=>({...node(),dataset:{page}}));
-  const content={...node(),querySelector:get,querySelectorAll:selector=>selector==='[data-restricted-doc]'?[...content.innerHTML.matchAll(/data-restricted-doc="(\d+)"/g)].map(([,id])=>Object.assign(get('[data-restricted-doc="'+id+'"]'),{dataset:{restrictedDoc:id}})):[]};
+  const pages=['dashboard','documents','workers','attendance','admins','clients','site-activity','statistics','board','new-unverified-menu'].map(page=>({...node(),dataset:{page}}));
+  const content={...node(),querySelector:get,querySelectorAll:selector=>{const match=selector.match(/^\[data-restricted-(doc|worker|presence|units)\]$/);if(!match)return [];const kind=match[1],key='restricted'+kind[0].toUpperCase()+kind.slice(1);return [...content.innerHTML.matchAll(new RegExp('data-restricted-'+kind+'="(\\d+)"','g'))].map(([,id])=>Object.assign(get('[data-restricted-'+kind+'="'+id+'"]'),{dataset:{[key]:id}}));}};
   const state={page:'admins',siteId:1,detail:null,admin:{...account},sites,types:{notice:'일반 공지'}};
   const dialog={open:false,showModal(){this.open=true;},close(){this.open=false;}};
   const context={state,content,dialog,siteSelect:get('#site-select'),detailEpoch:1,workerListEpoch:0,sitePhotoEpoch:0,permitRoleCleanup:null,labels:{documents:'안전 문서',admins:'관리자 계정'},statusLabels:{draft:'임시저장'},esc,URLSearchParams,today:()=> '2026-11-02',document:{querySelector:selector=>selector.startsWith('dialog')?null:get(selector),querySelectorAll:()=>pages},$:get,location:{assign:path=>redirects.push(path)},flash:message=>flashes.push(message),showError:error=>errors.push(error.message),confirm:()=>true,FormData:class{constructor(form){return Object.entries(form.values||{});}},fetch:async(path,options)=>{requests.push({path,options});return fetcher(path,options);}};
@@ -32,7 +32,7 @@ function screen(fetcher=async()=>({ok:true,status:200,json:async()=>[]})){
     part('function showDialog(',"$('#dialog-close')"),
     part('async function loadSites(','siteSelect.onchange='),
     source.split('\n').find(line=>line.startsWith('siteSelect.onchange=')),
-    part('async function renderRestrictedDocuments(','async function render(){'),
+    part('async function renderRestrictedWorkforce(','async function render(){'),
     part('async function render(){',"  if(state.page==='site-print')")+'}',
     "globalThis.renderAccounts=async()=>{const renderEpoch=detailEpoch;"+part("  if(state.page==='admins'){","  if(state.page==='clients')")+'};'
   ].join('\n'),context);
@@ -41,9 +41,9 @@ function screen(fetcher=async()=>({ok:true,status:200,json:async()=>[]})){
 }
 const response=data=>({ok:true,status:200,json:async()=>data});
 
-test('전역만 계정·전체현장·미검증 메뉴 노출, 제한은 문서 메뉴와 지원 설명만 표시',()=>{
+test('전역만 계정·전체현장·미검증 메뉴 노출, 제한은 검증된 문서·근로자·출역 메뉴만 표시',()=>{
   const ui=screen();ui.context.applyAdminScope({scope:'restricted',siteIds:[1]});
-  assert.deepEqual(ui.pages.filter(p=>!p.hidden).map(p=>p.dataset.page),['documents']);
+  assert.deepEqual(ui.pages.filter(p=>!p.hidden).map(p=>p.dataset.page),['documents','workers','attendance']);
   for(const key of ['#site-add','#site-qr','#sticker-requests','#ai-chat'])assert.equal(ui.get(key).hidden,true);
   assert.match(ui.get('.sidebar-help').textContent,/일반 공지 임시저장/);assert.equal(ui.state.page,'documents');
   ui.context.applyAdminScope(account);assert.equal(ui.pages.some(p=>p.hidden),false);assert.equal(ui.get('#site-add').hidden,false);
@@ -94,7 +94,29 @@ test('제한 공지 저장 중 현장 전환·세션 만료는 다른 화면에 
   const expired=screen(async(path,options)=>options.method?{ok:false,status:401,json:async()=>({error:'만료'})}:response([]));expired.state.page='documents';await expired.context.renderRestrictedDocuments();expired.get('#restricted-notice-add').onclick();await expired.submit({title:'가상',date:'2026-11-02',body:''});assert.equal(expired.dialog.open,true);assert.match(expired.get('#dialog-error').textContent,/다시 로그인/);
 });
 
-test('실제 HTTP 로그인→배정 현장 선택→공지 UI 임시저장·재조회, 다른 현장 거절 및 배정 제거 재로그인',{timeout:30000},async()=>{
+test('근로자·출역 이전 응답·이전 폼은 현장 및 계정 변경 뒤 화면과 저장에 영향을 주지 않는다',async()=>{
+  for(const page of ['workers','attendance'])for(const transition of ['site','account']){
+    const wait=delayed(),ui=screen(async()=>wait.promise);ui.state.page=page;ui.state.admin={scope:'restricted'};
+    const pending=ui.context.renderRestrictedWorkforce();ui.content.innerHTML='새 화면';
+    if(transition==='site'){ui.state.siteId=2;ui.context.detailEpoch++;}else ui.state.admin={scope:'restricted',id:2};
+    wait.resolve(response([{id:1,name:'이전 근로자'}]));await pending;assert.equal(ui.content.innerHTML,'새 화면');
+    const formUi=screen(async()=>response([{id:1,name:'가상 근로자',present:1,day_version:2,version:'v1'}]));formUi.state.page=page;formUi.state.admin={scope:'restricted'};
+    await formUi.context.renderRestrictedWorkforce();formUi.get(page==='workers'?'#restricted-worker-add':'[data-restricted-presence="1"]').onclick();
+    if(transition==='site'){formUi.state.siteId=2;formUi.context.detailEpoch++;}else formUi.state.admin={scope:'restricted',id:2};
+    await formUi.submit({name:'가상',present:'1'});assert.equal(formUi.requests.length,1);assert.equal(formUi.flashes.length,0);
+  }
+});
+
+test('근로자·출역·공수 저장 실패는 입력과 창을 유지하며 지연 성공은 새 화면을 변경하지 않는다',async()=>{
+  for(const action of ['worker','presence','units'])for(const status of [400,403,409,401]){
+    const ui=screen(async(path,options)=>options.method?{ok:false,status,json:async()=>({error:'가상 저장 거절'})}:response([{id:1,name:'가상',present:1,day_version:2,version:'v1'}]));ui.state.page=action==='worker'?'workers':'attendance';
+    await ui.context.renderRestrictedWorkforce();ui.get('[data-restricted-'+action+'="1"]').onclick();const values={name:'보존할 가상 입력',present:'0',units:'0.75'};await ui.submit(values);
+    assert.equal(ui.dialog.open,true);assert.deepEqual(ui.get('#dialog-form').values,values);assert.equal(ui.get('#dialog-form button[type=submit]').disabled,false);assert.ok(ui.get('#dialog-error').textContent);assert.equal(ui.flashes.length,0);
+  }
+  const wait=delayed(),ui=screen(async(path,options)=>options.method?wait.promise:response([]));ui.state.page='workers';await ui.context.renderRestrictedWorkforce();ui.get('#restricted-worker-add').onclick();const pending=ui.submit({name:'가상'});ui.context.detailEpoch++;ui.state.siteId=2;ui.content.innerHTML='새 현장';wait.resolve(response({id:2}));await pending;assert.equal(ui.content.innerHTML,'새 현장');assert.equal(ui.flashes.length,0);
+});
+
+test('실제 HTTP 로그인→배정 현장 선택→공지·근로자·출역·공수 UI 저장·재조회, 다른 현장 거절 및 배정 제거 재로그인',{timeout:30000},async()=>{
   const dir=mkdtempSync(join(tmpdir(),'jweb-scope-ui-')),reservation=createServer();await new Promise(done=>reservation.listen(0,'127.0.0.1',done));const port=reservation.address().port;await new Promise(done=>reservation.close(done));
   const child=spawn(process.execPath,['server.js'],{cwd:process.cwd(),env:{...process.env,PORT:String(port),JWEB_DATA_DIR:dir,JWEB_ADMIN_PASSWORD:'virtual-password-123'},stdio:['ignore','pipe','pipe']});
   try{
@@ -109,7 +131,17 @@ test('실제 HTTP 로그인→배정 현장 선택→공지 UI 임시저장·재
     const documents=await(await send('/api/documents?siteId='+created[1].id,'GET',null,cookie)).json();assert.equal(documents.length,1);assert.equal(documents[0].status,'draft');assert.equal(documents[0].site_id,created[1].id);
     ui.content.querySelectorAll('[data-restricted-doc]')[0].onclick();await ui.context.renderPending;assert.equal(ui.state.detail,documents[0].id);assert.match(ui.content.innerHTML,/가상 본문/);assert.doesNotMatch(ui.content.innerHTML,/결재 요청|암호 초기화/);
     assert.equal((await send('/api/documents?siteId='+created[2].id,'GET',null,cookie)).status,403);assert.equal((await send('/api/admin-accounts','GET',null,cookie)).status,403);
-    const updated=await send('/api/admin-accounts/'+limited.id,'PUT',{version:limited.version,scope:'restricted',siteIds:[]},globalCookie);assert.equal(updated.status,200);await assert.rejects(ui.context.render(),/로그인/);assert.deepEqual(ui.redirects,['/login']);
+    ui.state.page='workers';ui.state.detail=null;await ui.context.render();assert.match(ui.content.innerHTML,/등록된 근로자가 없습니다/);
+    ui.get('#restricted-worker-add').onclick();await ui.submit({name:'가상 UI 근로자',category:'직영',company:'',occupation:'가상 직종',memo:'가상 메모'});assert.equal(ui.dialog.open,false);assert.match(ui.content.innerHTML,/가상 UI 근로자/);
+    const worker=(await(await send('/api/workers?siteId='+created[1].id,'GET',null,cookie)).json())[0];assert.equal(worker.site_id,created[1].id);
+    ui.get('[data-restricted-worker="'+worker.id+'"]').onclick();await ui.submit({name:'가상 UI 수정',category:'직영',company:'',occupation:'가상 직종',memo:'수정 메모'});assert.equal(ui.dialog.open,false);assert.match(ui.content.innerHTML,/가상 UI 수정/);
+    ui.state.page='attendance';await ui.context.render();ui.get('[data-restricted-presence="'+worker.id+'"]').onclick();await ui.submit({present:'1'});assert.equal(ui.dialog.open,false);
+    ui.get('[data-restricted-units="'+worker.id+'"]').onclick();await ui.submit({units:'0.75'});assert.equal(ui.dialog.open,false);assert.match(ui.content.innerHTML,/공수 0.75/);
+    const day=await(await send('/api/attendance?siteId='+created[1].id+'&date=2026-11-02','GET',null,cookie)).json();assert.equal(day[0].present,1);assert.equal(day[0].units_hundredths,75);
+    ui.get('[data-restricted-presence="'+worker.id+'"]').onclick();await ui.submit({present:'0'});assert.equal(ui.dialog.open,false);assert.match(ui.content.innerHTML,/미출역/);assert.doesNotMatch(ui.content.innerHTML,/data-restricted-units/);
+    ui.state.page='workers';ui.get('#site-select').value=String(created[0].id);ui.get('#site-select').onchange();await ui.context.renderPending;assert.doesNotMatch(ui.content.innerHTML,/가상 UI 수정/);assert.match(ui.content.innerHTML,/등록된 근로자가 없습니다/);
+    for(const path of ['/api/workers?siteId=','/api/attendance?siteId='])assert.equal((await send(path+created[2].id,'GET',null,cookie)).status,403);
+    ui.get('#restricted-worker-add').onclick();const updated=await send('/api/admin-accounts/'+limited.id,'PUT',{version:limited.version,scope:'restricted',siteIds:[]},globalCookie);assert.equal(updated.status,200);await ui.submit({name:'회수 후 가상',category:'직영',company:'',occupation:'가상'});assert.equal(ui.dialog.open,true);assert.match(ui.get('#dialog-error').textContent,/로그인/);assert.equal(ui.get('#dialog-form').values.name,'회수 후 가상');ui.dialog.close();await assert.rejects(ui.context.render(),/로그인/);assert.deepEqual(ui.redirects,['/login']);
     const nextCookie=await login('scope_ui'),nextSession=await(await send('/api/session','GET',null,nextCookie)).json(),empty=screen((path,options)=>fetch(base+path,{...options,headers:{...options.headers,cookie:nextCookie,'x-admin-context':nextSession.context}}));empty.context.applyAdminScope(nextSession.admin);await empty.context.render();assert.match(empty.content.innerHTML,/배정 현장이 없습니다/);assert.deepEqual(empty.requests.map(r=>r.path),['/api/sites']);
   }finally{
     if(child.exitCode===null){const exited=once(child,'exit');child.kill();await exited;}
