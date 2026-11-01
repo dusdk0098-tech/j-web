@@ -1234,11 +1234,11 @@ export class Store {
   }
   delegatedAttendance(siteId,actorId,date){
     if(!this.workerPermissions(siteId,actorId).includes('attendance'))throw new Error('출역 관리 시험 권한이 필요합니다.');
-    return this.attendance(siteId,date).map(({id,name,category,company,occupation,present})=>({id,name,category,company,occupation,present}));
+    return this.attendance(siteId,date).map(({id,name,category,company,occupation,present,day_version})=>({id,name,category,company,occupation,present,day_version}));
   }
   setDelegatedAttendance(siteId,actorId,input,onAuthorize=null){
     const date=dateValue(input.date);
-    this.db.exec('BEGIN IMMEDIATE');try{if(onAuthorize)onAuthorize();if(!this.workerPermissions(siteId,actorId).includes('attendance'))throw Object.assign(new Error('출역 관리 시험 권한이 필요합니다.'),{sessionStatus:403});const actor=this.db.prepare('SELECT name FROM workers WHERE id=? AND site_id=?').get(Number(actorId),Number(siteId)),target=this.db.prepare('SELECT name FROM workers WHERE id=? AND site_id=?').get(Number(input.workerId),Number(siteId));if(!target)throw new Error('같은 현장의 출입자를 확인해 주세요.');this.setAttendance({siteId,workerId:input.workerId,date,present:input.present});this.db.prepare("UPDATE attendance SET source='delegated' WHERE worker_id=? AND date=?").run(Number(input.workerId),date);this.db.prepare('INSERT INTO delegated_attendance_events(site_id,actor_id,actor_name,worker_id,worker_name,date,present) VALUES(?,?,?,?,?,?,?)').run(Number(siteId),Number(actorId),actor.name,Number(input.workerId),target.name,date,input.present?1:0);this.db.exec('COMMIT');}catch(error){this.db.exec('ROLLBACK');throw error;}
+    this.db.exec('BEGIN IMMEDIATE');try{if(onAuthorize)onAuthorize();if(!this.workerPermissions(siteId,actorId).includes('attendance'))throw Object.assign(new Error('출역 관리 시험 권한이 필요합니다.'),{sessionStatus:403});const actor=this.db.prepare('SELECT name FROM workers WHERE id=? AND site_id=?').get(Number(actorId),Number(siteId)),target=this.db.prepare('SELECT name FROM workers WHERE id=? AND site_id=?').get(Number(input.workerId),Number(siteId));if(!target)throw new Error('같은 현장의 출입자를 확인해 주세요.');this.checkAttendanceDayVersion(siteId,input.workerId,date,input.expectedDayVersion);this.setAttendance({siteId,workerId:input.workerId,date,present:input.present});this.db.prepare("UPDATE attendance SET source='delegated' WHERE worker_id=? AND date=?").run(Number(input.workerId),date);this.db.prepare('INSERT INTO delegated_attendance_events(site_id,actor_id,actor_name,worker_id,worker_name,date,present) VALUES(?,?,?,?,?,?,?)').run(Number(siteId),Number(actorId),actor.name,Number(input.workerId),target.name,date,input.present?1:0);this.db.exec('COMMIT');}catch(error){this.db.exec('ROLLBACK');throw error;}
   }
   delegatedAttendanceEvents(siteId,date){date=dateValue(date);return this.db.prepare('SELECT id,actor_name,worker_name,present,created_at FROM delegated_attendance_events WHERE site_id=? AND date=? ORDER BY id DESC').all(Number(siteId),date);}
   workerDocuments(siteId,workerId){
@@ -1257,11 +1257,14 @@ export class Store {
     const companies=this.companies(siteId).map(({id,name,trade})=>({id,name,trade}));if(type==='risk')return {companies};
     return {companies,equipment:this.equipment(siteId).map(({id,kind,model,registration})=>({id,kind,model,registration})),places:this.workPlaces(siteId).map(({id,name})=>({id,name})),rigging:this.rigging(siteId).map(({id,category,kind,name})=>({id,category,kind,name})),workers:this.workers(siteId).map(({id,name,company})=>({id,name,company}))};
   }
+  checkAttendanceDayVersion(siteId,workerId,date,version){
+    if(version===undefined)return;if(!Number.isSafeInteger(version)||version<0)throw new Error('일별 출역 기록을 다시 확인해 주세요.');
+    const row=this.db.prepare('SELECT COALESCE(a.day_version,0) AS day_version FROM workers w LEFT JOIN attendance a ON a.worker_id=w.id AND a.date=? WHERE w.id=? AND w.site_id=?').get(date,Number(workerId),Number(siteId));if(!row)throw new Error('선택한 현장의 출입자를 확인해 주세요.');if(row.day_version!==version)throw Object.assign(new Error('일별 출역 기록이 변경되었습니다. 다시 조회해 주세요.'),{sessionStatus:409});
+  }
   changeAttendance(kind,input,onAuthorize=()=>{}){
     const actions={presence:()=>this.setAttendance(input),units:()=>this.setAttendanceUnits(input),dailyRate:()=>this.setAttendanceDailyRate(input),salary:()=>this.setAttendanceSalary(input)};
     if(!Object.hasOwn(actions,kind))throw new Error('출역 변경 종류를 확인해 주세요.');
-    if(input.expectedDayVersion!==undefined&&(!Number.isSafeInteger(input.expectedDayVersion)||input.expectedDayVersion<0))throw new Error('일별 출역 기록을 다시 확인해 주세요.');
-    this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();if(input.expectedDayVersion!==undefined){const date=dateValue(input.date),row=this.db.prepare('SELECT COALESCE(a.day_version,0) AS day_version FROM workers w LEFT JOIN attendance a ON a.worker_id=w.id AND a.date=? WHERE w.id=? AND w.site_id=?').get(date,Number(input.workerId),Number(input.siteId));if(!row)throw new Error('선택한 현장의 출입자를 확인해 주세요.');if(row.day_version!==input.expectedDayVersion)throw Object.assign(new Error('일별 출역 기록이 변경되었습니다. 다시 조회해 주세요.'),{sessionStatus:409});}actions[kind]();this.db.exec('COMMIT');}catch(error){this.db.exec('ROLLBACK');throw error;}
+    this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();this.checkAttendanceDayVersion(input.siteId,input.workerId,dateValue(input.date),input.expectedDayVersion);actions[kind]();this.db.exec('COMMIT');}catch(error){this.db.exec('ROLLBACK');throw error;}
   }
   setAttendance(input) {
     const date = dateValue(input.date);

@@ -32,3 +32,12 @@ test('출역 변경이 실패하면 다시 시도할 수 있다',async()=>{
   reply(pending[1],{error:'시험 오류'},false);await action;
   assert.equal(button.disabled,false);assert.match(list.children[0].children[0].textContent,/시험 오류/);
 });
+
+test('위임 출역 화면은 조회한 변경 번호를 보내고 충돌을 표시한다',async()=>{
+  const {list,pending,load,reply}=setup(),query=load();
+  reply(pending[0],[{id:2,name:'가상',company:'가상',present:false,day_version:4}]);await query;
+  const button=list.children[0].children[1],action=button.onclick();
+  assert.equal(JSON.parse(pending[1].options.body).expectedDayVersion,4);
+  reply(pending[1],{error:'일별 출역 기록이 변경되었습니다. 다시 조회해 주세요.'},false);await action;
+  assert.match(list.children[0].children[0].textContent,/다시 조회/);assert.equal(button.disabled,false);assert.equal(pending.length,2);
+});
