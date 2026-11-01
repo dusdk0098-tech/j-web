@@ -435,3 +435,5 @@ Node 실제 캔버스 시험은 `node --test test/plan-pdf-render.test.js`로 �
 버전은 DB 쓰기 잠금 안에서 비교하며 초 단위 수정 시각에 의존하지 않습니다. 본문·상세 변경, 서명·첨부·결재선·결재 이력·참조자·교육 대상 변경 때 해당 문서의 버전이 증가합니다. 다른 문서의 추가나 수정은 영향을 주지 않습니다. 자신의 열린 편집 화면에서 첨부나 서명을 별도로 저장한 경우에도 409가 날 수 있습니다. 입력은 유지되므로 필요한 내용을 복사하고 문서를 다시 열어 확인한 뒤 수정하세요. 자동 병합이나 자동 최신 버전 재저장은 하지 않습니다.
 
 기존 DB에는 기본값 0인 열과 트리거만 트랜잭션으로 추가합니다. 기존 본문·상세·서명·이력은 수정하지 않습니다. 기본서류의 필수 `expectedBasicVersion`을 제외하면 서버 내부의 기존 `Store.updateDocument` 호출은 버전 생략을 계속 허용하지만 이는 신뢰된 내부 호출의 호환 정책이며 외부 관리자·근로자 API는 생략을 허용하지 않습니다. 새로운 외부 수정 경로를 추가할 때도 조회 버전을 필수로 전달해야 합니다.
+
+승인된 위험성평가 개선 정보 `PUT /api/documents/:id/risk-improvement`도 조회 당시 `edit_version`을 `expectedEditVersion`으로 반드시 전달합니다. 단건 `{siteId, expectedEditVersion, index, dueDate, completionDate, responsible}`와 일괄 `{siteId, expectedEditVersion, changes:[{index, dueDate, completionDate, responsible, previous:{dueDate, completionDate, responsible}}]}` 모두 적용됩니다. 버전 누락·잘못된 형식·불일치와 일괄 이전값 불일치는 HTTP 409이며 전체 요청을 저장하지 않습니다. 값이 원상복귀된 경우에도 이전 버전은 거절됩니다. 이전 단일 객체 형식의 위험성평가는 index 0으로 수정할 수 있습니다. 저장 잠금 안에서 관리자 세션을 재확인하며, 충돌 시 화면 입력은 유지됩니다. 필요한 입력을 복사한 뒤 문서를 다시 열어야 합니다.
