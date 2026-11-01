@@ -43,3 +43,44 @@ for(const stage of ['create','upload','publish','recover','refresh'])test('DOM �
   globalThis.fetch=async(path,options={})=>{const step=options.method==='PUT'?'publish':options.method==='POST'?(path.includes('/files')?'upload':'create'):'refresh';if(step===stage||stage==='recover'&&step==='upload'&&!failed){failed=true;return response(false,{error:'가상 세션 만료'});}if(stage==='recover'&&step==='refresh'&&failed)return response(false,{error:'가상 세션 만료'});return response(true,step==='create'?{id:1,version:'v1'}:step==='upload'?{id:1,version:'v2'}:step==='publish'?{id:1,version:'v3'}:[]);};
   try{await mountCommonWork({target,base:'/api/common-work',siteId:1,api});const form=controls['[data-work-form]'];for(const [key,value] of Object.entries(input))form.elements[key].value=value;await form.onsubmit({preventDefault(){}});assert.equal(apiWrites,0);assert.equal(controls['[data-work-form]'],form);assert.equal(form.elements.title.value,input.title);assert.equal(controls['[data-work-recover]'].hidden,false);assert.match(controls['[data-work-status]'].textContent,/다른 탭/);if(stage==='recover'){controls['[data-work-recover]'].onclick();await new Promise(resolve=>setImmediate(resolve));assert.equal(controls['[data-work-form]'],form);assert.match(controls['[data-work-status]'].textContent,/다른 탭/);assert.equal(controls['[data-work-recover]'].disabled,false);}}finally{globalThis.FormData=oldForm;globalThis.fetch=oldFetch;}
 });
+
+for(const stage of ['create','upload','publish','recover','refresh'])for(const pendingBody of [false,true])test('DOM 가상 시계 '+stage+(pendingBody?' 본문':' 요청')+' 정체는 30초 뒤 입력·복구를 보존하고 늦은 응답을 무시한다',async t=>{
+  t.mock.timers.enable({apis:['setTimeout']});
+  let controls,release,heldSignal,waiting=false,recovering=false;const writes=[],doc={};
+  const target={isConnected:true,set innerHTML(value){
+    controls=Object.fromEntries(['work-status','work-cancel','work-recover','work-new-files','new-files-list','rich-toolbar','work-search','work-select-all','work-preview','work-print'].map(name=>['[data-'+name+']',{}]));
+    const submit={};controls['[data-work-form]']={elements:Object.fromEntries(Object.keys(input).map(key=>[key,{value:'',querySelector:()=>({}),focus(){}}])),querySelector:()=>submit,reset(){}};
+    controls['[data-rich-editor]']={ownerDocument:doc,childNodes:[],replaceChildren(){},querySelectorAll(){return [];}};
+    controls['[data-work-new-files]'].files=files;
+  },querySelector(selector){return controls[selector];},querySelectorAll(){return Object.values(controls).filter(control=>!control.elements);}};
+  const response=data=>({ok:true,status:200,json:async()=>data}),flush=()=>new Promise(done=>setImmediate(done));
+  const oldForm=globalThis.FormData,oldFetch=globalThis.fetch;
+  globalThis.FormData=class{constructor(form){return Object.entries(form.elements).map(([key,item])=>[key,item.value]);}};
+  globalThis.fetch=async(path,options={})=>{
+    const step=options.method==='PUT'?'publish':options.method==='POST'?(path.includes('/files')?'upload':'create'):recovering?'recover':'refresh';
+    if(options.method)writes.push(step);
+    if(stage==='recover'&&step==='upload')throw Error('가상 업로드 연결 끊김');
+    const data=step==='create'?{id:1,version:'v1'}:step==='upload'?{version:'v'+writes.length}:step==='publish'?{version:'v4'}:[];
+    if(step===stage&&!waiting){
+      waiting=true;heldSignal=options.signal;
+      const held=new Promise(done=>release=()=>done(pendingBody?data:response(data)));
+      return pendingBody?{ok:true,status:200,json:()=>held}:held;
+    }
+    return response(data);
+  };
+  try{
+    await mountCommonWork({target,base:'/api/common-work',siteId:1,api:async()=>[]});
+    const form=controls['[data-work-form]'];for(const [key,value] of Object.entries(input))form.elements[key].value=value;
+    let pending=form.onsubmit({preventDefault(){}});await flush();
+    if(stage==='recover'){await pending;recovering=true;pending=controls['[data-work-recover]'].onclick();await flush();}
+    assert.ok(waiting);assert.equal(heldSignal.aborted,false);t.mock.timers.tick(29999);await flush();assert.equal(heldSignal.aborted,false);
+    t.mock.timers.tick(1);await pending;
+    assert.equal(heldSignal.aborted,true);assert.equal(controls['[data-work-form]'],form);assert.equal(form.elements.title.value,input.title);
+    assert.equal(controls['[data-work-new-files]'].files,files);assert.equal(controls['[data-work-recover]'].hidden,false);assert.equal(controls['[data-work-recover]'].disabled,false);
+    assert.match(controls['[data-work-status]'].textContent,/30초.*확정할 수 없습니다/);
+    const before=writes.slice();await form.onsubmit({preventDefault(){}});release();await flush();assert.deepEqual(writes,before);assert.equal(controls['[data-work-form]'],form);
+    if(stage==='create')assert.deepEqual(writes,['create']);if(stage==='upload')assert.deepEqual(writes,['create','upload']);
+    recovering=true;await controls['[data-work-recover]'].onclick();assert.notEqual(controls['[data-work-form]'],form);
+    assert.equal(controls['[data-work-form]'].elements.title.value,input.title);assert.equal(controls['[data-work-form]'].querySelector().disabled,true);assert.match(controls['[data-work-status]'].textContent,/입력은 복사용으로 보존/);assert.deepEqual(writes,before);
+  }finally{globalThis.FormData=oldForm;globalThis.fetch=oldFetch;t.mock.timers.reset();}
+});

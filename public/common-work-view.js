@@ -33,10 +33,22 @@ export async function mountCommonWork({target,base,siteId,actorId=null,api,activ
   let sequence=0,loadSequence=0,savePending=false,filters={from:'',to:'',category:'',process:'',author:'',q:''};
   const alive=()=>target.isConnected&&active(),owner=id=>actorId===null||actorId===id;
   const url=(path='',extra={})=>`${base}${path}?${new URLSearchParams({siteId:String(siteId),...extra})}`;
-  const fileRequest=async(path,options={})=>{
-    const response=await fetch(path,{...options,headers:{'Content-Type':'application/json',...options.headers}});
-    const data=await response.json();if(!response.ok)throw Error(response.status===401?'로그인이 만료되었습니다. 입력을 보존하려면 다른 탭에서 다시 로그인한 뒤 저장 결과 목록을 확인해 주세요.':data.error||'요청에 실패했습니다.');return data;
+  const timedRequest=async(path,options={})=>{
+    const controller=new AbortController();let timer;
+    try{
+      return await Promise.race([
+        (async()=>{
+          const response=await fetch(path,{...options,signal:controller.signal});
+          const data=await response.json();if(!response.ok)throw Error(response.status===401?'로그인이 만료되었습니다. 입력을 보존하려면 다른 탭에서 다시 로그인한 뒤 저장 결과 목록을 확인해 주세요.':data.error||'요청에 실패했습니다.');return data;
+        })(),
+        new Promise((_,reject)=>{timer=setTimeout(()=>{
+          reject(Error('요청 확인 시간이 30초를 넘었습니다. 서버 저장 여부는 확정할 수 없습니다. 입력을 보존했으니 저장 결과 목록을 확인해 주세요.'));
+          controller.abort();
+        },30000);})
+      ]);
+    }finally{clearTimeout(timer);}
   };
+  const fileRequest=(path,options={})=>timedRequest(path,{...options,headers:{'Content-Type':'application/json',...options.headers}});
   async function render(recovery=null,keepInput=false){
     if(savePending)return;
     const current=++loadSequence,read=recovery||keepInput?fileRequest:api,[rows,authors]=await Promise.all([read(url('',filters)),read(url('/authors'))]);if(!alive()||current!==loadSequence||savePending)return;sequence=current;
@@ -48,13 +60,13 @@ export async function mountCommonWork({target,base,siteId,actorId=null,api,activ
     cancel.onclick=()=>{if(submitting||savePending)return;stopped=false;form.querySelector('[type=submit]').disabled=false;editing=null;if(newFiles){newFiles.disabled=false;newFiles.value='';fileList.textContent='';}form.reset();editor.clear();form.elements.status.querySelector('[value=draft]').disabled=false;cancel.hidden=true;};
     const newFiles=target.querySelector('[data-work-new-files]'),fileList=target.querySelector('[data-new-files-list]'),recover=target.querySelector('[data-work-recover]');
     if(newFiles)newFiles.onchange=()=>{fileList.textContent=[...newFiles.files].map(file=>file.name).join(' · ');};
-    if(recover)recover.onclick=()=>{filters={from:'',to:'',category:'',process:'',author:'',q:''};render({data:attemptData,names:[...newFiles.files].map(file=>file.name)}).catch(error);};
+    if(recover)recover.onclick=async()=>{filters={from:'',to:'',category:'',process:'',author:'',q:''};recover.disabled=true;try{await render({data:attemptData,names:[...newFiles.files].map(file=>file.name)});}catch(e){error(e);}finally{recover.disabled=false;}};
     const saveFiles=newWorkWithFiles({
       onStart:()=>{stopped=true;target.querySelectorAll('button,input,select,textarea').forEach(control=>{control.disabled=true;});target.querySelector('[data-rich-editor]').contentEditable='false';},
       active:()=>alive()&&current===sequence,
       onProgress:message=>{if(alive()&&current===sequence)status.textContent=message;},
       create:data=>fileRequest(url(),{method:'POST',body:JSON.stringify({...data,siteId})}),
-      upload:async(row,file)=>{const response=await fetch(url('/'+row.id+'/files',{version:row.version}),{method:'POST',headers:{'x-file-name':encodeURIComponent(file.name)},body:file});if(!response.ok)throw Error((await response.json()).error||'첨부 저장에 실패했습니다.');return response.json();},
+      upload:(row,file)=>timedRequest(url('/'+row.id+'/files',{version:row.version}),{method:'POST',headers:{'x-file-name':encodeURIComponent(file.name)},body:file}),
       publish:(row,data)=>fileRequest(url('/'+row.id),{method:'PUT',body:JSON.stringify({...data,siteId})})
     });
     form.onsubmit=async event=>{
