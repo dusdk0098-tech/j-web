@@ -50,7 +50,8 @@ test('작업중지 API는 이전 요청의 번호와 저장 대기 중 만료된
     const admin=await loginAdmin(),site=await (await send('/api/sites','POST',{name:'가상 현장'},admin)).json(),invite=await (await send(`/api/sites/${site.id}/invitation`,'POST',{},admin)).json(),token=new URL(invite.link).searchParams.get('token');
     const worker={token,name:'가상 근로자',category:'직영',company:'가상 업체',occupation:'가상 직종',loginId:'stop_version',password:'virtual-password-123',acknowledged:true,profile:{birthDate:'2000-01-01',phone:'010-0000-0000'}};
     assert.equal((await send('/api/join','POST',worker)).status,201);const login=await send('/api/worker/login','POST',{token,loginId:worker.loginId,password:worker.password}),workerCookie=login.headers.get('set-cookie').split(';')[0],listPath=`/api/sites/${site.id}/work-stops`,list=async()=>(await (await send(listPath,'GET',null,admin)).json())[0];
-    const submit=(place)=>send('/api/worker/work-stops','POST',{anonymous:true,place,reason:'가상 위험',photo:photoUrl},workerCookie);
+    const reportContext=(await login.json()).reportContext;
+    const submit=(place)=>send('/api/worker/work-stops','POST',{anonymous:true,place,reason:'가상 위험',photo:photoUrl,reportContext},workerCookie);
     assert.equal((await submit('첫 장소')).status,201);const old=await list(),path=`${listPath}/${old.id}`;
     assert.equal((await send(path,'DELETE',payload(old),admin)).status,200);assert.equal((await submit('새 장소')).status,201);
     const next=await list();assert.equal(next.id,old.id);assert.notEqual(next.version,old.version);

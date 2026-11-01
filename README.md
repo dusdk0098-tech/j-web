@@ -437,3 +437,15 @@ Node 실제 캔버스 시험은 `node --test test/plan-pdf-render.test.js`로 �
 기존 DB에는 기본값 0인 열과 트리거만 트랜잭션으로 추가합니다. 기존 본문·상세·서명·이력은 수정하지 않습니다. 기본서류의 필수 `expectedBasicVersion`을 제외하면 서버 내부의 기존 `Store.updateDocument` 호출은 버전 생략을 계속 허용하지만 이는 신뢰된 내부 호출의 호환 정책이며 외부 관리자·근로자 API는 생략을 허용하지 않습니다. 새로운 외부 수정 경로를 추가할 때도 조회 버전을 필수로 전달해야 합니다.
 
 승인된 위험성평가 개선 정보 `PUT /api/documents/:id/risk-improvement`도 조회 당시 `edit_version`을 `expectedEditVersion`으로 반드시 전달합니다. 단건 `{siteId, expectedEditVersion, index, dueDate, completionDate, responsible}`와 일괄 `{siteId, expectedEditVersion, changes:[{index, dueDate, completionDate, responsible, previous:{dueDate, completionDate, responsible}}]}` 모두 적용됩니다. 버전 누락·잘못된 형식·불일치와 일괄 이전값 불일치는 HTTP 409이며 전체 요청을 저장하지 않습니다. 값이 원상복귀된 경우에도 이전 버전은 거절됩니다. 이전 단일 객체 형식의 위험성평가는 index 0으로 수정할 수 있습니다. 저장 잠금 안에서 관리자 세션을 재확인하며, 충돌 시 화면 입력은 유지됩니다. 필요한 입력을 복사한 뒤 문서를 다시 열어야 합니다.
+
+### 근로자 작업중지·위험신고 작성 세션
+
+`POST /api/worker/work-stops`와 `POST /api/worker/hazard-reports`는 작성 화면을 열 때 받은 로그인 또는 `/api/worker/session` 응답의 `reportContext`를 그대로 전송해야 합니다. 계정·현장·세션 세대를 현재 요청 쿠키와 DB 저장 잠금 안에서 비교합니다. 다른 탭의 계정 전환과 같은 계정 재로그인 후에는 이전 화면의 요청을 저장하지 않습니다. 세대 값은 쿠키의 단방향 파생값이며 인증 수단이 아닙니다. 응답은 `no-store`이고 화면 메모리에서만 사용합니다.
+
+컨텍스트 누락·불일치는 HTTP 409입니다. 구형 화면과 외부 API 호출자도 필수 필드를 추가해야 합니다. 입력 내용을 복사한 뒤 다시 로그인해 새 화면에서 확인하고 제출하세요. 서버 거절 시 폼을 초기화하거나 새 계정 컨텍스트로 자동 재전송하지 않습니다. 로그아웃을 시작하거나 화면이 제거되면 사진 읽기 완료 후 전송도 중단합니다. 기존 세션 폐기·현장 차단·사진 형식/크기·익명 저장 규칙은 유지됩니다. 내부 Store 호출의 인터페이스와 기존 데이터는 변경하지 않습니다.
+
+### 결재 회차 충돌 방지 API
+
+일반 결재자의 `POST /api/reviewer/documents/:id/decision` 및 `/comments`, 관리자의 `POST /api/documents/:id/transition` 중 승인·반려·전결 요청에는 화면에서 조회한 문서의 `approval_cycle_id`를 `expectedCycleId`로 전송한다. `POST /api/documents/batch-approve`는 `ids`와 같은 순서와 길이의 `expectedCycleIds` 배열을 전송한다. 누락, 숫자가 아닌 값, 다른 회차는 HTTP 409이며 구버전 외부 클라이언트도 예외가 없다. 일괄 요청은 한 항목만 불일치해도 모두 취소한다. 오류 시 의견·서명·선택은 화면에 남으므로 입력을 보관하고 문서를 다시 조회하여 내용을 확인한다.
+
+검증은 쓰기 잠금 획득과 세션 재확인 후, 상태·서명·이력을 변경하기 전에 수행한다. 기존 내부 Store 호출에 한해서 마지막 회차 인수를 생략한 호출을 호환하며, HTTP 경계는 누락을 항상 `null`로 정규화하므로 JSON 입력으로 이 호환 경로에 진입할 수 없다. 회차가 없는 과거 자료는 다시 상신하여 회차를 생성한 뒤 처리한다.

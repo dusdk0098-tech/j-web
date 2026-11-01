@@ -43,6 +43,8 @@ const reviewerSessions=new ReviewerSessions(store.db),reviewerAccountFailures=ne
 let workerFailures=[];
 const workerAccountFailures=new Map();
 const workerKey=raw=>typeof raw==='string' && /^[\w-]{43}$/.test(raw)?createHash('sha256').update(raw).digest('hex'):'';
+const workerReportContext=(key,worker)=>({workerId:worker.id,siteId:worker.site_id,generation:createHash('sha256').update('worker-report:'+key).digest('hex')});
+function checkWorkerReport(req,key,session,input){checkRequestSession(req);const expected=workerReportContext(key,session.worker),actual=input.reportContext;if(!actual||actual.workerId!==expected.workerId||actual.siteId!==expected.siteId||actual.generation!==expected.generation)throw Object.assign(new Error('로그인 계정 또는 현장 세션이 변경되었습니다. 입력 내용을 복사한 뒤 다시 로그인해 주세요.'),{sessionStatus:409});}
 function workerSessionError(raw,expected){const now=new Date(),session=workerSessions.get(workerKey(raw));if(session!==expected||!session||session.expires<=now.getTime())return {status:401,error:'근로자 로그인이 필요합니다.'};const date=new Date(now.getTime()-now.getTimezoneOffset()*60000).toISOString().slice(0,10);return store.workerAccessBlocked(session.worker.site_id,date)?{status:403,error:'해당 현장은 오늘 근로자 접속이 차단되었습니다.'}:null;}
 delete process.env.JWEB_ADMIN_PASSWORD;
 const mime = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg':'image/svg+xml', '.png':'image/png' };
@@ -267,8 +269,8 @@ const server = http.createServer(async (req, res) => {
       const reviewDoc=url.pathname.match(/^\/api\/reviewer\/documents\/(\d+)(?:\/(decision|attachments|comments)(?:\/(\d+))?)?$/);
       if(reviewDoc){const [,id,part,fileId]=reviewDoc,doc=store.reviewerDocument(reviewer.id,id);if(!doc)return json(res,404,{error:'결재할 문서를 찾을 수 없습니다.'});
         if(!part&&req.method==='GET'){const canFinalApprove=doc.type==='office'&&store.reviewerCanFinalApprove(reviewer.id),line=canFinalApprove?store.approvalLine(id):[],position=line.findIndex(step=>step.reviewer_id===reviewer.id);return json(res,200,{...store.reviewerPayload(doc),priorReviews:store.priorReviewerEvents(doc,reviewer.id),canFinalApprove,remainingApprovers:position<0?[]:line.slice(position+1).map(step=>step.name)});}
-        if(part==='comments'&&!fileId&&req.method==='POST'){const input=await body(req);store.reviewerComment(id,reviewer.id,input.opinion,()=>checkRequestSession(req));return json(res,201,{ok:true});}
-        if(part==='decision'&&!fileId&&req.method==='POST'){const input=await body(req);return json(res,200,store.reviewerTransition(id,reviewer.id,input.action,input.opinion,input.signature,()=>checkRequestSession(req)));}
+        if(part==='comments'&&!fileId&&req.method==='POST'){const input=await body(req);store.reviewerComment(id,reviewer.id,input.opinion,()=>checkRequestSession(req),input.expectedCycleId??null);return json(res,201,{ok:true});}
+        if(part==='decision'&&!fileId&&req.method==='POST'){const input=await body(req);return json(res,200,store.reviewerTransition(id,reviewer.id,input.action,input.opinion,input.signature,()=>checkRequestSession(req),input.expectedCycleId??null));}
         if(part==='attachments'&&fileId&&req.method==='GET'){const payload=store.reviewerPayload(doc),file=payload.attachments.some(item=>item.id===Number(fileId))&&store.reviewerAttachment(doc,fileId);if(!file)return json(res,404,{error:'첨부파일을 찾을 수 없습니다.'});const name=encodeURIComponent(file.name).replace(/[!'()*]/g,c=>`%${c.charCodeAt(0).toString(16).toUpperCase()}`);res.writeHead(200,{'Content-Type':'application/octet-stream','Content-Disposition':`attachment; filename="file"; filename*=UTF-8''${name}`,'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(file.data);}
       }
       return json(res,404,{error:'요청한 경로가 없습니다.'});
@@ -300,14 +302,14 @@ const server = http.createServer(async (req, res) => {
       const raw=randomBytes(32).toString('base64url');store.recordWorkerLogin(worker.id,date,credentialHash,()=>{const currentSite=input.siteKey?store.siteFromAccess(input.siteKey):store.invitation(input.token);if(!currentSite||currentSite.id!==worker.site_id||identityMode&&store.workerLoginIdentity(currentSite.id,input.name,input.birthDigits)?.worker_id!==worker.id){const error=new Error('가입 링크 또는 로그인 정보를 확인해 주세요.');error.sessionStatus=401;throw error;}workerSessions.delete(workerKey(workerToken));workerSessions.set(workerKey(raw),{worker,expires:now+8*60*60*1000});},input.location);
       workerAccountFailures.delete(accountKey);
       for(const [key,session] of workerSessions)if(session.expires<=now)workerSessions.delete(key);
-      res.setHeader('Set-Cookie',`jweb_worker=${raw}; HttpOnly; SameSite=Strict; Path=/; Max-Age=28800${secureCookie}`);return json(res,200,{worker,siteKey:store.siteAccessKey(worker.site_id)});
+      res.setHeader('Set-Cookie',`jweb_worker=${raw}; HttpOnly; SameSite=Strict; Path=/; Max-Age=28800${secureCookie}`);return json(res,200,{worker,reportContext:workerReportContext(workerKey(raw),worker),siteKey:store.siteAccessKey(worker.site_id)});
     }
     if(url.pathname==='/api/worker/session' && req.method==='GET'){
       const key=workerKey(workerToken),session=workerSessions.get(key),now=new Date();
       if(!session || session.expires<=now.getTime()){workerSessions.delete(key);return json(res,401,{error:'근로자 로그인이 필요합니다.'});}
       const date=new Date(now.getTime()-now.getTimezoneOffset()*60000).toISOString().slice(0,10),nextDay=new Date(now);
       nextDay.setHours(24,0,0,0);
-      return json(res,200,{worker:session.worker,date,nextDayAt:nextDay.toISOString(),serverNow:now.toISOString()});
+      return json(res,200,{worker:session.worker,reportContext:workerReportContext(key,session.worker),date,nextDayAt:nextDay.toISOString(),serverNow:now.toISOString()});
     }
     if(url.pathname==='/api/worker/access' && req.method==='POST'){
       const key=workerKey(workerToken),session=workerSessions.get(key);
@@ -467,7 +469,7 @@ const server = http.createServer(async (req, res) => {
     if(url.pathname==='/api/worker/hazard-reports' && ['GET','POST'].includes(req.method)){
       const key=workerKey(workerToken),session=workerSessions.get(key);if(!session||session.expires<=Date.now()){workerSessions.delete(key);return json(res,401,{error:'근로자 로그인이 필요합니다.'});}
       if(req.method==='GET')return json(res,200,store.workerHazardReports(session.worker.id));
-      const input=await body(req,2805000);return json(res,201,{id:store.createWorkerHazardReport(session.worker.id,input,()=>checkRequestSession(req))});
+      const input=await body(req,2805000);return json(res,201,{id:store.createWorkerHazardReport(session.worker.id,input,()=>checkWorkerReport(req,key,session,input))});
     }
     const workerHazardPhoto=url.pathname.match(/^\/api\/worker\/hazard-reports\/(\d+)\/photo$/);
     if(workerHazardPhoto&&req.method==='GET'){
@@ -478,7 +480,7 @@ const server = http.createServer(async (req, res) => {
     if(url.pathname==='/api/worker/work-stops' && req.method==='POST'){
       const key=workerKey(workerToken),session=workerSessions.get(key);
       if(!session || session.expires<=Date.now()){workerSessions.delete(key);return json(res,401,{error:'근로자 로그인이 필요합니다.'});}
-      const input=await body(req,2805000);store.createWorkStop(session.worker.id,input,()=>checkRequestSession(req));return json(res,201,{ok:true});
+      const input=await body(req,2805000);store.createWorkStop(session.worker.id,input,()=>checkWorkerReport(req,key,session,input));return json(res,201,{ok:true});
     }
     const workerNotice=url.pathname.match(/^\/api\/worker\/notices\/(\d+)\/confirm$/);
     if(workerNotice && req.method==='POST'){
@@ -1040,7 +1042,7 @@ const server = http.createServer(async (req, res) => {
     if(riskImprovement&&req.method==='PUT')return json(res,200,store.updateRiskImprovement(riskImprovement[1],await body(req),()=>checkRequestSession(req)));
     const riskActivity=url.pathname.match(/^\/api\/documents\/(\d+)\/risk-activities(?:\/(\d+))?$/);
     if(riskActivity){const [,id,activityId]=riskActivity;if(!activityId&&req.method==='GET')return json(res,200,store.riskActivities(id));if(!activityId&&req.method==='POST')return json(res,201,{id:store.saveRiskActivity(id,await body(req),null,()=>checkRequestSession(req))});if(activityId&&req.method==='PUT')return json(res,200,{id:store.saveRiskActivity(id,await body(req),activityId,()=>checkRequestSession(req))});if(activityId&&req.method==='DELETE'){store.deleteRiskActivity(id,activityId);return json(res,200,{ok:true});}}
-    if(url.pathname==='/api/documents/batch-approve'&&req.method==='POST'){const input=await body(req);return json(res,200,store.approveDocuments(input.siteId,input.ids,input.signature,()=>checkRequestSession(req)));}
+    if(url.pathname==='/api/documents/batch-approve'&&req.method==='POST'){const input=await body(req);return json(res,200,store.approveDocuments(input.siteId,input.ids,input.signature,()=>checkRequestSession(req),input.expectedCycleIds??null));}
     const previousApproval=url.pathname.match(/^\/api\/documents\/(\d+)\/previous-approval-line$/);
     if(previousApproval&&req.method==='GET')return json(res,200,store.previousApprovalLine(previousApproval[1]));
     const approvalLine=url.pathname.match(/^\/api\/documents\/(\d+)\/approval-line$/);
@@ -1080,7 +1082,7 @@ const server = http.createServer(async (req, res) => {
       if (req.method === 'GET' && !part) { const d=store.document(id); return d ? json(res,200,d) : json(res,404,{error:'문서를 찾을 수 없습니다.'}); }
       if (req.method === 'PUT' && !part) {const input=await body(req,150000);if(!Number.isSafeInteger(input.expectedEditVersion))throw Object.assign(new Error('문서 버전이 없습니다. 입력 내용을 복사한 뒤 화면을 새로고침해 주세요.'),{sessionStatus:409});return json(res,200,store.updateDocument(id,input,()=>checkRequestSession(req)));}
       if (req.method === 'DELETE' && !part) {const input=await body(req);store.deleteBasicDocument(input.siteId,id,input.expectedVersion);return json(res,200,{ok:true});}
-      if (req.method === 'POST' && part === 'transition') {const input=await body(req);return json(res,200,store.managedTransition(id,input,()=>checkRequestSession(req)));}
+      if (req.method === 'POST' && part === 'transition') {const input=await body(req);return json(res,200,store.managedTransition(id,input,()=>checkRequestSession(req),input.expectedCycleId??null));}
     }
     return json(res,404,{error:'요청한 경로가 없습니다.'});
   } catch (e) {

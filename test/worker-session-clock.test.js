@@ -6,6 +6,7 @@ import {join} from 'node:path';
 import {createServer} from 'node:net';
 import {spawn} from 'node:child_process';
 import {once} from 'node:events';
+import {createHash} from 'node:crypto';
 
 const cases=[
   {zone:'Asia/Seoul',now:'2026-10-31T14:59:59.500Z',date:'2026-10-31',next:'2026-10-31T15:00:00.000Z',afterDate:'2026-11-01',afterNext:'2026-11-01T15:00:00.000Z'},
@@ -32,11 +33,13 @@ for(const scenario of cases)test(`근로자 세션 서버 시계: ${scenario.zon
     const person={token,name:'가상 근로자',category:'직영',occupation:'목공',loginId:'clock_worker',password:'virtual-password-123',acknowledged:true,profile:{birthDate:'2000-01-01',phone:'010-0000-0000'}};
     assert.equal((await call('/api/join','POST',person)).status,201);
     const logged=await call('/api/worker/login','POST',{token,loginId:person.loginId,password:person.password});assert.equal(logged.status,200);
-    const cookie=logged.headers.get('set-cookie').split(';')[0],worker=(await logged.json()).worker;
+    const cookie=logged.headers.get('set-cookie').split(';')[0],{worker,reportContext}=await logged.json(),raw=cookie.slice('jweb_worker='.length);
+    assert.equal(logged.headers.get('cache-control'),'no-store');assert.deepEqual(Object.keys(reportContext).sort(),['generation','siteId','workerId']);assert.equal(reportContext.workerId,worker.id);assert.equal(reportContext.siteId,worker.site_id);assert.match(reportContext.generation,/^[a-f0-9]{64}$/);assert.notEqual(reportContext.generation,raw);assert.notEqual(reportContext.generation,createHash('sha256').update(raw).digest('hex'));
+    assert.ok(!JSON.stringify({worker,reportContext}).includes(raw));
     const check=async(now,date,next)=>{
       writeFileSync(clock,now);
       const response=await call('/api/worker/session','GET',null,cookie);assert.equal(response.status,200);assert.equal(response.headers.get('cache-control'),'no-store');
-      assert.deepEqual(await response.json(),{worker,date,nextDayAt:next,serverNow:now});
+      assert.deepEqual(await response.json(),{worker,reportContext,date,nextDayAt:next,serverNow:now});
     };
     await check(scenario.now,scenario.date,scenario.next);
     if(scenario.afterDate)await check(scenario.next,scenario.afterDate,scenario.afterNext);
