@@ -11,8 +11,9 @@ test('위험요인 표시 선택은 해당 항목만 숨기고 생략 안내를 
   const panel={querySelectorAll:()=>rows,prepend(...nodes){this.controls=nodes[0];this.notice=nodes[1];}};
   const document={createElement,createTextNode:text=>({text})};
   runInNewContext(`${code.slice(start,end)};configureRiskDisplay(panel);`,{document,panel});
-  const inputs=panel.controls.querySelectorAll('input');assert.equal(inputs.length,5);
-  inputs[4].checked=false;inputs[4].change();assert.deepEqual(rows.map(row=>row.hidden),[false,false,false,false,true,true,true,true,false]);assert.match(panel.notice.textContent,/생략/);
+  const [all,...inputs]=panel.controls.querySelectorAll('input');assert.equal(inputs.length,5);
+  inputs[4].checked=false;inputs[4].change();assert.deepEqual(rows.map(row=>row.hidden),[false,false,false,false,true,true,true,true,false]);assert.match(panel.notice.textContent,/생략/);assert.equal(all.indeterminate,true);
   inputs[0].checked=false;inputs[0].change();inputs[4].checked=true;inputs[4].change();assert.equal(rows[0].hidden,true);assert.equal(rows[4].hidden,false);assert.match(panel.notice.textContent,/생략/);
-  inputs[0].checked=true;inputs[0].change();assert.equal(panel.notice.textContent,'');assert.ok(rows.every(row=>!row.hidden));
+  all.checked=true;all.change();assert.equal(panel.notice.textContent,'');assert.ok(rows.every(row=>!row.hidden));assert.equal(all.indeterminate,false);
+  all.checked=false;all.change();assert.ok(rows.slice(0,8).every(row=>row.hidden));assert.equal(rows[8].hidden,false);assert.match(panel.notice.textContent,/생략/);assert.equal(all.indeterminate,false);
 });
