@@ -17,6 +17,7 @@ import { LocalAuth, sessionToken, WorkerSessions, ReviewerSessions } from './aut
 import { workerSitePath } from './public/worker-link.js';
 import { createHash, randomBytes } from 'node:crypto';
 import { costImageType } from './cost-image.js';
+import { AiChat, AI_BODY_LIMIT } from './ai-chat.js';
 
 const root = dirname(fileURLToPath(import.meta.url));
 let publicOrigin='';
@@ -30,6 +31,7 @@ const dataDir = process.env.JWEB_DATA_DIR || join(root, 'data');
 const auth=new LocalAuth(process.env.JWEB_ADMIN_PASSWORD);
 mkdirSync(dataDir, { recursive: true });
 const store = new Store(join(dataDir, 'jweb.sqlite'));
+const aiChat = new AiChat(store.db);
 const personalNotes = new PersonalNotes(store.db);
 const commonWork = new CommonWork(store.db);
 const messages = new Messages(store.db);
@@ -65,6 +67,7 @@ assets.add('/reviewer-manager-check.js');
 assets.add('/basic-samples.js');
 assets.add('/reviewer-basic-documents.js');
 assets.add('/permit-roles.js');
+assets.add('/ai-chat.js');assets.add('/ai-chat.css');
 function checkRequestSession(req){const failure=req.checkSession?.();if(failure)throw Object.assign(new Error(failure.error),{sessionStatus:failure.status});}
 async function boardAttachmentRequest(req,res,url,match,actor){
   const [,id,fileId]=match,version=url.searchParams.get('version'),authorize=()=>checkRequestSession(req);
@@ -483,6 +486,13 @@ const server = http.createServer(async (req, res) => {
     }
     if(url.pathname.startsWith('/api/') && url.pathname!=='/api/join' && !auth.valid(token))return json(res,401,{error:'관리자 로그인이 필요합니다.'});
     if(url.pathname.startsWith('/api/')&&url.pathname!=='/api/join')req.checkSession=()=>auth.valid(token)?null:{status:401,error:'관리자 로그인이 필요합니다.'};
+    if(url.pathname.startsWith('/api/ai/')){
+      try{
+        if(url.pathname==='/api/ai/status'&&req.method==='GET')return json(res,200,aiChat.status());
+        if(url.pathname==='/api/ai/chat'&&req.method==='POST')return json(res,200,await aiChat.chat(await body(req,AI_BODY_LIMIT),token,()=>checkRequestSession(req)));
+        if(url.pathname==='/api/ai/feedback'&&req.method==='POST')return json(res,200,aiChat.feedback(await body(req),token,()=>checkRequestSession(req)));
+      }catch(error){if(error.aiStatus)return json(res,error.aiStatus,{error:error.message});throw error;}
+    }
     if(await handleCommonWork(req,res,url,'/api/common-work'))return;
     if (req.method === 'GET' && assets.has(url.pathname)) {
       const path = url.pathname === '/' ? '/index.html' : url.pathname === '/join' ? '/join.html' : url.pathname === '/login' ? '/login.html' : url.pathname === '/review' ? '/review.html' : url.pathname === '/client' ? '/client.html' : url.pathname === '/employment-certificate' ? '/employment-certificate.html' : url.pathname;
