@@ -10,6 +10,14 @@ import {runInNewContext} from 'node:vm';
 import {Store} from '../store.js';
 import {educationKinds} from '../public/education-kinds.js';
 
+test('승인된 교육의 시간과 장소 등은 지정 근로자의 조회 응답에서 열람 화면까지 전달된다',async()=>{
+  const s=new Store(':memory:');try{
+    const site=s.createSite({name:'가상'}),make=name=>s.createWorker({siteId:site.id,name,category:'직영',company:'가상 회사',occupation:'가상 직종'}),worker=make('가상 대상자'),other=make('다른 근로자'),details={kind:'regular',audience:'가상 교육대상',timeFrom:'09:15',timeTo:'10:45',instructor:'가상 강사',educationPlace:'가상 장소',educationMethod:'가상 방식'},doc=s.createDocument({siteId:site.id,type:'education',title:'가상 교육',date:'2026-10-29',body:'가상 내용',details});
+    s.setTrainingTargets(doc.id,[worker.id]);s.transition(doc.id,'submit');s.transition(doc.id,'approve');const [item]=s.workerTraining(worker.id,'2026-10-29');for(const [key,value] of Object.entries(details))assert.equal(item.details[key],value);assert.deepEqual(s.workerTraining(other.id,'2026-10-29'),[]);assert.deepEqual(s.workerTraining(worker.id,'2026-10-30'),[]);
+    const source=readFileSync(new URL('../public/join.js',import.meta.url),'utf8'),start=source.indexOf('    const loadTraining=async'),end=source.indexOf('\n',start),trainingList={items:[],replaceChildren(){this.items=[];},append(node){this.items.push(node);}},document={createElement(){return {children:[],append(...items){this.children.push(...items);},setAttribute(){}};}},fetch=async()=>({ok:true,json:async()=>[{...item,has_signature:1}]});assert.ok(start>=0&&end>start);await runInNewContext('(async()=>{'+source.slice(start,end)+' await loadTraining();})()',{trainingList,document,fetch,educationKinds});const body=trainingList.items[0].children[1].textContent;for(const value of ['가상 교육대상','09:15','10:45','가상 강사','가상 장소','가상 방식'])assert.ok(body.includes(value),value);
+  }finally{s.close();}
+});
+
 test('교육 강사는 작성·이전 화면 수정·결재 사본에서 보존되고 명시적으로 지울 수 있다',()=>{
   const s=new Store(':memory:');try{const site=s.createSite({name:'가상'}),base={siteId:site.id,type:'education',title:'가상 교육',date:'2026-10-01'},doc=s.createAuthorizedDocument({...base,details:{kind:'regular',instructor:'가상 강사'}});s.updateDocument(doc.id,{...base,details:{kind:'regular'}});assert.equal(JSON.parse(s.document(doc.id).details).instructor,'가상 강사');assert.throws(()=>s.updateDocument(doc.id,{...base,details:{kind:'regular',instructor:'가'.repeat(2001)}}));s.transition(doc.id,'submit');const cycle=s.document(doc.id).approval_cycle_id;s.transition(doc.id,'withdraw');s.updateDocument(doc.id,{...base,details:{kind:'regular',instructor:''}});assert.equal(JSON.parse(s.document(doc.id).details).instructor,'');assert.equal(JSON.parse(s.approvalCycle(doc.id,cycle).document.details).instructor,'가상 강사');
   }finally{s.close();}
