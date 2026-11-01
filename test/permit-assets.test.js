@@ -1,0 +1,33 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
+import {runInNewContext} from 'node:vm';
+import {Store} from '../store.js';
+import {mkdtempSync,rmSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import {createServer} from 'node:net';
+import {spawn} from 'node:child_process';
+import {once} from 'node:events';
+
+test('허가서 연결 자료는 현장과 중복을 검사하고 이전 수정과 결재 사본에 보존된다',()=>{
+  const s=new Store(':memory:');try{
+    const site=s.createSite({name:'가상'}),other=s.createSite({name:'다른 가상 현장'}),worker=s.createWorker({siteId:site.id,name:'가상 작업자',category:'직영',company:'가상 업체',occupation:'가상 직종'}),foreign=s.createWorker({siteId:other.id,name:'다른 작업자',category:'직영',company:'가상 업체',occupation:'가상 직종'}),equipment=s.createEquipment({siteId:site.id,kind:'가상 장비',model:'가상 모델',capacity:'',manufacturer:'',registration:''}),rigging=s.createRigging({siteId:site.id,category:'줄걸이',kind:'가상 장구',name:'시험 장구',standards:['가상 규격']}),base={siteId:site.id,type:'permit',title:'가상 허가',date:'2026-10-31'},details={company:'가상 업체',personnel:'2',periodFrom:'2026-10-31',periodTo:'2026-10-31',place:'가상 장소',work:'가상 작업',permitWorkerIds:[worker.id],permitEquipmentIds:[equipment.id],permitRiggingIds:[rigging.id]},doc=s.createDocument({...base,details});
+    let saved=JSON.parse(doc.details);assert.equal(saved.permitWorkerSnapshot[0].name,'가상 작업자');assert.equal(saved.permitEquipmentSnapshot[0].model,'가상 모델');assert.equal(saved.permitRiggingSnapshot[0].name,'시험 장구');
+    assert.throws(()=>s.updateDocument(doc.id,{...base,details:{...details,permitWorkerIds:[foreign.id]}}),/현장/);assert.throws(()=>s.updateDocument(doc.id,{...base,details:{...details,permitEquipmentIds:[equipment.id,equipment.id]}}));assert.deepEqual(JSON.parse(s.document(doc.id).details),saved);
+    s.updateDocument(doc.id,{...base,details:{company:'가상 업체',personnel:'2',periodFrom:'2026-10-31',periodTo:'2026-10-31',place:'가상 장소',work:'가상 작업'}});assert.deepEqual(JSON.parse(s.document(doc.id).details),saved);const reviewer=s.createReviewer({siteId:site.id,name:'가상 결재자',loginId:'permit_asset_reviewer',password:'virtual-password-123'}),roles={contractorLead:reviewer.id,coordinator:null,supervisor:null,safetyOfficer:null,siteManager:reviewer.id,inspector:null};s.setPermitRoles(doc.id,{expectedVersion:s.permitRoles(doc.id).version,roles});s.transition(doc.id,'submit');const cycle=s.document(doc.id).approval_cycle_id;assert.deepEqual(JSON.parse(s.approvalCycle(doc.id,cycle).document.details),saved);s.transition(doc.id,'withdraw');s.updateDocument(doc.id,{...base,details:{...details,permitWorkerIds:[]}});assert.deepEqual(JSON.parse(s.document(doc.id).details).permitWorkerSnapshot,[]);assert.equal(JSON.parse(s.approvalCycle(doc.id,cycle).document.details).permitWorkerSnapshot[0].name,'가상 작업자');
+  }finally{s.close();}
+});
+
+test('허가서 작성은 저장된 선택을 보여 주고 선택된 식별자를 전송한다',()=>{
+  const source=readFileSync(new URL('../public/app.js',import.meta.url),'utf8'),line=source.split(/\r?\n/).find(item=>item.includes("['작업자','data-permit-worker'")),save=source.split(/\r?\n/).find(item=>item.includes("['permitWorkerIds','[data-permit-worker]:checked']")),target={html:'',insertAdjacentHTML(_where,html){this.html+=html;}},details={permitWorkerIds:[1,9],permitWorkerSnapshot:[{id:9,name:'이전 <작업자>'}],permitEquipmentIds:[2],permitRiggingIds:[3]},workers=[{id:1,name:'가상 작업자'}],equipment=[{id:2,kind:'가상 장비'}],rigging=[{id:3,name:'가상 장구'}],context={details,workers,equipment,rigging,esc:value=>String(value).replaceAll('<','&lt;').replaceAll('>','&gt;'),$:()=>target};assert.ok(line&&save);runInNewContext(line,context);assert.match(target.html,/data-permit-worker/);assert.match(target.html,/이전 &lt;작업자&gt;/);assert.match(target.html,/data-permit-equipment/);assert.match(target.html,/data-permit-rigging/);
+  const data={details:{}},document={querySelectorAll:selector=>selector.includes('worker')?[{value:'1'},{value:'9'}]:selector.includes('equipment')?[{value:'2'}]:[{value:'3'}]};runInNewContext(save,{data,document,Number});assert.deepEqual(JSON.parse(JSON.stringify(data.details)),{permitWorkerIds:[1,9],permitEquipmentIds:[2],permitRiggingIds:[3]});
+});
+
+test('작업허가서 연결 자료 API는 관리자 인증과 현장을 확인한다',{timeout:30000},async()=>{
+  const dir=mkdtempSync(join(tmpdir(),'jweb-permit-assets-')),store=new Store(join(dir,'jweb.sqlite'));let site,worker,foreign,equipment,rigging;
+  try{site=store.createSite({name:'가상 현장'});const other=store.createSite({name:'다른 현장'}),make=id=>store.createWorker({siteId:id,name:'가상 작업자',category:'직영',company:'가상 업체',occupation:'가상 직종'});worker=make(site.id);foreign=make(other.id);equipment=store.createEquipment({siteId:site.id,kind:'가상 장비',model:'모델',capacity:'',manufacturer:'',registration:''});rigging=store.createRigging({siteId:site.id,category:'줄걸이',kind:'가상 장구',name:'가상 장구',standards:['가상 규격']});}finally{store.close();}
+  const reservation=createServer();await new Promise(resolve=>reservation.listen(0,'127.0.0.1',resolve));const port=reservation.address().port;await new Promise(resolve=>reservation.close(resolve));const child=spawn(process.execPath,['server.js'],{cwd:process.cwd(),env:{...process.env,PORT:String(port),JWEB_DATA_DIR:dir,JWEB_ADMIN_PASSWORD:'virtual-admin-password'},stdio:['ignore','pipe','pipe']});
+  try{await Promise.race([once(child.stdout,'data'),once(child,'exit').then(()=>{throw Error('시험 서버 종료');})]);const base='http://127.0.0.1:'+port,call=(path,method='GET',data,cookie)=>fetch(base+path,{method,headers:{...(data?{'content-type':'application/json'}:{}),...(cookie?{cookie}:{})},...(data?{body:JSON.stringify(data)}:{})}),admin=(await call('/api/login','POST',{password:'virtual-admin-password'})).headers.get('set-cookie').split(';')[0],input={siteId:site.id,type:'permit',title:'가상 허가',date:'2026-10-31',details:{permitWorkerIds:[worker.id],permitEquipmentIds:[equipment.id],permitRiggingIds:[rigging.id]}};assert.equal((await call('/api/documents','POST',input)).status,401);assert.equal((await call('/api/documents','POST',{...input,details:{...input.details,permitWorkerIds:[foreign.id]}},admin)).status,400);const response=await call('/api/documents','POST',input,admin);assert.equal(response.status,201);const doc=await response.json(),saved=JSON.parse((await (await call('/api/documents/'+doc.id,'GET',null,admin)).json()).details);assert.equal(saved.permitWorkerSnapshot[0].name,'가상 작업자');assert.equal(saved.permitEquipmentSnapshot[0].model,'모델');assert.equal(saved.permitRiggingSnapshot[0].name,'가상 장구');
+  }finally{if(child.exitCode===null){const exited=once(child,'exit');child.kill();await exited;}rmSync(dir,{recursive:true,force:true});}
+});

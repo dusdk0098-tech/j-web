@@ -1805,6 +1805,7 @@ export class Store {
     this.validateSafetyMeeting(d);
     this.validateInstructionRecipient(d);
     this.validatePermitCompany(d);
+    this.validatePermitAssets(d);
     this.validateRiskContractors(d);
     this.validateOfficeReference(d);
     if(d.type==='safety_log')d.details.attendanceSnapshot={present:this.attendance(d.siteId,d.date).filter(row=>row.present).length,capturedAt:new Date().toISOString()};
@@ -2050,7 +2051,7 @@ export class Store {
     if(current.type==='checklist'&&input.details?.kind==='wind'&&input.details.photoNote===undefined){const previous=JSON.parse(current.details);if(previous.kind==='wind'&&previous.photoNote!==undefined)input={...input,details:{...input.details,photoNote:previous.photoNote}};}
     if(current.type==='work_plan'&&(input.details===undefined||input.details&&typeof input.details==='object'&&!Array.isArray(input.details))){const previous=JSON.parse(current.details),details={...input.details};for(const key of ['heavyLoads','equipmentAssignments','safetyMeasures'])if(details[key]===undefined&&previous[key]!==undefined)details[key]=previous[key];input={...input,details};}
     if(current.type==='education'&&(input.details==null||typeof input.details==='object'&&!Array.isArray(input.details))){const previous=JSON.parse(current.details),details={...input.details};for(const key of ['timeFrom','timeTo','instructor','educationPlace','educationMethod'])if(details[key]===undefined&&previous[key]!==undefined)details[key]=previous[key];input={...input,details};}
-    if(current.type==='permit'&&(input.details==null||typeof input.details==='object'&&!Array.isArray(input.details))){const previous=JSON.parse(current.details),details={...input.details};if((previous.companyId>0&&details.companyId===undefined)||(previous.directWork&&details.directWork===undefined))throw new Error('작업업체 구분을 보존하려면 화면을 새로고침해 주세요.');if(details.safetyMeasures===undefined&&previous.safetyMeasures!==undefined)details.safetyMeasures=previous.safetyMeasures;input={...input,details};}
+    if(current.type==='permit'&&(input.details==null||typeof input.details==='object'&&!Array.isArray(input.details))){const previous=JSON.parse(current.details),details={...input.details};if((previous.companyId>0&&details.companyId===undefined)||(previous.directWork&&details.directWork===undefined))throw new Error('작업업체 구분을 보존하려면 화면을 새로고침해 주세요.');for(const key of ['safetyMeasures','permitWorkerIds','permitEquipmentIds','permitRiggingIds'])if(details[key]===undefined&&previous[key]!==undefined)details[key]=previous[key];input={...input,details};}
     if(current.type==='basic'&&JSON.parse(current.details).categoryId>0&&input.details?.categoryId===undefined)throw new Error('기본 서류 분류를 보존하려면 화면을 새로고침해 주세요.');
     if(current.type==='office'&&JSON.parse(current.details).referenceId>0&&input.details?.referenceId===undefined)throw new Error('참조 품의서를 보존하려면 화면을 새로고침해 주세요.');
     if(current.type==='office'&&JSON.parse(current.details).referenceDocId>0&&input.details?.referenceDocId===undefined)throw new Error('참조 문서를 보존하려면 화면을 새로고침해 주세요.');
@@ -2058,6 +2059,7 @@ export class Store {
     const d = recordInput(input);
     if (d.siteId !== current.site_id || d.type !== current.type) throw new Error('문서의 현장과 유형은 변경할 수 없습니다.');
     this.validatePermitCompany(d,current);
+    this.validatePermitAssets(d,current);
     this.validateBasicCategory(d);
     if(d.type==='checklist'&&d.details.kind!=='morning'&&this.db.prepare("SELECT 1 FROM attachments WHERE document_id=? AND category='morning_hazard_photo' LIMIT 1").get(Number(id)))throw new Error('점검 항목 사진을 삭제한 뒤 점검 종류를 변경해 주세요.');
     this.validatePlanEquipment(d);
@@ -2135,6 +2137,15 @@ export class Store {
     if(!company)throw new Error('같은 현장의 협력사를 선택해 주세요.');
     const previous=current?JSON.parse(current.details):null;
     doc.details.company=previous?.companyId===doc.details.companyId&&previous.company?previous.company:company.name;
+  }
+  validatePermitAssets(doc,current=null){
+    if(doc.type!=='permit')return;
+    const previous=current?JSON.parse(current.details):{};
+    for(const [ids,snapshot,sql] of [
+      ['permitWorkerIds','permitWorkerSnapshot','SELECT id,name,company,occupation FROM workers WHERE id=? AND site_id=?'],
+      ['permitEquipmentIds','permitEquipmentSnapshot','SELECT id,kind,model,registration FROM equipment WHERE id=? AND site_id=?'],
+      ['permitRiggingIds','permitRiggingSnapshot','SELECT id,category,kind,name FROM rigging WHERE id=? AND site_id=?']
+    ])if(doc.details[ids]!==undefined){const find=this.db.prepare(sql),old=previous[snapshot]||[];doc.details[snapshot]=doc.details[ids].map(id=>{const saved=old.find(row=>row.id===id);if(saved)return saved;const item=find.get(id,doc.siteId);if(!item)throw new Error('같은 현장의 작업자·장비·장구를 선택해 주세요.');return {...item};});}
   }
   transition(id, action, opinion='', signature=null,reviewerId=null) {
     const doc = this.document(id);

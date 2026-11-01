@@ -176,6 +176,7 @@ export function recordInput(input) {
   }
   if(type==='permit'){
     const value=input.details??{};if(!value||typeof value!=='object'||Array.isArray(value))throw new Error('작업허가서 항목을 확인해 주세요.');
+    for(const key of ['permitWorkerIds','permitEquipmentIds','permitRiggingIds'])if(value[key]!==undefined){if(!Array.isArray(value[key])||value[key].length>100||value[key].some(id=>!Number.isSafeInteger(id)||id<1)||new Set(value[key]).size!==value[key].length)throw new Error('작업허가서 연결 자료를 확인해 주세요.');details[key]=value[key];}
     if(value.kinds!==undefined){if(!Array.isArray(value.kinds)||value.kinds.some(kind=>!permitKinds.includes(kind))||new Set(value.kinds).size!==value.kinds.length)throw new Error('위험작업 종류를 확인해 주세요.');details.kinds=value.kinds;}
     if(value.safetyMeasures!==undefined){
       if(!Array.isArray(value.safetyMeasures)||value.safetyMeasures.length>100)throw new Error('안전대책 항목을 확인해 주세요.');

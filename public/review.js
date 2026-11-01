@@ -19,6 +19,7 @@ const labels={kind:'종류',otherTitle:'교육명',audience:'교육대상',compa
 Object.assign(labels,{processName:'가상 공정명',contractor:'가상 협력사',supervisorOpinion:'관리감독자 시험 검토 의견',safetyOpinion:'안전관리자 시험 검토 의견',healthOpinion:'보건관리자 시험 검토 의견',managerOpinion:'현장소장 시험 검토 의견',instructor:'교육 실시자',hazards:'위험요인 및 대책',route:'운행경로',terrain:'지형',ground:'지반',drainage:'배수',reinforcement:'보강',obstacles:'지장물',protection:'안전시설',equipment:'장비',equipment_snapshot:'점검 당시 장비',details:'상세 정보',spec:'제원',standards:'규격',additional:'추가 정보',label:'항목',value:'내용'});
 labels.otherKind='기타 구분';
 Object.assign(labels,{educationPlace:'교육 장소',educationMethod:'교육 방법'});
+Object.assign(labels,{permitWorkerSnapshot:'연결된 작업자',permitEquipmentSnapshot:'연결된 장비',permitRiggingSnapshot:'연결된 장구'});
 labels.employeeSnapshot='가상 직원 참석자';
 Object.assign(labels,{heavyLoads:'가상 중량물',size:'크기',totalWeight:'총중량',liftWeight:'1회 양중 중량',liftMode:'양중 방식',riggingName:'장구',lines:'줄 수',method:'연결 방식'});
 labels.classification='자료 구분';
