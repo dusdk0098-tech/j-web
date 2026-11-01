@@ -308,13 +308,13 @@ export class Store {
     if(from)from=dateValue(from);if(to)to=dateValue(to);if(from&&to&&from>to)throw new Error('조회 기간을 확인해 주세요.');if(typeof query!=='string'||query.length>200)throw new Error('검색어를 확인해 주세요.');
     return this.db.prepare("SELECT id,name,date,description FROM site_photos WHERE site_id=? AND (?='' OR date>=?) AND (?='' OR date<=?) AND (instr(name,?)>0 OR instr(description,?)>0) ORDER BY date DESC,id DESC").all(Number(siteId),from,from,to,to,query,query);
   }
-  addSitePhoto(siteId,name,data,onAuthorize=()=>{}){
+  addSitePhoto(siteId,name,data,onAuthorize=()=>{},metadata={}){
     siteId=Number(siteId);
     if(typeof name!=='string'||!name.trim()||name.length>200||/[\\/\x00-\x1f\x7f]/.test(name))throw new Error('사진 이름을 확인해 주세요.');
     if(!(data instanceof Uint8Array)||!data.length||data.length>2*1024*1024)throw new Error('사진은 1바이트 이상 2MB 이하여야 합니다.');
     const bytes=Buffer.from(data);if(!bytes.subarray(0,8).equals(Buffer.from('89504e470d0a1a0a','hex'))&&!bytes.subarray(0,3).equals(Buffer.from('ffd8ff','hex')))throw new Error('PNG 또는 JPEG 사진을 선택해 주세요.');
-    const now=new Date(),date=new Date(now.getTime()-now.getTimezoneOffset()*60000).toISOString().slice(0,10);
-    this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();if(!this.db.prepare('SELECT 1 FROM sites WHERE id=?').get(siteId))throw new Error('현장을 선택해 주세요.');const id=this.db.prepare('INSERT INTO site_photos(site_id,name,date,data) VALUES(?,?,?,?)').run(siteId,name,date,bytes).lastInsertRowid;this.db.exec('COMMIT');return id;}catch(error){this.db.exec('ROLLBACK');throw error;}
+    const now=new Date(),date=metadata.date?dateValue(metadata.date):new Date(now.getTime()-now.getTimezoneOffset()*60000).toISOString().slice(0,10),description=metadata.description??'';if(typeof description!=='string'||description.length>2000)throw new Error('사진 설명을 확인해 주세요.');
+    this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();if(!this.db.prepare('SELECT 1 FROM sites WHERE id=?').get(siteId))throw new Error('현장을 선택해 주세요.');const id=this.db.prepare('INSERT INTO site_photos(site_id,name,date,description,data) VALUES(?,?,?,?,?)').run(siteId,name,date,description.trim(),bytes).lastInsertRowid;this.db.exec('COMMIT');return id;}catch(error){this.db.exec('ROLLBACK');throw error;}
   }
   sitePhoto(siteId,id){return this.db.prepare('SELECT * FROM site_photos WHERE site_id=? AND id=?').get(Number(siteId),Number(id))||null;}
   sitePhotoVersion(photo){return createHash('sha256').update(JSON.stringify([photo.id,photo.site_id,photo.name,photo.date,photo.description])).update(photo.data).digest('hex');}
