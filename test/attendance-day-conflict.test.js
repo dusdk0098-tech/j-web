@@ -1,0 +1,34 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {readFileSync,mkdtempSync,rmSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import {createServer} from 'node:net';
+import {spawn} from 'node:child_process';
+import {once} from 'node:events';
+import {runInNewContext} from 'node:vm';
+import {Store} from '../store.js';
+
+test('이전 출역 데이터는 변경 번호 추가 후에도 보존된다',()=>{
+  const dir=mkdtempSync(join(tmpdir(),'jweb-old-day-version-')),path=join(dir,'data.sqlite');let s=new Store(path);try{const site=s.createSite({name:'가상 현장'}),worker=s.createWorker({siteId:site.id,name:'가상 근로자',category:'직영',company:'가상 업체',occupation:'가상 직종'}),input={siteId:site.id,workerId:worker.id,date:'2024-02-29'};s.setAttendance({...input,present:true});s.setAttendanceUnits({...input,units:'1.25'});s.db.exec('DROP TRIGGER attendance_day_version; ALTER TABLE attendance DROP COLUMN day_version');s.close();s=new Store(path);const row=s.attendance(site.id,input.date)[0];assert.equal(row.present,1);assert.equal(row.units_hundredths,125);assert.equal(row.day_version,1);s.changeAttendance('units',{...input,units:'2',expectedDayVersion:1});assert.equal(s.attendance(site.id,input.date)[0].day_version,2);}finally{s.close();rmSync(dir,{recursive:true,force:true});}
+});
+
+test('일별 변경 번호는 등록·취소·복구와 다른 경로의 변경을 감지한다',()=>{
+  const s=new Store(':memory:');try{const a=s.createSite({name:'가상 A'}),b=s.createSite({name:'가상 B'}),worker=s.createWorker({siteId:a.id,name:'가상 근로자',category:'직영',company:'가상 업체',occupation:'가상 직종'}),input={siteId:a.id,workerId:worker.id,date:'2024-02-29'},read=()=>s.attendance(a.id,input.date)[0],month=()=>s.monthlyAttendance(a.id,'2024-02')[0];
+    assert.equal(read().day_version,0);assert.equal(month().dayVersions[input.date],undefined);s.changeAttendance('presence',{...input,present:true,expectedDayVersion:0});const first=read().day_version;assert.equal(first,1);assert.equal(month().dayVersions[input.date],first);assert.throws(()=>s.changeAttendance('presence',{...input,present:false,expectedDayVersion:0}),/변경/);assert.throws(()=>s.changeAttendance('units',{...input,siteId:b.id,units:'1',expectedDayVersion:0}),/현장/);
+    s.changeAttendance('units',{...input,units:'1',expectedDayVersion:first});const second=read().day_version,monthlyBefore=month().version;assert.ok(second>first);assert.throws(()=>s.changeAttendance('dailyRate',{...input,dailyRate:'1000',expectedDayVersion:first}),/변경/);s.setAttendance({...input,present:false});const cancelled=read().day_version;assert.ok(cancelled>second);assert.equal(month().days.length,0);assert.equal(month().dayVersions[input.date],cancelled);s.setAttendance({...input,present:true});const restored=read().day_version;assert.ok(restored>cancelled);assert.throws(()=>s.changeAttendance('presence',{...input,present:false,expectedDayVersion:first}),/변경/);assert.throws(()=>s.updateMonthlyAttendanceDetails({siteId:a.id,workerId:worker.id,month:'2024-02',company:'오래된 가상 업체',expectedVersion:monthlyBefore}),/변경/);
+    const monthly=month();s.updateMonthlyAttendanceDetails({siteId:a.id,workerId:worker.id,month:'2024-02',company:'다른 가상 업체',expectedVersion:monthly.version});assert.ok(read().day_version>restored);assert.throws(()=>s.changeAttendance('salary',{...input,kind:'monthly',amount:'1000',expectedDayVersion:restored}),/변경/);s.changeAttendance('units',{...input,units:'2'});assert.equal(read().units_hundredths,200);
+  }finally{s.close();}
+});
+
+test('일별과 월별 화면은 각각 조회 당시 날짜의 변경 번호를 보낸다',async()=>{
+  const source=readFileSync(new URL('../public/app.js',import.meta.url),'utf8'),lines=source.split(/\r?\n/),daily=lines.find(line=>line.includes("document.querySelectorAll('[data-attendance]')")),monthlyLine=lines.find(line=>line.includes("document.querySelectorAll('[data-month-worker]')"));assert.ok(daily&&monthlyLine);const sent=[],buttons=[{dataset:{attendance:'5',present:'false',monthWorker:'5',date:'2024-02-29'},closest:()=>({})}],context={document:{querySelectorAll:()=>buttons},siteId:3,date:'2024-02-29',rows:[{id:5,day_version:7}],monthly:[{id:5,dayVersions:{'2024-02-29':7}}],api:async(path,options)=>{sent.push(JSON.parse(options.body));},flash(){},renderKeepingEdits:async()=>{},render:async()=>{},showError(error){throw error;}};
+  runInNewContext(daily,context);await buttons[0].onclick();runInNewContext(monthlyLine,context);await buttons[0].onclick();assert.deepEqual(sent.map(row=>[row.siteId,row.workerId,row.expectedDayVersion]),[[3,5,7],[3,5,7]]);
+});
+
+test('일별 출역 API는 오래된 변경을 거절하고 다른 날짜와 기존 호출을 보존한다',{timeout:30000},async()=>{
+  const dir=mkdtempSync(join(tmpdir(),'jweb-day-conflict-')),reservation=createServer();await new Promise(resolve=>reservation.listen(0,'127.0.0.1',resolve));const port=reservation.address().port;await new Promise(resolve=>reservation.close(resolve));const child=spawn(process.execPath,['server.js'],{cwd:process.cwd(),env:{...process.env,PORT:String(port),JWEB_DATA_DIR:dir,JWEB_ADMIN_PASSWORD:'virtual-admin-password'},stdio:['ignore','pipe','pipe']});
+  try{await Promise.race([once(child.stdout,'data'),once(child,'exit').then(()=>{throw Error('시험 서버 종료');})]);const base=`http://127.0.0.1:${port}`,call=(path,method='GET',data,cookie)=>fetch(base+path,{method,headers:{...(data?{'content-type':'application/json'}:{}),...(cookie?{cookie}:{})},...(data?{body:JSON.stringify(data)}:{})}),admin=(await call('/api/login','POST',{password:'virtual-admin-password'})).headers.get('set-cookie').split(';')[0],site=await (await call('/api/sites','POST',{name:'가상 현장'},admin)).json(),worker=await (await call('/api/workers','POST',{siteId:site.id,name:'가상',category:'직영',company:'가상 업체',occupation:'가상 직종'},admin)).json(),input={siteId:site.id,workerId:worker.id,date:'2024-02-29'},get=async date=>(await (await call(`/api/attendance?siteId=${site.id}&date=${date}`,'GET',null,admin)).json())[0];
+    assert.equal((await get(input.date)).day_version,0);assert.equal((await call('/api/attendance','POST',{...input,present:true,expectedDayVersion:0},admin)).status,200);assert.equal((await call('/api/attendance','POST',{...input,present:false,expectedDayVersion:0},admin)).status,409);const version=(await get(input.date)).day_version;assert.equal((await call('/api/attendance/units','PUT',{...input,units:'1',expectedDayVersion:version},admin)).status,200);assert.equal((await call('/api/attendance/daily-rate','PUT',{...input,dailyRate:'1000',expectedDayVersion:version},admin)).status,409);assert.equal((await call('/api/attendance','POST',{...input,date:'2024-02-28',present:true,expectedDayVersion:0},admin)).status,200);assert.equal((await call('/api/attendance/daily-rate','PUT',{...input,dailyRate:'1000'},admin)).status,200);assert.equal((await get(input.date)).daily_rate,1000);
+  }finally{if(child.exitCode===null){const exited=once(child,'exit');child.kill();await exited;}rmSync(dir,{recursive:true,force:true});}
+});

@@ -271,6 +271,8 @@ export class Store {
     if(!attendanceColumns.includes('daily_rate'))this.db.exec('ALTER TABLE attendance ADD COLUMN daily_rate INTEGER CHECK(daily_rate IS NULL OR daily_rate BETWEEN 0 AND 999999999)');
     if(!attendanceColumns.includes('salary_kind'))this.db.exec("ALTER TABLE attendance ADD COLUMN salary_kind TEXT CHECK(salary_kind IS NULL OR salary_kind IN ('monthly','yearly','other'))");
     if(!attendanceColumns.includes('salary_amount'))this.db.exec('ALTER TABLE attendance ADD COLUMN salary_amount INTEGER CHECK(salary_amount IS NULL OR salary_amount BETWEEN 0 AND 999999999)');
+    if(!attendanceColumns.includes('day_version'))this.db.exec('ALTER TABLE attendance ADD COLUMN day_version INTEGER NOT NULL DEFAULT 1');
+    this.db.exec('CREATE TRIGGER IF NOT EXISTS attendance_day_version AFTER UPDATE ON attendance WHEN NEW.day_version=OLD.day_version BEGIN UPDATE attendance SET day_version=OLD.day_version+1 WHERE worker_id=NEW.worker_id AND date=NEW.date; END');
   }
   close() { this.db.close(); }
   managerChecks(siteId) {
@@ -990,15 +992,16 @@ export class Store {
   }
   attendance(siteId, date) {
     date = dateValue(date);
-    return this.db.prepare("SELECT workers.id,workers.name,workers.category,workers.company,workers.occupation,COALESCE(attendance.present,0) AS present,attendance.source,attendance.units_hundredths,attendance.daily_rate,attendance.salary_kind,attendance.salary_amount,attendance.category_snapshot AS attendance_category,attendance.company_snapshot AS attendance_company,attendance.occupation_snapshot AS attendance_occupation,CASE WHEN json_valid(j.profile) THEN json_extract(j.profile,'$.birthDate') END AS birth_date,CASE WHEN json_valid(j.profile) THEN json_extract(j.profile,'$.phone') END AS phone FROM workers LEFT JOIN attendance ON attendance.worker_id=workers.id AND attendance.date=? LEFT JOIN join_acknowledgements j ON j.worker_id=workers.id WHERE workers.site_id=? ORDER BY workers.name,workers.id").all(date,Number(siteId));
+    return this.db.prepare("SELECT workers.id,workers.name,workers.category,workers.company,workers.occupation,COALESCE(attendance.present,0) AS present,COALESCE(attendance.day_version,0) AS day_version,attendance.source,attendance.units_hundredths,attendance.daily_rate,attendance.salary_kind,attendance.salary_amount,attendance.category_snapshot AS attendance_category,attendance.company_snapshot AS attendance_company,attendance.occupation_snapshot AS attendance_occupation,CASE WHEN json_valid(j.profile) THEN json_extract(j.profile,'$.birthDate') END AS birth_date,CASE WHEN json_valid(j.profile) THEN json_extract(j.profile,'$.phone') END AS phone FROM workers LEFT JOIN attendance ON attendance.worker_id=workers.id AND attendance.date=? LEFT JOIN join_acknowledgements j ON j.worker_id=workers.id WHERE workers.site_id=? ORDER BY workers.name,workers.id").all(date,Number(siteId));
   }
   monthlyAttendance(siteId,month) {
     month=monthValue(month);
     const workers=this.db.prepare("SELECT w.id,w.name,w.company,w.occupation,CASE WHEN json_valid(j.profile) THEN json_extract(j.profile,'$.birthDate') END AS birth_date,CASE WHEN json_valid(j.profile) THEN json_extract(j.profile,'$.phone') END AS phone FROM workers w LEFT JOIN join_acknowledgements j ON j.worker_id=w.id WHERE w.site_id=? ORDER BY w.name,w.id").all(Number(siteId));
     const records=this.db.prepare('SELECT attendance.worker_id,attendance.date,attendance.units_hundredths,attendance.daily_rate,attendance.salary_kind,attendance.salary_amount,attendance.category_snapshot,attendance.company_snapshot,attendance.occupation_snapshot FROM attendance JOIN workers ON workers.id=attendance.worker_id WHERE workers.site_id=? AND attendance.present=1 AND attendance.date BETWEEN ? AND ? ORDER BY attendance.date').all(Number(siteId),`${month}-01`,`${month}-31`);
+    const versions=this.db.prepare('SELECT a.worker_id,a.date,a.day_version FROM attendance a JOIN workers w ON w.id=a.worker_id WHERE w.site_id=? AND a.date BETWEEN ? AND ? ORDER BY a.worker_id,a.date').all(Number(siteId),`${month}-01`,`${month}-31`),dayVersions=new Map(workers.map(w=>[w.id,{}]));for(const row of versions)dayVersions.get(row.worker_id)[row.date]=row.day_version;
     const units=new Map(workers.map(w=>[w.id,[]]));
     for(const record of records)units.get(record.worker_id).push({date:record.date,units_hundredths:record.units_hundredths,daily_rate:record.daily_rate,salary_kind:record.salary_kind,salary_amount:record.salary_amount,estimated_pay:record.salary_kind!==null||record.daily_rate===null||record.units_hundredths===null?null:Math.floor((record.daily_rate*record.units_hundredths+50)/100),category:record.category_snapshot,company:record.company_snapshot,occupation:record.occupation_snapshot});
-    return workers.map(w=>{const entries=units.get(w.id),version=createHash('sha256').update(JSON.stringify([w.id,month,entries])).digest('hex');return {...w,days:entries.map(record=>record.date),units:entries,version};});
+    return workers.map(w=>{const entries=units.get(w.id),version=createHash('sha256').update(JSON.stringify([w.id,month,entries,dayVersions.get(w.id)])).digest('hex');return {...w,days:entries.map(record=>record.date),units:entries,version,dayVersions:dayVersions.get(w.id)};});
   }
   workerAttendance(workerId,month) {
     month=monthValue(month);
@@ -1257,7 +1260,8 @@ export class Store {
   changeAttendance(kind,input,onAuthorize=()=>{}){
     const actions={presence:()=>this.setAttendance(input),units:()=>this.setAttendanceUnits(input),dailyRate:()=>this.setAttendanceDailyRate(input),salary:()=>this.setAttendanceSalary(input)};
     if(!Object.hasOwn(actions,kind))throw new Error('출역 변경 종류를 확인해 주세요.');
-    this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();actions[kind]();this.db.exec('COMMIT');}catch(error){this.db.exec('ROLLBACK');throw error;}
+    if(input.expectedDayVersion!==undefined&&(!Number.isSafeInteger(input.expectedDayVersion)||input.expectedDayVersion<0))throw new Error('일별 출역 기록을 다시 확인해 주세요.');
+    this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();if(input.expectedDayVersion!==undefined){const date=dateValue(input.date),row=this.db.prepare('SELECT COALESCE(a.day_version,0) AS day_version FROM workers w LEFT JOIN attendance a ON a.worker_id=w.id AND a.date=? WHERE w.id=? AND w.site_id=?').get(date,Number(input.workerId),Number(input.siteId));if(!row)throw new Error('선택한 현장의 출입자를 확인해 주세요.');if(row.day_version!==input.expectedDayVersion)throw Object.assign(new Error('일별 출역 기록이 변경되었습니다. 다시 조회해 주세요.'),{sessionStatus:409});}actions[kind]();this.db.exec('COMMIT');}catch(error){this.db.exec('ROLLBACK');throw error;}
   }
   setAttendance(input) {
     const date = dateValue(input.date);
