@@ -19,13 +19,13 @@ const esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;
 // shortcut: 실제 앱 함수와 가상 DOM을 실행하며 배치·키보드·인쇄는 별도 브라우저 검증이 필요하다.
 function screen(fetcher=async()=>({ok:true,status:200,json:async()=>[]})){
   const nodes=new Map(),requests=[],errors=[],redirects=[],flashes=[];
-  const node=()=>({innerHTML:'',textContent:'',value:'restricted',disabled:false,hidden:false,classList:{toggle(){},remove(){}},setAttribute(){},insertAdjacentHTML(position,html){this.innerHTML+=html;}});
+  const node=(tag='')=>({tag,children:[],get innerHTML(){return this.markup||'';},set innerHTML(value){this.markup=value;this.children=[];},append(...children){for(const child of children){child.parent=this;this.children.push(child);}},remove(){this.parent.children.splice(this.parent.children.indexOf(this),1);},focus(){this.focused=true;},textContent:'',value:'restricted',disabled:false,hidden:false,classList:{toggle(){},remove(){}},setAttribute(){},insertAdjacentHTML(position,html){this.innerHTML+=html;}});
   const get=key=>{if(!nodes.has(key))nodes.set(key,node());return nodes.get(key);};
   const pages=['dashboard','documents','workers','attendance','admins','clients','site-activity','statistics','board','new-unverified-menu'].map(page=>({...node(),dataset:{page}}));
   const content={...node(),querySelector:get,querySelectorAll:selector=>{const match=selector.match(/^\[data-restricted-(doc|worker|presence|units)\]$/);if(!match)return [];const kind=match[1],key='restricted'+kind[0].toUpperCase()+kind.slice(1);return [...content.innerHTML.matchAll(new RegExp('data-restricted-'+kind+'="(\\d+)"','g'))].map(([,id])=>Object.assign(get('[data-restricted-'+kind+'="'+id+'"]'),{dataset:{[key]:id}}));}};
   const state={page:'admins',siteId:1,detail:null,admin:{...account},sites,types:{notice:'일반 공지'}};
   const dialog={open:false,showModal(){this.open=true;},close(){this.open=false;}};
-  const context={state,content,dialog,siteSelect:get('#site-select'),detailEpoch:1,workerListEpoch:0,sitePhotoEpoch:0,permitRoleCleanup:null,labels:{documents:'안전 문서',admins:'관리자 계정'},statusLabels:{draft:'임시저장'},esc,URLSearchParams,today:()=> '2026-11-02',document:{querySelector:selector=>selector.startsWith('dialog')?null:get(selector),querySelectorAll:()=>pages},$:get,location:{assign:path=>redirects.push(path)},flash:message=>flashes.push(message),showError:error=>errors.push(error.message),confirm:()=>true,FormData:class{constructor(form){return Object.entries(form.values||{});}},fetch:async(path,options)=>{requests.push({path,options});return fetcher(path,options);}};
+  const context={state,content,dialog,siteSelect:get('#site-select'),detailEpoch:1,workerListEpoch:0,sitePhotoEpoch:0,permitRoleCleanup:null,labels:{documents:'안전 문서',admins:'관리자 계정'},statusLabels:{draft:'임시저장'},esc,URLSearchParams,today:()=> '2026-11-02',document:{createElement:node,querySelector:selector=>selector.startsWith('dialog')?null:get(selector),querySelectorAll:()=>pages},$:get,location:{assign:path=>redirects.push(path)},flash:message=>flashes.push(message),showError:error=>errors.push(error.message),confirm:()=>true,FormData:class{constructor(form){return Object.entries(form.values||{});}},fetch:async(path,options)=>{requests.push({path,options});return fetcher(path,options);}};
   context.siteQrSession=siteQrSession;
   context.mountRestrictedMonthEditor=()=>({dirty:()=>false,busy:()=>false});
   context.siteSelect.selectedOptions=[{textContent:'가상 첫 현장'}];
@@ -40,6 +40,7 @@ function screen(fetcher=async()=>({ok:true,status:200,json:async()=>[]})){
     part('function applyAdminScope(','let sitePhotoEpoch='),
     part('async function api(','function flash('),
     part('function field(','function signaturePad('),
+    part('function mountWorkerLicenses(','async function showWorkerPermissions('),
     part('function showDialog(',"$('#dialog-close')"),
     part('async function loadSites(','siteSelect.onchange='),
     source.split('\n').find(line=>line.startsWith('siteSelect.onchange=')),
@@ -51,6 +52,40 @@ function screen(fetcher=async()=>({ok:true,status:200,json:async()=>[]})){
   return {context,state,content,dialog,nodes,get,pages,requests,errors,redirects,flashes,submit:async values=>{const form=get('#dialog-form');form.values=values;await form.onsubmit({preventDefault(){},currentTarget:form});}};
 }
 const response=data=>({ok:true,status:200,json:async()=>data});
+
+const licenseSection=ui=>ui.get('#dialog-body').children.find(child=>child.tag==='fieldset');
+const licenseRows=ui=>licenseSection(ui).children[2].children.map(element=>({name:element.children[0].children[0],number:element.children[1].children[0],remove:element.children[2]}));
+const addLicense=ui=>licenseSection(ui).children[3].onclick();
+
+test('제한 면허 등록·수정은 기존 행·선택 입력·20행·100자·문자열 표시를 보존한다',async()=>{
+  const worker={id:3,name:'가상 근로자',version:'v1',licenses:[{name:'<가상 면허>',number:'가상-001'}]};
+  const ui=screen(async(path,options)=>options.method?{ok:false,status:409,json:async()=>({error:'가상 충돌'})}:response([worker]));ui.state.page='workers';
+  await ui.context.renderRestrictedWorkforce();ui.get('[data-restricted-worker="3"]').onclick();
+  let row=licenseRows(ui)[0];assert.equal(row.name.value,'<가상 면허>');assert.equal(row.name.innerHTML,'');assert.equal(row.name.maxLength,100);assert.equal(row.number.maxLength,100);assert.equal(!!row.name.required,false);
+  row.name.value=' 가상 변경 ';row.number.value='';addLicense(ui);licenseRows(ui)[1].number.value=' 가상-002 ';addLicense(ui);licenseRows(ui)[2].name.value='   ';
+  await ui.submit({name:'가상 수정',memo:'가상 메모'});
+  assert.deepEqual(JSON.parse(ui.requests.at(-1).options.body),{name:'가상 수정',memo:'가상 메모',siteId:1,version:'v1',licenses:[{name:'가상 변경',number:''},{name:'',number:'가상-002'}]});
+  assert.equal(ui.dialog.open,true);assert.equal(row.name.value,' 가상 변경 ');assert.equal(ui.get('#dialog-form').values.memo,'가상 메모');assert.match(ui.get('#dialog-error').textContent,/충돌/);
+  for(let i=0;i<25;i++)addLicense(ui);assert.equal(licenseRows(ui).length,20);assert.equal(licenseSection(ui).children[3].disabled,true);row.remove.onclick();assert.equal(licenseSection(ui).children[3].disabled,false);
+  for(const row of licenseRows(ui))row.remove.onclick();await ui.submit({name:'가상 수정'});assert.deepEqual(JSON.parse(ui.requests.at(-1).options.body).licenses,[]);
+  ui.get('#restricted-worker-add').onclick();assert.equal(licenseRows(ui).length,0);addLicense(ui);licenseRows(ui)[0].name.value='가상 신규';await ui.submit({name:'가상 신규 근로자'});assert.equal(ui.requests.at(-1).options.method,'POST');assert.deepEqual(JSON.parse(ui.requests.at(-1).options.body).licenses,[{name:'가상 신규',number:''}]);
+});
+
+test('제한 면허 오류 입력 보존·저장 중 행 변경 차단·현장 계정 페이지 창 전환 후 콜백과 늦은 응답 차단',async()=>{
+  const worker={id:3,name:'가상 근로자',version:'v1',licenses:[{name:'가상 면허',number:'가상-001'}]};
+  for(const status of [400,401,403,409,500]){
+    const ui=screen(async(path,options)=>options.method?{ok:false,status,json:async()=>({error:'가상 거절'})}:response([worker]));ui.state.page='workers';await ui.context.renderRestrictedWorkforce();ui.get('[data-restricted-worker="3"]').onclick();
+    licenseRows(ui)[0].name.value='가상 보존';await ui.submit({name:'가상 이름'});assert.equal(ui.dialog.open,true);assert.equal(licenseRows(ui)[0].name.value,'가상 보존');assert.equal(ui.get('#dialog-form button[type=submit]').disabled,false);assert.ok(ui.get('#dialog-error').textContent);
+  }
+  for(const transition of ['site','account','page','dialog','close'])for(const status of [200,401,409]){
+    const wait=delayed(),ui=screen(async(path,options)=>options.method?wait.promise:response([worker]));ui.state.page='workers';await ui.context.renderRestrictedWorkforce();ui.get('[data-restricted-worker="3"]').onclick();
+    const section=licenseSection(ui),row=licenseRows(ui)[0],add=section.children[3],save=ui.get('#dialog-form').onsubmit;
+    const pending=ui.submit({name:'가상 저장'});add.onclick();row.remove.onclick();await ui.submit({name:'중복'});assert.equal(section.children[2].children.length,1);assert.equal(ui.requests.filter(r=>r.options.method).length,1);
+    if(transition==='site')ui.state.siteId=2;if(transition==='account')ui.state.admin={scope:'restricted',id:99};if(transition==='page')ui.state.page='documents';if(transition==='dialog')ui.context.showDialog('다른 창','가상 내용',async()=>{});if(transition==='close')ui.dialog.close();
+    add.onclick();row.remove.onclick();await save({preventDefault(){},currentTarget:ui.get('#dialog-form')});assert.equal(section.children[2].children.length,1);assert.equal(ui.requests.filter(r=>r.options.method).length,1);
+    const body=ui.get('#dialog-body').innerHTML,opened=ui.dialog.open;wait.resolve({ok:status===200,status,json:async()=>status===200?worker:{error:'늦은 오류'}});await pending;assert.equal(ui.get('#dialog-body').innerHTML,body);assert.equal(ui.dialog.open,opened);assert.equal(ui.get('#dialog-error').textContent,'');assert.deepEqual(ui.flashes,[]);assert.deepEqual(ui.redirects,[]);
+  }
+});
 
 test('월 편집기 통합: 미저장·저장 중 월 전환 방지, 조회 실패 보존, 저장 후 요약·인원 동기화',async()=>{
   const row={id:3,name:'가상 근로자',days:['2024-02-29'],version:'v1',units:[{date:'2024-02-29',units_hundredths:75}]};
@@ -191,9 +226,22 @@ test('실제 HTTP 로그인→배정 현장 선택→공지·근로자·출역·
     ui.content.querySelectorAll('[data-restricted-doc]')[0].onclick();await ui.context.renderPending;assert.equal(ui.state.detail,documents[0].id);assert.match(ui.content.innerHTML,/가상 본문/);assert.doesNotMatch(ui.content.innerHTML,/결재 요청|암호 초기화/);
     assert.equal((await send('/api/documents?siteId='+created[2].id,'GET',null,cookie)).status,403);assert.equal((await send('/api/admin-accounts','GET',null,cookie)).status,403);
     ui.state.page='workers';ui.state.detail=null;await ui.context.render();assert.match(ui.content.innerHTML,/등록된 근로자가 없습니다/);
-    ui.get('#restricted-worker-add').onclick();await ui.submit({name:'가상 UI 근로자',category:'직영',company:'',occupation:'가상 직종',memo:'가상 메모'});assert.equal(ui.dialog.open,false);assert.match(ui.content.innerHTML,/가상 UI 근로자/);
-    const worker=(await(await send('/api/workers?siteId='+created[1].id,'GET',null,cookie)).json())[0];assert.equal(worker.site_id,created[1].id);
-    ui.get('[data-restricted-worker="'+worker.id+'"]').onclick();await ui.submit({name:'가상 UI 수정',category:'직영',company:'',occupation:'가상 직종',memo:'수정 메모'});assert.equal(ui.dialog.open,false);assert.match(ui.content.innerHTML,/가상 UI 수정/);
+    ui.get('#restricted-worker-add').onclick();addLicense(ui);licenseRows(ui)[0].name.value='가상 면허';licenseRows(ui)[0].number.value='가상-001';await ui.submit({name:'가상 UI 근로자',category:'직영',company:'',occupation:'가상 직종',memo:'가상 메모'});assert.equal(ui.dialog.open,false);assert.match(ui.content.innerHTML,/가상 UI 근로자/);
+    const worker=(await(await send('/api/workers?siteId='+created[1].id,'GET',null,cookie)).json())[0];assert.equal(worker.site_id,created[1].id);assert.deepEqual(worker.licenses,[{name:'가상 면허',number:'가상-001'}]);
+    ui.get('[data-restricted-worker="'+worker.id+'"]').onclick();assert.equal(licenseRows(ui)[0].name.value,'가상 면허');licenseRows(ui)[0].number.value='가상-002';await ui.submit({name:'가상 UI 수정',category:'직영',company:'',occupation:'가상 직종',memo:'수정 메모'});assert.equal(ui.dialog.open,false);assert.match(ui.content.innerHTML,/가상 UI 수정/);
+    const readWorker=async()=>(await(await send('/api/workers?siteId='+created[1].id,'GET',null,cookie)).json())[0];
+    let saved=await readWorker();assert.deepEqual(saved.licenses,[{name:'가상 면허',number:'가상-002'}]);
+    const basic={siteId:created[1].id,name:'가상 UI 수정',category:'직영',company:'',occupation:'가상 직종',memo:'수정 메모'};
+    assert.equal((await send('/api/workers/'+worker.id,'PUT',{...basic,version:saved.version,memo:'가상 생략 보존'},cookie)).status,200);saved=await readWorker();assert.deepEqual(saved.licenses,[{name:'가상 면허',number:'가상-002'}]);
+    await ui.context.render();ui.get('[data-restricted-worker="'+worker.id+'"]').onclick();licenseRows(ui)[0].number.value='가상 충돌 입력';
+    assert.equal((await send('/api/workers/'+worker.id,'PUT',{...basic,version:saved.version,licenses:[{name:'가상 동시 수정',number:'가상-003'}]},cookie)).status,200);
+    await ui.submit(basic);assert.equal(ui.dialog.open,true);assert.match(ui.get('#dialog-error').textContent,/다시|변경/);assert.equal(licenseRows(ui)[0].number.value,'가상 충돌 입력');assert.deepEqual((await readWorker()).licenses,[{name:'가상 동시 수정',number:'가상-003'}]);
+    ui.dialog.close();await ui.context.render();ui.get('[data-restricted-worker="'+worker.id+'"]').onclick();
+    for(let i=1;i<20;i++)addLicense(ui);for(const row of licenseRows(ui)){row.name.value='가'.repeat(100);row.number.value='0'.repeat(100);}await ui.submit(basic);assert.equal(ui.dialog.open,false);saved=await readWorker();assert.equal(saved.licenses.length,20);assert.ok(saved.licenses.every(row=>row.name.length===100&&row.number.length===100));
+    assert.equal((await send('/api/workers/'+worker.id,'PUT',{...basic,version:saved.version,licenses:Array.from({length:21},()=>({name:'가상'}))},cookie)).status,400);
+    ui.get('[data-restricted-worker="'+worker.id+'"]').onclick();licenseRows(ui)[0].number.value='0'.repeat(101);await ui.submit(basic);assert.equal(ui.dialog.open,true);assert.match(ui.get('#dialog-error').textContent,/면허/);assert.equal(licenseRows(ui)[0].number.value.length,101);assert.deepEqual((await readWorker()).licenses,saved.licenses);
+    for(const row of licenseRows(ui))row.remove.onclick();await ui.submit(basic);assert.equal(ui.dialog.open,false);assert.deepEqual((await readWorker()).licenses,[]);
+    ui.get('[data-restricted-worker="'+worker.id+'"]').onclick();assert.equal(licenseRows(ui).length,0);ui.dialog.close();
     ui.state.page='attendance';await ui.context.render();ui.get('[data-restricted-presence="'+worker.id+'"]').onclick();await ui.submit({present:'1'});assert.equal(ui.dialog.open,false);
     ui.get('[data-restricted-units="'+worker.id+'"]').onclick();await ui.submit({units:'0.75'});assert.equal(ui.dialog.open,false);assert.match(ui.content.innerHTML,/공수 0.75/);
     const day=await(await send('/api/attendance?siteId='+created[1].id+'&date=2026-11-02','GET',null,cookie)).json();assert.equal(day[0].present,1);assert.equal(day[0].units_hundredths,75);
@@ -210,7 +258,7 @@ test('실제 HTTP 로그인→배정 현장 선택→공지·근로자·출역·
     ui.get('[data-restricted-presence="'+worker.id+'"]').onclick();await ui.submit({present:'0'});assert.equal(ui.dialog.open,false);assert.match(ui.content.innerHTML,/미출역/);assert.doesNotMatch(ui.content.innerHTML,/data-restricted-units/);
     ui.state.page='workers';ui.get('#site-select').value=String(created[0].id);ui.get('#site-select').onchange();await ui.context.renderPending;assert.doesNotMatch(ui.content.innerHTML,/가상 UI 수정/);assert.match(ui.content.innerHTML,/등록된 근로자가 없습니다/);
     for(const path of ['/api/workers?siteId=','/api/attendance?siteId='])assert.equal((await send(path+created[2].id,'GET',null,cookie)).status,403);
-    ui.get('#restricted-worker-add').onclick();const updated=await send('/api/admin-accounts/'+limited.id,'PUT',{version:limited.version,scope:'restricted',siteIds:[]},globalCookie);assert.equal(updated.status,200);await ui.submit({name:'회수 후 가상',category:'직영',company:'',occupation:'가상'});assert.equal(ui.dialog.open,true);assert.match(ui.get('#dialog-error').textContent,/로그인/);assert.equal(ui.get('#dialog-form').values.name,'회수 후 가상');ui.dialog.close();await assert.rejects(ui.context.render(),/로그인/);assert.deepEqual(ui.redirects,['/login']);
+    ui.get('#restricted-worker-add').onclick();addLicense(ui);licenseRows(ui)[0].name.value='가상 회수 보존';const updated=await send('/api/admin-accounts/'+limited.id,'PUT',{version:limited.version,scope:'restricted',siteIds:[]},globalCookie);assert.equal(updated.status,200);await ui.submit({name:'회수 후 가상',category:'직영',company:'',occupation:'가상'});assert.equal(ui.dialog.open,true);assert.match(ui.get('#dialog-error').textContent,/로그인/);assert.equal(ui.get('#dialog-form').values.name,'회수 후 가상');assert.equal(licenseRows(ui)[0].name.value,'가상 회수 보존');assert.equal((await(await send('/api/workers?siteId='+created[0].id,'GET',null,globalCookie)).json()).length,0);ui.dialog.close();await assert.rejects(ui.context.render(),/로그인/);assert.deepEqual(ui.redirects,['/login']);
     const nextCookie=await login('scope_ui'),nextSession=await(await send('/api/session','GET',null,nextCookie)).json(),empty=screen((path,options)=>fetch(base+path,{...options,headers:{...options.headers,cookie:nextCookie,'x-admin-context':nextSession.context}}));empty.context.applyAdminScope(nextSession.admin);await empty.context.render();assert.match(empty.content.innerHTML,/배정 현장이 없습니다/);assert.deepEqual(empty.requests.map(r=>r.path),['/api/sites']);
   }finally{
     if(child.exitCode===null){const exited=once(child,'exit');child.kill();await exited;}
