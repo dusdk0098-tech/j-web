@@ -10,6 +10,7 @@ import { normalizeRichText,richTextToPlain } from './public/rich-text.js';
 import { summarizeWorkerCounts } from './public/worker-list.js';
 import { matchesAttendanceQuery } from './public/attendance-matrix.js';
 import { safetyCostAmount } from './public/safety-cost.js';
+import { educationKinds } from './public/education-kinds.js';
 
 const siteArticleRow=row=>({...row,rich_body:row.rich_body===null?null:JSON.parse(row.rich_body)});
 const workerDocumentPermission={risk:'risk',work_plan:'work_plan',tbm:'training',education:'training'};
@@ -1503,7 +1504,7 @@ export class Store {
     if((riskKind||riskContractorId)&&type!=='risk')throw new Error('위험성평가 검색 조건을 확인해 주세요.');
     if(instructionCompanyId&&type!=='instruction')throw new Error('작업 지시서 검색 조건을 확인해 주세요.');
     if((permitCompany||permitFrom||permitTo)&&type!=='permit')throw new Error('작업 허가서 검색 조건을 확인해 주세요.');
-    if(educationKind&&(type!=='education'||!['new','regular','risk','special','changed','supervisor','msds','other'].includes(educationKind)))throw new Error('교육 종류 검색 조건을 확인해 주세요.');
+    if(educationKind&&(type!=='education'||!Object.hasOwn(educationKinds,educationKind)))throw new Error('교육 종류 검색 조건을 확인해 주세요.');
     if(permitFrom)permitFrom=dateValue(permitFrom);if(permitTo)permitTo=dateValue(permitTo);if(permitFrom&&permitTo&&permitFrom>permitTo)throw new Error('작업기간 검색 범위를 확인해 주세요.');
     if(riskKind&&!['initial','regular','occasional','continuous'].includes(riskKind))throw new Error('평가 종류를 확인해 주세요.');
     if(riskContractorId&&(!/^[1-9]\d*$/.test(String(riskContractorId))||!Number.isSafeInteger(Number(riskContractorId))||!this.companies(siteId).some(company=>company.id===Number(riskContractorId))))throw new Error('같은 현장의 협력사를 선택해 주세요.');

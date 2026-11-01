@@ -1,10 +1,10 @@
 import { riskScaleOptions, riskScore } from './risk-scale.js';
 import { mountMusculoskeletal } from './musculoskeletal.js';
+import { educationKinds as trainingKinds } from './education-kinds.js';
 
 const esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const today=()=>new Date(Date.now()-new Date().getTimezoneOffset()*60000).toISOString().slice(0,10);
 const labels={risk:'위험성평가',work_plan:'작업계획서',tbm:'일일안전교육 및 TBM',education:'안전·보건 교육'};
-const trainingKinds={new:'신규채용자 안전교육',regular:'근로자 정기교육',risk:'위험성평가 전파교육',special:'특별안전보건교육',changed:'작업내용 변경 시 교육',supervisor:'관리감독자 교육',msds:'물질안전보건교육(MSDS)',other:'기타교육'};
 const statuses={draft:'임시저장',pending:'결재 대기',rejected:'반려',approved:'승인'};
 const riskFields={processName:'공정명',contractor:'협력사',task:'작업 내용',riskCategory:'위험 분류',riskType:'위험 형태',hazard:'유해·위험요인',legalBasis:'관련 근거',existingMeasures:'기존 조치',grade:'현재 위험 등급',likelihood:'가능성',severity:'중대성',additionalMeasures:'추가 조치',improvedGrade:'개선 후 위험 등급',improvedLikelihood:'개선 후 가능성',improvedSeverity:'개선 후 중대성',dueDate:'개선 예정일',completionDate:'완료일',responsible:'담당자',supervisorOpinion:'관리감독자 시험 의견',safetyOpinion:'안전관리자 시험 의견',healthOpinion:'보건관리자 시험 의견',managerOpinion:'현장소장 시험 의견'};
 const planFields={consultedAt:'협의일',periodFrom:'작업기간 시작일',periodTo:'작업기간 종료일',company:'작업업체',personnel:'작업인원',place:'작업장소',equipment:'기계·장비',hazards:'위험요인',measures:'안전대책',routeDescription:'운행경로 설명',workSequence:'작업순서'};

@@ -21,6 +21,7 @@ import { safetyCostAmount } from './safety-cost.js';
 import { salarySummary, salaryDay, groupWageRecords, wageEstimateCurrent } from './salary-summary.js';
 import { attendanceMealChange } from './attendance-meals.js';
 import { attendanceMatrixMarkup,attendanceEditDeadline,matchesAttendanceQuery,matchesMonthlyAttendance,directAttendanceMarkup } from './attendance-matrix.js';
+import { educationKinds } from './education-kinds.js';
 import { jointExamples } from './joint-examples.js';
 import { mergeSafetyLogSources } from './safety-log-sources.js';
 import { mountMusculoskeletal } from './musculoskeletal.js';
@@ -216,7 +217,6 @@ const readDailyRow=row=>Object.fromEntries(['name','quantity','previous','day','
 const riskFields={processName:'가상 공정명',contractor:'가상 협력사',task:'작업 내용',riskCategory:'위험 분류',riskType:'위험 형태',hazard:'유해·위험요인',legalBasis:'관련 근거',existingMeasures:'기존 조치',grade:'현재 위험 등급 (3등급)',likelihood:'가능성 (3×3 또는 5×4)',severity:'중대성 (3×3 또는 5×4)',additionalMeasures:'추가 조치',improvedGrade:'개선 후 위험 등급',improvedLikelihood:'개선 후 가능성',improvedSeverity:'개선 후 중대성',dueDate:'개선 예정일',completionDate:'완료일',responsible:'담당자',supervisorOpinion:'관리감독자 시험 검토 의견',safetyOpinion:'안전관리자 시험 검토 의견',healthOpinion:'보건관리자 시험 검토 의견',managerOpinion:'현장소장 시험 검토 의견'};
 const riskKinds={initial:'최초평가',regular:'정기평가',occasional:'수시평가',continuous:'상시평가'};
 const riskScales={'three-level':'3등급(상·중·하) 판단법','3x3':'3×3 위험성 추정','5x4':'5×4 위험성 추정'};
-const educationKinds={new:'신규채용자 안전교육',regular:'근로자 정기교육',risk:'위험성평가 전파교육',special:'특별안전보건교육',changed:'작업내용 변경 시 교육',supervisor:'관리감독자 교육',msds:'물질안전보건교육(MSDS)',other:'기타교육'};
 const tbmFields={weather:'날씨',instructor:'교육 실시자',work:'작업 내용',hazards:'위험요인 및 대책'};
 const planFields={consultedAt:'협의일',periodFrom:'작업기간 시작일',periodTo:'작업기간 종료일',company:'작업업체',personnel:'작업인원',place:'작업장소',equipment:'기계·장비',hazards:'위험요인',measures:'안전대책'};
 const incidentFields={recipient:'수신',sender:'발신',contractor:'원청',contractorRepresentative:'원청 대표',subcontractor:'하청',subcontractorRepresentative:'하청 대표',siteName:'현장명',siteAddress:'현장 주소',client:'발주처',constructionType:'공사종류',constructionAmount:'공사금액 (백만원)',periodFrom:'공사 시작일',periodTo:'공사 종료일',workerCount:'근로자수',progress:'공정률 (%)',occurredAt:'발생 일시',location:'발생 장소',incidentType:'발생 형태',causeObject:'기인물',circumstances:'사고경위',measures:'조치',other:'기타 중요한 사항',prevention:'재발 방지 대책'};

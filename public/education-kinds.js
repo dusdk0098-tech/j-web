@@ -1,0 +1,5 @@
+export const educationKinds=Object.freeze({
+  new:'신규채용자 안전교육',regular:'근로자 정기교육',risk:'위험성평가 전파교육',special:'특별안전보건교육',changed:'작업내용 변경 시 교육',
+  supervisor_new:'관리감독자 신규 채용 시 교육',supervisor_regular:'관리감독자 정기·위험성평가 전파교육',supervisor_special:'관리감독자 특별교육',supervisor_changed:'관리감독자 작업내용 변경 시 교육',
+  supervisor:'관리감독자 교육 (세부 구분 미기록)',msds:'물질안전보건교육(MSDS)',other:'기타교육'
+});

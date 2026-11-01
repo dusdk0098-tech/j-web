@@ -1,6 +1,7 @@
 import { riskScaleOptions, riskScore } from './public/risk-scale.js';
 import { quantityTenths } from './public/daily-quantities.js';
 import { documentRichLimits,normalizeRichText,richTextToPlain } from './public/rich-text.js';
+import { educationKinds } from './public/education-kinds.js';
 
 export const types = {
   notice: '유해·위험 공지', tbm: 'TBM', education: '안전 교육 서류',
@@ -195,8 +196,7 @@ export function recordInput(input) {
   if(type==='education'){
     const value=input.details ?? {};
     if(!value || typeof value!=='object' || Array.isArray(value))throw new Error('교육 항목을 확인해 주세요.');
-    const kinds=['new','regular','risk','special','changed','supervisor','msds','other'];
-    if(value.kind!==undefined && value.kind!=='' && !kinds.includes(value.kind))throw new Error('교육 종류를 확인해 주세요.');
+    if(value.kind!==undefined && value.kind!=='' && !Object.hasOwn(educationKinds,value.kind))throw new Error('교육 종류를 확인해 주세요.');
     for(const key of ['kind','otherTitle','audience']){
       if(value[key]!==undefined){if(typeof value[key]!=='string' || value[key].length>2000)throw new Error('교육 항목을 확인해 주세요.');details[key]=value[key].trim();}
     }
