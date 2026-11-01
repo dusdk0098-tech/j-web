@@ -15,6 +15,11 @@ const png=new PNG({width:1,height:1});png.data[3]=255;const photo=PNG.sync.write
 const payload=(stop,response)=>({previousResponse:stop.response,expectedVersion:stop.version,...(response===undefined?{}:{response})});
 const cleanup=dir=>{assert.ok(resolve(dir).startsWith(resolve(tmpdir())+sep));rmSync(dir,{recursive:true,force:true});};
 
+test('작업중지 요청은 장소와 사유가 필요하고 요청자의 현장에만 저장된다',()=>{
+  const s=new Store(':memory:');try{const site=s.createSite({name:'가상 현장'}),other=s.createSite({name:'다른 현장'}),worker=s.createWorker({siteId:site.id,name:'가상 근로자',category:'직영',company:'가상 업체',occupation:'가상 직종'}),valid={anonymous:true,place:'가상 장소',reason:'가상 사유'};assert.throws(()=>s.createWorkStop(worker.id,{...valid,place:'  '}),/장소/);assert.throws(()=>s.createWorkStop(worker.id,{...valid,reason:''}),/사유/);assert.throws(()=>s.createWorkStop(999999,valid),/근로자/);assert.equal(s.workStops(site.id).length,0);s.createWorkStop(worker.id,valid);assert.equal(s.workStops(site.id).length,1);assert.equal(s.workStops(other.id).length,0);
+  }finally{s.close();}
+});
+
 test('번호가 재사용되거나 조치 내용이 되돌아와도 이전 화면의 조치·삭제·사진은 거절된다',()=>{
   const s=new Store(':memory:');try{
     const site=s.createSite({name:'가상 현장'}),worker=s.createWorker({siteId:site.id,name:'가상 근로자',category:'직영',company:'가상 업체',occupation:'가상 직종'});
