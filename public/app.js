@@ -243,7 +243,7 @@ async function editDocument(doc=null,initialDetails={},initialType=null) {
     const fields=data.type==='daily_report'?dailyFields:null;
     if(fields){data.details={};for(const key of Object.keys(fields)){data.details[key]=data[key]||'';delete data[key];}}
     if(data.type==='tbm')data.details=Object.fromEntries(Object.keys(tbmFields).map(key=>[key,data[`tbm_${key}`]||'']));
-    if(data.type==='education')data.details={kind:data.educationKind||'',otherTitle:data.otherTitle||'',audience:data.audience||''};
+    if(data.type==='education')data.details={kind:data.educationKind||'',otherTitle:data.otherTitle||'',audience:data.audience||'',timeFrom:data.educationTimeFrom||'',timeTo:data.educationTimeTo||'',educationPlace:data.educationPlace||'',educationMethod:data.educationMethod||''};
     if(data.type==='basic')data.details={category:data.basicCategory||'',categoryId:Number(data.basicCategoryId||0),shared:data.basicShared==='on'};
     if(data.type==='checklist'){data.details={kind:data.checklistKind||''};if(data.details.kind==='wind')data.details.photoNote=data.checklistPhotoNote||'';delete data.checklistPhotoNote;if(data.details.kind)data.details.answers=[...document.querySelectorAll('[data-check-row]')].map(row=>({answer:row.querySelector('[data-answer]')?.value||'',note:row.querySelector('[data-note]').value}));}
     if(data.type==='safety_log')data.details={...Object.fromEntries(Object.keys(safetyLogFields).map(key=>[key,data[`safety_${key}`]||''])),inspectionKind:data.safety_inspectionKind||''};
@@ -399,7 +399,7 @@ async function editDocument(doc=null,initialDetails={},initialType=null) {
       dateInput.onchange=loadWorkers;loadWorkers();return;
     }
     if(select.value==='education'){
-      $('#daily-fields').innerHTML=`<label>교육 종류<select name="educationKind"><option value="">선택하지 않음</option>${Object.entries(educationKinds).map(([key,label])=>`<option value="${key}" ${details.kind===key?'selected':''}>${esc(label)}</option>`).join('')}</select></label>${field('otherTitle','기타 교육명',details.otherTitle||'','text',false)}${field('audience','출력용 교육대상',details.audience||'','text',false)}<p class="muted">출력용 교육대상은 설명이며 실제 참가자 지정이나 서명이 아닙니다.</p>`;
+      $('#daily-fields').innerHTML=`<label>교육 종류<select name="educationKind"><option value="">선택하지 않음</option>${Object.entries(educationKinds).map(([key,label])=>`<option value="${key}" ${details.kind===key?'selected':''}>${esc(label)}</option>`).join('')}</select></label>${field('otherTitle','기타 교육명',details.otherTitle||'','text',false)}${field('audience','출력용 교육대상',details.audience||'','text',false)}${field('educationTimeFrom','교육 시작 시간 (시:분)',details.timeFrom||'','text',false)}${field('educationTimeTo','교육 종료 시간 (시:분)',details.timeTo||'','text',false)}${field('educationPlace','교육 장소',details.educationPlace||'','text',false)}${field('educationMethod','교육 방법',details.educationMethod||'','text',false)}<p class="muted">시간은 09:00처럼 입력합니다. 출력용 교육대상은 설명이며 실제 참가자 지정이나 서명이 아닙니다.</p>`;
       return;
     }
     if(select.value==='incident'){
@@ -570,7 +570,7 @@ async function renderDetail(){
   const [doc,events,attachments,line]=await Promise.all([api(`/api/documents/${state.detail}`),api(`/api/documents/${state.detail}/events`),api(`/api/documents/${state.detail}/attachments`),api(`/api/documents/${state.detail}/approval-line`)]);
   if(!currentDetail())return;
   const actions=({draft:[['submit','결재 요청']],pending:[['approve','승인'],['reject','반려'],['withdraw','요청 취소']],rejected:[['revise','다시 작성']],approved:[]}[doc.status]).filter(([action])=>!line.length||!['approve','reject'].includes(action));
-  const fields=doc.type==='daily_report'?dailyFields:doc.type==='tbm'?tbmFields:doc.type==='education'?{otherTitle:'기타 교육명',audience:'출력용 교육대상'}:doc.type==='work_plan'?planFields:doc.type==='permit'?permitFields:doc.type==='incident'?{severity:'사고유형',...incidentFields,technicalGuidance:'기술지도관계',preventionPlan:'방지계획서관계'}:{};
+  const fields=doc.type==='daily_report'?dailyFields:doc.type==='tbm'?tbmFields:doc.type==='education'?{otherTitle:'기타 교육명',audience:'출력용 교육대상',timeFrom:'교육 시작',timeTo:'교육 종료',educationPlace:'교육 장소',educationMethod:'교육 방법'}:doc.type==='work_plan'?planFields:doc.type==='permit'?permitFields:doc.type==='incident'?{severity:'사고유형',...incidentFields,technicalGuidance:'기술지도관계',preventionPlan:'방지계획서관계'}:{};
   const details=JSON.parse(doc.details||'{}');
   const meetingChecks=['safety_meeting','work_council'].includes(doc.type)?await api(`/api/documents/${doc.id}/meeting-checks`):[];
   const currentEquipment=doc.type==='work_plan' && details.equipmentIds?.length?(await api(`/api/equipment?siteId=${doc.site_id}`)).filter(item=>details.equipmentIds.includes(item.id)):[];
