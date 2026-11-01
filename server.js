@@ -303,9 +303,11 @@ const server = http.createServer(async (req, res) => {
       res.setHeader('Set-Cookie',`jweb_worker=${raw}; HttpOnly; SameSite=Strict; Path=/; Max-Age=28800${secureCookie}`);return json(res,200,{worker,siteKey:store.siteAccessKey(worker.site_id)});
     }
     if(url.pathname==='/api/worker/session' && req.method==='GET'){
-      const key=workerKey(workerToken),session=workerSessions.get(key);
-      if(!session || session.expires<=Date.now()){workerSessions.delete(key);return json(res,401,{error:'근로자 로그인이 필요합니다.'});}
-      return json(res,200,{worker:session.worker});
+      const key=workerKey(workerToken),session=workerSessions.get(key),now=new Date();
+      if(!session || session.expires<=now.getTime()){workerSessions.delete(key);return json(res,401,{error:'근로자 로그인이 필요합니다.'});}
+      const date=new Date(now.getTime()-now.getTimezoneOffset()*60000).toISOString().slice(0,10),nextDay=new Date(now);
+      nextDay.setHours(24,0,0,0);
+      return json(res,200,{worker:session.worker,date,nextDayAt:nextDay.toISOString(),serverNow:now.toISOString()});
     }
     if(url.pathname==='/api/worker/access' && req.method==='POST'){
       const key=workerKey(workerToken),session=workerSessions.get(key);
