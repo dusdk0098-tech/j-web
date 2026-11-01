@@ -791,11 +791,11 @@ const server = http.createServer(async (req, res) => {
     }
     const costPhotos=url.pathname.match(/^\/api\/safety-costs\/(\d+)\/photos(?:\/(\d+))?$/);
     if(costPhotos){
-      const siteId=url.searchParams.get('siteId'),id=costPhotos[1],photoId=costPhotos[2];
+      const siteId=url.searchParams.get('siteId'),id=costPhotos[1],photoId=costPhotos[2],expectedVersion=url.searchParams.get('version');
       if(!photoId&&req.method==='GET')return json(res,200,store.safetyCostPhotos(siteId,id));
       if(!photoId&&req.method==='POST'){const chunks=[];let size=0;for await(const chunk of req){size+=chunk.length;if(size>2*1024*1024)throw new Error('사진은 2MB 이하여야 합니다.');chunks.push(chunk);}checkRequestSession(req);let name;try{name=decodeURIComponent(req.headers['x-file-name']||'');}catch{throw new Error('사진 이름을 확인해 주세요.');}return json(res,201,{id:store.addSafetyCostPhoto(siteId,id,name,Buffer.concat(chunks),req.headers['x-cost-photo-kind']||'photo',()=>checkRequestSession(req))});}
-      if(photoId&&req.method==='DELETE'){store.deleteSafetyCostPhoto(siteId,id,photoId,()=>checkRequestSession(req));return json(res,200,{ok:true});}
-      if(photoId&&req.method==='GET'){const photo=store.safetyCostPhoto(siteId,id,photoId);if(!photo)return json(res,404,{error:'사진을 찾을 수 없습니다.'});const name=encodeURIComponent(photo.name).replace(/[!'()*]/g,c=>`%${c.charCodeAt(0).toString(16).toUpperCase()}`);res.writeHead(200,{'Content-Type':'application/octet-stream','Content-Disposition':`attachment; filename="photo"; filename*=UTF-8''${name}`,'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(photo.data);}
+      if(photoId&&req.method==='DELETE'){store.deleteSafetyCostPhoto(siteId,id,photoId,()=>checkRequestSession(req),expectedVersion);return json(res,200,{ok:true});}
+      if(photoId&&req.method==='GET'){const photo=store.safetyCostPhoto(siteId,id,photoId);if(!photo)return json(res,404,{error:'사진을 찾을 수 없습니다.'});if(expectedVersion!==null&&photo.version!==expectedVersion)return json(res,409,{error:'사진이 변경되었습니다. 다시 조회해 주세요.'});const name=encodeURIComponent(photo.name).replace(/[!'()*]/g,c=>`%${c.charCodeAt(0).toString(16).toUpperCase()}`);res.writeHead(200,{'Content-Type':'application/octet-stream','Content-Disposition':`attachment; filename="photo"; filename*=UTF-8''${name}`,'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(photo.data);}
     }
     const costReportPhotos=url.pathname.match(/^\/api\/safety-cost-reports\/(\d+)\/photos(?:\/(\d+))?$/);
     if(costReportPhotos&&req.method==='GET'){
