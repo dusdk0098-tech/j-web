@@ -4,5 +4,5 @@ export function createJoinFlow(choices,login,form,message){
   loginChoice.onclick=()=>choose('login');joinChoice.onclick=()=>{if(canJoin)choose('join');};
   form.querySelector('#join-next').onclick=()=>{if(!form.elements.acknowledged.checked){status.textContent='세 가지 시험 안내를 모두 확인해 주세요.';return;}status.textContent='';consent.hidden=true;details.hidden=false;};
   form.querySelector('#join-back').onclick=()=>{details.hidden=true;consent.hidden=false;};
-  return {open(allowed){canJoin=allowed;choices.hidden=false;joinChoice.hidden=!allowed;login.hidden=true;form.hidden=true;},hide(){choices.hidden=true;login.hidden=true;form.hidden=true;}};
+  return {open(allowed){canJoin=allowed;choices.hidden=false;joinChoice.hidden=!allowed;login.hidden=true;form.hidden=true;},hide(){choices.hidden=true;login.hidden=true;form.hidden=true;},registered(){if(choices.hidden)return false;choose('login');return true;}};
 }
