@@ -1,5 +1,5 @@
 import { riskScaleOptions, riskScore, copyRiskItem, copyRiskImprovement, groupRiskItems, selectedMusculoskeletalItems } from './risk-scale.js';
-import { selectBatchDocuments, selectBatchItems } from './batch-print.js';
+import { selectBatchDocuments, selectBatchItems, siteDocumentsForDay } from './batch-print.js';
 import { paginateWorkers, workerSummaryMarkup } from './worker-list.js';
 import { managerCheckQuestions } from './reviewer-manager-check.js';
 import { weeklyPpeMarkup } from './weekly-ppe.js';
@@ -59,6 +59,7 @@ labels['board']='게시판';
 labels['office-documents']='업무 문서';
 labels['personal-notes']='개인업무 일지';
 labels['common-work']='공통업무';
+labels['site-print']='현장별 서류 출력';
 document.querySelector('[data-page=stops]').insertAdjacentHTML('afterend','<button data-page="hazards">의견제안 및 위험신고</button>');
 document.querySelector('[data-page=hazards]').insertAdjacentHTML('afterend','<button data-page="incident-guide">사고 대응 안내</button>');
 document.querySelector('[data-page=statistics]').insertAdjacentHTML('afterend','<button data-page="site-activity">전체 현장 주간 활동</button>');
@@ -76,6 +77,7 @@ document.querySelector('[data-page=worker-access-blocks]').insertAdjacentHTML('a
 document.querySelector('[data-page=worker-access-blocks]').insertAdjacentHTML('afterend','<button data-page="worker-locations">접속 위치 확인</button>');
 document.querySelector('[data-page=site-occupations]').insertAdjacentHTML('afterend','<button data-page="ppe-issues">보호구 지급</button>');
 document.querySelector('[data-page=documents]').insertAdjacentHTML('afterend','<button data-page="basic-categories">기본 서류 분류</button>');
+document.querySelector('[data-page=documents]').insertAdjacentHTML('afterend','<button data-page="site-print">현장별 서류 출력</button>');
 document.querySelector('[data-page=approval]').insertAdjacentHTML('afterend','<button data-page="reviewers">시험 결재자</button>');
 document.querySelector('[data-page=reviewers]').insertAdjacentHTML('afterend','<button data-page="clients">발주처 시험 계정</button>');
 document.querySelector('[data-page=documents]').insertAdjacentHTML('beforebegin','<button data-page="schedules">일정 관리</button>');
@@ -757,18 +759,20 @@ async function renderDetail(){
   $('#back').onclick=()=>{state.detail=null;render().catch(showError);};if($('#edit'))$('#edit').onclick=()=>editDocument(doc);$('#print').onclick=()=>{if([...content.querySelectorAll('img')].some(img=>!img.complete||!img.naturalWidth)){flash('이미지가 아직 준비되지 않았거나 불러오지 못했습니다. 확인 후 다시 인쇄해 주세요.',true);return;}window.print();};
   document.querySelectorAll('[data-action]').forEach(b=>b.onclick=async()=>{const action=b.dataset.action;if(['approve','reject'].includes(action)){let getSignature;showDialog(action==='approve'?'승인 검토 의견':'반려 의견',`<label>의견<textarea name="opinion" maxlength="2000" ${doc.type==='risk'&&action==='reject'?'required':''}></textarea></label>${action==='approve'?'<p>가상 서명 입력</p><canvas id="approval-signature" class="signature-pad" width="320" height="120" aria-label="승인 시험 서명 입력 영역"></canvas><button type="button" id="approval-signature-clear">서명 지우기</button>':''}`,d=>api(`/api/documents/${doc.id}/transition`,{method:'POST',body:JSON.stringify({action,opinion:d.opinion,...(getSignature?{signature:getSignature()}:{})})}));if(action==='approve')getSignature=signaturePad($('#approval-signature'),$('#approval-signature-clear'));return;}try{await api(`/api/documents/${doc.id}/transition`,{method:'POST',body:JSON.stringify({action})});flash('상태를 변경했습니다.');await render();}catch(e){showError(e);}});
   if(doc.type==='permit')for(const control of content.querySelectorAll('button,input[type=file]')){if(['back','print'].includes(control.id))continue;const handler=control.onclick;if(handler)control.onclick=function(...args){if(this.disabled||!currentDetail())return;return handler.apply(this,args);};}
+  return doc;
 }
-async function showBatchPreview(ids,reports=[],siteId=state.siteId,includeDailyPhotos=false){
+async function showBatchPreview(ids,reports=[],siteId=state.siteId,includeDailyPhotos=false,siteDocuments=null){
   const fragment=document.createDocumentFragment(),wasInert=document.body.inert;document.body.inert=true;content.style.visibility='hidden';
   try{
     for(const [index,id] of ids.entries()){
-      flash(`문서 미리보기를 준비 중입니다. ${index+1}/${ids.length}`);state.detail=id;await renderDetail();
+      flash(`문서 미리보기를 준비 중입니다. ${index+1}/${ids.length}`);const selected=siteDocuments?.find(doc=>doc.id===id);if(siteDocuments&&!selected)throw Error('선택한 현장 문서를 다시 확인해 주세요.');if(selected)state.siteId=selected.site_id;state.detail=id;const rendered=await renderDetail();if(selected&&(!rendered||rendered.id!==id||rendered.site_id!==selected.site_id))throw Error('문서 또는 현장이 변경되었습니다. 다시 조회해 주세요.');
       const group=document.createElement('article');group.className='batch-document';for(const child of [...content.children])group.append(child.cloneNode(true));
+      if(selected){const heading=document.createElement('p');heading.textContent=`가상 현장: ${selected.site_name}`;group.prepend(heading);}
       group.querySelectorAll('button,canvas,input:not([type=checkbox]),select,textarea').forEach(node=>node.remove());group.querySelectorAll('input[type=checkbox]').forEach(input=>{input.disabled=true;});group.querySelectorAll('details').forEach(detail=>{detail.open=true;});group.querySelectorAll('[id]').forEach(node=>node.removeAttribute('id'));if(includeDailyPhotos){const photos=await api(`/api/sites/${siteId}/daily-reports/${id}/print-photos`);group.insertAdjacentHTML('beforeend',dailyReportPhotos(siteId,id,photos));}fragment.append(group);
     }
     const statuses={received:'접수',reviewing:'검토 중',resolved:'조치 완료'};for(const report of reports){const group=document.createElement('article');group.className='panel batch-document';group.innerHTML=`<h2>가상 의견·위험신고: ${esc(report.title)}</h2><p>${esc(report.reporter)} · ${esc(report.created_at)} (UTC) · ${esc(statuses[report.status]||'상태 미확인')}</p><p class="detail-body">${esc(report.body)}</p><p class="detail-body">가상 조치 내용: ${esc(report.response||'없음')}</p><h3>가상 답변</h3>${report.replies.length?report.replies.map(reply=>`<p class="detail-body">${esc(reply.created_at)} (UTC) · ${esc(reply.body)}</p>`).join(''):'<p>답변 없음</p>'}${report.has_photo?`<figure><img class="worker-hazard-photo" src="/api/sites/${siteId}/hazard-reports/${report.id}/photo?preview=1" alt="가상 신고 사진"><figcaption><a href="/api/sites/${siteId}/hazard-reports/${report.id}/photo">시험 사진 다운로드</a></figcaption></figure>`:''}`;fragment.append(group);}
-    state.detail=null;content.innerHTML='<section class="panel batch-controls"><h2>선택 문서 미리보기</h2><p>'+(includeDailyPhotos?'일보 첨부 사진과 같은 현장·날짜의 현장사진을 포함합니다. 사진은 조회 당시 목록입니다.':'문서 상세 화면의 내용과 선택한 가상 신고를 모았습니다. 일반 첨부파일은 별도로 확인하세요.')+'</p><button type="button" id="batch-back">목록으로</button> <button type="button" id="batch-print">인쇄</button></section>';content.append(fragment);$('#batch-back').onclick=()=>render().catch(showError);$('#batch-print').onclick=()=>{if([...content.querySelectorAll('.batch-document img')].some(img=>!img.complete||!img.naturalWidth)){flash('이미지가 아직 준비되지 않았거나 불러오지 못했습니다. 확인 후 다시 시도해 주세요.',true);return;}window.print();};flash('선택 문서 미리보기가 준비되었습니다.');
-  }catch(error){state.detail=null;await render();throw error;}finally{content.style.visibility='';document.body.inert=wasInert;}
+    state.siteId=siteId;state.detail=null;content.innerHTML='<section class="panel batch-controls"><h2>선택 문서 미리보기</h2><p>'+(includeDailyPhotos?'일보 첨부 사진과 같은 현장·날짜의 현장사진을 포함합니다. 사진은 조회 당시 목록입니다.':'문서 상세 화면의 내용과 선택한 가상 신고를 모았습니다. 일반 첨부파일은 별도로 확인하세요.')+'</p><button type="button" id="batch-back">목록으로</button> <button type="button" id="batch-print">인쇄</button></section>';content.append(fragment);$('#batch-back').onclick=()=>render().catch(showError);$('#batch-print').onclick=()=>{if([...content.querySelectorAll('.batch-document img')].some(img=>!img.complete||!img.naturalWidth)){flash('이미지가 아직 준비되지 않았거나 불러오지 못했습니다. 확인 후 다시 시도해 주세요.',true);return;}window.print();};flash('선택 문서 미리보기가 준비되었습니다.');
+  }catch(error){state.siteId=siteId;state.detail=null;await render();throw error;}finally{state.siteId=siteId;content.style.visibility='';document.body.inert=wasInert;}
 }
 async function renderDailyTrainingStatistics(siteId,from,to,month,day){
   const anchor=content.querySelector('#education-report'),rows=await api(`/api/education/daily-report?${new URLSearchParams({siteId:String(siteId),from,to})}`);
@@ -796,6 +800,15 @@ async function render(){
   document.querySelectorAll('[data-page]').forEach(b=>b.classList.toggle('selected',b.dataset.page===state.page));
   if(!state.siteId&&state.page!=='board'&&state.page!=='clients'){content.innerHTML='<section class="panel empty">먼저 현장을 추가해 주세요. 시험을 위해 가상의 현장명을 사용하세요.</section>';return;}
   if(state.detail)return renderDetail();
+  if(state.page==='site-print'){
+    const epoch=detailEpoch,sites=await api('/api/sites');if(state.page!=='site-print'||detailEpoch!==epoch)return;
+    const selected=state.sitePrintSites||[state.siteId],date=state.sitePrintDate||today();
+    content.innerHTML=`<section class="panel"><h2>현장별 가상 서류 출력</h2><p>선택한 현장의 같은 날짜에 작성된 가상 안전 문서를 모아 최대 20개까지 미리보고 인쇄합니다. 일반 첨부파일은 별도로 확인하세요.</p><label>작성일 <input id="site-print-date" type="date" value="${esc(date)}"></label><fieldset><legend>현장 선택</legend>${sites.map(site=>`<label><input type="checkbox" data-print-site="${site.id}" ${selected.includes(site.id)?'checked':''}> ${esc(site.name)}</label>`).join('')}</fieldset><button type="button" id="site-print-all">현장 전체 선택</button> <button type="button" id="site-print-search">문서 조회</button><div id="site-print-results" role="status"></div></section>`;
+    const chosen=()=>[...content.querySelectorAll('[data-print-site]:checked')].map(input=>Number(input.dataset.printSite)),target=$('#site-print-results');
+    const clearResults=()=>{target.replaceChildren();};content.querySelectorAll('[data-print-site]').forEach(input=>{input.onchange=clearResults;});$('#site-print-date').onchange=clearResults;
+    $('#site-print-all').onclick=()=>{content.querySelectorAll('[data-print-site]').forEach(input=>{input.checked=true;});clearResults();};
+    $('#site-print-search').onclick=async event=>{const button=event.currentTarget,ids=chosen(),day=$('#site-print-date').value,requested=sites.filter(site=>ids.includes(site.id));try{button.disabled=true;target.textContent='문서를 조회하는 중입니다.';const docs=await siteDocumentsForDay(requested,day,api);if(!target.isConnected||state.page!=='site-print'||detailEpoch!==epoch||$('#site-print-date').value!==day||chosen().join(',')!==ids.join(','))return;state.sitePrintSites=ids;state.sitePrintDate=day;target.innerHTML=docs.length?`<p>선택한 가상 문서 ${docs.length}건</p><button type="button" id="site-print-select-all">문서 전체 선택</button> <button type="button" id="site-print-preview">선택 문서 미리보기</button><div class="table-wrap"><table><thead><tr><th>선택</th><th>현장</th><th>유형</th><th>제목</th><th>상태</th></tr></thead><tbody>${docs.map(doc=>`<tr><td><input type="checkbox" data-print-document="${doc.id}" aria-label="${esc(doc.title)} 선택"></td><td>${esc(doc.site_name)}</td><td>${esc(state.types[doc.type]||doc.type)}</td><td>${esc(doc.title)}</td><td>${esc(statusLabels[doc.status]||doc.status)}</td></tr>`).join('')}</tbody></table></div>`:'<p>해당 날짜에 작성된 시험 문서가 없습니다.</p>';if(docs.length){$('#site-print-select-all').onclick=()=>target.querySelectorAll('[data-print-document]').forEach(input=>{input.checked=true;});$('#site-print-preview').onclick=async()=>{try{const picked=selectBatchDocuments(docs,[...target.querySelectorAll('[data-print-document]:checked')].map(input=>input.dataset.printDocument));await showBatchPreview(picked,[],state.siteId,false,docs);}catch(error){showError(error);}};}}catch(error){if(target.isConnected)target.textContent=error.message;}finally{if(button.isConnected)button.disabled=false;}};return;
+  }
   if(state.page==='clients'){
     const people=await api('/api/client-accounts');if(state.page!=='clients')return;
     content.innerHTML='<section class="panel"><h2>발주처 시험 계정</h2><p>가상 정보로 만든 계정입니다. 계정 중지와 암호 변경 시 해당 시험 로그인을 종료합니다.</p><p><a href="/client">시험 가입·로그인 화면</a></p>'+(people.length?'<ul>'+people.map(p=>'<li>'+esc(p.name)+' · '+esc(p.login_id)+' · '+esc(p.business_name||'개인')+' · '+(p.active?'사용 중':'중지됨')+' <button type="button" data-client-status="'+p.id+'">'+(p.active?'계정 중지':'계정 재개')+'</button> <button type="button" data-client-password="'+p.id+'">암호 재설정</button></li>').join('')+'</ul>':'<p>등록된 시험 계정이 없습니다.</p>')+'</section>';
