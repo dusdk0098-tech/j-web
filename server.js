@@ -65,6 +65,14 @@ assets.add('/basic-samples.js');
 assets.add('/reviewer-basic-documents.js');
 assets.add('/permit-roles.js');
 function checkRequestSession(req){const failure=req.checkSession?.();if(failure)throw Object.assign(new Error(failure.error),{sessionStatus:failure.status});}
+async function boardAttachmentRequest(req,res,url,match,actor){
+  const [,id,fileId]=match,version=url.searchParams.get('version'),authorize=()=>checkRequestSession(req);
+  if(!fileId&&req.method==='GET')return json(res,200,store.boardAttachments(id,version,actor,authorize));
+  if(!fileId&&req.method==='POST'){let name;try{name=decodeURIComponent(req.headers['x-file-name']||'');}catch{throw new Error('파일 이름을 확인해 주세요.');}const chunks=[];let size=0;for await(const chunk of req){size+=chunk.length;if(size>2*1024*1024)throw new Error('파일은 2MB 이하여야 합니다.');chunks.push(chunk);}return json(res,201,store.addBoardAttachment(id,version,name,Buffer.concat(chunks),actor,authorize));}
+  if(fileId&&req.method==='DELETE'){store.deleteBoardAttachment(id,fileId,version,url.searchParams.get('fileVersion'),actor,authorize);return json(res,200,{ok:true});}
+  if(fileId&&req.method==='GET'){const file=store.boardAttachment(id,fileId,version,url.searchParams.get('fileVersion'),actor,authorize),name=encodeURIComponent(file.name).replace(/[!'()*]/g,c=>`%${c.charCodeAt(0).toString(16).toUpperCase()}`);res.writeHead(200,{'Content-Type':'application/octet-stream','Content-Disposition':`attachment; filename="file"; filename*=UTF-8''${name}`,'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(file.data);}
+  return json(res,405,{error:'지원하지 않는 요청입니다.'});
+}
 function instructionPhotoResponse(res,photo,preview){
   const bytes=Buffer.from(photo.data),type=bytes.subarray(0,8).equals(Buffer.from('89504e470d0a1a0a','hex'))?'image/png':bytes.subarray(0,3).equals(Buffer.from('ffd8ff','hex'))?'image/jpeg':null;
   if(preview&&!type)return json(res,415,{error:'미리 볼 수 없는 사진입니다.'});
@@ -193,6 +201,7 @@ const server = http.createServer(async (req, res) => {
       }
       if(url.pathname==='/api/reviewer/board-posts'){if(req.method==='GET'){const rows=store.reviewerBoardPosts(reviewer,url.searchParams.get('kind'),url.searchParams.get('q')||'');checkRequestSession(req);return json(res,200,rows);}if(req.method==='POST'){const input=await body(req);return json(res,201,store.saveReviewerBoardPost(reviewer,input,null,()=>checkRequestSession(req)));}}
       const reviewerBoardComment=url.pathname.match(/^\/api\/reviewer\/board-posts\/(\d+)\/comments(?:\/(\d+))?$/);
+      const reviewerBoardAttachment=url.pathname.match(/^\/api\/reviewer\/board-posts\/(\d+)\/attachments(?:\/(\d+))?$/);if(reviewerBoardAttachment)return await boardAttachmentRequest(req,res,url,reviewerBoardAttachment,reviewer);
       if(reviewerBoardComment){const [,id,commentId]=reviewerBoardComment;if(!commentId&&req.method==='GET')return json(res,200,store.boardComments(id,url.searchParams.get('version'),reviewer,()=>checkRequestSession(req)));if(!commentId&&req.method==='POST')return json(res,201,store.addBoardComment(id,await body(req),reviewer,()=>checkRequestSession(req)));if(commentId&&req.method==='DELETE'){store.deleteBoardComment(id,commentId,await body(req),reviewer,()=>checkRequestSession(req));return json(res,200,{ok:true});}}
       const reviewerBoard=url.pathname.match(/^\/api\/reviewer\/board-posts\/(\d+)$/);
       if(reviewerBoard&&req.method==='PUT'){const input=await body(req);return json(res,200,store.saveReviewerBoardPost(reviewer,input,reviewerBoard[1],()=>checkRequestSession(req)));}
@@ -704,6 +713,7 @@ const server = http.createServer(async (req, res) => {
       if(req.method==='POST')return json(res,201,store.saveBoardPost(await body(req),null,()=>checkRequestSession(req)));
     }
     const boardComment=url.pathname.match(/^\/api\/board-posts\/(\d+)\/comments(?:\/(\d+))?$/);
+    const boardAttachment=url.pathname.match(/^\/api\/board-posts\/(\d+)\/attachments(?:\/(\d+))?$/);if(boardAttachment)return await boardAttachmentRequest(req,res,url,boardAttachment,null);
     if(boardComment){const [,id,commentId]=boardComment;if(!commentId&&req.method==='GET')return json(res,200,store.boardComments(id,url.searchParams.get('version'),null,()=>checkRequestSession(req)));if(!commentId&&req.method==='POST')return json(res,201,store.addBoardComment(id,await body(req),null,()=>checkRequestSession(req)));if(commentId&&req.method==='DELETE'){store.deleteBoardComment(id,commentId,await body(req),null,()=>checkRequestSession(req));return json(res,200,{ok:true});}}
     const boardPost=url.pathname.match(/^\/api\/board-posts\/(\d+)$/);
     if(boardPost&&req.method==='PUT')return json(res,200,store.saveBoardPost(await body(req),boardPost[1],()=>checkRequestSession(req)));
