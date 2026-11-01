@@ -20,7 +20,7 @@ test('관리자 조치는 본문 수신 중 로그아웃과 잠금 대기 중 �
     assert.match(String((await once(child.stdout,'data'))[0]),/SERVER_READY/);
     const base=`http://127.0.0.1:${port}`,send=(path,method='GET',data,cookie)=>fetch(base+path,{method,headers:{...(data?{'content-type':'application/json'}:{}),...(cookie?{cookie}:{})},...(data?{body:JSON.stringify(data)}:{})}),login=async()=>(await send('/api/login','POST',{password:'virtual-admin-password'})).headers.get('set-cookie').split(';')[0];
     let admin=await login();const site=await(await send('/api/sites','POST',{name:'가상 현장'},admin)).json(),doc=await(await send('/api/documents','POST',{siteId:site.id,type:'instruction',title:'가상 지시',date:'2026-10-30'},admin)).json();
-    db=new DatabaseSync(join(dir,'jweb.sqlite'));db.prepare("UPDATE documents SET status='approved' WHERE id=?").run(doc.id);
+    db=new DatabaseSync(join(dir,'jweb.sqlite'));db.exec('PRAGMA busy_timeout=3000');db.prepare("UPDATE documents SET status='approved' WHERE id=?").run(doc.id);
     const payload=JSON.stringify({date:'2026-10-30',actor:'가상 담당자',content:'가상 조치'}),started=once(child.stdout,'data');let finish;
     const pending=new Promise((resolve,reject)=>{const req=request(base+`/api/documents/${doc.id}/instruction-result`,{method:'POST',headers:{cookie:admin,'x-slow':'1','content-type':'application/json','content-length':Buffer.byteLength(payload)}},res=>{res.resume();res.on('end',()=>resolve(res.statusCode));});req.on('error',reject);req.write(payload.slice(0,-1));finish=()=>req.end(payload.slice(-1));});
     assert.match(String((await started)[0]),/BODY_STARTED/);assert.equal((await send('/api/logout','POST',{},admin)).status,200);finish();assert.equal(await pending,401);

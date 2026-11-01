@@ -1,3 +1,4 @@
+import { fetchWithWorkerSession as fetch } from './helpers/worker-session-request.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {mkdtempSync,rmSync,readFileSync} from 'node:fs';
@@ -89,8 +90,8 @@ test('관리자 저장 핸들러에 409를 주면 입력과 대화상자를 유�
 });
 test('근로자 실제 저장 핸들러가 조회 버전을 전송하고 409 후 본문·상세 입력을 보존한다',async()=>{
   const source=readFileSync('public/worker-documents.js','utf8'),handler=source.slice(source.indexOf('    form.onsubmit=async event=>{'),source.indexOf("    if(doc&&type==='work_plan'){")),button={disabled:false},elements=Object.fromEntries(['title','date','body','weather','instructor','work','hazards'].map(key=>[key,{value:'편집 '+key}])),form={elements,isConnected:true,querySelector(){return button;}},status={};let sent,calls=0;
-  const context={form,type:'tbm',doc:{id:1,edit_version:7},editor:{replaceChildren(){throw Error('입력 소실');}},status,updateList(){throw Error('목록 재조회');},message(error){status.textContent=error.message;},send:async(path,method,value)=>{calls++;sent={path,method,value};throw Object.assign(Error('문서 변경: 입력 내용을 복사해 주세요.'),{status:409});}};
-  runInNewContext(handler,context);await form.onsubmit({preventDefault(){}});assert.equal(calls,1);assert.equal(sent.method,'PUT');assert.equal(sent.value.expectedEditVersion,7);assert.equal(sent.value.body,'편집 body');assert.equal(sent.value.details.weather,'편집 weather');assert.equal(form.elements.body.value,'편집 body');assert.equal(form.elements.weather.value,'편집 weather');assert.equal(button.disabled,false);assert.match(status.textContent,/복사/);
+  const reportContext={workerId:1,siteId:1,generation:'original'},context={form,type:'tbm',doc:{id:1,edit_version:7},reportContext,editor:{replaceChildren(){throw Error('입력 소실');}},status,updateList(){throw Error('목록 재조회');},message(error){status.textContent=error.message;},send:async(path,method,value)=>{calls++;sent={path,method,value};throw Object.assign(Error('문서 변경: 입력 내용을 복사해 주세요.'),{status:409});}};
+  runInNewContext(handler,context);await form.onsubmit({preventDefault(){}});assert.equal(calls,1);assert.equal(sent.method,'PUT');assert.equal(sent.value.expectedEditVersion,7);assert.equal(sent.value.reportContext,reportContext);assert.equal(sent.value.body,'편집 body');assert.equal(sent.value.details.weather,'편집 weather');assert.equal(form.elements.body.value,'편집 body');assert.equal(form.elements.weather.value,'편집 weather');assert.equal(button.disabled,false);assert.match(status.textContent,/복사/);
 });
 
 test('직원 실제 저장 핸들러가 기존 권한 해시와 조회 버전을 보내고 409 후 입력을 보존한다',async()=>{

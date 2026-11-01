@@ -1,0 +1,19 @@
+const statuses={received:'접수',processing:'수동 처리 중',completed:'수동 처리 완료',cancelled:'취소'};
+const esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+export function mountStickerRequests({button,api,site,currentSite,siteSelect,document=globalThis.document,confirm=globalThis.confirm}){
+  let epoch=0,opened;
+  siteSelect.addEventListener('change',()=>{epoch++;opened?.close();});
+  button.onclick=async()=>{
+    const selected=site();if(!selected?.id)return;
+    const generation=++epoch,path=`/api/sites/${selected.id}/sticker-requests`,dialog=document.createElement('dialog');
+    const active=()=>generation===epoch&&currentSite()===selected.id&&dialog.isConnected&&dialog.open;
+    dialog.innerHTML=`<h2>QR 스티커 로컬 신청 · ${esc(selected.name)}</h2><p>관리자 수동 처리용 접수입니다. 업체 전송, 실물 제작, 결제, 배송은 자동으로 진행되지 않습니다.</p><p>주소·수령인·연락처는 이 컴퓨터의 DB에 삭제할 때까지 보관됩니다. 백업 사본은 별도로 관리해 주세요.</p><form><div class="fields"><label>현장명<input value="${esc(selected.name)}" disabled></label><label>주소<input name="address" maxlength="300" required></label><label>상세주소<input name="detail" maxlength="300"></label><label>수령인<input name="recipient" maxlength="100" required></label><label>연락처<input name="phone" type="tel" maxlength="30" required></label><label>수량 (1~20)<input name="quantity" type="number" min="1" max="20" step="1" value="1" required></label><label>비고<textarea name="note" maxlength="1000"></textarea></label></div><label><input name="consent" type="checkbox" required> 로컬 신청 처리 목적의 개인정보 수집·보관에 동의합니다.</label><button type="submit">로컬 신청 접수</button></form><p role="status" data-status></p><button type="button" data-refresh>목록 새로고침</button><div data-list></div><button type="button" data-close>닫기</button>`;
+    opened?.close();opened=dialog;document.body.append(dialog);dialog.showModal();dialog.onclose=()=>{dialog.remove();};
+    const form=dialog.querySelector('form'),message=dialog.querySelector('[data-status]'),list=dialog.querySelector('[data-list]');let busy=false;
+    dialog.querySelector('[data-close]').onclick=()=>dialog.close();
+    const load=async()=>{const rows=await api(path);if(!active())return;list.innerHTML=rows.length?rows.map(row=>`<article data-id="${row.id}"><h3>신청 ${row.id} · ${esc(statuses[row.status])}</h3><p>${esc(row.site_name)} · ${esc(row.created_at)} · ${row.quantity}개</p><p>${esc(row.address)} ${esc(row.detail)} / ${esc(row.recipient)} / ${esc(row.phone)}</p><p>${esc(row.note)}</p><label>관리자 수동 상태<select>${Object.entries(statuses).map(([key,label])=>`<option value="${key}" ${key===row.status?'selected':''}>${label}</option>`).join('')}</select></label><button type="button" data-save>상태 저장</button><button type="button" data-delete>신청·개인정보 삭제</button></article>`).join(''):'<p>신청 내역이 없습니다.</p>';for(const row of rows){const card=list.querySelector(`[data-id="${row.id}"]`);card.querySelector('[data-save]').onclick=()=>run(async()=>{await api(`${path}/${row.id}`,{method:'PUT',body:JSON.stringify({version:row.version,status:card.querySelector('select').value})});await load();});card.querySelector('[data-delete]').onclick=()=>{if(active()&&confirm('이 신청과 개인정보를 로컬 DB에서 삭제할까요? 백업 사본은 별도 관리해야 합니다.'))run(async()=>{await api(`${path}/${row.id}`,{method:'DELETE',body:JSON.stringify({version:row.version})});await load();});};}};
+    const run=async action=>{if(!active()||busy)return;busy=true;message.textContent='처리 중입니다.';try{await action();if(active())message.textContent='처리했습니다.';}catch(error){if(active())message.textContent=error.message;}finally{busy=false;}};
+    form.onsubmit=event=>{event.preventDefault();return run(async()=>{const values=Object.fromEntries(new FormData(form));await api(path,{method:'POST',body:JSON.stringify({...values,quantity:Number(values.quantity),consent:values.consent==='on'})});if(active()){form.reset();await load();}});};
+    dialog.querySelector('[data-refresh]').onclick=()=>run(load);await run(load);
+  };
+}

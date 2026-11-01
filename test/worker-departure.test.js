@@ -1,3 +1,4 @@
+import { fetchWithWorkerSession as fetch } from './helpers/worker-session-request.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {mkdtempSync,rmSync,readFileSync} from 'node:fs';
@@ -31,7 +32,7 @@ test('퇴근 저장 대기 중 세션이 폐기되면 기록하지 않는다',{t
 });
 
 test('퇴근 버튼은 현재 위치 설정을 확인한 뒤 한 번만 요청한다',async()=>{
-  const source=readFileSync(new URL('../public/join.js',import.meta.url),'utf8'),from=source.indexOf("    const departure=panel.querySelector('#worker-departure')"),to=source.indexOf("    const logout=panel.querySelector('#worker-logout')",from);assert.ok(from>=0&&to>from);const button={},status={},panel={isConnected:true,querySelector:selector=>selector==='#worker-departure'?button:status},calls=[],location={latitude:0,longitude:0,accuracyMeters:10,timestamp:123},fetch=async(path,options)=>{calls.push({path,options});return {ok:true,json:async()=>options?{checkedAt:123}:{locationRequired:true}};};runInNewContext(source.slice(from,to),{panel,fetch,captureWorkerLocation:async()=>location,Date,JSON});const pending=button.onclick();await button.onclick();await pending;assert.equal(button.disabled,false);assert.equal(calls.length,2);assert.deepEqual(JSON.parse(calls[1].options.body),{location});
+  const source=readFileSync(new URL('../public/join.js',import.meta.url),'utf8'),from=source.indexOf("    const departure=panel.querySelector('#worker-departure')"),to=source.indexOf("    const logout=panel.querySelector('#worker-logout')",from);assert.ok(from>=0&&to>from);const button={},status={},panel={isConnected:true,querySelector:selector=>selector==='#worker-departure'?button:status},calls=[],location={latitude:0,longitude:0,accuracyMeters:10,timestamp:123},fetch=async(path,options)=>{calls.push({path,options});return {ok:true,json:async()=>options?{checkedAt:123}:{locationRequired:true}};};runInNewContext(source.slice(from,to),{panel,fetch,reportContext:{workerId:1,siteId:1,generation:'screen'},captureWorkerLocation:async()=>location,Date,JSON});const pending=button.onclick();await button.onclick();await pending;assert.equal(button.disabled,false);assert.equal(calls.length,2);assert.deepEqual(JSON.parse(calls[1].options.body),{reportContext:{workerId:1,siteId:1,generation:'screen'},location});
 });
 
 test('자정을 넘긴 같은 세션은 날짜별로 퇴근을 기록한다',()=>{

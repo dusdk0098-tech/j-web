@@ -6,6 +6,10 @@ export async function fetchWithApprovalCycle(url,options={}){
     const response=await fetch(new URL(parsed.pathname.replace(/\/(decision|comments|transition)$/,''),url),{headers:options.headers}),view=await response.json();input.expectedCycleId=(view.document||view).approval_cycle_id??null;
     options={...options,body:JSON.stringify(input)};
   }
+  const edit=parsed.pathname.match(/^\/api\/(?:worker\/)?documents\/(\d+)\/(transition|(?:checklist|tbm|joint|meeting|author)-signature)$/);
+  if(options.method==='POST'&&input&&edit&&(edit[2]!=='transition'||['submit','withdraw','revise'].includes(input.action))&&!Object.hasOwn(input,'expectedEditVersion')){
+    const response=await fetch(new URL(parsed.pathname.replace(/\/[^/]+$/,''),url),{headers:options.headers}),view=await response.json();input.expectedEditVersion=view.edit_version??null;options={...options,body:JSON.stringify(input)};
+  }
   if(options.method==='POST'&&input&&parsed.pathname==='/api/documents/batch-approve'&&!Object.hasOwn(input,'expectedCycleIds')){
     input.expectedCycleIds=await Promise.all(input.ids.map(async id=>{const response=await fetch(new URL(`/api/documents/${id}`,url),{headers:options.headers});return (await response.json()).approval_cycle_id??null;}));options={...options,body:JSON.stringify(input)};
   }

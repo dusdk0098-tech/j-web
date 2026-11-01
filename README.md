@@ -449,3 +449,25 @@ Node 실제 캔버스 시험은 `node --test test/plan-pdf-render.test.js`로 �
 일반 결재자의 `POST /api/reviewer/documents/:id/decision` 및 `/comments`, 관리자의 `POST /api/documents/:id/transition` 중 승인·반려·전결 요청에는 화면에서 조회한 문서의 `approval_cycle_id`를 `expectedCycleId`로 전송한다. `POST /api/documents/batch-approve`는 `ids`와 같은 순서와 길이의 `expectedCycleIds` 배열을 전송한다. 누락, 숫자가 아닌 값, 다른 회차는 HTTP 409이며 구버전 외부 클라이언트도 예외가 없다. 일괄 요청은 한 항목만 불일치해도 모두 취소한다. 오류 시 의견·서명·선택은 화면에 남으므로 입력을 보관하고 문서를 다시 조회하여 내용을 확인한다.
 
 검증은 쓰기 잠금 획득과 세션 재확인 후, 상태·서명·이력을 변경하기 전에 수행한다. 기존 내부 Store 호출에 한해서 마지막 회차 인수를 생략한 호출을 호환하며, HTTP 경계는 누락을 항상 `null`로 정규화하므로 JSON 입력으로 이 호환 경로에 진입할 수 없다. 회차가 없는 과거 자료는 다시 상신하여 회차를 생성한 뒤 처리한다.
+
+### 작성자 상태 변경·서명 충돌 방지 API
+
+관리자 `POST /api/documents/:id/transition` 및 근로자 `POST /api/worker/documents/:id/transition`의 `submit`, `withdraw`, `revise` 요청은 화면에서 조회한 문서의 정수 `edit_version`을 `expectedEditVersion`으로 보낸다. 관리자 작성자 서명 경로 `checklist-signature`, `tbm-signature`, `joint-signature`, `meeting-signature`와 근로자 작업계획서 `author-signature` 저장에도 필수다. 작업계획서 서명 조회 응답은 `editVersion`을 함께 제공한다. 작업계획·참조 문서의 기존 `expectedVersion` 해시도 그대로 필요하다.
+
+쓰기 잠금 획득 후 세션·작성 권한을 다시 확인하고 편집 버전을 비교한다. 누락·형식 오류·과거 버전은 HTTP 409이며 상태·결재 회차·이력·현재/이전 서명을 변경하지 않는다. 실패한 화면은 입력과 서명을 지우거나 최신 버전으로 자동 재전송하지 않는다. 구형 화면과 외부 API 호출자는 새 필드를 추가하고 문서를 다시 열어 내용을 확인해야 한다. 내부 Store 직접 호출만 버전 인수 생략 호환을 유지한다.
+
+직원 작성 업무 문서의 상태 변경·서명은 기존 필수 `version` 해시가 문서 편집 버전·서명·결재 이력을 포함하며 쓰기 잠금 안에서 검사한다. 근로자 TBM 작성자 서명도 기존 필수 교육 `expectedVersion` 해시가 문서 편집 버전·대상·첨부·서명을 포함한다. 두 경로에는 별도 필드를 중복 요구하지 않는다. 관리자 승인·반려 및 일괄 승인에는 기존 결재 회차 검사를 그대로 사용한다.
+
+### QR 스티커 로컬 신청
+
+관리자 화면의 `QR 스티커 신청`에서 선택한 현장의 신청을 접수하고 내역을 조회합니다. 현장명은 서버의 현장 이름으로 저장합니다. 주소·수령인·연락처·수량(정수 1~20)·개인정보 동의는 필수이며 상세주소와 비고는 선택입니다. 접수·수동 처리 중·수동 처리 완료·취소 상태를 관리자가 직접 기록합니다. 실제 제작 업체 연결, 업체 전송, 결제와 배송 자동화는 없습니다.
+
+신청 정보는 로컬 SQLite DB의 `sticker_requests`에 삭제할 때까지 보존합니다. `신청·개인정보 삭제`는 해당 신청 행을 삭제하며 기존 백업 사본은 별도로 관리해야 합니다. 전체 DB 백업·복원에 신청 정보도 포함됩니다. 관리자만 접근하며 근로자·시험 결재자 화면에는 제공하지 않습니다. 시험에는 가상 개인정보만 사용하세요.
+
+API는 `GET/POST /api/sites/:siteId/sticker-requests`, `PUT/DELETE /api/sites/:siteId/sticker-requests/:id`입니다. 변경과 삭제에는 조회 시 받은 `version`이 필수이며 충돌은 HTTP 409입니다. 쓰기 잠금 획득 후 관리자 세션을 재검사하고, 현장과 신청 ID를 함께 검증합니다. 현장을 바꾸면 신청 창을 닫고 이전 현장의 늦은 응답을 버립니다. 충돌 시 목록을 새로고침한 후 내용을 확인하고 다시 처리하세요.
+
+검증: `node --test test/sticker-requests.test.js test/site-qr.test.js`. DB·HTTP·가상 DOM 동작을 검증하며 실제 브라우저 렌더링, 실물 제작·배송은 검증 범위에 포함하지 않습니다.
+
+### 근로자 나머지 저장 요청의 화면 세션
+
+출역 관리, 보호구 수령, 작업지시 응답, 출입 복원·퇴근과 근로자 문서 수정·상신·첨부 삭제·교육 대상·TBM 및 작성자 서명도 최초 화면의 `reportContext`를 JSON 본문에 전송합니다. 작업지시 사진과 문서 첨부 업로드는 같은 객체를 `JSON.stringify`한 `X-Worker-Report-Context` 헤더를 전송합니다. 바이너리 본문은 그대로 유지합니다. 컨텍스트 누락·불일치·잘못된 헤더는 HTTP 409와 `sessionChanged: true`로 거절하며 DB 잠금 획득 후에도 다시 검사합니다. 로그인은 기존 방식으로 새 컨텍스트를 발급하고, 기존 로그인 복원은 최초 세션 조회에서 받은 컨텍스트를 사용합니다. 현장 접속 차단 이후에도 유효한 기존 세션의 퇴근을 허용하는 정책은 유지합니다.

@@ -23,15 +23,15 @@ function screen(){
   }
   const elements=Object.fromEntries(['equipment','sober','exercise','briefing','rights'].map(name=>[name,{checked:false}]));
   const form=()=>{const node=new Node(),submit=new Node();node.elements=structuredClone(elements);node.resets=0;node.querySelector=()=>submit;node.querySelectorAll=()=>[];node.reset=()=>{node.resets++;Object.values(node.elements).forEach(input=>input.checked=false);};return node;};
-  const documentEvents=new Map(),windowEvents=new Map(),timers=new Map(),requests=[],pads=[],panel=new Node(),checkForm=form(),dailyForm=form(),trainingList=new Node(),training=new Node(),notices=new Node(),noticeList=new Node(),rights={checked:true},checkStatus=new Node(),dailyStatus=new Node(),message=new Node(),initialLoads=[];
-  notices.querySelector=()=>noticeList;
+  const documentEvents=new Map(),windowEvents=new Map(),timers=new Map(),requests=[],pads=[],panel=new Node(),checkForm=form(),dailyForm=form(),trainingList=new Node(),training=new Node(),meetings=new Node(),meetingList=new Node(),notices=new Node(),noticeList=new Node(),rights={checked:true},checkStatus=new Node(),dailyStatus=new Node(),message=new Node(),initialLoads=[];
+  notices.querySelector=()=>noticeList;meetings.querySelector=()=>meetingList;
   training.querySelector=key=>key==='#training-list'?trainingList:rights;
   const document={visibilityState:'visible',createElement:()=>new Node(),addEventListener:(name,fn)=>documentEvents.set(name,fn),removeEventListener:name=>documentEvents.delete(name)};
   const window={addEventListener:(name,fn)=>windowEvents.set(name,fn),removeEventListener:name=>windowEvents.delete(name)};
   const signaturePad=canvas=>{const pad={clears:0,clear(){this.clears++;},value(){return canvas.signature||'virtual-signature';}};pads.push(pad);return pad;};
   let clock=Date.parse('2032-05-03T04:00:00Z'),timerId=0;
   class Clock extends Date {static now(){return clock;}}
-  const context={siteKey:'virtual-site',panel,logout:{disabled:false},worker:{id:1,site_id:7},button:{disabled:true},message,flow:{open(){context.opened=true;}},document,window,checkForm,checkStatus,check:new Node(),pad:signaturePad({}),dailyForm,dailyStatus,dailyPad:signaturePad({}),training,notices,initialLoads,educationKinds:{},signaturePad,startWorkerLoads,Date:Clock,performance:{now:()=>clock},AbortController,
+  const context={reportContext:{workerId:1,siteId:7,generation:'original'},siteKey:'virtual-site',panel,logout:{disabled:false},worker:{id:1,site_id:7},button:{disabled:true},message,flow:{open(){context.opened=true;}},document,window,checkForm,checkStatus,check:new Node(),pad:signaturePad({}),dailyForm,dailyStatus,dailyPad:signaturePad({}),training,meetings,notices,initialLoads,educationKinds:{},signaturePad,startWorkerLoads,Date:Clock,performance:{now:()=>clock},AbortController,
     setTimeout:(fn,delay)=>{const id=++timerId;timers.set(id,{fn,delay});return id;},clearTimeout:id=>timers.delete(id),
     fetch:(url,options)=>new Promise((resolve,reject)=>{requests.push({url,options,resolve,reject});options?.signal?.addEventListener('abort',()=>reject(Object.assign(Error('timeout'),{name:'AbortError'})));})
   };
@@ -39,6 +39,7 @@ function screen(){
     part('    const workerSiteKey=','    const month='),
     part('    const dailyNames=','    const training=document'),
     part('    const trainingList=','    const meetings=document'),
+    part('    const meetingList=','    const instructions=document'),
     part("    const list=notices.querySelector",'    const archive=document'),
     part('    let checkGeneration=','    const stop=document'),
     part('    const dayStatus=','    startWorkerLoads(initialLoads,'),
@@ -46,15 +47,15 @@ function screen(){
   ].join('\n');
   runInNewContext(code,context);
   const reply=async(request,data,status=200)=>{request.resolve({ok:status>=200&&status<300,status,json:async()=>data});await tick();};
-  const session=(date='2026-10-31',overrides={})=>({worker:{id:1,site_id:7},date,serverNow:date+'T14:59:00.000Z',nextDayAt:date+'T15:00:00.000Z',...overrides});
+  const session=(date='2026-10-31',overrides={})=>({worker:{id:1,site_id:7},reportContext:{workerId:1,siteId:7,generation:'original'},date,serverNow:date+'T14:59:00.000Z',nextDayAt:date+'T15:00:00.000Z',...overrides});
   const pending=url=>requests.filter(request=>request.url===url).at(-1);
   const items=(id=1)=>[{id,type:'education',title:'가상 교육 '+id,body:'가상 내용',details:{},files:[],has_signature:false}];
   const noticeItems=(id=1)=>[{id,title:'가상 공지 '+id,body:'가상 공지 내용',files:[],read_at:null,version:1}];
-  const finishLoads=async(check=null,trainingItems=items())=>{await reply(pending('/api/worker/self-check'),{check});await reply(pending('/api/worker/daily-training'),[]);await reply(pending('/api/worker/training'),trainingItems);await reply(pending('/api/worker/notices'),noticeItems());};
+  const finishLoads=async(check=null,trainingItems=items())=>{await reply(pending('/api/worker/self-check'),{check});await reply(pending('/api/worker/daily-training'),[]);await reply(pending('/api/worker/training'),trainingItems);await reply(pending('/api/worker/notices'),noticeItems());await reply(pending('/api/worker/meetings'),[{id:1,date:'2026-10-31',type:'safety_meeting',title:'가상 회의',details:{},body:'가상 본문',files:[],role:'worker'}]);};
   const start=async(check=null)=>{const work=context.actions.refreshWorkerDay();await reply(pending('/api/worker/session'),session());await work;await finishLoads(check);};
   const event=async(name,hidden=false)=>{document.visibilityState=hidden?'hidden':'visible';(documentEvents.get(name)||windowEvents.get(name))?.();await tick();};
   const fire=async()=>{const [id,timer]=timers.entries().next().value;timers.delete(id);clock+=timer.delay;timer.fn();await tick();};
-  return {context,requests,timers,panel,checkForm,checkStatus,dailyForm,dailyStatus,trainingList,training,noticeList,noticeItems,rights,pads,message,documentEvents,windowEvents,reply,session,pending,items,finishLoads,start,event,fire,tick,advance(ms){clock+=ms;}};
+  return {context,requests,timers,panel,meetingList,checkForm,checkStatus,dailyForm,dailyStatus,trainingList,training,noticeList,noticeItems,rights,pads,message,documentEvents,windowEvents,reply,session,pending,items,finishLoads,start,event,fire,tick,advance(ms){clock+=ms;}};
 }
 
 test('서버 현장 자정에 완료 점검을 초기화하고 다음 날 점검과 교육을 표시한다',async()=>{
@@ -283,3 +284,8 @@ test('응답 없는 세션 확인은 15초에 중단하고 60초 뒤 재시도�
   assert.match(ui.context.actions.dayStatus.textContent,/시간이 초과/);assert.equal([...ui.timers.values()][0].delay,60000);
   await ui.fire();await ui.reply(ui.pending('/api/worker/session'),ui.session());await ui.finishLoads();assert.equal(ui.checkForm.hidden,false);
 });
+
+test('같은 근로자의 다른 로그인 세대는 기존 입력을 보존하고 저장을 멈춘다',async()=>{const ui=screen();await ui.start();ui.checkForm.elements.sober.checked=true;await ui.event('focus');await ui.reply(ui.pending('/api/worker/session'),ui.session(undefined,{reportContext:{workerId:1,siteId:7,generation:'new'}}));const before=ui.requests.length;await ui.checkForm.onsubmit({preventDefault(){}});assert.equal(ui.requests.length,before);assert.equal(ui.panel.isConnected,true);assert.equal(ui.checkForm.elements.sober.checked,true);assert.match(ui.context.actions.dayStatus.textContent,/입력 내용을 복사/);});
+test('공지 세션409는 서명과 기존 화면을 보존한다',async()=>{const ui=screen();await ui.start();const row=ui.noticeList.children[0],button=row.children.at(-1);row.children[2].signature='가상 보존';const action=button.onclick(),request=ui.pending('/api/worker/notices/1/confirm'),before=ui.requests.length;assert.equal(JSON.parse(request.options.body).reportContext.generation,'original');await ui.reply(request,{error:'입력 내용을 복사',sessionChanged:true},409);await action;assert.equal(ui.requests.length,before);assert.equal(ui.noticeList.children[0],row);assert.equal(row.children[2].signature,'가상 보존');assert.equal(button.disabled,false);});
+
+test('회의도 최초 세션으로 제출하고 409와 복귀 조회에서 서명을 유지한다',async()=>{const ui=screen();await ui.start();const row=ui.meetingList.children[0],button=row.children[5],canvas=row.children[3];canvas.signature='가상 유지';const action=button.onclick(),request=ui.pending('/api/worker/meetings');assert.equal(JSON.parse(request.options.body).reportContext.generation,'original');await ui.reply(request,{error:'입력 내용을 복사',sessionChanged:true},409);await action;assert.equal(ui.meetingList.children[0],row);assert.equal(canvas.signature,'가상 유지');assert.equal(button.disabled,false);await ui.event('focus');await ui.reply(ui.pending('/api/worker/session'),ui.session());await ui.finishLoads();assert.equal(ui.meetingList.children[0],row);assert.equal(canvas.signature,'가상 유지');await ui.event('visibilitychange',true);const count=ui.requests.length;await button.onclick();assert.equal(ui.requests.length,count);});

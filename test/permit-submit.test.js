@@ -1,3 +1,4 @@
+import { fetchWithWorkerSession as fetch } from './helpers/worker-session-request.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {mkdtempSync,rmSync} from 'node:fs';
@@ -73,7 +74,7 @@ test('HTTP 요청은 쓰기 잠금 대기 후 최신 내용·역할·활성 상�
       if(['title','date'].includes(change))db.prepare(`UPDATE documents SET ${change}='' WHERE id=?`).run(doc.id);
       if(change==='roles')db.prepare("UPDATE permit_roles SET roles='{}' WHERE document_id=?").run(doc.id);
       if(change==='active')db.prepare('UPDATE reviewers SET active=0 WHERE id=?').run(person.id);
-      db.exec('COMMIT');locked=false;const before=snapshot(s,doc.id),response=await pending;assert.equal(response.status,400,change);await response.text();assert.deepEqual(snapshot(s,doc.id),before,change);
+      db.exec('COMMIT');locked=false;const before=snapshot(s,doc.id),response=await pending;assert.equal(response.status,['work','title','date'].includes(change)?409:400,change);await response.text();assert.deepEqual(snapshot(s,doc.id),before,change);
       db.prepare('UPDATE documents SET title=?,date=?,details=? WHERE id=?').run('가상 공정','2026-10-31',JSON.stringify(details),doc.id);db.prepare('UPDATE reviewers SET active=1 WHERE id=?').run(person.id);s.setPermitRoles(doc.id,{expectedVersion:s.permitRoles(doc.id).version,roles:{...s.permitRoles(doc.id).roles,siteManager:person.id}});
     }
     stage='정상 요청';const response=await send(path,{action:'submit'},cookie);assert.equal(response.status,200);await response.text();assert.equal(s.document(doc.id).status,'pending');assert.equal(s.db.prepare('SELECT count(*) AS n FROM approval_cycles WHERE document_id=?').get(doc.id).n,2);

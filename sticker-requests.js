@@ -1,0 +1,15 @@
+import { text } from './domain.js';
+
+export class StickerRequests {
+  constructor(db){this.db=db;db.exec(`CREATE TABLE IF NOT EXISTS sticker_requests(id INTEGER PRIMARY KEY,site_id INTEGER NOT NULL REFERENCES sites(id),site_name TEXT NOT NULL,address TEXT NOT NULL,detail TEXT NOT NULL,recipient TEXT NOT NULL,phone TEXT NOT NULL,quantity INTEGER NOT NULL CHECK(quantity BETWEEN 1 AND 20),note TEXT NOT NULL,consented_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,status TEXT NOT NULL DEFAULT 'received' CHECK(status IN ('received','processing','completed','cancelled')),version TEXT NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);`);}
+  site(id){id=Number(id);const site=Number.isSafeInteger(id)&&id>0&&this.db.prepare('SELECT id,name FROM sites WHERE id=?').get(id);if(!site)throw Error('현장을 확인해 주세요.');return site;}
+  transaction(callback,authorize){this.db.exec('BEGIN IMMEDIATE');try{authorize();const result=callback();this.db.exec('COMMIT');return result;}catch(error){this.db.exec('ROLLBACK');throw error;}}
+  list(siteId){return this.db.prepare('SELECT * FROM sticker_requests WHERE site_id=? ORDER BY id DESC').all(this.site(siteId).id);}
+  create(siteId,input,authorize=()=>{}){
+    const address=text(input.address,'주소',300),recipient=text(input.recipient,'수령인',100),phone=text(input.phone,'연락처',30),optional=(value,label,max)=>value===undefined||value===''?'':text(value,label,max),detail=optional(input.detail,'상세주소',300),note=optional(input.note,'비고',1000);
+    if(!/^[0-9+() -]{7,30}$/.test(phone)||phone.replace(/\D/g,'').length<7)throw Error('연락처를 확인해 주세요.');
+    if(!Number.isInteger(input.quantity)||input.quantity<1||input.quantity>20)throw Error('수량은 1~20개로 입력해 주세요.');if(input.consent!==true)throw Error('개인정보 수집 동의가 필요합니다.');
+    return this.transaction(()=>{const site=this.site(siteId),id=this.db.prepare('INSERT INTO sticker_requests(site_id,site_name,address,detail,recipient,phone,quantity,note,version) VALUES(?,?,?,?,?,?,?,?,lower(hex(randomblob(16))))').run(site.id,site.name,address,detail,recipient,phone,input.quantity,note).lastInsertRowid;return this.db.prepare('SELECT * FROM sticker_requests WHERE id=?').get(id);},authorize);
+  }
+  change(siteId,id,input,remove=false,authorize=()=>{}){return this.transaction(()=>{siteId=this.site(siteId).id;const row=this.db.prepare('SELECT * FROM sticker_requests WHERE site_id=? AND id=?').get(siteId,Number(id));if(!row)throw Error('이 현장의 신청을 확인해 주세요.');if(typeof input.version!=='string'||input.version!==row.version)throw Object.assign(Error('신청이 변경되었습니다. 다시 조회해 주세요.'),{sessionStatus:409});if(remove){this.db.prepare('DELETE FROM sticker_requests WHERE site_id=? AND id=?').run(siteId,row.id);return {ok:true};}if(!['received','processing','completed','cancelled'].includes(input.status))throw Error('처리 상태를 확인해 주세요.');this.db.prepare('UPDATE sticker_requests SET status=?,version=lower(hex(randomblob(16))) WHERE id=?').run(input.status,row.id);return this.db.prepare('SELECT * FROM sticker_requests WHERE id=?').get(row.id);},authorize);}
+}

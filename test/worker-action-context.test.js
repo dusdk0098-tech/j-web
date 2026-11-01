@@ -1,0 +1,35 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtempSync,rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { createServer } from 'node:net';
+import { spawn } from 'node:child_process';
+import { once } from 'node:events';
+import { DatabaseSync } from 'node:sqlite';
+import { PNG } from 'pngjs';
+
+test('여섯 근로자 저장은 최초 화면 세션만 허용하고 잠금 중 철회를 재검증한다',{timeout:30000},async()=>{
+  const dir=mkdtempSync(join(tmpdir(),'jweb-report-session-')),reservation=createServer();await new Promise(resolve=>reservation.listen(0,'127.0.0.1',resolve));const port=reservation.address().port;await new Promise(resolve=>reservation.close(resolve));
+  const source=pathToFileURL(join(process.cwd(),'store.js')).href,trace=`import {Store} from ${JSON.stringify(source)};for(const [method,table] of [['createWorkerDocument','documents'],['confirmWorkerMeeting','worker_meeting_checks'],['createWorkerSelfCheck','worker_self_checks'],['confirmDailyTraining','worker_daily_training'],['confirmWorkerTraining','worker_training_checks'],['confirmWorkerNotice','worker_notice_reads']]){const original=Store.prototype[method];Store.prototype[method]=function(...args){const db=this.db,exec=db.exec,prepare=db.prepare;let notified=false;const notify=()=>{if(!notified){notified=true;process.stdout.write('REPORT_SAVE\\n')}};db.exec=function(sql){if(sql==='BEGIN IMMEDIATE')notify();return exec.call(this,sql)};db.prepare=function(sql){if(sql.includes('INSERT')&&sql.includes(table))notify();return prepare.call(this,sql)};try{return original.apply(this,args)}finally{db.exec=exec;db.prepare=prepare}};}`,child=spawn(process.execPath,['--import',`data:text/javascript,${encodeURIComponent(trace)}`,'server.js'],{cwd:process.cwd(),env:{...process.env,PORT:String(port),JWEB_DATA_DIR:dir,JWEB_ADMIN_PASSWORD:'test-password-12345'},stdio:['ignore','pipe','pipe']});let db,locked=false;
+  try{
+    await Promise.race([once(child.stdout,'data'),once(child,'exit').then(()=>{throw Error('시험 서버가 종료됐습니다.');})]);const base=`http://127.0.0.1:${port}`,send=(path,method='GET',data,cookie)=>fetch(base+path,{method,headers:{...(data?{'content-type':'application/json'}:{}),...(cookie?{cookie}:{})},...(data?{body:JSON.stringify(data)}:{})}),admin=(await send('/api/login','POST',{password:'test-password-12345'})).headers.get('set-cookie').split(';')[0],site=await (await send('/api/sites','POST',{name:'가상 현장'},admin)).json(),invitation=await (await send(`/api/sites/${site.id}/invitation`,'POST',{},admin)).json(),token=new URL(invitation.link).searchParams.get('token'),person={token,name:'가상 근로자',category:'직영',company:'가상 업체',occupation:'가상 직종',loginId:'report_race',password:'virtual-password-123',acknowledged:true,profile:{birthDate:'2000-01-01',phone:'010-0000-0000'}};
+    assert.equal((await send('/api/join','POST',person)).status,201);const login=async(loginId=person.loginId,cookie)=>{const r=await send('/api/worker/login','POST',{token,loginId,password:person.password},cookie);assert.equal(r.status,200);assert.equal(r.headers.get('cache-control'),'no-store');return {cookie:r.headers.get('set-cookie').split(';')[0],...(await r.json())};},png=new PNG({width:1,height:1});png.data[3]=255;const bytes=PNG.sync.write(png),photo=`data:image/png;base64,${bytes.toString('base64')}`;db=new DatabaseSync(join(dir,'jweb.sqlite'));db.exec('PRAGMA busy_timeout=3000');let current=await login();assert.equal((await send('/api/join','POST',{...person,name:'가상 B',loginId:'report_other'})).status,201);
+
+    const a=current,b=await login('report_other'),now=new Date(),date=new Date(now.getTime()-now.getTimezoneOffset()*60000).toISOString().slice(0,10),signature=photo;
+    for(const person of [a,b])db.prepare("INSERT INTO worker_permissions(worker_id,permission) VALUES(?,'risk')").run(person.worker.id);
+    const document=(type,details={})=>Number(db.prepare("INSERT INTO documents(site_id,type,title,date,body,status,details) VALUES(?,?,?,?,'가상 본문','approved',?)").run(site.id,type,'가상 문서',date,JSON.stringify(details)).lastInsertRowid);
+    const meeting=document('safety_meeting',{workerSnapshot:[{id:a.worker.id},{id:b.worker.id}]}),training=document('education'),notice=document('notice');
+    const scenarios=[['/api/worker/meetings',{documentId:meeting,signature},'worker_meeting_checks',200],['/api/worker/training',{documentId:training,rightsConfirmed:true,signature},'worker_training_checks',200],['/api/worker/notices/'+notice+'/confirm',{signature,version:0},'worker_notice_reads',200],['/api/worker/self-check',{answers:{equipment:true,sober:true,exercise:true,briefing:true},signature},'worker_self_checks',200],['/api/worker/daily-training',{kinds:['tbm'],rightsConfirmed:true,signature},'worker_daily_training',200],['/api/worker/documents',{type:'risk',title:'가상 신규',date,body:'가상 작성',details:{}},'worker_authored_documents',201]];
+    for(const [path,data,table,status] of scenarios){
+      current=await login('report_other');const count=()=>db.prepare('SELECT count(*) AS n FROM '+table).get().n,before=count();
+      for(const reportContext of [undefined,a.reportContext,b.reportContext,{...current.reportContext,siteId:99999},{...current.reportContext,workerId:a.worker.id}]){
+        const response=await send(path,'POST',{...data,reportContext},current.cookie);assert.equal(response.status,409,path);assert.equal((await response.json()).sessionChanged,true);assert.equal(count(),before,path);
+      }
+      db.exec('BEGIN IMMEDIATE');locked=true;const started=once(child.stdout,'data'),pending=send(path,'POST',{...data,reportContext:current.reportContext},current.cookie);pending.catch(()=>{});assert.match(String((await started)[0]),/REPORT_SAVE/);db.prepare('DELETE FROM worker_sessions WHERE worker_id=?').run(current.worker.id);db.exec('COMMIT');locked=false;assert.equal((await pending).status,401,path);assert.equal(count(),before);
+      current=await login('report_other');db.exec('BEGIN IMMEDIATE');locked=true;const blockedStart=once(child.stdout,'data'),blocked=send(path,'POST',{...data,reportContext:current.reportContext},current.cookie);blocked.catch(()=>{});await blockedStart;db.prepare("INSERT INTO site_worker_blocks(site_id,date,kind) VALUES(?,?,'holiday')").run(site.id,date);db.exec('COMMIT');locked=false;assert.equal((await blocked).status,403,path);assert.equal(count(),before);db.prepare('DELETE FROM site_worker_blocks WHERE site_id=?').run(site.id);
+      const valid=await send(path,'POST',{...data,reportContext:current.reportContext},current.cookie);assert.equal(valid.status,status,path+' '+JSON.stringify(await valid.json()));assert.equal(count(),before+1,path);const saved=db.prepare('SELECT worker_id FROM '+table+' ORDER BY rowid DESC LIMIT 1').get();assert.equal(saved.worker_id,current.worker.id);
+    }
+  }finally{if(db){if(locked)db.exec('ROLLBACK');db.close();}if(child.exitCode===null){const exited=once(child,'exit');child.kill();await exited;}rmSync(dir,{recursive:true,force:true});}
+});

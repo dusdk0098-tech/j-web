@@ -10,7 +10,7 @@ function setup() {
   const date={value:'2026-11-01'},list={textContent:'',children:[],replaceChildren(){this.children=[];this.textContent='';},append(item){this.children.push(item);}},panel={isConnected:true},pending=[];
   const document={createElement(){return {children:[],append(...items){this.children.push(...items);}};}};
   const fetch=(url,options)=>new Promise(resolve=>pending.push({url,options,resolve}));
-  const load=runInNewContext(`${source.slice(start,end)};loadManaged`,{date,list,panel,document,fetch,encodeURIComponent,Error,JSON});
+  const load=runInNewContext(`${source.slice(start,end)};loadManaged`,{date,list,panel,document,fetch,reportContext:{workerId:1,siteId:1,generation:'screen'},encodeURIComponent,Error,JSON});
   const reply=(request,rows,ok=true)=>request.resolve({ok,json:async()=>rows});
   return {date,list,panel,pending,load,reply};
 }
@@ -37,7 +37,7 @@ test('위임 출역 화면은 조회한 변경 번호를 보내고 충돌을 표
   const {list,pending,load,reply}=setup(),query=load();
   reply(pending[0],[{id:2,name:'가상',company:'가상',present:false,day_version:4}]);await query;
   const button=list.children[0].children[1],action=button.onclick();
-  assert.equal(JSON.parse(pending[1].options.body).expectedDayVersion,4);
+  assert.equal(JSON.parse(pending[1].options.body).expectedDayVersion,4);assert.deepEqual(JSON.parse(pending[1].options.body).reportContext,{workerId:1,siteId:1,generation:'screen'});
   reply(pending[1],{error:'일별 출역 기록이 변경되었습니다. 다시 조회해 주세요.'},false);await action;
   assert.match(list.children[0].children[0].textContent,/다시 조회/);assert.equal(button.disabled,false);assert.equal(pending.length,2);
 });
