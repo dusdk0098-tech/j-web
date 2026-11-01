@@ -113,6 +113,7 @@ export class Store {
       CREATE TABLE IF NOT EXISTS safety_cost_report_photos (id INTEGER PRIMARY KEY,document_id INTEGER NOT NULL REFERENCES documents(id),cost_id INTEGER NOT NULL,name TEXT NOT NULL,data BLOB NOT NULL);
       CREATE TABLE IF NOT EXISTS safety_cost_month_files (id INTEGER PRIMARY KEY,site_id INTEGER NOT NULL REFERENCES sites(id),date TEXT NOT NULL,note TEXT NOT NULL,name TEXT NOT NULL,data BLOB NOT NULL);
       CREATE TABLE IF NOT EXISTS equipment (id INTEGER PRIMARY KEY,site_id INTEGER NOT NULL REFERENCES sites(id),kind TEXT NOT NULL,model TEXT NOT NULL,capacity TEXT NOT NULL,manufacturer TEXT NOT NULL,registration TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS equipment_attendance (id INTEGER PRIMARY KEY,site_id INTEGER NOT NULL REFERENCES sites(id),equipment_id INTEGER NOT NULL REFERENCES equipment(id),date TEXT NOT NULL,equipment_snapshot TEXT NOT NULL,driver_name TEXT NOT NULL,driver_birth TEXT NOT NULL,driver_phone TEXT NOT NULL,note TEXT NOT NULL,version INTEGER NOT NULL DEFAULT 1);
       CREATE TABLE IF NOT EXISTS work_places (id INTEGER PRIMARY KEY,site_id INTEGER NOT NULL REFERENCES sites(id),name TEXT NOT NULL,details TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS rigging (id INTEGER PRIMARY KEY,site_id INTEGER NOT NULL REFERENCES sites(id),category TEXT NOT NULL,kind TEXT NOT NULL,name TEXT NOT NULL,details TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS rigging_photos (id INTEGER PRIMARY KEY,rigging_id INTEGER NOT NULL REFERENCES rigging(id),name TEXT NOT NULL,data BLOB NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
@@ -730,6 +731,21 @@ export class Store {
     }catch(error){this.db.exec('ROLLBACK');throw error;}
   }
   equipment(siteId) {return this.db.prepare('SELECT * FROM equipment WHERE site_id=? ORDER BY kind,model,id').all(Number(siteId));}
+  equipmentAttendance(siteId,month){
+    siteId=Number(siteId);month=monthValue(month);if(!this.db.prepare('SELECT 1 FROM sites WHERE id=?').get(siteId))throw new Error('현장을 확인해 주세요.');
+    return this.db.prepare('SELECT * FROM equipment_attendance WHERE site_id=? AND date BETWEEN ? AND ? ORDER BY date DESC,id DESC').all(siteId,`${month}-01`,`${month}-31`).map(row=>({...row,equipment_snapshot:JSON.parse(row.equipment_snapshot)}));
+  }
+  saveEquipmentAttendance(input,id=null,onAuthorize=()=>{}){
+    const siteId=Number(input.siteId),date=dateValue(input.date),optional=(value,label)=>{if(typeof value!=='string'||value.length>200||/[\x00-\x1f\x7f]/.test(value))throw new Error(`${label}을 확인해 주세요.`);return value.trim();},driver=optional(input.driverName,'가상 운전원'),birthText=optional(input.driverBirth,'가상 생년월일'),birth=birthText?dateValue(birthText):'',phone=optional(input.driverPhone,'가상 연락처'),note=optional(input.note,'가상 비고');
+    this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();const site=this.db.prepare('SELECT 1 FROM sites WHERE id=?').get(siteId);if(!site)throw new Error('현장을 확인해 주세요.');
+      if(id!==null){const row=this.db.prepare('SELECT version FROM equipment_attendance WHERE id=? AND site_id=?').get(Number(id),siteId);if(!row)throw new Error('같은 현장의 장비 출역 기록을 확인해 주세요.');if(!Number.isSafeInteger(input.expectedVersion)||row.version!==input.expectedVersion)throw Object.assign(new Error('장비 출역 기록이 변경되었습니다. 다시 조회해 주세요.'),{sessionStatus:409});this.db.prepare('UPDATE equipment_attendance SET date=?,driver_name=?,driver_birth=?,driver_phone=?,note=?,version=version+1 WHERE id=? AND site_id=?').run(date,driver,birth,phone,note,Number(id),siteId);
+      }else{const equipment=this.db.prepare('SELECT * FROM equipment WHERE id=? AND site_id=?').get(Number(input.equipmentId),siteId);if(!equipment)throw new Error('같은 현장의 장비를 선택해 주세요.');id=Number(this.db.prepare('INSERT INTO equipment_attendance(site_id,equipment_id,date,equipment_snapshot,driver_name,driver_birth,driver_phone,note) VALUES(?,?,?,?,?,?,?,?)').run(siteId,equipment.id,date,JSON.stringify(equipment),driver,birth,phone,note).lastInsertRowid);}
+      const result=this.db.prepare('SELECT id,version FROM equipment_attendance WHERE id=?').get(Number(id));this.db.exec('COMMIT');return result;
+    }catch(error){this.db.exec('ROLLBACK');throw error;}
+  }
+  deleteEquipmentAttendance(siteId,id,version,onAuthorize=()=>{}){
+    this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();const row=this.db.prepare('SELECT version FROM equipment_attendance WHERE id=? AND site_id=?').get(Number(id),Number(siteId));if(!row)throw new Error('같은 현장의 장비 출역 기록을 확인해 주세요.');if(!Number.isSafeInteger(version)||row.version!==version)throw Object.assign(new Error('장비 출역 기록이 변경되었습니다. 다시 조회해 주세요.'),{sessionStatus:409});this.db.prepare('DELETE FROM equipment_attendance WHERE id=? AND site_id=?').run(Number(id),Number(siteId));this.db.exec('COMMIT');}catch(error){this.db.exec('ROLLBACK');throw error;}
+  }
   equipmentCopySource(siteId,id){
     const source=this.db.prepare('SELECT * FROM equipment WHERE site_id=? AND id=?').get(Number(siteId),Number(id));if(!source)throw new Error('선택한 현장의 장비를 확인해 주세요.');
     const files=this.db.prepare('SELECT id,category,name,data FROM equipment_attachments WHERE equipment_id=? ORDER BY id').all(source.id),hash=createHash('sha256').update(JSON.stringify(source));
