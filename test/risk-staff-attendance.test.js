@@ -1,4 +1,4 @@
-import { fetchWithWorkerSession as fetch } from './helpers/worker-session-request.js';
+import { fetchWithRiskRevision as fetch } from './helpers/risk-revision-request.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';

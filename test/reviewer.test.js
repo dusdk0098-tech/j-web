@@ -1,4 +1,4 @@
-import { fetchWithApprovalCycle as fetch } from './helpers/approval-request.js';
+import { fetchWithRiskRevision as fetch } from './helpers/risk-revision-request.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync,rmSync } from 'node:fs';

@@ -66,7 +66,7 @@ function harness(){
     if(path.includes('joined-on'))return [worker];
     return changed?{...preview,workers:[{...preview.workers[0],...changed}]}:preview;
   };
-  const context={detailEpoch:0,state,content:{children:[],style:{},append(){},querySelectorAll:()=>images},document:{body:{inert:false},createDocumentFragment:()=>({append:group=>groups.push(group)}),createElement:()=>({})},api,adminSession:Promise.resolve({context:'test-session'}),esc,dailyBatchReport,joinedBatchPreview,$:id=>nodes[id]??={},flash(){},showError:error=>errors.push(error.message),window:{print(){prints++;}},render:async()=>{}};
+  const context={freezeBatchImages:async()=>({dispose(){},check:async()=>{}}),detailEpoch:0,state,content:{children:[],style:{},append(){},querySelectorAll:()=>images},document:{body:{inert:false},createDocumentFragment:()=>({querySelectorAll:()=>[],append:group=>groups.push(group)}),createElement:()=>({})},api,adminSession:Promise.resolve({context:'test-session'}),esc,dailyBatchReport,joinedBatchPreview,$:id=>nodes[id]??={},flash(){},showError:error=>errors.push(error.message),window:{print(){prints++;}},render:async()=>{}};
   runInNewContext(source.slice(start,end),context);
   return {context,nodes,groups,errors,images,prints:()=>prints,deny(){allowed=false;},change(value={memo:'바뀜'}){changed=value;},block(promise){gate=promise;}};
 }

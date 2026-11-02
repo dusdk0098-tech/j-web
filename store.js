@@ -291,6 +291,11 @@ export class Store {
     if(!this.db.prepare('PRAGMA table_info(risk_activities)').all().some(c=>c.name==='worker_snapshot'))this.db.exec("ALTER TABLE risk_activities ADD COLUMN worker_snapshot TEXT NOT NULL DEFAULT '[]'");
     if(!this.db.prepare('PRAGMA table_info(risk_activities)').all().some(c=>c.name==='reviewer_snapshot'))this.db.exec("ALTER TABLE risk_activities ADD COLUMN reviewer_snapshot TEXT NOT NULL DEFAULT '[]'");
     if(!this.db.prepare('PRAGMA table_info(risk_activities)').all().some(c=>c.name==='classification'))this.db.exec("ALTER TABLE risk_activities ADD COLUMN classification TEXT NOT NULL DEFAULT ''");
+    if(!this.db.prepare('PRAGMA table_info(risk_activities)').all().some(c=>c.name==='revision'))this.db.exec("ALTER TABLE risk_activities ADD COLUMN revision TEXT NOT NULL DEFAULT ''");
+    this.db.exec(`UPDATE risk_activities SET revision=lower(hex(randomblob(32))) WHERE revision='';
+      CREATE TRIGGER IF NOT EXISTS risk_activity_created_revision AFTER INSERT ON risk_activities BEGIN UPDATE risk_activities SET revision=lower(hex(randomblob(32))) WHERE id=NEW.id; END;
+      CREATE TRIGGER IF NOT EXISTS risk_activity_changed_revision AFTER UPDATE ON risk_activities WHEN NEW.revision=OLD.revision BEGIN UPDATE risk_activities SET revision=lower(hex(randomblob(32))) WHERE id=NEW.id; END;`);
+    for(const table of ['risk_activity_photos','risk_activity_signatures'])for(const operation of ['INSERT','UPDATE','DELETE'])this.db.exec(`CREATE TRIGGER IF NOT EXISTS ${table}_${operation.toLowerCase()}_revision AFTER ${operation} ON ${table} BEGIN UPDATE risk_activities SET revision=lower(hex(randomblob(32))) WHERE id=${operation==='DELETE'?'OLD':'NEW'}.activity_id; END;`);
     if(!this.db.prepare('PRAGMA table_info(risk_activity_photos)').all().some(c=>c.name==='purpose'))this.db.exec("ALTER TABLE risk_activity_photos ADD COLUMN purpose TEXT NOT NULL DEFAULT 'photo'");
     if(!this.db.prepare('PRAGMA table_info(hazard_reports)').all().some(c=>c.name==='worker_id'))this.db.exec('ALTER TABLE hazard_reports ADD COLUMN worker_id INTEGER REFERENCES workers(id)');
     if(!this.db.prepare('PRAGMA table_info(hazard_reports)').all().some(c=>c.name==='status'))this.db.exec("ALTER TABLE hazard_reports ADD COLUMN status TEXT NOT NULL DEFAULT 'received'");
@@ -2084,15 +2089,20 @@ export class Store {
   deletePermitExtension(documentId,id,onAuthorize=()=>{}){this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();this.permitExtensions(documentId);if(!this.db.prepare('DELETE FROM permit_extensions WHERE id=? AND document_id=?').run(Number(id),Number(documentId)).changes)throw new Error('시험 연장 기록을 찾을 수 없습니다.');this.db.exec('COMMIT');}catch(error){this.db.exec('ROLLBACK');throw error;}}
   riskActivities(documentId){const doc=this.document(documentId);if(!doc||doc.type!=='risk')throw new Error('위험성평가를 확인해 주세요.');return this.db.prepare('SELECT a.*,EXISTS(SELECT 1 FROM risk_activity_signatures s WHERE s.activity_id=a.id) AS has_signature FROM risk_activities a WHERE a.document_id=? ORDER BY a.date DESC,a.id DESC').all(Number(documentId));}
   riskActivitySignature(documentId,id){return this.db.prepare('SELECT s.signature,s.created_at FROM risk_activity_signatures s JOIN risk_activities a ON a.id=s.activity_id JOIN documents d ON d.id=a.document_id WHERE d.id=? AND d.type=\'risk\' AND a.id=?').get(Number(documentId),Number(id))||null;}
-  saveRiskActivitySignature(documentId,id,signature,onAuthorize=()=>{}){
+  checkRiskActivityRevision(documentId,id,expectedRevision){
+    const current=this.db.prepare('SELECT revision FROM risk_activities WHERE id=? AND document_id=?').get(Number(id),Number(documentId));
+    if(expectedRevision!==undefined&&(!current||typeof expectedRevision!=='string'||!expectedRevision||expectedRevision!==current.revision))throw Object.assign(new Error('활동 또는 첨부·서명이 변경되었습니다. 입력을 보관하고 최신 활동을 다시 열어 주세요.'),{sessionStatus:409});
+  }
+  saveRiskActivitySignature(documentId,id,signature,onAuthorize=()=>{},expectedRevision){
     const bytes=signatureBytes(signature);this.db.exec('BEGIN IMMEDIATE');try{
-      onAuthorize();const activity=this.db.prepare("SELECT a.* FROM risk_activities a JOIN documents d ON d.id=a.document_id WHERE d.id=? AND d.type='risk' AND a.id=? AND a.kind='weekly' AND a.entry_mode='manual'").get(Number(documentId),Number(id));
+      onAuthorize();this.checkRiskActivityRevision(documentId,id,expectedRevision);const activity=this.db.prepare("SELECT a.* FROM risk_activities a JOIN documents d ON d.id=a.document_id WHERE d.id=? AND d.type='risk' AND a.id=? AND a.kind='weekly' AND a.entry_mode='manual'").get(Number(documentId),Number(id));
       if(!activity||!activity.period_from||!activity.period_to||!activity.place||!activity.host||!activity.content||!(JSON.parse(activity.worker_snapshot).length||JSON.parse(activity.reviewer_snapshot).length))throw new Error('직접 작성한 주간 점검의 필수 내용을 확인해 주세요.');
       this.db.prepare('INSERT INTO risk_activity_signatures(activity_id,signature) VALUES(?,?) ON CONFLICT(activity_id) DO UPDATE SET signature=excluded.signature,created_at=CURRENT_TIMESTAMP').run(activity.id,bytes);this.db.exec('COMMIT');
     }catch(error){this.db.exec('ROLLBACK');throw error;}
   }
   saveRiskActivity(documentId,input,id=null,onAuthorize=()=>{}){
     this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();
+    if(id!==null)this.checkRiskActivityRevision(documentId,id,input.expectedRevision);
     this.riskActivities(documentId);
     if(!['meeting','weekly','education','other'].includes(input.kind))throw new Error('시험 활동 종류를 확인해 주세요.');
     const date=dateValue(input.date),fields={};for(const key of ['place','host','participants','content']){if(typeof input[key]!=='string'||input[key].length>2000)throw new Error('시험 활동 내용을 확인해 주세요.');fields[key]=input[key].trim();}
@@ -2119,18 +2129,19 @@ export class Store {
     else result=this.db.prepare('INSERT INTO risk_activities(document_id,kind,date,place,host,participants,content,period_from,period_to,entry_mode,worker_snapshot,reviewer_snapshot,classification) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)').run(Number(documentId),input.kind,date,fields.place,fields.host,fields.participants,fields.content,from,to,mode,workers,reviewers,input.kind==='other'?classification.trim():'').lastInsertRowid;
     this.db.exec('COMMIT');return result;}catch(error){this.db.exec('ROLLBACK');throw error;}
   }
-  deleteRiskActivity(documentId,id){this.riskActivities(documentId);if(!this.db.prepare('DELETE FROM risk_activities WHERE id=? AND document_id=?').run(Number(id),Number(documentId)).changes)throw new Error('시험 활동을 찾을 수 없습니다.');}
+  deleteRiskActivity(documentId,id,expectedRevision,onAuthorize=()=>{}){this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();this.checkRiskActivityRevision(documentId,id,expectedRevision);this.riskActivities(documentId);if(!this.db.prepare('DELETE FROM risk_activities WHERE id=? AND document_id=?').run(Number(id),Number(documentId)).changes)throw new Error('시험 활동을 찾을 수 없습니다.');this.db.exec('COMMIT');}catch(error){this.db.exec('ROLLBACK');throw error;}}
   riskActivityPhotos(documentId,id){if(!this.db.prepare('SELECT 1 FROM risk_activities WHERE id=? AND document_id=?').get(Number(id),Number(documentId)))throw new Error('시험 활동을 찾을 수 없습니다.');return this.db.prepare("SELECT id,name,purpose,length(data) AS size,CASE WHEN substr(data,1,8)=X'89504E470D0A1A0A' THEN 'image/png' WHEN substr(data,1,3)=X'FFD8FF' THEN 'image/jpeg' ELSE NULL END AS image_type FROM risk_activity_photos WHERE activity_id=? ORDER BY id").all(Number(id));}
-  addRiskActivityPhoto(documentId,id,name,data,purpose='photo'){
+  addRiskActivityPhoto(documentId,id,name,data,purpose='photo',expectedRevision,onAuthorize=()=>{}){
+    this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();this.checkRiskActivityRevision(documentId,id,expectedRevision);
     const photos=this.riskActivityPhotos(documentId,id);if(photos.length>=20)throw new Error('시험 사진은 20개까지 가능합니다.');
     if(typeof name!=='string'||!name.trim()||name.length>200||/[\\/\x00-\x1f\x7f]/.test(name))throw new Error('사진 이름을 확인해 주세요.');
     if(!(data instanceof Uint8Array)||!data.length||data.length>2*1024*1024)throw new Error('사진은 1바이트 이상 2MB 이하여야 합니다.');
     const activity=this.db.prepare('SELECT kind,entry_mode FROM risk_activities WHERE id=? AND document_id=?').get(Number(id),Number(documentId));if(!['photo','minutes','material'].includes(purpose)||purpose==='minutes'&&(activity.kind!=='weekly'||activity.entry_mode!=='scan')||purpose==='material'&&activity.kind!=='other')throw new Error('첨부 구분을 확인해 주세요.');
     const bytes=Buffer.from(data),image=bytes.subarray(0,8).equals(Buffer.from('89504e470d0a1a0a','hex'))||bytes.subarray(0,3).equals(Buffer.from('ffd8ff','hex'));if(purpose!=='material'&&!image&&!(purpose==='minutes'&&bytes.subarray(0,5).toString()==='%PDF-'))throw new Error('PNG 또는 JPEG 사진이나 허용된 PDF 회의록을 선택해 주세요.');
-    this.db.exec('SAVEPOINT add_risk_activity_file');try{const fileId=this.db.prepare('INSERT INTO risk_activity_photos(activity_id,name,data,purpose) VALUES(?,?,?,?)').run(Number(id),name,bytes,purpose).lastInsertRowid;this.db.prepare('DELETE FROM risk_activity_signatures WHERE activity_id=?').run(Number(id));this.db.exec('RELEASE add_risk_activity_file');return fileId;}catch(error){this.db.exec('ROLLBACK TO add_risk_activity_file');this.db.exec('RELEASE add_risk_activity_file');throw error;}
+    const fileId=this.db.prepare('INSERT INTO risk_activity_photos(activity_id,name,data,purpose) VALUES(?,?,?,?)').run(Number(id),name,bytes,purpose).lastInsertRowid;this.db.prepare('DELETE FROM risk_activity_signatures WHERE activity_id=?').run(Number(id));this.db.exec('COMMIT');return fileId;}catch(error){this.db.exec('ROLLBACK');throw error;}
   }
   riskActivityPhoto(documentId,id,photoId){return this.db.prepare('SELECT p.* FROM risk_activity_photos p JOIN risk_activities a ON a.id=p.activity_id WHERE a.document_id=? AND a.id=? AND p.id=?').get(Number(documentId),Number(id),Number(photoId))||null;}
-  deleteRiskActivityPhoto(documentId,id,photoId){if(!this.riskActivityPhoto(documentId,id,photoId))throw new Error('시험 사진을 찾을 수 없습니다.');this.db.exec('SAVEPOINT delete_risk_activity_file');try{this.db.prepare('DELETE FROM risk_activity_photos WHERE id=?').run(Number(photoId));this.db.prepare('DELETE FROM risk_activity_signatures WHERE activity_id=?').run(Number(id));this.db.exec('RELEASE delete_risk_activity_file');}catch(error){this.db.exec('ROLLBACK TO delete_risk_activity_file');this.db.exec('RELEASE delete_risk_activity_file');throw error;}}
+  deleteRiskActivityPhoto(documentId,id,photoId,expectedRevision,onAuthorize=()=>{}){this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();this.checkRiskActivityRevision(documentId,id,expectedRevision);if(!this.riskActivityPhoto(documentId,id,photoId))throw new Error('시험 사진을 찾을 수 없습니다.');this.db.prepare('DELETE FROM risk_activity_photos WHERE id=?').run(Number(photoId));this.db.prepare('DELETE FROM risk_activity_signatures WHERE activity_id=?').run(Number(id));this.db.exec('COMMIT');}catch(error){this.db.exec('ROLLBACK');throw error;}}
   instructionResult(id){const doc=this.document(id);if(!doc||doc.type!=='instruction')throw new Error('작업지시서를 확인해 주세요.');return this.db.prepare('SELECT date,actor,content,created_at,source,signature IS NOT NULL AS has_signature FROM instruction_results WHERE document_id=?').get(Number(id))||null;}
   instructionSignature(id){return this.db.prepare('SELECT signature FROM instruction_results WHERE document_id=? AND signature IS NOT NULL').get(Number(id))?.signature || null;}
   addAuthorizedInstructionResult(id,input,onAuthorize=()=>{}){

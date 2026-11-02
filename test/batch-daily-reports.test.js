@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {runInNewContext} from 'node:vm';
-import {siteReportsForDay,dailyBatchReport,mountSiteBatchResults,selectBatchItems} from '../public/batch-print.js';
+import {siteReportsForDay,dailyBatchReport,mountSiteBatchResults,selectBatchItems,reloadDailyBatchRows} from '../public/batch-print.js';
 
 const esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const site={id:1,name:'<가상 현장>'},date='2026-11-01';
@@ -41,14 +41,14 @@ test('조회 A→B→A 및 겹친 요청·오래된 오류가 새 결과를 덮�
 function previewContext(api){
   const source=readFileSync(new URL('../public/app.js',import.meta.url),'utf8'),start=source.indexOf('async function showBatchPreview('),end=source.indexOf('async function renderDailyTrainingStatistics(',start),nodes={},groups=[],errors=[],state={page:'site-print',siteId:1,detail:null,admin:{id:1}},images=[];
   let prints=0;
-  const content={children:[],style:{},append(){},querySelectorAll:()=>images},document={body:{inert:false},createDocumentFragment:()=>({append:group=>groups.push(group)}),createElement:()=>({})};
-  const context={detailEpoch:0,state,content,document,api,adminSession:Promise.resolve({context:'virtual-context'}),esc,dailyBatchReport,$:id=>nodes[id]??={},flash(){},showError:error=>errors.push(error.message),window:{print(){prints++;}},render:async()=>{}};
+  const content={children:[],style:{},append(){},querySelectorAll:()=>images},document={body:{inert:false},createDocumentFragment:()=>({querySelectorAll:()=>[],append:group=>groups.push(group)}),createElement:()=>({})};
+  const context={freezeBatchImages:async()=>({dispose(){},check:async()=>{}}),detailEpoch:0,state,content,document,reloadDailyBatchRows,api:path=>path.startsWith('/api/ppe-issues')?Promise.resolve({rows:[]}):api(path),adminSession:Promise.resolve({context:'virtual-context'}),esc,dailyBatchReport,$:id=>nodes[id]??={},flash(){},showError:error=>errors.push(error.message),window:{print(){prints++;}},render:async()=>{}};
   runInNewContext(source.slice(start,end),context);return {context,nodes,groups,errors,images,prints:()=>prints};
 }
 const report={id:1,kind:'ppe-summary',title:'보호구 당일 요약',rows:[],site,date};
 test('선택 미리보기 실패 후 자기 목록 복구는 오류를 표시하고 다른 화면 이동은 보호한다',async()=>{
   for(const mode of ['permission','document']){
-    const p=previewContext(async()=>{throw Error('현재 권한 실패');}),h=harness(async path=>path.startsWith('/api/ppe')?{rows:[]}:[],()=>p.context.showBatchPreview(mode==='document'?[7]:[],[],1,false,mode==='document'?[{id:7,site_id:1}]:null,false,mode==='document'?[]:[report]));
+    const p=previewContext(async()=>{if(mode==='document')return {authenticated:true,admin:{scope:'global'},context:'virtual-context'};throw Error('현재 권한 실패');}),h=harness(async path=>path.startsWith('/api/ppe')?{rows:[]}:[],()=>p.context.showBatchPreview(mode==='document'?[7]:[],[],1,false,mode==='document'?[{id:7,site_id:1}]:null,false,mode==='document'?[]:[report]));
     p.context.renderDetail=async()=>{throw Error('현재 문서 조회 실패');};
     p.context.render=async()=>{p.context.detailEpoch++;h.stop();h.target.isConnected=false;};
     await h.nodes['#site-print-search'].onclick();
@@ -65,7 +65,7 @@ test('선택 미리보기 실패 후 자기 목록 복구는 오류를 표시하
 });
 test('보고서 단독 미리보기는 권한 오류·관리자 변경·미준비 이미지를 인쇄하지 않는다',async()=>{
   let allowed=true,calls=0;const h=previewContext(async()=>{calls++;if(!allowed)throw Error('권한 없음');return {authenticated:true,admin:{scope:'global'},context:'virtual-context'};});
-  await h.context.showBatchPreview([],[],1,false,null,false,[report]);assert.equal(h.groups.length,1);assert.equal(calls,1);assert.equal(h.context.document.body.inert,false);
+  await h.context.showBatchPreview([],[],1,false,null,false,[report]);assert.equal(h.groups.length,1);assert.equal(calls,2);assert.equal(h.context.document.body.inert,false);
   h.images.push({complete:false,naturalWidth:0});await h.nodes['#batch-print'].onclick();assert.equal(h.prints(),0);
   h.images.length=0;await h.nodes['#batch-print'].onclick();assert.equal(h.prints(),1);
   allowed=false;await h.nodes['#batch-print'].onclick();assert.equal(h.prints(),1);assert.deepEqual(h.errors,['권한 없음']);

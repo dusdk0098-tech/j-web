@@ -31,6 +31,16 @@ export async function siteDocumentsForDay(sites,date,api) {
   return results.flatMap(({site,documents})=>documents.filter(doc=>doc.site_id===site.id&&doc.date===date&&doc.type!=='office').map(doc=>({...doc,site_name:site.name})));
 }
 
+export async function reloadDailyBatchRows(report,api) {
+  const {kind,site,date}=report;
+  if(kind==='attendance')return (await api(`/api/attendance?${new URLSearchParams({siteId:String(site.id),date})}`)).filter(row=>row.present);
+  if(!['ppe-summary','ppe-detail'].includes(kind))throw Error('출력할 보고서 종류를 확인해 주세요.');
+  const rows=(await api(`/api/ppe-issues?${new URLSearchParams({siteId:String(site.id),month:date.slice(0,7)})}`)).rows.filter(row=>row.date===date);
+  if(kind==='ppe-detail')return rows;
+  const totals=new Map();for(const row of rows)totals.set(row.item,(totals.get(row.item)||0)+row.quantity);
+  return [...totals].map(([item,quantity])=>({item,quantity}));
+}
+
 export async function siteReportsForDay(sites,date,api) {
   if(!Array.isArray(sites)||!sites.length||!/^\d{4}-\d{2}-\d{2}$/.test(date))throw Error('현장과 날짜를 선택해 주세요.');
   const result=await Promise.all(sites.map(async site=>{
