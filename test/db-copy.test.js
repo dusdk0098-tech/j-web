@@ -11,6 +11,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { PNG } from 'pngjs';
 import jsQR from 'jsqr';
 import { Store } from '../store.js';
+import { issueWorkerInvitationQr } from '../qr-issue.js';
 import { WorkerSessions, ReviewerSessions } from '../auth.js';
 import { ClientAccounts } from '../client-accounts.js';
 
@@ -26,7 +27,7 @@ test('실행 중 DB의 일관된 사본을 만들고 별도 폴더에서 문서�
   try{
     const site=store.createSite({name:'가상 현장'}),worker=store.createWorker({siteId:site.id,name:'가상 근로자',category:'직영',company:'가상 업체',occupation:'가상 직종'}),reviewer=store.createReviewer({siteId:site.id,loginId:'virtual_reviewer',name:'가상 직원',password:'virtual-password-123'}),doc=store.createDocument({siteId:site.id,type:'tbm',title:'가상 문서',date:'2026-10-01',body:'가상 내용'}),attachment=store.addAttachment(doc.id,'가상.txt',Buffer.from('가상 첨부'));
     const equipment=store.createEquipment({siteId:site.id,kind:'가상 장비',model:'가상 모델',capacity:'',manufacturer:'',registration:'가상 번호'}),attendance=store.saveEquipmentAttendance({siteId:site.id,equipmentId:equipment.id,date:'2026-10-01',driverName:'가상 운전원',driverBirth:'2000-01-01',driverPhone:'010-0000-0000',note:'가상 비고'});store.updateEquipment(equipment.id,{siteId:site.id,kind:'가상 장비',model:'변경된 모델',capacity:'',manufacturer:'',registration:'가상 번호'});
-    const invitation=store.createInvitation(site.id),siteKey=store.siteAccessKey(site.id);store.openSiteRegistration(site.id);
+    const invitation=store.createInvitation(site.id),siteKey=store.siteAccessKey(site.id),claimWorker=store.createWorker({siteId:site.id,name:'가상 미가입 출입자',category:'직영',company:'가상 업체',occupation:'가상 직종'}),claim=await issueWorkerInvitationQr(store,site.id,claimWorker.id,claimWorker.version,'https://example.test',async()=> '가상 QR'),claimToken=new URL(claim.link).searchParams.get('token');store.openSiteRegistration(site.id);
     const salt=Buffer.alloc(16,1);store.db.prepare('INSERT INTO worker_accounts(worker_id,site_id,login_id,salt,password_hash) VALUES(?,?,?,?,?)').run(worker.id,site.id,'virtual_worker',salt,scryptSync('virtual-password-123',salt,32));
     const workerToken='A'.repeat(43),reviewerToken='B'.repeat(43),hash=token=>createHash('sha256').update(token).digest('hex'),workerHash=hash(workerToken),reviewerHash=hash(reviewerToken),expires=Date.now()+3600000;
     const workerSessions=new WorkerSessions(store.db),reviewerSessions=new ReviewerSessions(store.db),credential=store.db.prepare('SELECT password_hash,auth_version FROM reviewers WHERE id=?').get(reviewer.id);
@@ -55,9 +56,9 @@ test('실행 중 DB의 일관된 사본을 만들고 별도 폴더에서 문서�
       assert.equal(restored.db.prepare('SELECT count(*) AS n FROM worker_sessions').get().n,0);assert.equal(restored.db.prepare('SELECT count(*) AS n FROM reviewer_sessions').get().n,0);
       assert.equal(restored.db.prepare('SELECT count(*) AS n FROM client_sessions').get().n,0);
       assert.equal(restored.siteFromAccess(siteKey),null);assert.match(restored.siteAccessKey(site.id),/^[\w-]{43}$/);assert.notEqual(restored.siteAccessKey(site.id),siteKey);
-      assert.equal(restored.invitation(invitation.token),null);assert.equal(restored.siteRegistrationOpen(site.id),false);
+      assert.equal(restored.invitation(invitation.token),null);assert.equal(restored.invitation(claimToken),null);assert.equal(restored.siteRegistrationOpen(site.id),false);
     }finally{restored.close();}
-    assert.equal(store.siteFromAccess(siteKey).id,site.id);assert.equal(store.invitation(invitation.token).id,site.id);assert.equal(store.siteRegistrationOpen(site.id),true);
+    assert.equal(store.siteFromAccess(siteKey).id,site.id);assert.equal(store.invitation(invitation.token).id,site.id);assert.equal(store.invitation(claimToken).worker_id,claimWorker.id);assert.equal(store.siteRegistrationOpen(site.id),true);
     const reservation=createServer();await new Promise(resolve=>reservation.listen(0,'127.0.0.1',resolve));const port=reservation.address().port;await new Promise(resolve=>reservation.close(resolve));
     child=spawn(process.execPath,['server.js'],{cwd:process.cwd(),env:{...process.env,PORT:String(port),JWEB_DATA_DIR:restoreDir,JWEB_ADMIN_PASSWORD:'virtual-admin-password'},stdio:['ignore','pipe','pipe']});
     await Promise.race([once(child.stdout,'data'),once(child,'exit').then(()=>{throw Error('복원 시험 서버가 종료됐습니다.');})]);

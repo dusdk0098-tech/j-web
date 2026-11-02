@@ -245,6 +245,10 @@ export class Store {
     this.db.exec('BEGIN IMMEDIATE');try{
       if(!this.db.prepare('PRAGMA table_info(reviewers)').all().some(c=>c.name==='auth_version'))this.db.exec("ALTER TABLE reviewers ADD COLUMN auth_version TEXT NOT NULL DEFAULT ''");
       if(!this.db.prepare('PRAGMA table_info(invitations)').all().some(c=>c.name==='pending'))this.db.exec('ALTER TABLE invitations ADD COLUMN pending INTEGER NOT NULL DEFAULT 0 CHECK(pending IN (0,1))');
+      if(!this.db.prepare('PRAGMA table_info(invitations)').all().some(c=>c.name==='worker_id'))this.db.exec('ALTER TABLE invitations ADD COLUMN worker_id INTEGER REFERENCES workers(id)');
+      if(!this.db.prepare('PRAGMA table_info(invitations)').all().some(c=>c.name==='worker_version'))this.db.exec('ALTER TABLE invitations ADD COLUMN worker_version TEXT');
+      this.db.exec('CREATE INDEX IF NOT EXISTS invitations_worker ON invitations(worker_id) WHERE worker_id IS NOT NULL');
+      this.db.exec('CREATE TRIGGER IF NOT EXISTS worker_invitation_update AFTER UPDATE ON workers BEGIN UPDATE invitations SET revoked=1 WHERE worker_id=NEW.id AND revoked=0; END');
       if(!this.db.prepare('PRAGMA table_info(schedules)').all().some(c=>c.name==='target_id'))this.db.exec('ALTER TABLE schedules ADD COLUMN target_id INTEGER REFERENCES reviewers(id)');
       if(!this.db.prepare('PRAGMA table_info(schedules)').all().some(c=>c.name==='target_name'))this.db.exec("ALTER TABLE schedules ADD COLUMN target_name TEXT NOT NULL DEFAULT ''");
       if(!this.db.prepare('PRAGMA table_info(board_posts)').all().some(c=>c.name==='author_id'))this.db.exec('ALTER TABLE board_posts ADD COLUMN author_id INTEGER REFERENCES reviewers(id)');
@@ -1600,6 +1604,29 @@ export class Store {
     this.db.prepare('INSERT INTO invitations(token_hash,site_id,expires_at,pending) VALUES(?,?,?,?)').run(hash,Number(siteId),expiresAt,pending?1:0);
     return { token, expiresAt };
   }
+  createWorkerInvitation(siteId,workerId,version,token,authorize=()=>{}) {
+    if(!Number.isSafeInteger(Number(siteId))||Number(siteId)<1||!Number.isSafeInteger(Number(workerId))||Number(workerId)<1||typeof version!=='string'||!/^[a-f0-9]{64}$/.test(version)||typeof token!=='string'||!/^[\w-]{43}$/.test(token))throw new Error('출입자와 가입 주소를 확인해 주세요.');
+    const expiresAt=Date.now()+24*60*60*1000,hash=createHash('sha256').update(token).digest('hex');
+    this.db.exec('BEGIN IMMEDIATE');try{authorize();
+      const row=this.db.prepare('SELECT * FROM workers WHERE id=? AND site_id=?').get(Number(workerId),Number(siteId));
+      if(!row||workerVersion(row)!==version)throw Object.assign(new Error('출입자 정보가 변경되었습니다. 다시 조회해 주세요.'),{sessionStatus:409});
+      if(this.db.prepare('SELECT 1 FROM worker_accounts WHERE worker_id=?').get(row.id)||this.db.prepare('SELECT 1 FROM join_acknowledgements WHERE worker_id=?').get(row.id))throw Object.assign(new Error('이미 가입 기록이나 계정이 있는 출입자입니다.'),{sessionStatus:409});
+      this.db.prepare('INSERT INTO invitations(token_hash,site_id,expires_at,pending,worker_id,worker_version) VALUES(?,?,?,1,?,?)').run(hash,Number(siteId),expiresAt,row.id,version);
+      this.db.exec('COMMIT');return expiresAt;
+    }catch(error){this.db.exec('ROLLBACK');throw error;}
+  }
+  activateWorkerInvitation(token,authorize=()=>{}) {
+    const hash=createHash('sha256').update(token).digest('hex');this.db.exec('BEGIN IMMEDIATE');try{authorize();
+      const invite=this.db.prepare('SELECT site_id,worker_id,worker_version FROM invitations WHERE token_hash=? AND pending=1 AND revoked=0 AND expires_at>? AND worker_id IS NOT NULL').get(hash,Date.now());
+      if(!invite){this.db.exec('COMMIT');return false;}
+      const row=this.db.prepare('SELECT * FROM workers WHERE id=? AND site_id=?').get(invite.worker_id,invite.site_id);
+      if(!row||workerVersion(row)!==invite.worker_version||this.db.prepare('SELECT 1 FROM worker_accounts WHERE worker_id=?').get(invite.worker_id)||this.db.prepare('SELECT 1 FROM join_acknowledgements WHERE worker_id=?').get(invite.worker_id))throw Object.assign(new Error('출입자 정보가 변경되었습니다. 다시 조회해 주세요.'),{sessionStatus:409});
+      this.ensureSiteAccess(invite.site_id);
+      this.db.prepare('UPDATE invitations SET revoked=1 WHERE site_id=? AND worker_id=? AND token_hash<>? AND revoked=0').run(invite.site_id,invite.worker_id,hash);
+      this.db.prepare('UPDATE invitations SET pending=0 WHERE token_hash=?').run(hash);
+      this.db.exec('COMMIT');return true;
+    }catch(error){this.db.exec('ROLLBACK');throw error;}
+  }
   revokeInvitations(siteId,authorize=()=>{}) {
     this.db.exec('BEGIN IMMEDIATE');try{authorize();const count=this.db.prepare('SELECT COUNT(*) AS n FROM invitations WHERE site_id=? AND revoked=0 AND pending=0').get(Number(siteId)).n;this.db.prepare('UPDATE invitations SET revoked=1 WHERE site_id=? AND revoked=0').run(Number(siteId));this.db.prepare('DELETE FROM site_registration WHERE site_id=?').run(Number(siteId));this.db.exec('COMMIT');return count;}catch(error){this.db.exec('ROLLBACK');throw error;}
   }
@@ -1610,7 +1637,7 @@ export class Store {
   invitation(token) {
     if (typeof token !== 'string' || !/^[\w-]{43}$/.test(token)) return null;
     const hash=createHash('sha256').update(token).digest('hex');
-    return this.db.prepare('SELECT sites.id,sites.name,invitations.expires_at FROM invitations JOIN sites ON sites.id=invitations.site_id WHERE token_hash=? AND revoked=0 AND pending=0 AND expires_at>?').get(hash,Date.now()) || null;
+    return this.db.prepare('SELECT sites.id,sites.name,invitations.expires_at,invitations.worker_id,invitations.worker_version FROM invitations JOIN sites ON sites.id=invitations.site_id WHERE token_hash=? AND revoked=0 AND pending=0 AND expires_at>?').get(hash,Date.now()) || null;
   }
   ensureSiteAccess(siteId){
     siteId=Number(siteId);if(!this.db.prepare('SELECT 1 FROM sites WHERE id=?').get(siteId))throw new Error('현장을 선택해 주세요.');
@@ -1669,7 +1696,7 @@ export class Store {
     if(typeof input.loginId!=='string' || !/^[a-zA-Z0-9_]{3,40}$/.test(input.loginId))throw new Error('아이디는 영문, 숫자, 밑줄 3~40자로 입력해 주세요.');
     if(typeof input.password!=='string' || input.password.length<12 || input.password.length>256)throw new Error('암호는 12자 이상 256자 이하여야 합니다.');
     // 가입 화면의 구분만 허용한다. 현장관리자 등 다른 구분은 관리자만 지정한다.
-    if(!['직영','협력업체 근로자','협력업체 관리자','근로를 제공하지 않는 사람','기타 출입자'].includes(input.category))throw new Error('구분을 확인해 주세요.');
+    if(!invite.worker_id&&!['직영','협력업체 근로자','협력업체 관리자','근로를 제공하지 않는 사람','기타 출입자'].includes(input.category))throw new Error('구분을 확인해 주세요.');
     if(this.db.prepare('SELECT 1 FROM worker_accounts WHERE site_id=? AND login_id=?').get(invite.id,input.loginId))throw new Error('이 현장에 이미 사용 중인 아이디입니다.');
     const salt=passwordSalt(input.password),passwordHash=scryptSync(input.password,salt,32);
     this.db.exec('BEGIN IMMEDIATE');
@@ -1677,10 +1704,18 @@ export class Store {
       const current=input.siteKey?this.siteFromAccess(input.siteKey):this.invitation(token);
       if(!current||current.id!==invite.id)throw new Error('유효하지 않거나 만료된 가입 링크입니다.');
       if(input.siteKey&&!this.siteRegistrationOpen(current.id))throw new Error('이 현장의 시험 가입이 중지되었거나 만료되었습니다.');
-      const worker=this.createWorker({...input,siteId:invite.id,memo:'',licenses:[]});
-      this.db.prepare("UPDATE workers SET registration_type='self' WHERE id=?").run(worker.id);worker.registration_type='self';
+      let worker;
+      if(current.worker_id){
+        const row=this.db.prepare('SELECT * FROM workers WHERE id=? AND site_id=?').get(current.worker_id,current.id);
+        if(current.worker_id!==invite.worker_id||!row||workerVersion(row)!==current.worker_version||text(input.name,'이름')!==row.name||this.db.prepare('SELECT 1 FROM worker_accounts WHERE worker_id=?').get(row.id)||this.db.prepare('SELECT 1 FROM join_acknowledgements WHERE worker_id=?').get(row.id))throw Object.assign(new Error('출입자 정보 또는 개인 가입 주소가 변경되었습니다. 관리자에게 다시 확인해 주세요.'),{sessionStatus:409});
+        worker=workerRow(row);
+      }else{
+        worker=this.createWorker({...input,siteId:invite.id,memo:'',licenses:[]});
+        this.db.prepare("UPDATE workers SET registration_type='self' WHERE id=?").run(worker.id);worker.registration_type='self';
+      }
       this.db.prepare('INSERT INTO worker_accounts(worker_id,site_id,login_id,salt,password_hash) VALUES(?,?,?,?,?)').run(worker.id,invite.id,input.loginId,salt,passwordHash);
       this.db.prepare('INSERT INTO join_acknowledgements(worker_id,notice_version,equipment,signature,profile) VALUES(?,?,?,?,?)').run(worker.id,'demo-v1',JSON.stringify(equipment),signature,profile?JSON.stringify(profile):null);
+      if(current.worker_id)this.db.prepare('UPDATE invitations SET revoked=1 WHERE site_id=? AND worker_id=? AND revoked=0').run(current.id,current.worker_id);
       const result=workerRow(this.db.prepare('SELECT * FROM workers WHERE id=?').get(worker.id));this.db.exec('COMMIT');return result;
     } catch(error) {this.db.exec('ROLLBACK');throw error;}
   }

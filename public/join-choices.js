@@ -12,8 +12,8 @@ export function mountJoinChoices(form){
     for(const [key,names] of [['company',data.companies||[]],['occupation',data.occupations||[]]]){
       const {input,label,select,list}=controls[key],unique=[...new Set(names.filter(name=>typeof name==='string'&&name.length))];
       const option=(value,text)=>{const item=doc.createElement('option');item.value=value;item.textContent=text;return item;};
-      list.replaceChildren(...unique.map(name=>option(name,name)));select.replaceChildren(option('','직접 입력'),...unique.map(name=>option(name,name)));select.value=unique.includes(input.value)?input.value:'';label.hidden=!unique.length;
-      if(key==='occupation'){quick.hidden=!unique.length;buttons.replaceChildren(...unique.map(name=>{const button=doc.createElement('button');button.type='button';button.textContent=name;button.onclick=()=>{input.value=name;select.value=name;input.focus();};return button;}));}
+      list.replaceChildren(...unique.map(name=>option(name,name)));select.replaceChildren(option('','직접 입력'),...unique.map(name=>option(name,name)));select.value=unique.includes(input.value)?input.value:'';label.hidden=data.existingWorker===true||!unique.length;select.disabled=data.existingWorker===true;
+      if(key==='occupation'){quick.hidden=data.existingWorker===true||!unique.length;buttons.replaceChildren(...unique.map(name=>{const button=doc.createElement('button');button.type='button';button.textContent=name;button.onclick=()=>{input.value=name;select.value=name;input.focus();};return button;}));}
     }
   };
 }

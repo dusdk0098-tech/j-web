@@ -104,7 +104,9 @@ test('기존 데이터베이스의 초대는 업데이트 후에도 유지된다
   const dir=mkdtempSync(join(tmpdir(),'jweb-qr-')),path=join(dir,'test.sqlite');let store;
   try{
     store=new Store(path);const site=store.createSite({name:'가상 현장'}),invite=store.createInvitation(site.id);store.close();store=null;
-    const legacy=new DatabaseSync(path);legacy.exec('ALTER TABLE invitations DROP COLUMN pending');legacy.close();
+    const legacy=new DatabaseSync(path);legacy.exec('DROP TRIGGER worker_invitation_update; DROP INDEX invitations_worker; ALTER TABLE invitations DROP COLUMN worker_id; ALTER TABLE invitations DROP COLUMN worker_version; ALTER TABLE invitations DROP COLUMN pending');legacy.close();
     store=new Store(path);assert.equal(store.invitation(invite.token).id,site.id);assert.equal(store.revokeInvitations(site.id),1);
+    const worker=store.createWorker({siteId:site.id,name:'가상 출입자',category:'직영',company:'가상 회사',occupation:'가상 직종'}),personal='p'.repeat(43);
+    store.createWorkerInvitation(site.id,worker.id,worker.version,personal);assert.equal(store.activateWorkerInvitation(personal),true);assert.equal(store.invitation(personal).worker_id,worker.id);
   }finally{if(store)store.close();rmSync(dir,{recursive:true,force:true});}
 });

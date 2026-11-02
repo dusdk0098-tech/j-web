@@ -35,6 +35,12 @@ export function adminSitePolicy(db,req,url,session){
     return null;
   }
   const workerSite=(id,siteId)=>positive(id)&&allowed(siteId)&&db.prepare('SELECT 1 FROM workers WHERE id=? AND site_id=?').get(Number(id),Number(siteId));
+  const workerInvitation=path.match(/^\/api\/workers\/([1-9]\d*)\/invitation$/);
+  if(workerInvitation){
+    if(method!=='POST'||url.search)return denied();
+    if(input===undefined)return owned(db.prepare('SELECT site_id FROM workers WHERE id=?').get(Number(workerInvitation[1])));
+    return fields(['siteId','version'])&&workerSite(workerInvitation[1],input.siteId)&&typeof input.version==='string'&&/^[a-f0-9]{64}$/.test(input.version)?null:denied();
+  }
   const training=path.match(/^\/api\/documents\/([1-9]\d*)\/training-targets$/);
   if(training){
     const row=doc(training[1]);if(owned(row)||row.type!=='education'||url.search)return denied();

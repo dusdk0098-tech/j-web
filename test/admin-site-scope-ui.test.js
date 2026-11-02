@@ -16,6 +16,7 @@ import { riskDetailMarkup, muscleDetailMarkup } from '../public/risk-detail.js';
 import { planDetailMarkup } from '../public/plan-detail.js';
 import { educationAttachmentLabels } from '../public/education-kinds.js';
 import { checklistCategories } from '../public/checklist-copy.js';
+import { mountWorkerInvitation } from '../public/worker-invitation.js';
 
 const source=readFileSync(new URL('../public/app.js',import.meta.url),'utf8');
 const part=(from,to)=>{const start=source.indexOf(from),end=source.indexOf(to,start);assert.ok(start>=0&&end>start,from);return source.slice(start,end);};
@@ -27,7 +28,7 @@ const esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;
 // shortcut: 실제 앱 함수와 가상 DOM을 실행하며 배치·키보드·인쇄는 별도 브라우저 검증이 필요하다.
 function screen(fetcher=async()=>({ok:true,status:200,json:async()=>[]})){
   const nodes=new Map(),requests=[],errors=[],redirects=[],flashes=[];
-  const node=(tag='')=>({tag,children:[],get innerHTML(){return this.markup||'';},set innerHTML(value){this.markup=value;this.children=[];},append(...children){for(const child of children){child.parent=this;this.children.push(child);}},remove(){this.parent.children.splice(this.parent.children.indexOf(this),1);},focus(){this.focused=true;},textContent:'',value:'restricted',disabled:false,hidden:false,classList:{toggle(){},remove(){}},setAttribute(){},insertAdjacentHTML(position,html){this.innerHTML+=html;}});
+  const node=(tag='')=>({tag,children:[],isConnected:true,get innerHTML(){return this.markup||'';},set innerHTML(value){this.markup=value;this.children=[];},append(...children){for(const child of children){child.parent=this;this.children.push(child);}},after(element){this.afterElement=element;},remove(){this.parent.children.splice(this.parent.children.indexOf(this),1);},focus(){this.focused=true;},textContent:'',value:'restricted',disabled:false,hidden:false,classList:{toggle(){},remove(){}},setAttribute(){},insertAdjacentHTML(position,html){this.innerHTML+=html;}});
   const get=key=>{if(!nodes.has(key))nodes.set(key,node());return nodes.get(key);};
   const pages=['dashboard','documents','workers','attendance','equipment-attendance','admins','clients','site-activity','statistics','board','new-unverified-menu'].map(page=>({...node(),dataset:{page}}));
   const content={...node(),querySelector:get,querySelectorAll:selector=>{const equipmentMatch=selector.match(/^\[data-equipment-attendance-(edit|delete)\]$/);if(equipmentMatch){const kind=equipmentMatch[1];return [...content.innerHTML.matchAll(new RegExp('data-equipment-attendance-'+kind+'="(\\d+)"','g'))].map(([,id])=>Object.assign(get('[data-equipment-attendance-'+kind+'="'+id+'"]'),{isConnected:true,dataset:{['equipmentAttendance'+kind[0].toUpperCase()+kind.slice(1)]:id}}));}const match=selector.match(/^\[data-restricted-(doc|worker|presence|units)\]$/);if(!match)return [];const kind=match[1],key='restricted'+kind[0].toUpperCase()+kind.slice(1);return [...content.innerHTML.matchAll(new RegExp('data-restricted-'+kind+'="(\\d+)"','g'))].map(([,id])=>Object.assign(get('[data-restricted-'+kind+'="'+id+'"]'),{dataset:{[key]:id}}));}};
@@ -40,6 +41,7 @@ function screen(fetcher=async()=>({ok:true,status:200,json:async()=>[]})){
   const dialog={open:false,showModal(){this.open=true;},close(){this.open=false;}};
   const context={state,content,dialog,siteSelect:get('#site-select'),detailEpoch:1,workerListEpoch:0,sitePhotoEpoch:0,permitRoleCleanup:null,siteEducationCleanup:null,labels:{documents:'안전 문서',admins:'관리자 계정'},statusLabels:{draft:'임시저장'},esc,URLSearchParams,today:()=> '2026-11-02',document:{createElement:node,querySelector:selector=>selector.startsWith('dialog')?null:get(selector),querySelectorAll:()=>pages},$:get,location:{assign:path=>redirects.push(path)},flash:message=>flashes.push(message),showError:error=>errors.push(error.message),confirm:()=>true,FormData:class{constructor(form){return Object.entries(form.values||{});}},fetch:async(path,options)=>{requests.push({path,options});return fetcher(path,options);}};
   context.siteQrSession=siteQrSession;context.siteQrPrintAction=options=>siteQrPrintAction({...options,print:(dialog,mode)=>context.printSiteQr(dialog,mode)});
+  context.mountWorkerInvitation=(...args)=>mountWorkerInvitation(...args,context.document);
   context.mountRestrictedMonthEditor=()=>({dirty:()=>false,busy:()=>false});
   context.hasManagerEducationTargets=hasManagerEducationTargets;
   context.checklistCategories=checklistCategories;

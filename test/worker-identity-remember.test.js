@@ -73,4 +73,6 @@ test('위치 확인 중 로그인 입력을 잠그고 제출 당시의 이름만
   const pending=login.onsubmit({preventDefault(){}});for(const item of Object.values(elements))assert.equal(item.disabled,true);elements.workerName.value='나중 입력';elements.password.value='다른 암호';location.resolve({latitude:1,longitude:1});await pending;
   assert.equal(calls[0].input.name,identity.name);assert.equal(calls[0].input.password,'virtual-secret');assert.equal(saved[0][1].name,identity.name);assert.equal(saved[0][1].birthDigits,identity.birthDigits);assert.equal(elements.method.disabled,false);assert.equal(rememberChoice.disabled,false);
   context.inviteInfo={locationRequired:false};context.fetch=async()=>({ok:false,json:async()=>({error:'인증 실패'})});button.disabled=false;await login.onsubmit({preventDefault(){}});assert.equal(saved.length,1);assert.equal(message.textContent,'인증 실패');assert.equal(button.disabled,false);assert.equal(elements.method.disabled,false);
+  context.inviteInfo={existingWorker:true,siteKey:a,locationRequired:false};context.siteKey=null;context.token='c'.repeat(43);context.fetch=async(path,options)=>{calls.push({path,input:JSON.parse(options.body)});return {ok:false,json:async()=>({error:'가상 실패'})};};
+  await login.onsubmit({preventDefault(){}});assert.equal(calls.at(-1).input.siteKey,a);assert.equal(calls.at(-1).input.token,context.token);
 });

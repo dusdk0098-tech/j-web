@@ -11,3 +11,9 @@ export async function issueInvitationQr(store,siteId,origin,render,authorize=()=
   try{const image=await render(link);if(!store.activateInvitation(invite.token,authorize)){try{store.discardPendingInvitation(invite.token);}catch{}return null;}return {link,image,expiresAt:invite.expiresAt};}
   catch(error){try{store.discardPendingInvitation(invite.token);}catch{}throw error;}
 }
+
+export async function issueWorkerInvitationQr(store,siteId,workerId,version,origin,render,authorize=()=>{}){
+  const token=randomBytes(32).toString('base64url'),link=`${origin}/join?token=${encodeURIComponent(token)}`,expiresAt=store.createWorkerInvitation(siteId,workerId,version,token,authorize);
+  try{const image=await render(link);if(!store.activateWorkerInvitation(token,authorize)){store.discardPendingInvitation(token);return null;}return {link,image,expiresAt};}
+  catch(error){try{store.discardPendingInvitation(token);}catch{}throw error;}
+}

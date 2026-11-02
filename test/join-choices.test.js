@@ -23,4 +23,6 @@ test('가입 후보 선택은 현장 목록을 갱신하고 직접 입력을 보
   buttons.children[0].onclick();assert.equal(occupation.value,'가상 직종');assert.equal(occupationSelect.value,'가상 직종');assert.equal(occupation.focused,true);
   occupation.value='직접 입력한 직종';occupation.oninput();assert.equal(occupationSelect.value,'');
   update({companies:[],occupations:['새 직종']});assert.equal(occupation.value,'직접 입력한 직종');assert.equal(company.label.beforeNode.hidden,true);assert.deepEqual(buttons.children.map(b=>b.textContent),['새 직종']);
+  update({companies:['가상 업체'],occupations:['가상 직종'],existingWorker:true});assert.equal(company.label.beforeNode.hidden,true);assert.equal(occupation.label.beforeNode.hidden,true);assert.equal(quick.hidden,true);assert.equal(companySelect.disabled,true);assert.equal(occupationSelect.disabled,true);
+  update({companies:['가상 업체'],occupations:['가상 직종']});assert.equal(company.label.beforeNode.hidden,false);assert.equal(occupation.label.beforeNode.hidden,false);assert.equal(quick.hidden,false);assert.equal(companySelect.disabled,false);assert.equal(occupationSelect.disabled,false);
 });

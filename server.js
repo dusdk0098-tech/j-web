@@ -19,7 +19,7 @@ import { LoginFailures } from './login-failures.js';
 import { passwordRequests } from './password-hashing.js';
 import { types } from './domain.js';
 import QRCode from 'qrcode';
-import { issueAccessQr,issueInvitationQr } from './qr-issue.js';
+import { issueAccessQr,issueInvitationQr,issueWorkerInvitationQr } from './qr-issue.js';
 import { workerSpreadsheet, wageSpreadsheet } from './exports.js';
 import { sessionToken, WorkerSessions, ReviewerSessions } from './auth.js';
 import { workerSitePath } from './public/worker-link.js';
@@ -113,6 +113,7 @@ assets.add('/education-reference.js');
 assets.add('/checklist-copy.js');
 assets.add('/permit-sources.js');
 assets.add('/permit-measures.js');
+assets.add('/worker-invitation.js');
 assets.add('/safety-cost.js');
 assets.add('/weekly-ppe.js');
 assets.add('/reviewer-manager-check.js');
@@ -764,8 +765,13 @@ const server = http.createServer((req,res)=>passwordRequests.run(true,()=>adminR
       return result?json(res,201,result):json(res,409,{error:'가입 QR이 중지되었습니다. 다시 발급해 주세요.'});
     }
     if (inviteSite && req.method === 'DELETE') return json(res,200,{revoked:store.revokeInvitations(inviteSite[1],()=>checkRequestSession(req))});
+    const workerInvitation=url.pathname.match(/^\/api\/workers\/([1-9]\d*)\/invitation$/);
+    if(workerInvitation&&req.method==='POST'){
+      const input=await body(req),result=await issueWorkerInvitationQr(store,input.siteId,Number(workerInvitation[1]),input.version,requestOrigin,link=>QRCode.toDataURL(link,{errorCorrectionLevel:'M',margin:4,width:512}),()=>checkRequestSession(req));
+      checkRequestSession(req);return result?json(res,201,result):json(res,409,{error:'가입 주소가 중지되었습니다. 다시 발급해 주세요.'});
+    }
     if (url.pathname === '/api/join') {
-      if (req.method === 'GET') {const invite=store.invitation(url.searchParams.get('token'));return invite?json(res,200,{id:invite.id,name:invite.name,siteKey:store.siteAccessKey(invite.id),locationRequired:store.siteLocationPolicy(invite.id).enabled,companies:store.companies(invite.id).map(c=>c.name),occupations:store.siteOccupations(invite.id).map(o=>o.name)}):json(res,404,{error:'유효하지 않거나 만료된 가입 링크입니다.'});}
+      if (req.method === 'GET') {const invite=store.invitation(url.searchParams.get('token'));return invite?json(res,200,{id:invite.id,name:invite.name,siteKey:store.siteAccessKey(invite.id),locationRequired:store.siteLocationPolicy(invite.id).enabled,companies:store.companies(invite.id).map(c=>c.name),occupations:store.siteOccupations(invite.id).map(o=>o.name),existingWorker:!!invite.worker_id}):json(res,404,{error:'유효하지 않거나 만료된 가입 링크입니다.'});}
       if (req.method === 'POST') {const input=await body(req),worker=await store.joinAsync(input.token,input,workerPeer(req));return json(res,201,{ok:true,siteKey:store.siteAccessKey(worker.site_id)});}
     }
     if (url.pathname === '/api/sites') {
