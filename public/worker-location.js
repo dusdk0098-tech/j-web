@@ -1,3 +1,8 @@
+export function locationMapUrl(latitude,longitude){
+  if(typeof latitude!=='number'||!Number.isFinite(latitude)||latitude < -90||latitude > 90||typeof longitude!=='number'||!Number.isFinite(longitude)||longitude < -180||longitude > 180)return '';
+  return 'https://www.google.com/maps/search/?api=1&query='+encodeURIComponent(`${latitude},${longitude}`);
+}
+
 export function captureWorkerLocation(geolocation=globalThis.navigator?.geolocation){
   if(!geolocation||typeof geolocation.getCurrentPosition!=='function')return Promise.reject(new Error('이 기기에서 위치 확인을 사용할 수 없습니다.'));
   return new Promise((resolve,reject)=>{

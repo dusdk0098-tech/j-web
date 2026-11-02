@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join,resolve,sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createServer } from 'node:net';
-import { spawn } from 'node:child_process';
+import { spawn,spawnSync } from 'node:child_process';
 import { once } from 'node:events';
 import { DatabaseSync } from 'node:sqlite';
 import { Store } from '../store.js';
@@ -44,10 +44,32 @@ test('현장별 위치 설정과 출역 확인은 함께 저장되고 실패하�
     s.db.exec("CREATE TRIGGER fail_location_event BEFORE INSERT ON worker_location_events BEGIN SELECT RAISE(ABORT,'시험 위치 저장 실패'); END");assert.throws(()=>s.recordWorkerLogin(worker.id,'2026-10-30',null,null,position()),/시험 위치 저장 실패/);assert.deepEqual(s.attendance(site.id,'2026-10-30').filter(row=>row.present),[]);s.db.exec('DROP TRIGGER fail_location_event');
     s.recordWorkerLogin(worker.id,'2026-10-30',null,null,position());const events=s.workerLocationEvents(site.id,'2026-10-30');assert.equal(events.length,1);assert.equal(events[0].worker_id,worker.id);assert.equal(events[0].distance_meters,0);assert.deepEqual(s.workerLocationEvents(other.id,'2026-10-30'),[]);
     assert.throws(()=>s.recordWorkerLogin(worker.id,'2026-10-31',null,()=>{throw Error('세션 만료');},position()),/세션 만료/);assert.deepEqual(s.workerLocationEvents(site.id,'2026-10-31'),[]);assert.deepEqual(s.attendance(site.id,'2026-10-31').filter(row=>row.present),[]);
-    assert.throws(()=>s.deleteWorkerLocationEvent(other.id,events[0].id),/현장|위치/);assert.throws(()=>s.deleteWorkerLocationEvent(site.id,events[0].id,()=>{throw Error('세션 만료');}),/세션 만료/);assert.equal(s.workerLocationEvents(site.id,'2026-10-30').length,1);
-    s.deleteWorkerLocationEvent(site.id,events[0].id);assert.deepEqual(s.workerLocationEvents(site.id,'2026-10-30'),[]);
+    assert.match(events[0].version,/^[a-f0-9]{32}$/);assert.throws(()=>s.deleteWorkerLocationEvent(other.id,events[0].id,events[0].version),error=>error.sessionStatus===409);assert.throws(()=>s.deleteWorkerLocationEvent(site.id,events[0].id,events[0].version,()=>{throw Error('세션 만료');}),/세션 만료/);assert.equal(s.workerLocationEvents(site.id,'2026-10-30').length,1);
+    s.deleteWorkerLocationEvent(site.id,events[0].id,events[0].version);assert.deepEqual(s.workerLocationEvents(site.id,'2026-10-30'),[]);
     s.setSiteLocationPolicy(site.id,{enabled:false,expectedVersion:saved.version});s.recordWorkerLogin(worker.id,'2026-11-01');assert.equal(s.attendance(site.id,'2026-11-01')[0].present,1);
   }finally{s.close();}
+});
+
+test('위치 기록은 ID가 재사용되어도 오래된 삭제를 거부하고 기존 자료와 버전을 보존한다',()=>{
+  const dir=mkdtempSync(join(tmpdir(),'jweb-location-version-')),file=join(dir,'data.sqlite');let s=new Store(file);
+  try{
+    const site=s.createSite({name:'가상 현장'}),worker=s.createWorker({siteId:site.id,name:'가상 근로자',category:'직영',company:'가상 업체',occupation:'가상 직종'}),date='2026-10-30';
+    s.setSiteLocationPolicy(site.id,{...policy,expectedVersion:null});s.recordWorkerLogin(worker.id,date,null,null,position());
+    const original=s.workerLocationEvents(site.id,date)[0];s.deleteWorkerLocationEvent(site.id,original.id,original.version);s.recordWorkerLogin(worker.id,date,null,null,position());
+    const replacement=s.workerLocationEvents(site.id,date)[0];assert.equal(replacement.id,original.id);assert.notEqual(replacement.version,original.version);
+    assert.throws(()=>s.deleteWorkerLocationEvent(site.id,original.id,original.version),error=>error.sessionStatus===409);
+    for(const invalid of [undefined,null,'', 'g'.repeat(32),'a'.repeat(31),42])assert.throws(()=>s.deleteWorkerLocationEvent(site.id,replacement.id,invalid),/위치 기록/);
+    assert.deepEqual(s.workerLocationEvents(site.id,date),[replacement]);
+    const legacy=s.db.prepare('SELECT id,site_id,worker_id,date,latitude,longitude,accuracy_meters,distance_meters,captured_at,checked_at FROM worker_location_events').all();
+    s.db.exec("DROP TRIGGER worker_location_events_version; ALTER TABLE worker_location_events DROP COLUMN version; CREATE TRIGGER fail_location_migration BEFORE UPDATE ON worker_location_events BEGIN SELECT RAISE(ABORT,'virtual migration failure'); END");s.close();
+    const failed=spawnSync(process.execPath,['--input-type=module','-e',`import { Store } from ${JSON.stringify(new URL('../store.js',import.meta.url).href)};try{new Store(process.argv[1]);process.exit(1)}catch(error){if(!error.message.includes('virtual migration failure'))throw error}`,file],{encoding:'utf8'});assert.equal(failed.status,0,failed.stderr);
+    const db=new DatabaseSync(file);try{assert.equal(db.prepare('PRAGMA table_info(worker_location_events)').all().some(column=>column.name==='version'),false);assert.deepEqual(db.prepare('SELECT * FROM worker_location_events').all(),legacy);db.exec('DROP TRIGGER fail_location_migration');}finally{db.close();}
+    s=new Store(file);
+    const upgraded=s.workerLocationEvents(site.id,date)[0];assert.match(upgraded.version,/^[a-f0-9]{32}$/);assert.deepEqual(s.db.prepare('SELECT id,site_id,worker_id,date,latitude,longitude,accuracy_meters,distance_meters,captured_at,checked_at FROM worker_location_events').all(),legacy);
+    s.recordWorkerLogin(worker.id,date,null,null,position());assert.equal(s.workerLocationEvents(site.id,date).find(row=>row.id===upgraded.id).version,upgraded.version);
+    s.close();s=new Store(file);assert.equal(s.workerLocationEvents(site.id,date).find(row=>row.id===upgraded.id).version,upgraded.version);
+    s.deleteWorkerLocationEvent(site.id,upgraded.id,upgraded.version);assert.equal(s.workerLocationEvents(site.id,date).length,1);assert.equal(s.attendance(site.id,date)[0].present,1);
+  }finally{s.close();assert.ok(resolve(dir).startsWith(resolve(tmpdir())+sep));rmSync(dir,{recursive:true,force:true});}
 });
 
 test('첫 시험 접속은 위치 설정과 무관하게 날짜별로 보존하고 실패 시 되돌린다',()=>{
@@ -63,7 +85,7 @@ test('첫 접속 화면은 시험 기록을 표시하고 이름을 안전하게 
 });
 
 test('첫 접속 삭제 버튼은 조회한 날짜와 확인값을 보낸다',async()=>{
-  const source=readFileSync(new URL('../public/app.js',import.meta.url),'utf8'),start=source.indexOf("    content.querySelectorAll('[data-arrival-id]')"),end=source.indexOf('\n',start);assert.ok(start>=0&&end>start);let call;const button={dataset:{arrivalId:'7',arrivalVersion:'a'.repeat(32)}},context={content:{querySelectorAll:()=>[button]},confirm:()=>true,api:async(path,options)=>{call={path,method:options.method};},base:'/api/sites/1',date:'2026-10-30',state:{siteId:1,page:'worker-locations'},siteId:1,detailEpoch:1,epoch:1,render:async()=>{},showError:error=>{throw error;},encodeURIComponent};runInNewContext(source.slice(start,end),context);await button.onclick();assert.equal(call.path,`/api/sites/1/worker-arrivals/7?date=2026-10-30&version=${'a'.repeat(32)}`);assert.equal(call.method,'DELETE');
+  const source=readFileSync(new URL('../public/app.js',import.meta.url),'utf8'),start=source.indexOf("    content.querySelectorAll('[data-arrival-id]')"),end=source.indexOf('\n',start);assert.ok(start>=0&&end>start);let call;const button={dataset:{arrivalId:'7',arrivalVersion:'a'.repeat(32)}},context={current:()=>true,content:{querySelectorAll:()=>[button]},confirm:()=>true,api:async(path,options)=>{call={path,method:options.method};},base:'/api/sites/1',date:'2026-10-30',state:{siteId:1,page:'worker-locations'},siteId:1,detailEpoch:1,epoch:1,render:async()=>{},showError:error=>{throw error;},encodeURIComponent};runInNewContext(source.slice(start,end),context);await button.onclick();assert.equal(call.path,`/api/sites/1/worker-arrivals/7?date=2026-10-30&version=${'a'.repeat(32)}`);assert.equal(call.method,'DELETE');
 });
 
 test('QR 가입 계정은 설정된 위치 확인을 통과해야 시험 출역한다',{timeout:30000},async()=>{
@@ -84,7 +106,14 @@ test('QR 가입 계정은 설정된 위치 확인을 통과해야 시험 출역�
     assert.equal((await send(arrivalsPath)).status,401);assert.equal((await send(arrivalsPath,'GET',undefined,cookie)).status,401);const arrivals=await (await send(arrivalsPath,'GET',undefined,admin)).json();assert.equal(arrivals.length,1);assert.equal(arrivals[0].name,'가상 근로자');assert.equal('latitude' in arrivals[0],false);
     assert.equal((await send(eventsPath)).status,401);assert.equal((await send(eventsPath,'GET',undefined,cookie)).status,401);assert.equal((await (await send(eventsPath,'GET',undefined,admin)).json()).length,1);
     assert.equal((await send('/api/worker/access','POST',{siteId:site.id,token},cookie)).status,400);assert.equal((await send('/api/worker/access','POST',{siteId:site.id,token,location:position()},cookie)).status,200);assert.deepEqual(await (await send(arrivalsPath,'GET',undefined,admin)).json(),arrivals);
-    assert.equal((await send('/api/worker/login','POST',{...identity,location:position()})).status,200);assert.equal((await send('/api/worker/login','POST',{siteKey:inviteInfo.siteKey,loginId:registration.loginId,password:registration.password,location:position()})).status,200);const events=await (await send(eventsPath,'GET',undefined,admin)).json();assert.equal(events.length,4);assert.equal((await send(path+`/location-events/${events[0].id}`,'DELETE',{},cookie)).status,401);assert.equal((await send(path+`/location-events/${events[0].id}`,'DELETE',{},admin)).status,200);
+    assert.equal((await send('/api/worker/login','POST',{...identity,location:position()})).status,200);assert.equal((await send('/api/worker/login','POST',{siteKey:inviteInfo.siteKey,loginId:registration.loginId,password:registration.password,location:position()})).status,200);const events=await (await send(eventsPath,'GET',undefined,admin)).json();assert.equal(events.length,4);
+    const event=events[0],eventPath=path+`/location-events/${event.id}`,versionedEventPath=eventPath+`?version=${event.version}`;assert.match(event.version,/^[a-f0-9]{32}$/);
+    assert.equal((await send(versionedEventPath,'DELETE')).status,401);assert.equal((await send(versionedEventPath,'DELETE',{},cookie)).status,401);
+    assert.equal((await send(eventPath,'DELETE',{},admin)).status,400);assert.equal((await send(eventPath+'?version=invalid','DELETE',{},admin)).status,400);
+    const other=await (await send('/api/sites','POST',{name:'다른 가상 현장'},admin)).json();assert.equal((await send(`/api/sites/${other.id}/location-events/${event.id}?version=${event.version}`,'DELETE',{},admin)).status,409);
+    assert.equal((await send(versionedEventPath,'DELETE',{},admin)).status,200);assert.equal((await send('/api/worker/login','POST',{...credentials,location:position()})).status,200);
+    const replacement=(await (await send(eventsPath,'GET',undefined,admin)).json()).find(row=>row.id===event.id);assert.ok(replacement);assert.notEqual(replacement.version,event.version);
+    assert.equal((await send(versionedEventPath,'DELETE',{},admin)).status,409);assert.equal((await (await send(eventsPath,'GET',undefined,admin)).json()).length,4);
     assert.equal((await send(path+'/location-policy','PUT',{enabled:false,expectedVersion:configured.version},admin)).status,200);assert.equal((await send('/api/worker/login','POST',credentials)).status,200);const arrival=arrivals[0],deletePath=path+`/worker-arrivals/${arrival.worker_id}?date=${day}&version=${arrival.version}`;assert.equal((await send(deletePath,'DELETE')).status,401);assert.equal((await send(deletePath,'DELETE',undefined,admin)).status,200);assert.equal((await send('/api/worker/login','POST',credentials)).status,200);const again=await (await send(arrivalsPath,'GET',undefined,admin)).json();assert.equal(again.length,1);assert.notEqual(again[0].version,arrival.version);assert.equal((await send(deletePath,'DELETE',undefined,admin)).status,409);
   }finally{if(child.exitCode===null){const exited=once(child,'exit');child.kill();await exited;}assert.ok(resolve(dir).startsWith(resolve(tmpdir())+sep));rmSync(dir,{recursive:true,force:true});}
 });

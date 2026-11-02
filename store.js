@@ -316,6 +316,11 @@ export class Store {
     if (!this.db.prepare('PRAGMA table_info(equipment_checks)').all().some(c=>c.name==='signature')) this.db.exec('ALTER TABLE equipment_checks ADD COLUMN signature BLOB');
     if (!this.db.prepare('PRAGMA table_info(instruction_results)').all().some(c=>c.name==='source')) this.db.exec("ALTER TABLE instruction_results ADD COLUMN source TEXT NOT NULL DEFAULT 'manager'");
     if (!this.db.prepare('PRAGMA table_info(instruction_results)').all().some(c=>c.name==='signature')) this.db.exec('ALTER TABLE instruction_results ADD COLUMN signature BLOB');
+    this.db.exec('BEGIN IMMEDIATE');try{
+      if(!this.db.prepare('PRAGMA table_info(worker_location_events)').all().some(c=>c.name==='version'))this.db.exec('ALTER TABLE worker_location_events ADD COLUMN version TEXT');
+      this.db.exec("UPDATE worker_location_events SET version=lower(hex(randomblob(16))) WHERE version IS NULL; CREATE TRIGGER IF NOT EXISTS worker_location_events_version AFTER INSERT ON worker_location_events BEGIN UPDATE worker_location_events SET version=lower(hex(randomblob(16))) WHERE id=NEW.id; END");
+      this.db.exec('COMMIT');
+    }catch(error){this.db.exec('ROLLBACK');throw error;}
     const attendanceColumns=this.db.prepare('PRAGMA table_info(attendance)').all().map(c=>c.name);
     if(!this.db.prepare('PRAGMA table_info(worker_arrivals)').all().some(c=>c.name==='version'))this.db.exec('ALTER TABLE worker_arrivals ADD COLUMN version TEXT');
     this.db.exec("UPDATE worker_arrivals SET version=lower(hex(randomblob(16))) WHERE version IS NULL; CREATE TRIGGER IF NOT EXISTS worker_arrivals_version AFTER INSERT ON worker_arrivals WHEN NEW.version IS NULL BEGIN UPDATE worker_arrivals SET version=lower(hex(randomblob(16))) WHERE worker_id=NEW.worker_id AND date=NEW.date; END");
@@ -1533,7 +1538,7 @@ export class Store {
     if(typeof version!=='string'||!/^[a-f0-9]{32}$/.test(version))throw new Error('퇴근 기록을 다시 확인해 주세요.');this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();if(!this.db.prepare('DELETE FROM worker_departures WHERE site_id=? AND id=? AND version=?').run(Number(siteId),Number(id),version).changes)throw Object.assign(new Error('퇴근 기록이 변경되었습니다. 다시 조회해 주세요.'),{sessionStatus:409});this.db.exec('COMMIT');}catch(error){this.db.exec('ROLLBACK');throw error;}
   }
   workerLocationEvents(siteId,date){
-    date=dateValue(date);this.siteLocationPolicy(siteId);return this.db.prepare('SELECT e.id,e.worker_id,w.name,e.latitude,e.longitude,e.accuracy_meters,e.distance_meters,e.captured_at,e.checked_at FROM worker_location_events e JOIN workers w ON w.id=e.worker_id AND w.site_id=e.site_id WHERE e.site_id=? AND e.date=? ORDER BY e.checked_at DESC,e.id DESC').all(Number(siteId),date);
+    date=dateValue(date);this.siteLocationPolicy(siteId);return this.db.prepare('SELECT e.id,e.worker_id,w.name,e.latitude,e.longitude,e.accuracy_meters,e.distance_meters,e.captured_at,e.checked_at,e.version FROM worker_location_events e JOIN workers w ON w.id=e.worker_id AND w.site_id=e.site_id WHERE e.site_id=? AND e.date=? ORDER BY e.checked_at DESC,e.id DESC').all(Number(siteId),date);
   }
   workerArrivals(siteId,date){
     date=dateValue(date);this.siteLocationPolicy(siteId);return this.db.prepare('SELECT a.worker_id,w.name,a.checked_at,a.version FROM worker_arrivals a JOIN workers w ON w.id=a.worker_id WHERE w.site_id=? AND a.date=? ORDER BY a.checked_at,a.worker_id').all(Number(siteId),date);
@@ -1541,8 +1546,8 @@ export class Store {
   deleteWorkerArrival(siteId,workerId,date,version,onAuthorize=()=>{}){
     date=dateValue(date);if(typeof version!=='string'||!/^[a-f0-9]{32}$/.test(version))throw new Error('접속 기록을 다시 확인해 주세요.');this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();if(!this.db.prepare('DELETE FROM worker_arrivals WHERE worker_id=? AND date=? AND version=? AND EXISTS (SELECT 1 FROM workers WHERE id=worker_arrivals.worker_id AND site_id=?)').run(Number(workerId),date,version,Number(siteId)).changes)throw Object.assign(new Error('접속 기록이 변경되었습니다. 다시 조회해 주세요.'),{sessionStatus:409});this.db.exec('COMMIT');}catch(error){this.db.exec('ROLLBACK');throw error;}
   }
-  deleteWorkerLocationEvent(siteId,id,onAuthorize=()=>{}){
-    this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();if(!this.db.prepare('DELETE FROM worker_location_events WHERE site_id=? AND id=?').run(Number(siteId),Number(id)).changes)throw new Error('선택한 현장의 위치 기록을 확인해 주세요.');this.db.exec('COMMIT');}catch(error){this.db.exec('ROLLBACK');throw error;}
+  deleteWorkerLocationEvent(siteId,id,version,onAuthorize=()=>{}){
+    if(typeof version!=='string'||!/^[a-f0-9]{32}$/.test(version))throw new Error('위치 기록을 다시 확인해 주세요.');this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();if(!this.db.prepare('DELETE FROM worker_location_events WHERE site_id=? AND id=? AND version=?').run(Number(siteId),Number(id),version).changes)throw Object.assign(new Error('위치 기록이 변경되었습니다. 다시 조회해 주세요.'),{sessionStatus:409});this.db.exec('COMMIT');}catch(error){this.db.exec('ROLLBACK');throw error;}
   }
   recordWorkerLogin(workerId,date,verifiedCredential=null,onLogin=null,position=null) {
     date=dateValue(date);
