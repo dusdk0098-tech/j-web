@@ -18,7 +18,7 @@ function screen(){
   const renderIntro=slice('async function render(){','  await loadSites();');
   runInNewContext([
     source.match(/^let sitePhotoEpoch=.*$/m)[0],
-    'let permitRoleCleanup=null;',source.match(/^const esc = .*$/m)[0],
+    'let permitRoleCleanup=null,siteEducationCleanup=null;',source.match(/^const esc = .*$/m)[0],
     slice('async function api(','function flash('),
     slice('function showDialog(',"$('#menu-toggle').onclick"),
     renderIntro+'}',

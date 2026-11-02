@@ -54,7 +54,7 @@ function applyAdminScope(admin) {
   if(!global){state.page='documents';state.detail=null;document.querySelector('.sidebar-help').textContent='배정 현장의 문서 요약·일반 공지 임시저장, 근로자 기본정보, 날짜별 출역·공수와 장비 출역을 관리합니다. 다른 기능은 전역 관리자에게 요청하세요.';}
 }
 let sitePhotoEpoch=0,workerListEpoch=0,detailEpoch=0,workerSelfCheckEpoch=0,ppeDetailEpoch=0,workerEditEpoch=0,joinRecordEpoch=0;
-let permitRoleCleanup=null;
+let permitRoleCleanup=null,siteEducationCleanup=null;
 const labels = {dashboard:'현장 현황','manager-check':'관리자 자가점검',workers:'출입자 관리',companies:'협력사 관리',equipment:'기계·장비',rigging:'줄걸이·체결장구','work-places':'작업장소','safety-costs':'산업안전보건관리비',attendance:'출역 관리',stops:'작업중지 요청',documents:'안전 문서',approval:'미결재 문서',statistics:'안전 활동 통계'};
 labels['hazards']='의견제안 및 위험신고';
 labels['incident-guide']='사고 대응 안내';
@@ -243,11 +243,14 @@ async function showWorkerSelfCheck(worker,siteId,date){
     dialog.close();showDialog('시험 자가점검 상세',`<div class="self-check-print"><h2>시험 자가점검</h2><p>${esc(worker.name)} · ${esc(date)}</p><p class="muted">가상 기록이며 본인 확인이나 실제 점검을 증명하지 않습니다.</p>${record.answers?`<ul>${Object.entries(questions).map(([key,label])=>`<li>${esc(label)}: ${record.answers[key]===true?'확인':'미기록'}</li>`).join('')}</ul>`:'<p>이전 기록의 답변은 보존되지 않았습니다.</p>'}${record.has_signature?`<p>시험 서명</p><img class="signature-pad" src="${signature}&amp;preview=1" alt="시험 자가점검 서명"><a href="${signature}">시험 서명 다운로드</a>`:'<p>시험 서명 없음</p>'}</div><button type="button" id="self-check-print-button">인쇄</button>`,async()=>{});$('#dialog-form button[type=submit]').textContent='닫기';$('#self-check-print-button').onclick=()=>{const image=$('.self-check-print img');if(image&&(!image.complete||!image.naturalWidth)){flash('시험 서명을 불러온 뒤 다시 시도해 주세요.',true);return;}window.print();};
   }catch(error){if(active())showError(error);}
 }
-async function showWorkerActivities(worker){
-  const siteId=state.siteId,labels={tbm:'TBM',education:'안전교육',notice:'공지 확인',checklist:'자가점검',hazard:'위험신고',risk:'위험성평가 활동',work_plan:'작업계획서',instruction:'안전 작업 지시서'};
+async function showWorkerActivities(worker,siteId=state.siteId,currentScope=()=>true,readOnly=false){
+  const parentSite=state.siteId,admin=state.admin,epoch=detailEpoch;
+  const labels={tbm:'TBM',education:'안전교육',notice:'공지 확인',checklist:'자가점검',hazard:'위험신고',risk:'위험성평가 활동',work_plan:'작업계획서',instruction:'안전 작업 지시서'};
   showDialog('가상 안전활동 현황',`<p>${esc(worker.name)} · ${esc(worker.company)}</p><p class="muted">시험 확인과 지정 명단을 구분합니다. 지정은 실제 참석을 증명하지 않습니다.</p><fieldset><legend>활동 종류</legend>${Object.entries(labels).map(([kind,label])=>`<label><input type="checkbox" data-activity-kind value="${kind}" checked> ${esc(label)}</label>`).join('')}</fieldset><button type="button" id="activity-search">검색</button><div id="activity-results" aria-live="polite"></div><button type="button" id="activity-more" hidden>더 보기</button>`,async()=>{});$('#dialog-form button[type=submit]').textContent='닫기';
+  if(readOnly)$('#dialog-form').onsubmit=e=>{e.preventDefault();dialog.close();};
+  const anchor=$('#activity-results'),active=()=>currentScope()&&state.admin===admin&&detailEpoch===epoch&&state.siteId===parentSite&&dialog.open&&$('#activity-results')===anchor;
   let offset=null,sequence=0;
-  const load=async(append=false)=>{const current=++sequence,list=$('#activity-results'),more=$('#activity-more'),selected=[...document.querySelectorAll('[data-activity-kind]:checked')].map(input=>input.value);more.hidden=true;if(!append)list.replaceChildren();if(!selected.length){list.textContent='활동 종류를 선택해 주세요.';return;}try{const params=new URLSearchParams({siteId:String(siteId),offset:String(append?offset:0)});for(const kind of selected)params.append('kind',kind);const result=await api(`/api/workers/${worker.id}/activities?${params}`);if(current!==sequence||!dialog.open||state.siteId!==siteId)return;for(const row of result.items){const item=document.createElement('p');item.append(document.createTextNode(`${row.date||'날짜 미기록'} · ${labels[row.kind]} · `));if(row.document_id||row.kind==='checklist'){const link=document.createElement('button');link.type='button';link.className='link';link.textContent=row.title;link.onclick=()=>{if(row.kind==='checklist')return showWorkerSelfCheck(worker,siteId,row.date);dialog.close();state.detail=row.document_id;render().catch(showError);};item.append(link);}else item.append(document.createTextNode(row.title));item.append(document.createTextNode(` · ${row.detail}`));if(row.kind==='checklist'&&row.has_signature){const link=document.createElement('a');link.href=`/api/sites/${siteId}/self-checks/${worker.id}/signature?date=${encodeURIComponent(row.date)}`;link.textContent='시험 서명 다운로드';item.append(document.createTextNode(' · '),link);}list.append(item);}if(!list.childElementCount)list.textContent='해당 활동 기록이 없습니다.';offset=result.nextOffset;more.hidden=offset===null;}catch(error){if(current===sequence)list.textContent=error.message;}};
+  const load=async(append=false)=>{const current=++sequence,list=$('#activity-results'),more=$('#activity-more'),selected=[...document.querySelectorAll('[data-activity-kind]:checked')].map(input=>input.value);more.hidden=true;if(!append)list.replaceChildren();if(!selected.length){list.textContent='활동 종류를 선택해 주세요.';return;}try{const params=new URLSearchParams({siteId:String(siteId),offset:String(append?offset:0)});for(const kind of selected)params.append('kind',kind);const result=await api(`/api/workers/${worker.id}/activities?${params}`,{},()=>current===sequence&&active());if(current!==sequence||!active())return;for(const row of result.items){const item=document.createElement('p');item.append(document.createTextNode(`${row.date||'날짜 미기록'} · ${labels[row.kind]} · `));if(!readOnly&&(row.document_id||row.kind==='checklist')){const link=document.createElement('button');link.type='button';link.className='link';link.textContent=row.title;link.onclick=()=>{if(row.kind==='checklist')return showWorkerSelfCheck(worker,siteId,row.date);dialog.close();state.detail=row.document_id;render().catch(showError);};item.append(link);}else item.append(document.createTextNode(row.title));item.append(document.createTextNode(` · ${row.detail}`));if(!readOnly&&row.kind==='checklist'&&row.has_signature){const link=document.createElement('a');link.href=`/api/sites/${siteId}/self-checks/${worker.id}/signature?date=${encodeURIComponent(row.date)}`;link.textContent='시험 서명 다운로드';item.append(document.createTextNode(' · '),link);}list.append(item);}if(!list.childElementCount)list.textContent='해당 활동 기록이 없습니다.';offset=result.nextOffset;more.hidden=offset===null;}catch(error){if(current===sequence&&active())list.textContent=error.message;}};
   $('#activity-search').onclick=()=>load();$('#activity-more').onclick=()=>load(true);document.querySelectorAll('[data-activity-kind]').forEach(input=>input.onchange=()=>{sequence++;$('#activity-more').hidden=true;});await load();
 }
 async function showWorkerFiles(worker){
@@ -902,13 +905,44 @@ async function renderDailyTrainingStatistics(siteId,from,to,month,day){
   const select=section.querySelector('select');if(select)select.onchange=()=>section.querySelectorAll('[data-daily-row]').forEach(row=>{row.hidden=!!select.value&&rows[Number(row.dataset.dailyRow)].category!==select.value;});
   section.querySelectorAll('[data-daily-activity]').forEach(button=>button.onclick=()=>{const worker=rows[Number(button.dataset.dailyActivity)];if(worker&&section.isConnected&&state.page==='statistics'&&state.siteId===siteId&&(state.statisticsMonth||today().slice(0,7))===month&&state.statisticsDay===day)showWorkerActivities(worker).catch(showError);});
 }
+function showSiteEducationDetail(site,initialMonth){
+  siteEducationCleanup?.();
+  const parentSite=state.siteId,admin=state.admin,epoch=detailEpoch,box=document.createElement('dialog');
+  box.setAttribute('aria-label','현장 교육 통계 상세');
+  box.innerHTML=`<h2>${esc(site.name)} · 교육 통계 상세</h2><p>승인된 문서별 시험 확인 건수입니다. 실제 교육 이수를 증명하지 않으며 당일 종류별 별도 확인은 포함하지 않습니다.</p><label>조회 월 <input type="month" id="site-education-month" value="${esc(initialMonth)}"></label><fieldset id="site-education-categories"><legend>근로 구분</legend></fieldset><div id="site-education-results" aria-live="polite"></div><button type="button" id="site-education-close">닫기</button>`;
+  document.body.append(box);box.showModal();
+  const month=box.querySelector('#site-education-month'),categories=box.querySelector('#site-education-categories'),results=box.querySelector('#site-education-results');
+  let sequence=0,rows=[],selected=null,activityAnchor=null,closed=false;
+  const active=()=>box.open&&box.isConnected&&state.siteId===parentSite&&state.admin===admin&&detailEpoch===epoch;
+  const cleanup=()=>{if(closed)return;closed=true;sequence++;if(dialog.open&&activityAnchor&&$('#activity-results')===activityAnchor)dialog.close();box.remove();if(siteEducationCleanup===cleanup)siteEducationCleanup=null;};
+  siteEducationCleanup=cleanup;box.onclose=cleanup;box.querySelector('#site-education-close').onclick=()=>box.close();
+  const paint=()=>{
+    if(!active())return;
+    const visible=filterEducationReport(rows,selected||[]);
+    results.innerHTML=visible.length?`<div class="table-wrap"><table><thead><tr><th>구분</th><th>이름</th><th>소속</th><th>가상 생년월일</th><th>교육 종류</th><th>확인 문서 수</th><th>상세</th></tr></thead><tbody>${visible.map((row,i)=>`<tr><td>${esc(row.category)}</td><td>${esc(row.name)}</td><td>${esc(row.company)}</td><td>${esc(row.birth_date||'미기록')}</td><td>${esc(row.type==='tbm'?'TBM':educationKinds[row.kind]||'종류 미기록')}</td><td>${row.count}</td><td><button type="button" data-site-education-person="${i}">안전활동 보기</button></td></tr>`).join('')}</tbody></table></div>`:'<p>선택한 조건의 시험 참가 확인이 없습니다.</p>';
+    results.querySelectorAll('[data-site-education-person]').forEach(button=>button.onclick=()=>{if(!active())return;const pending=showWorkerActivities(visible[Number(button.dataset.siteEducationPerson)],site.id,active,true);activityAnchor=$('#activity-results');return pending.catch(error=>{if(active())results.textContent=error.message;});});
+  };
+  categories.onchange=()=>{selected=[...categories.querySelectorAll('input:checked')].map(input=>input.value);paint();};
+  const load=async()=>{
+    const request=++sequence,value=month.value;rows=[];results.textContent='불러오는 중입니다.';
+    if(!/^\d{4}-(0[1-9]|1[0-2])$/.test(value)){results.textContent='조회할 월을 확인해 주세요.';return;}
+    const current=()=>active()&&sequence===request&&month.value===value,days=new Date(Number(value.slice(0,4)),Number(value.slice(5)),0).getDate();
+    try{
+      const data=await api(`/api/education/report?${new URLSearchParams({siteId:String(site.id),from:`${value}-01`,to:`${value}-${days}`})}`,{},current);
+      if(!current())return;rows=data;
+      const options=[...new Set(rows.map(row=>row.category))];if(selected===null&&options.length)selected=options;
+      categories.innerHTML='<legend>근로 구분</legend>'+options.map(category=>`<label><input type="checkbox" value="${esc(category)}" ${selected?.includes(category)?'checked':''}> ${esc(category)}</label>`).join('');paint();
+    }catch(error){if(current())results.textContent=error.message;}
+  };
+  month.onchange=load;return load();
+}
 async function renderAllSiteStatistics(siteId,from,to,month,day){
   const anchor=content.querySelector('#education-report'),rows=await api(`/api/attendance/sites-report?${new URLSearchParams({from,to})}`);
   if(!anchor?.isConnected||state.page!=='statistics'||state.siteId!==siteId||(state.statisticsMonth||today().slice(0,7))!==month||state.statisticsDay!==day)return;
   const {sites,totals}=summarizeSiteAttendance(rows);
   const describe=categories=>categories.map(item=>`${esc(item.label)} ${item.days}`).join(' · ')||'없음',section=document.createElement('section');section.className='panel';
   section.innerHTML=`<h2>전체 현장 가상 출역</h2><p class="muted">${esc(from)} ~ ${esc(to)}의 기록 당시 구분별 출역 인일입니다. 외주는 협력업체 근로자와 기존 외주 기록이며, 협력업체 관리자 등 다른 구분은 별도로 표시합니다.</p><div class="table-wrap"><table><thead><tr><th>현장</th><th>교육 통계</th><th>직영</th><th>외주</th><th>그 외 구분</th><th>합계</th></tr></thead><tbody>${sites.map(row=>`<tr><td>${esc(row.name)}</td><td><button type="button" data-site-education="${row.id}">상세보기</button></td><td>${row.direct}</td><td>${row.external}</td><td>${describe(row.other)}</td><td>${row.total}</td></tr>`).join('')}<tr><th>전체 합계</th><td></td><td>${totals.direct}</td><td>${totals.external}</td><td>${describe(totals.other)}</td><td>${totals.total}</td></tr></tbody></table></div>`;anchor.before(section);
-  section.querySelectorAll('[data-site-education]').forEach(button=>button.onclick=async()=>{const target=Number(button.dataset.siteEducation);state.siteId=target;state.statisticsDay='';state.detail=null;state.workerFilters={};state.wageFilters={};try{await render();if(state.page==='statistics'&&state.siteId===target)content.querySelector('#education-report')?.scrollIntoView({block:'start'});}catch(error){showError(error);}});
+  section.querySelectorAll('[data-site-education]').forEach(button=>button.onclick=()=>{if(section.isConnected&&state.page==='statistics'&&state.siteId===siteId&&(state.statisticsMonth||today().slice(0,7))===month&&state.statisticsDay===day)return showSiteEducationDetail(sites.find(row=>row.id===Number(button.dataset.siteEducation)),month);});
 }
 async function showRestrictedQr(){
   if(!state.siteId){flash('먼저 현장을 선택해 주세요.',true);return;}
@@ -1015,6 +1049,7 @@ async function renderRestrictedDocuments(){
   $('#restricted-notice-add').onclick=()=>showDialog('일반 공지 임시저장',field('title','제목')+field('date','작성일',today(),'date')+'<label>본문<textarea name="body" maxlength="20000"></textarea></label><p>임시저장만 합니다. 게시·결재는 전역 관리자에게 요청하세요.</p>',data=>api('/api/documents',{method:'POST',body:JSON.stringify({siteId,type:'notice',title:data.title,date:data.date,body:data.body})},current),current);
 }
 async function render(){
+  siteEducationCleanup?.();
   permitRoleCleanup?.();permitRoleCleanup=null;
   detailEpoch++;
   const renderEpoch=detailEpoch;
@@ -1581,4 +1616,4 @@ async function render(){
     if(reports.length){$('#hazard-select-all').onclick=()=>section.querySelectorAll('[data-hazard-document]').forEach(input=>{input.checked=true;});$('#hazard-preview').onclick=()=>{try{preview([...section.querySelectorAll('[data-hazard-document]:checked')].map(input=>input.dataset.hazardDocument));}catch(error){showError(error);}};section.querySelectorAll('[data-hazard-preview]').forEach(button=>button.onclick=()=>{try{preview([button.dataset.hazardPreview]);}catch(error){showError(error);}});if(filtered.length){const button=document.createElement('button');button.type='button';button.textContent='선택 문서와 신고 함께 미리보기';section.querySelector('.batch-controls').append(button);button.onclick=async()=>{try{const chosen=selectBatchItems(filtered,reports,[...content.querySelectorAll('[data-batch-document]:checked')].map(input=>input.dataset.batchDocument),[...section.querySelectorAll('[data-hazard-document]:checked')].map(input=>input.dataset.hazardDocument));await showBatchPreview(chosen.documents,chosen.reports.map(id=>reports.find(report=>report.id===id)),siteId);}catch(error){showError(error);}};}}
   }
 }
-try {const session=await adminSession;if(!session?.authenticated||!session.context){location.assign('/login');throw Error('관리자 로그인이 필요합니다.');}applyAdminScope(session.admin);if(session.enabled){const identity=document.createElement('span');identity.textContent=(session.admin?.name||'관리자')+(state.admin.scope==='global'?' · 전역 권한':' · 배정 현장만');document.querySelector('.top').append(identity);const logout=document.createElement('button');logout.className='outline';logout.textContent='로그아웃';logout.onclick=async()=>{joinRecordEpoch++;detailEpoch++;state.admin=null;if(dialog.open)dialog.close();content.innerHTML='';await api('/api/logout',{method:'POST',body:'{}'});location.assign('/login');};document.querySelector('.top').append(logout);}state.types=await api('/api/types'); await render();} catch(e) {showError(e);}
+try {const session=await adminSession;if(!session?.authenticated||!session.context){location.assign('/login');throw Error('관리자 로그인이 필요합니다.');}applyAdminScope(session.admin);if(session.enabled){const identity=document.createElement('span');identity.textContent=(session.admin?.name||'관리자')+(state.admin.scope==='global'?' · 전역 권한':' · 배정 현장만');document.querySelector('.top').append(identity);const logout=document.createElement('button');logout.className='outline';logout.textContent='로그아웃';logout.onclick=async()=>{siteEducationCleanup?.();joinRecordEpoch++;detailEpoch++;state.admin=null;if(dialog.open)dialog.close();content.innerHTML='';await api('/api/logout',{method:'POST',body:'{}'});location.assign('/login');};document.querySelector('.top').append(logout);}state.types=await api('/api/types'); await render();} catch(e) {showError(e);}
