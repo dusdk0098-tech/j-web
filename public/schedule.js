@@ -1,4 +1,9 @@
 export const scheduleTypes=['당직','외근','업무','교육','행사','공정','회의','휴가','반차(오전)','반차(오후)','조퇴','예비군','민방위','기타'];
+export const personalScheduleTypes=['당직','외근','업무','교육','휴가','반차(오전)','반차(오후)','조퇴','예비군','민방위'];
+
+export function scheduleTargetRequired(kind,row=null){
+  return personalScheduleTypes.includes(kind)&&!(row&&personalScheduleTypes.includes(row.kind)&&!row.target_id);
+}
 
 export function validScheduleTime(value){
   return typeof value==='string'&&(value===''||/^([01]\d|2[0-3]):[0-5]\d$/.test(value)||value==='24:00');

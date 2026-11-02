@@ -3,7 +3,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { createHash, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
 import { dateValue, officeKinds, recordInput, muscleReferenceInput, text, transitions } from './domain.js';
 import { PNG } from 'pngjs';
-import { scheduleTypes, validScheduleTime } from './public/schedule.js';
+import { scheduleTypes, scheduleTargetRequired, validScheduleTime } from './public/schedule.js';
 import { verifyWorkerLocation } from './geo.js';
 import { workerFieldRequirements } from './public/worker-fields.js';
 import { salarySummary } from './public/salary-summary.js';
@@ -466,7 +466,7 @@ export class Store {
     const start=dateValue(input.startDate),end=dateValue(input.endDate),startTime=input.startTime??'',endTime=input.endTime??'',content=text(input.content,'일정 내용',200);
     if(![startTime,endTime].every(validScheduleTime)||start>end||(start===end&&startTime&&endTime&&startTime>endTime))throw new Error('일정 기간과 시간을 확인해 주세요.');
     this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();if(!this.db.prepare('SELECT 1 FROM sites WHERE id=?').get(siteId))throw new Error('현장을 선택해 주세요.');const current=id===null?null:this.db.prepare('SELECT * FROM schedules WHERE id=? AND site_id=?').get(Number(id),siteId);if(id!==null&&!current)throw new Error('선택한 현장의 일정을 확인해 주세요.');
-      const selected=input.targetId===undefined?(current?.target_id||0):input.targetId;if(!Number.isSafeInteger(selected)||selected<0)throw new Error('일정 대상자를 확인해 주세요.');let targetName='';if(selected){const target=this.db.prepare('SELECT id,name,active FROM reviewers WHERE id=? AND site_id=?').get(selected,siteId);if(!target||(!target.active&&selected!==current?.target_id))throw new Error('같은 현장의 시험 대상자를 선택해 주세요.');targetName=selected===current?.target_id?current.target_name:target.name;}
+      const selected=input.targetId===undefined?(current?.target_id||0):input.targetId;if(!Number.isSafeInteger(selected)||selected<0)throw new Error('일정 대상자를 확인해 주세요.');if(!selected&&scheduleTargetRequired(input.kind,current))throw new Error('개인 일정의 대상자를 선택해 주세요.');let targetName='';if(selected){const target=this.db.prepare('SELECT id,name,active FROM reviewers WHERE id=? AND site_id=?').get(selected,siteId);if(!target||(!target.active&&selected!==current?.target_id))throw new Error('같은 현장의 시험 대상자를 선택해 주세요.');targetName=selected===current?.target_id?current.target_name:target.name;}
       if(id===null)id=this.db.prepare('INSERT INTO schedules(site_id,kind,start_date,end_date,start_time,end_time,content,target_id,target_name) VALUES(?,?,?,?,?,?,?,?,?)').run(siteId,input.kind,start,end,startTime,endTime,content,selected||null,targetName).lastInsertRowid;
       else this.db.prepare('UPDATE schedules SET kind=?,start_date=?,end_date=?,start_time=?,end_time=?,content=?,target_id=?,target_name=? WHERE id=? AND site_id=?').run(input.kind,start,end,startTime,endTime,content,selected||null,targetName,Number(id),siteId);
       const result=this.db.prepare('SELECT * FROM schedules WHERE id=? AND site_id=?').get(Number(id),siteId);this.db.exec('COMMIT');return result;
