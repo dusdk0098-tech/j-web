@@ -11,6 +11,7 @@ import { spawn } from 'node:child_process';
 import { once,EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 import { DatabaseSync } from 'node:sqlite';
+import { inspect } from 'node:util';
 import { PNG } from 'pngjs';
 import { Store } from '../store.js';
 
@@ -62,6 +63,20 @@ test('역할 시험 신호 대기는 종료·오류·분할 출력과 시간 초
   await assert.rejects(waitOutput(child,'READY',10),/시간 초과/);child.exitCode=1;await assert.rejects(waitOutput(child,'READY'),/종료/);assert.equal(child.listenerCount('exit'),0);assert.equal(child.listenerCount('error'),0);assert.equal(child.stdout.listenerCount('data'),0);assert.equal(child.stdout.listenerCount('error'),0);child.stdout.destroy();
 });
 
+function waitRequestSignal(signal,pending){return Promise.race([signal,pending.then(()=>signal)]);}
+
+test('역할 요청 실패는 신호 대기 중 즉시 전달하고 성공은 신호를 기다린다',async()=>{
+  const failure=Object.assign(Error('가상 연결 종료'),{code:'ECONNRESET'});
+  await assert.rejects(waitRequestSignal(new Promise(()=>{}),Promise.reject(failure)),error=>error===failure);
+  let signalReady,advanced=false;const signal=new Promise(resolve=>{signalReady=resolve;});
+  const waiting=waitRequestSignal(signal,Promise.resolve()).then(()=>{advanced=true;});
+  await new Promise(setImmediate);assert.equal(advanced,false);signalReady();await waiting;assert.equal(advanced,true);
+  let rejectRequest;const pending=new Promise((resolve,reject)=>{rejectRequest=reject;});
+  await waitRequestSignal(Promise.resolve(),pending);rejectRequest(failure);await new Promise(setImmediate);await assert.rejects(pending,error=>error===failure);
+  let rejectLater;const later=new Promise((resolve,reject)=>{rejectLater=reject;});
+  await assert.rejects(waitRequestSignal(Promise.reject(Error('가상 신호 시간 초과')),later),/가상 신호 시간 초과/);rejectLater(failure);await new Promise(setImmediate);
+});
+
 test('역할 HTTP 저장은 본문 중 로그아웃과 잠금 대기 중 계정·문서·결재선·세션 변경을 거절한다',{timeout:120000},async()=>{
   const dir=mkdtempSync(join(tmpdir(),'jweb-permit-role-http-')),flag=join(dir,'expired'),reservation=createServer();await new Promise(r=>reservation.listen(0,'127.0.0.1',r));const port=reservation.address().port;await new Promise(r=>reservation.close(r));
   const trace=`import http from 'node:http';import {existsSync} from 'node:fs';import {Store} from ${JSON.stringify(pathToFileURL(join(process.cwd(),'store.js')).href)};import {AdminAccounts} from ${JSON.stringify(pathToFileURL(join(process.cwd(),'admin-accounts.js')).href)};const create=http.createServer;http.createServer=function(handler){const server=create.call(this,(req,res)=>{if(req.headers['x-slow'])req.once('data',()=>process.stdout.write('BODY_STARTED'));return handler(req,res)});server.once('listening',()=>process.stdout.write('READY'));return server};const set=Store.prototype.setPermitRoles;Store.prototype.setPermitRoles=function(...args){process.stdout.write('LOCK_WAIT');return set.apply(this,args)};const valid=AdminAccounts.prototype.valid;AdminAccounts.prototype.valid=function(token){return valid.call(this,token,Date.now()+(existsSync(${JSON.stringify(flag)})?9*60*60*1000:0))};`;
@@ -69,12 +84,12 @@ test('역할 HTTP 저장은 본문 중 로그아웃과 잠금 대기 중 계정�
   const readTrace=`const read=Store.prototype.permitRoles;Store.prototype.permitRoles=function(...args){const result=read.apply(this,args);if(existsSync(${JSON.stringify(readFlag)}))this.db.exec('DELETE FROM admin_sessions');return result};`;
   const child=spawn(process.execPath,['--import',`data:text/javascript,${encodeURIComponent(trace+readTrace)}`,'server.js'],{cwd:process.cwd(),env:{...process.env,PORT:String(port),JWEB_DATA_DIR:dir,JWEB_ADMIN_PASSWORD:'virtual-admin-password'},stdio:['ignore','pipe','pipe']});let db,locked=false,stage='로그인',serverOutput='',serverErrors='';child.stdout.on('data',chunk=>{serverOutput=(serverOutput+chunk).slice(-4096);});child.stderr.on('data',chunk=>{serverErrors+=chunk;});
   try{
-    await waitOutput(child,'READY');const base=`http://127.0.0.1:${port}`,send=(path,method='GET',data,cookie)=>fetch(base+path,{method,headers:{...(cookie?{cookie}:{}),'content-type':'application/json',connection:'close'},...(data===undefined?{}:{body:JSON.stringify(data)})}).catch(error=>{throw new Error(method+' '+path+' 전송 실패; 단계='+stage+' 서버 출력='+serverOutput+' 서버 종료='+child.exitCode+' 신호='+child.signalCode+' 오류='+serverErrors,{cause:error});}),login=async()=>(await send('/api/login','POST',{password:'virtual-admin-password'})).headers.get('set-cookie').split(';')[0];let admin=await login();
+    await waitOutput(child,'READY');const base=`http://127.0.0.1:${port}`,send=(path,method='GET',data,cookie)=>fetch(base+path,{method,headers:{...(cookie?{cookie}:{}),'content-type':'application/json',connection:'close'},...(data===undefined?{}:{body:JSON.stringify(data)})}).catch(error=>{throw new Error(method+' '+path+' 전송 실패',{cause:error});}),login=async()=>(await send('/api/login','POST',{password:'virtual-admin-password'})).headers.get('set-cookie').split(';')[0];let admin=await login();
     const s=new Store(join(dir,'jweb.sqlite'));const {doc,people,roles}=fixture(s);s.close();db=new DatabaseSync(join(dir,'jweb.sqlite'));const path=`/api/documents/${doc.id}/permit-roles`,get=async()=>await (await send(path,'GET',undefined,admin)).json();assert.equal((await send(path)).status,401);
     stage='최초 역할 저장';let current=await get();assert.equal((await send(path,'PUT',{expectedVersion:current.version,roles},admin)).status,200);
     stage='조회 도중 세션 철회';writeFileSync(readFlag,'revoke');const expiredRead=await send(path,'GET',undefined,admin);assert.equal(expiredRead.status,401);const expiredBody=await expiredRead.json();assert.deepEqual(Object.keys(expiredBody),['error']);assert.ok(!JSON.stringify(expiredBody).includes('contractorLead'));unlinkSync(readFlag);admin=await login();
     for(const change of ['account','status','line','session']){
-      stage='잠금 대기 '+change;current=await get();db.exec('BEGIN IMMEDIATE');locked=true;const waiting=waitOutput(child,'LOCK_WAIT'),pending=send(path,'PUT',{expectedVersion:current.version,roles:{...roles,inspector:null}},admin);await waiting;
+      stage='잠금 대기 '+change;current=await get();db.exec('BEGIN IMMEDIATE');locked=true;const waiting=waitOutput(child,'LOCK_WAIT'),pending=send(path,'PUT',{expectedVersion:current.version,roles:{...roles,inspector:null}},admin);await waitRequestSignal(waiting,pending);
       if(change==='account')db.prepare('UPDATE reviewers SET active=0 WHERE id=?').run(people[1].id);
       if(change==='status')db.prepare("UPDATE documents SET status='pending' WHERE id=?").run(doc.id);
       if(change==='line')db.prepare('UPDATE approval_steps SET state=state WHERE document_id=?').run(doc.id);
@@ -84,6 +99,6 @@ test('역할 HTTP 저장은 본문 중 로그아웃과 잠금 대기 중 계정�
       if(change==='status')db.prepare("UPDATE documents SET status='draft' WHERE id=?").run(doc.id);
       if(change==='session'){assert.equal(response.status,401);unlinkSync(flag);admin=await login();}
     }
-    stage='본문 대기 중 로그아웃';current=await get();const data=JSON.stringify({expectedVersion:current.version,roles:empty()}),begun=waitOutput(child,'BODY_STARTED');let slow;const pending=new Promise((resolve,reject)=>{slow=request(base+path,{method:'PUT',headers:{cookie:admin,'content-type':'application/json','content-length':Buffer.byteLength(data),'x-slow':'1'}},res=>{res.resume();res.on('end',()=>resolve(res.statusCode));});slow.on('error',reject);slow.write(data.slice(0,1));});await begun;assert.equal((await send('/api/logout','POST',{},admin)).status,200);slow.end(data.slice(1));assert.equal(await pending,401);assert.equal(JSON.parse(db.prepare('SELECT roles FROM permit_roles WHERE document_id=?').get(doc.id).roles).inspector,people[5].id);
-  }finally{if(db){if(locked)db.exec('ROLLBACK');db.close();}if(child.exitCode===null){const ended=once(child,'exit');child.kill();await ended;}assert.ok(resolve(dir).startsWith(resolve(tmpdir())+sep));rmSync(dir,{recursive:true,force:true});}
+    stage='본문 대기 중 로그아웃';current=await get();const data=JSON.stringify({expectedVersion:current.version,roles:empty()}),begun=waitOutput(child,'BODY_STARTED');let slow;const pending=new Promise((resolve,reject)=>{slow=request(base+path,{method:'PUT',headers:{cookie:admin,'content-type':'application/json','content-length':Buffer.byteLength(data),'x-slow':'1'}},res=>{res.resume();res.on('end',()=>resolve(res.statusCode));});slow.on('error',reject);slow.write(data.slice(0,1));});await waitRequestSignal(begun,pending);assert.equal((await send('/api/logout','POST',{},admin)).status,200);slow.end(data.slice(1));assert.equal(await pending,401);assert.equal(JSON.parse(db.prepare('SELECT roles FROM permit_roles WHERE document_id=?').get(doc.id).roles).inspector,people[5].id);
+  }catch(error){throw new Error('역할 HTTP 시험 실패; 단계='+stage+' 서버 출력='+serverOutput+' 서버 종료='+child.exitCode+' 신호='+child.signalCode+' 표준오류='+serverErrors+' 원인='+inspect(error,{depth:null}),{cause:error});}finally{if(db){if(locked)db.exec('ROLLBACK');db.close();}if(child.exitCode===null){const ended=once(child,'exit');child.kill();await ended;}assert.ok(resolve(dir).startsWith(resolve(tmpdir())+sep));rmSync(dir,{recursive:true,force:true});}
 });

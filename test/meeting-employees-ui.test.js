@@ -9,7 +9,7 @@ const flush=()=>new Promise(resolve=>setImmediate(resolve));
 const decode=value=>value.replace(/&(amp|lt|gt|quot|#39);/g,(_,key)=>({amp:'&',lt:'<',gt:'>',quot:'"','#39':"'"}[key]));
 
 // shortcut: 폼·응답 경쟁은 모의 DOM으로 실행하며 실제 화면 배치 검증은 브라우저 시험에서 수행한다.
-async function screen({type='safety_meeting',details={},existing=false,people=[person(1)],load}={}){
+async function screen({type='safety_meeting',details={},existing=false,people=[person(1)],load,workers=[],attendance=[],loadAttendance,loadWorkers}={}){
   const nodes=new Map(),controls=new Map(),calls=[];
   const parse=(html,owner)=>{
     for(const [,id] of html.matchAll(/<\w+\b[^>]*\bid="([^"]+)"[^>]*>/g))nodes.set('#'+id,node(id));
@@ -25,7 +25,7 @@ async function screen({type='safety_meeting',details={},existing=false,people=[p
   const find=selector=>{const name=selector.match(/\[name=["']?([^\]"']+)/)?.[1];return name?controls.get(name):nodes.get(selector);};
   const state={siteId:7,page:'documents',type,types:{safety_meeting:'안전보건회의',work_council:'노사협의체'}};
   const dialog={open:false,showModal(){this.open=true;},close(){this.open=false;}};
-  const context={state,dialog,$:find,document:{querySelector:find,querySelectorAll:selector=>[...nodes.values()].filter(item=>item.isConnected).flatMap(item=>item.checks).filter(input=>selector.includes('['+input.marker+']')&&(!selector.endsWith(':checked')||input.checked))},FormData:class{*[Symbol.iterator](){for(const control of controls.values())if(!control.disabled)yield [control.name,control.value];}},api:async(path,options)=>{calls.push({path,options});if(options)return {id:5};if(path.startsWith('/api/reviewers?'))return load?load():people;return [];},today:()=> '2026-11-01',flash(){},render:async()=>{},showError:error=>{nodes.get('#dialog-error').textContent=error.message;}};
+  const context={state,dialog,$:find,document:{querySelector:find,querySelectorAll:selector=>[...nodes.values()].filter(item=>item.isConnected).flatMap(item=>item.checks).filter(input=>selector.includes('['+input.marker+']')&&(!selector.endsWith(':checked')||input.checked))},FormData:class{*[Symbol.iterator](){for(const control of controls.values())if(!control.disabled)yield [control.name,control.value];}},api:async(path,options)=>{calls.push({path,options});if(options)return {id:5};if(path.startsWith('/api/reviewers?'))return load?load():people;if(path.startsWith('/api/workers?'))return loadWorkers?loadWorkers():workers;if(path.startsWith('/api/attendance?'))return loadAttendance?loadAttendance(path):attendance;return [];},today:()=> '2026-11-01',flash(){},render:async()=>{},showError:error=>{nodes.get('#dialog-error').textContent=error.message;}};
   const parts=[source.match(/^const esc = .*$/m)[0],source.slice(source.indexOf('function field('),source.indexOf('function signaturePad(')),source.slice(source.indexOf('function showDialog('),source.indexOf("$('#dialog-close')")),source.slice(source.indexOf('async function editDocument('),source.indexOf('async function loadDocuments('))];
   runInNewContext(parts.join('\n')+'\nglobalThis.open=editDocument;',context);
   await context.open(existing?{id:5,site_id:7,type,title:'가상 기존 회의',date:'2026-11-01',details:JSON.stringify(details)}:null,details,type);await flush();
@@ -86,4 +86,51 @@ test('상세 화면은 스냅샷 이름을 이스케이프해 표시하고 실�
     let html='';const context={doc:{type},details:{employeeSnapshot:[{id:9,name:'<가상 이전 직원>'}]},content:{querySelector:()=>({insertAdjacentHTML:(_,value)=>{html=value;}})}};
     runInNewContext(source.match(/^const esc = .*$/m)[0]+'\n'+line,context);assert.match(html,/&lt;가상 이전 직원&gt;/);assert.match(html,/실제 참석·본인 인증·서명을 증명하지 않습니다/);assert.doesNotMatch(html,/<img|<가상 이전 직원>/);
   }
+});
+
+const worker=(id,category='일반근로자')=>({id,name:'가상 근로자',company:'가상 소속',occupation:'<가상 직종>',present:1,category});
+const click=(ui,group,action='select')=>ui.nodes.get(`#council-${group}-${action}`).onclick();
+
+test('노사협의체 전체 및 각 목록 선택·해제는 ID 공간을 분리하고 이전 선택과 직종을 표시한다',async()=>{
+  const ui=await screen({type:'work_council',existing:true,people:[person(1)],workers:[worker(2,'현장관리자')],attendance:[worker(1),worker(2,'현장관리자')],details:{employeeSnapshot:[{id:9,name:'이전 직원'}],workerSnapshot:[{...worker(8),occupation:'이전 직종'}],managerSnapshot:[worker(7,'현장관리자')]}});
+  const workerBox=ui.nodes.get('#meeting-workers');assert.match(workerBox.innerHTML,/&lt;가상 직종&gt;/);assert.match(workerBox.innerHTML,/이전 직종/);assert.equal(workerBox.checks.length,2);
+  click(ui,'all');for(const id of ['meeting-employees','meeting-workers','joint-managers'])assert.ok(ui.nodes.get('#'+id).checks.every(input=>input.checked));
+  click(ui,'employee','clear');assert.ok(ui.box().checks.every(input=>!input.checked));assert.ok(workerBox.checks.every(input=>input.checked));click(ui,'employee');
+  click(ui,'worker','clear');assert.ok(workerBox.checks.every(input=>!input.checked));click(ui,'worker');
+  click(ui,'manager','clear');assert.ok(ui.nodes.get('#joint-managers').checks.every(input=>!input.checked));click(ui,'manager');
+  await ui.save();assert.deepEqual(ui.payload().details.employeeIds,[1,9]);assert.deepEqual(ui.payload().details.workerIds,[1,8]);assert.deepEqual(ui.payload().details.managerIds,[2,7]);
+  const empty=await screen({type:'work_council'});click(empty,'all');click(empty,'all','clear');await empty.save();assert.deepEqual(empty.payload().details.employeeIds,[]);
+});
+
+test('전체 해제는 모든 목록을 해제하고 100명 초과는 원자적으로 거절해 입력을 유지한다',async()=>{
+  for(const group of ['employee','worker','manager']){
+    const many=Array.from({length:101},(_,i)=>i+1),ui=await screen({type:'work_council',people:group==='employee'?many.map(id=>person(id)):[person(1)],attendance:group==='worker'?many.map(id=>worker(id)):[],workers:group==='manager'?many.map(id=>worker(id,'현장관리자')):[]});
+    ui.controls.get('councilDiscussion').value='유지할 가상 입력';ui.box().checks[0].checked=true;click(ui,'all');assert.match(ui.error(),/100명/);assert.equal(ui.box().checks[0].checked,true);assert.equal(ui.box().checks.filter(x=>x.checked).length,1);click(ui,group);assert.match(ui.error(),/100명/);
+    const box=ui.nodes.get(group==='employee'?'#meeting-employees':group==='worker'?'#meeting-workers':'#joint-managers');box.checks.forEach(x=>x.checked=true);await ui.save();assert.equal(ui.writes().length,0);assert.match(ui.error(),/100명/);assert.equal(box.checks.filter(x=>x.checked).length,101);assert.equal(ui.controls.get('councilDiscussion').value,'유지할 가상 입력');assert.equal(ui.dialog.open,true);
+    box.checks.at(-1).checked=false;await ui.save();assert.equal(ui.writes().length,1);
+  }
+  const ui=await screen({type:'work_council',workers:[worker(2,'현장관리자')],attendance:[worker(1)]});click(ui,'all');click(ui,'all','clear');await ui.save();for(const key of ['employeeIds','workerIds','managerIds'])assert.deepEqual(ui.payload().details[key],[]);
+});
+
+test('날짜 변경 응답 경합·로딩·현장 전환은 이전 목록 전체 선택 및 저장을 막는다',async()=>{
+  const pending=[];const ui=await screen({type:'work_council',loadAttendance:()=>new Promise(resolve=>pending.push(resolve))});click(ui,'all');assert.match(ui.error(),/불러온 뒤/);assert.equal(ui.box().checks[0].checked,false);
+  ui.controls.get('date').value='2026-11-02';const loading=ui.controls.get('date').onchange();pending[1]([worker(2)]);await loading;pending[0]([worker(1)]);await flush();assert.equal(ui.nodes.get('#meeting-workers').checks[0].value,'2');click(ui,'all');await ui.save();assert.deepEqual(ui.payload().details.workerIds,[2]);
+  for(const change of [ui=>ui.state.siteId=8,ui=>ui.state.page='workers',ui=>ui.dialog.open=false]){
+    let resolve;const other=await screen({type:'work_council',loadAttendance:()=>new Promise(done=>resolve=done)});change(other);resolve([worker(1)]);await flush();assert.equal(other.nodes.get('#meeting-workers').dataset.loaded,undefined);click(other,'all');assert.equal(other.box().checks[0].checked,false);await other.save();assert.equal(other.writes().length,0);
+  }
+});
+
+test('노사협의체 이외 화면에는 전체 선택을 추가하지 않는다',async()=>{const ui=await screen();assert.equal(ui.nodes.has('#council-all-select'),false);});
+
+test('현장관리자의 늦은 응답도 현장·페이지·닫기 전환 뒤 적용하지 않는다',async()=>{
+  for(const change of [ui=>ui.state.siteId=8,ui=>ui.state.page='workers',ui=>ui.dialog.open=false]){
+    let calls=0,resolve;const ui=await screen({type:'work_council',loadWorkers:()=>++calls===1?[]:new Promise(done=>resolve=done)});change(ui);resolve([worker(2,'현장관리자')]);await flush();assert.equal(ui.nodes.get('#joint-managers').dataset.loaded,undefined);assert.equal(ui.nodes.get('#joint-managers').checks.length,0);
+  }
+});
+
+test('이전 근로자가 현장관리자로 바뀌면 전체 선택은 중복을 알리고 기존 선택을 원자적으로 보존한다',async()=>{
+  const ui=await screen({type:'work_council',existing:true,workers:[worker(1,'현장관리자')],details:{workerSnapshot:[worker(1)]}}),workers=ui.nodes.get('#meeting-workers'),managers=ui.nodes.get('#joint-managers');
+  assert.equal(workers.checks[0].checked,true);assert.equal(managers.checks[0].checked,false);click(ui,'all');assert.match(ui.error(),/한쪽만/);assert.equal(ui.box().checks[0].checked,false);assert.equal(workers.checks[0].checked,true);assert.equal(managers.checks[0].checked,false);
+  click(ui,'manager');assert.match(ui.error(),/한쪽만/);assert.equal(managers.checks[0].checked,false);managers.checks[0].checked=true;await ui.save();assert.equal(ui.writes().length,0);assert.match(ui.error(),/한쪽 선택/);assert.equal(ui.dialog.open,true);assert.equal(workers.checks[0].checked,true);
+  click(ui,'worker','clear');await ui.save();assert.deepEqual(ui.payload().details.workerIds,[]);assert.deepEqual(ui.payload().details.managerIds,[1]);
 });
