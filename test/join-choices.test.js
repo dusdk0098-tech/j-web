@@ -1,5 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import {mkdtempSync,rmSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {dirname,join,resolve} from 'node:path';
+import {createServer} from 'node:net';
+import {spawn} from 'node:child_process';
+import {once} from 'node:events';
+import {Store} from '../store.js';
 import { mountJoinChoices } from '../public/join-choices.js';
 
 class Node {
@@ -25,4 +32,31 @@ test('가입 후보 선택은 현장 목록을 갱신하고 직접 입력을 보
   update({companies:[],occupations:['새 직종']});assert.equal(occupation.value,'직접 입력한 직종');assert.equal(company.label.beforeNode.hidden,true);assert.deepEqual(buttons.children.map(b=>b.textContent),['새 직종']);
   update({companies:['가상 업체'],occupations:['가상 직종'],existingWorker:true});assert.equal(company.label.beforeNode.hidden,true);assert.equal(occupation.label.beforeNode.hidden,true);assert.equal(quick.hidden,true);assert.equal(companySelect.disabled,true);assert.equal(occupationSelect.disabled,true);
   update({companies:['가상 업체'],occupations:['가상 직종']});assert.equal(company.label.beforeNode.hidden,false);assert.equal(occupation.label.beforeNode.hidden,false);assert.equal(quick.hidden,false);assert.equal(companySelect.disabled,false);assert.equal(occupationSelect.disabled,false);
+});
+
+test('현장 후보가 없어도 기본 직종을 선택하고 등록 후보와 중복 없이 함께 표시한다',()=>{
+  const company=new Node('input'),occupation=new Node('input');company.label=new Node('label');occupation.label=new Node('label');
+  const form=new Node('form');form.ownerDocument={createElement:tag=>new Node(tag)};form.elements={company,occupation};const update=mountJoinChoices(form),select=occupation.label.beforeNode.children[0],quick=occupation.label.afterNode;
+  update({companies:[],occupations:[]});assert.equal(occupation.label.beforeNode.hidden,false);assert.equal(select.options.length,46);assert.equal(quick.hidden,true);
+  select.value='전기-내선';select.onchange();assert.equal(occupation.value,'전기-내선');
+  update({occupations:['전기-내선','가상 현장 직종']});assert.equal(select.value,'전기-내선');assert.equal(select.options.filter(option=>option.value==='전기-내선').length,1);assert.deepEqual(quick.children[1].children.map(button=>button.textContent),['전기-내선','가상 현장 직종']);
+  update({existingWorker:true});assert.equal(occupation.label.beforeNode.hidden,true);assert.equal(select.disabled,true);assert.equal(quick.hidden,true);
+  update({occupations:[]});assert.equal(occupation.label.beforeNode.hidden,false);assert.equal(select.disabled,false);assert.equal(select.value,'전기-내선');assert.equal(quick.hidden,true);
+});
+
+test('등록된 직종이 없는 가상 현장에서 기본 직종을 선택해 가입하고 로그인한다',{timeout:30000},async()=>{
+  const dir=mkdtempSync(join(tmpdir(),'jweb-default-occupation-')),store=new Store(join(dir,'jweb.sqlite')),site=store.createSite({name:'가상 현장'}),token=store.createInvitation(site.id).token;store.close();
+  const reservation=createServer();await new Promise(resolve=>reservation.listen(0,'127.0.0.1',resolve));const port=reservation.address().port;await new Promise(resolve=>reservation.close(resolve));
+  const child=spawn(process.execPath,['server.js'],{cwd:process.cwd(),env:{...process.env,PORT:String(port),JWEB_DATA_DIR:dir,JWEB_ADMIN_PASSWORD:'virtual-admin-password'},stdio:['ignore','pipe','pipe']});
+  try{
+    await Promise.race([once(child.stdout,'data'),once(child,'exit').then(()=>{throw Error('시험 서버 종료');})]);
+    const base=`http://127.0.0.1:${port}`,send=(path,method='GET',data,cookie)=>fetch(base+path,{method,headers:{...(data?{'content-type':'application/json'}:{}),...(cookie?{cookie}:{})},...(data?{body:JSON.stringify(data)}:{})});
+    const infoResponse=await send(`/api/join?token=${token}`),info=await infoResponse.json();assert.equal(infoResponse.status,200);assert.deepEqual(info.occupations,[]);
+    const company=new Node('input'),occupation=new Node('input');company.label=new Node('label');occupation.label=new Node('label');const form=new Node('form');form.ownerDocument={createElement:tag=>new Node(tag)};form.elements={company,occupation};mountJoinChoices(form)(info);
+    const select=occupation.label.beforeNode.children[0];assert.ok(select.options.some(option=>option.value==='배관-상하수도'));select.value='배관-상하수도';select.onchange();
+    const signup={token,name:'가상 근로자',category:'직영',occupation:occupation.value,loginId:'virtual_trade',password:'virtual-password-123',acknowledged:true,profile:{birthDate:'2000-01-01',phone:'010-0000-0000'}};
+    assert.equal((await send('/api/join','POST',signup)).status,201);assert.equal((await send('/api/worker/login','POST',{siteKey:info.siteKey,loginId:signup.loginId,password:signup.password})).status,200);
+    const admin=(await send('/api/login','POST',{password:'virtual-admin-password'})).headers.get('set-cookie').split(';')[0],workers=await(await send(`/api/workers?siteId=${site.id}`,'GET',null,admin)).json();assert.equal(workers.find(worker=>worker.name===signup.name).occupation,'배관-상하수도');
+    const asset=await send('/join-choices.js');assert.equal(asset.status,200);assert.match(await asset.text(),/배관-상하수도/);
+  }finally{if(child.exitCode===null){const done=once(child,'exit');child.kill();await done;}if(dirname(resolve(dir))===resolve(tmpdir()))rmSync(dir,{recursive:true,force:true});}
 });
