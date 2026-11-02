@@ -1768,7 +1768,7 @@ export class Store {
     if((riskKind||riskContractorId)&&type!=='risk')throw new Error('위험성평가 검색 조건을 확인해 주세요.');
     if(instructionCompanyId&&type!=='instruction')throw new Error('작업 지시서 검색 조건을 확인해 주세요.');
     if((permitCompany||permitFrom||permitTo)&&type!=='permit')throw new Error('작업 허가서 검색 조건을 확인해 주세요.');
-    if(educationKind&&(type!=='education'||!Object.hasOwn(educationKinds,educationKind)))throw new Error('교육 종류 검색 조건을 확인해 주세요.');
+    if(educationKind&&(type!=='education'||(educationKind!=='regular_and_risk'&&!Object.hasOwn(educationKinds,educationKind))))throw new Error('교육 종류 검색 조건을 확인해 주세요.');
     if(permitFrom)permitFrom=dateValue(permitFrom);if(permitTo)permitTo=dateValue(permitTo);if(permitFrom&&permitTo&&permitFrom>permitTo)throw new Error('작업기간 검색 범위를 확인해 주세요.');
     if(riskKind&&!['initial','regular','occasional','continuous'].includes(riskKind))throw new Error('평가 종류를 확인해 주세요.');
     if(riskContractorId&&(!/^[1-9]\d*$/.test(String(riskContractorId))||!Number.isSafeInteger(Number(riskContractorId))||!this.companies(siteId).some(company=>company.id===Number(riskContractorId))))throw new Error('같은 현장의 협력사를 선택해 주세요.');
@@ -1777,7 +1777,7 @@ export class Store {
     const rows=this.db.prepare(`SELECT documents.*,EXISTS(SELECT 1 FROM approval_steps WHERE document_id=documents.id) AS has_approval_line,EXISTS(SELECT 1 FROM instruction_results WHERE document_id=documents.id) AS has_instruction_result,COALESCE((SELECT source_document_id FROM work_plan_copies WHERE document_id=documents.id),(SELECT source_document_id FROM office_document_copies WHERE document_id=documents.id)) AS copied_from,${documentAuthorSql} AS author_name FROM documents WHERE (site_id=? OR (type='basic' AND status='approved' AND json_extract(details,'$.shared')=1)) AND (?='' OR type=?) AND (title LIKE ? OR body LIKE ? OR details LIKE ?) AND (?='' OR date>=?) AND (?='' OR date<=?) ORDER BY date DESC,id DESC`).all(siteId,type,type,...Array(3).fill(`%${query}%`),from,from,to,to);
     if(checklistCategory)return rows.filter(doc=>checklistCategoryForKind(JSON.parse(doc.details)?.kind)===checklistCategory);
     if(workPlanCompany)return rows.filter(doc=>{const company=JSON.parse(doc.details)?.company;return typeof company==='string'&&company.includes(workPlanCompany);});
-    if(educationKind)return rows.filter(doc=>JSON.parse(doc.details).kind===educationKind);
+    if(educationKind)return rows.filter(doc=>{const kind=JSON.parse(doc.details).kind;return educationKind==='regular_and_risk'?['regular','risk'].includes(kind):kind===educationKind;});
     if(instructionCompanyId)return rows.filter(doc=>JSON.parse(doc.details).companyId===Number(instructionCompanyId));
     if(permitCompany||permitFrom||permitTo)return rows.filter(doc=>{const details=JSON.parse(doc.details);if(permitCompany&&(permitCompany==='direct'?details.directWork!==true:details.companyId!==Number(permitCompany)))return false;if(permitFrom||permitTo)return !!details.periodFrom&&!!details.periodTo&&(!permitFrom||details.periodTo>=permitFrom)&&(!permitTo||details.periodFrom<=permitTo);return true;});
     if(!riskKind&&!riskContractorId)return rows;
