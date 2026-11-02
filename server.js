@@ -14,6 +14,7 @@ import { EmploymentCertificates } from './employment-certificates.js';
 import { ReviewerProfile } from './reviewer-profile.js';
 import { AdminAccounts } from './admin-accounts.js';
 import { ClientAccounts } from './client-accounts.js';
+import { LoginFailures } from './login-failures.js';
 import { types } from './domain.js';
 import QRCode from 'qrcode';
 import { issueAccessQr,issueInvitationQr } from './qr-issue.js';
@@ -60,7 +61,7 @@ const employment = new EmploymentCertificates(store.db);
 const reviewerProfile = new ReviewerProfile(store.db);
 const clients = new ClientAccounts(store.db);
 const workerSessions=new WorkerSessions(store.db);
-const reviewerSessions=new ReviewerSessions(store.db),reviewerAccountFailures=new Map();let reviewerFailures=[];
+const reviewerSessions=new ReviewerSessions(store.db),reviewerLoginFailures=new LoginFailures(),reviewerAccountFailures=reviewerLoginFailures.accounts;
 const workerPeerFailures=new Map(),workerAccountFailures=new Map();
 function pruneWorkerFailures(now){
   for(const failures of [workerPeerFailures,workerAccountFailures])for(const [key,times] of failures){const recent=times.filter(t=>t>now-5*60*1000);if(recent.length)failures.set(key,recent);else failures.delete(key);}
@@ -99,6 +100,7 @@ assets.add('/attendance-matrix.js');
 assets.add('/restricted-month-editor.js');
 assets.add('/education-kinds.js');
 assets.add('/training-detail.js');
+assets.add('/risk-detail.js');
 assets.add('/reviewer-education.js');
 assets.add('/education-reference.js');
 assets.add('/checklist-copy.js');
@@ -169,7 +171,8 @@ const server = http.createServer((req,res)=>adminRequests.run(req,async()=>{
     const token=sessionToken(req.headers.cookie);
     if(url.pathname==='/api/session' && req.method==='GET')return json(res,200,{enabled:true,authenticated:auth.valid(token),admin:auth.session(token),context:auth.context(token)});
     if(url.pathname==='/api/login' && req.method==='POST'){
-      const input=await body(req),newToken=auth.login(input.loginId,input.password,token);
+      const input=await body(req),peer=workerPeer(req);if(peer===null)return json(res,503,{error:'로그인 중계 설정을 확인해 주세요.'});
+      const newToken=auth.login(input.loginId,input.password,token,peer);
       if(!newToken)return json(res,401,{error:'암호가 올바르지 않거나 잠시 로그인할 수 없습니다.'});
       auth.logout(token);res.setHeader('Set-Cookie',`jweb_session=${newToken}; HttpOnly; SameSite=Strict; Path=/; Max-Age=28800${secureCookie}`);return json(res,200,{ok:true});
     }
@@ -181,16 +184,18 @@ const server = http.createServer((req,res)=>adminRequests.run(req,async()=>{
     if(url.pathname==='/api/client/id-check'&&req.method==='POST'){const input=await body(req);return json(res,200,{available:clients.available(input.loginId)});}
     if(url.pathname==='/api/client/register'&&req.method==='POST'){const input=await body(req);return json(res,201,clients.register(input));}
     if(url.pathname==='/api/client/login'&&req.method==='POST'){
-      const input=await body(req),next=clients.login(input.loginId,input.password,clientToken);if(!next)return json(res,401,{error:'아이디 또는 암호가 올바르지 않습니다.'});
+      const input=await body(req),peer=workerPeer(req);if(peer===null)return json(res,503,{error:'로그인 중계 설정을 확인해 주세요.'});
+      const next=clients.login(input.loginId,input.password,clientToken,peer);if(!next)return json(res,401,{error:'아이디 또는 암호가 올바르지 않습니다.'});
       res.setHeader('Set-Cookie','jweb_client='+next+'; HttpOnly; SameSite=Strict; Path=/; Max-Age=28800'+secureCookie);return json(res,200,{ok:true});
     }
     if(url.pathname==='/api/client/logout'&&req.method==='POST'){clients.logout(clientToken);res.setHeader('Set-Cookie','jweb_client=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0'+secureCookie);return json(res,200,{ok:true});}
     if(url.pathname==='/api/client/session'&&req.method==='GET'){const client=clients.session(clientToken);return client?json(res,200,{client}):json(res,401,{error:'발주처 시험 로그인이 필요합니다.'});}
     const reviewerToken=(req.headers.cookie||'').split(';').map(x=>x.trim()).find(x=>x.startsWith('jweb_reviewer='))?.slice(14)||'';
     if(url.pathname==='/api/reviewer/login'&&req.method==='POST'){
-      const input=await body(req),now=Date.now(),accountKey=typeof input.loginId==='string'&&/^[A-Za-z0-9_]{3,40}$/.test(input.loginId)?input.loginId:'invalid';reviewerFailures=reviewerFailures.filter(time=>time>now-5*60*1000);for(const [key,times] of reviewerAccountFailures){const recent=times.filter(time=>time>now-5*60*1000);if(recent.length)reviewerAccountFailures.set(key,recent);else reviewerAccountFailures.delete(key);}
-      const failures=reviewerAccountFailures.get(accountKey)||[];if(reviewerFailures.length>=100||failures.length>=10)return json(res,429,{error:'잠시 후 다시 로그인해 주세요.'});
-      const authenticated=store.authenticateReviewer(input.loginId,input.password,true);if(!authenticated){reviewerFailures.push(now);failures.push(now);reviewerAccountFailures.set(accountKey,failures);return json(res,401,{error:'아이디 또는 암호가 올바르지 않습니다.'});}
+      const input=await body(req),now=Date.now(),accountKey=typeof input.loginId==='string'&&/^[A-Za-z0-9_]{3,40}$/.test(input.loginId)?input.loginId:'invalid',peer=workerPeer(req);
+      if(peer===null)return json(res,503,{error:'로그인 중계 설정을 확인해 주세요.'});
+      reviewerLoginFailures.check(peer,accountKey,now);
+      const authenticated=store.authenticateReviewer(input.loginId,input.password,true);if(!authenticated){reviewerLoginFailures.record(peer,accountKey,now);return json(res,401,{error:'아이디 또는 암호가 올바르지 않습니다.'});}
       const raw=randomBytes(32).toString('base64url'),session={id:authenticated.reviewer.id,expires:now+8*60*60*1000};if(!reviewerSessions.issue(workerKey(raw),session,authenticated.credentialHash,authenticated.authVersion,workerKey(reviewerToken)))return json(res,401,{error:'아이디 또는 암호가 올바르지 않습니다.'});
       reviewerAccountFailures.delete(accountKey);for(const [key,item] of reviewerSessions)if(item.expires<=now)reviewerSessions.delete(key);res.setHeader('Set-Cookie',`jweb_reviewer=${raw}; HttpOnly; SameSite=Strict; Path=/; Max-Age=28800${secureCookie}`);return json(res,200,{ok:true});
     }

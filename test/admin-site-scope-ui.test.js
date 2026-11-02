@@ -12,6 +12,7 @@ import { hasManagerEducationTargets } from '../public/education-kinds.js';
 import { changedTrainingWorkers } from '../public/training-groups.js';
 import { attendanceNoticesMarkup } from '../public/attendance-matrix.js';
 import { trainingDetailMarkup } from '../public/training-detail.js';
+import { riskDetailMarkup, muscleDetailMarkup } from '../public/risk-detail.js';
 import { educationAttachmentLabels } from '../public/education-kinds.js';
 
 const source=readFileSync(new URL('../public/app.js',import.meta.url),'utf8');
@@ -37,6 +38,8 @@ function screen(fetcher=async()=>({ok:true,status:200,json:async()=>[]})){
   context.changedTrainingWorkers=changedTrainingWorkers;
   context.attendanceNoticesMarkup=attendanceNoticesMarkup;
   context.trainingDetailMarkup=trainingDetailMarkup;context.educationAttachmentLabels=educationAttachmentLabels;
+  Object.assign(context,{riskDetailMarkup,muscleDetailMarkup});
+  for(const key of ['riskFields','riskKinds','riskScales'])context[key]=runInNewContext(source.split('\n').find(line=>line.startsWith('const '+key+'='))+'\n'+key);
   context.siteSelect.selectedOptions=[{textContent:'가상 첫 현장'}];
   const oldQueryAll=context.document.querySelectorAll;
   context.document.querySelectorAll=selector=>{
@@ -61,6 +64,41 @@ function screen(fetcher=async()=>({ok:true,status:200,json:async()=>[]})){
   return {context,state,content,dialog,nodes,get,pages,requests,errors,redirects,flashes,submit:async values=>{const form=get('#dialog-form');form.values=values;await form.onsubmit({preventDefault(){},currentTarget:form});}};
 }
 const response=data=>({ok:true,status:200,json:async()=>data});
+
+test('제한 위험성평가 상세는 기존 전역 표시와 같은 항목·점수만 읽고 위험 내용을 이스케이프한다',async()=>{
+  const row={processName:'가상 <공정>',contractor:'가상 &업체',contractorId:12,task:'시험 작업',hazard:'시험 <위험>',existingMeasures:'기존 조치',additionalMeasures:'추가 조치',riskCategory:'시험 분류',riskType:'시험 형태',legalBasis:'시험 근거',likelihood:'3',severity:'2',improvedLikelihood:'1',improvedSeverity:'2',dueDate:'2026-11-04',completionDate:'2026-11-05',responsible:'가상 담당',supervisorOpinion:'가상 검토'};
+  const details={kind:'regular',scale:'3x3',periodFrom:'2026-11-01',periodTo:'2026-11-30',items:[row,{...row,contractorId:13,hazard:'별도 업체 위험'}],musculoskeletalItems:[{...row,selected:true,task:'선택한 근골격계 <작업>'},{selected:false,task:'제외된 근골격계'}],phone:'노출 금지',files:[{name:'노출 금지 파일'}]};
+  const doc={id:5,site_id:1,type:'risk',title:'가상 위험성평가',body:'가상 본문',status:'draft',details:JSON.stringify(details)},ui=screen(async()=>response(doc));
+  ui.state.page='documents';ui.state.detail=5;ui.state.admin={scope:'restricted',id:4};await ui.context.renderRestrictedDocuments();
+  const html=ui.content.innerHTML;
+  for(const value of Object.values(row))assert.ok(html.includes(esc(value)),String(value));
+  assert.match(html,/정기평가/);assert.match(html,/3×3 위험성 추정/);assert.match(html,/시험 점수<\/strong> 6/);assert.match(html,/개선 후 시험 점수<\/strong> 2/);assert.match(html,/등록번호 12/);assert.match(html,/등록번호 13/);
+  assert.match(html,/선택한 근골격계 &lt;작업&gt;/);assert.match(html,/선택하지 않은 1개/);
+  assert.doesNotMatch(html,/<공정>|<위험>|노출 금지|제외된 근골격계|data-action=|id="edit"|href=|data-training-file/);
+  assert.deepEqual(ui.requests.map(r=>r.path),['/api/documents/5']);assert.ok(ui.requests.every(r=>!r.options.method));
+  const {riskFields,riskKinds,riskScales}=ui.context;
+  assert.ok(html.includes(riskDetailMarkup(details,esc,riskFields,riskKinds,riskScales)));assert.ok(html.includes(muscleDetailMarkup(details,esc,riskFields)));
+});
+
+test('제한 위험성평가 상세는 구형 단일 항목과 빈 기록을 읽는다',async()=>{
+  for(const details of [null,'null','{}',JSON.stringify({processName:'이전 공정',task:'이전 작업',hazard:'이전 위험',scale:'three-level',grade:'상',improvedGrade:'하'})]){
+    const ui=screen(async()=>response({id:5,site_id:1,type:'risk',title:'이전 평가',body:'',status:'approved',details}));ui.state.page='documents';ui.state.detail=5;await ui.context.renderRestrictedDocuments();
+    assert.match(ui.content.innerHTML,/위험성평가 상세/);assert.doesNotMatch(ui.content.innerHTML,/undefined|NaN|시험 점수<\/strong>/);
+    if(details?.includes('이전 공정'))for(const value of ['이전 공정','이전 작업','이전 위험','상','하'])assert.ok(ui.content.innerHTML.includes(value));
+  }
+});
+
+test('제한 위험성평가의 늦은 조회 응답은 현장·계정·페이지·문서·세대 전환 뒤 표시하지 않는다',async()=>{
+  const doc={id:5,site_id:1,type:'risk',title:'이전 위험 제목',body:'이전 위험 본문',status:'approved',details:JSON.stringify({hazard:'이전 위험 항목'})};
+  for(const change of ['site','account','page','detail','epoch']){
+    const wait=delayed(),ui=screen(()=>wait.promise);ui.state.page='documents';ui.state.detail=5;
+    const pending=ui.context.renderRestrictedDocuments();
+    if(change==='site')ui.state.siteId=2;else if(change==='account')ui.state.admin={id:8};else if(change==='page')ui.state.page='workers';else if(change==='detail')ui.state.detail=6;else ui.context.detailEpoch++;
+    ui.content.innerHTML='새 화면';wait.resolve(response(doc));await pending;assert.equal(ui.content.innerHTML,'새 화면');assert.equal(ui.requests.length,1);
+  }
+  const wrong=screen(async()=>response({...doc,site_id:2}));wrong.state.page='documents';wrong.state.detail=5;await assert.rejects(wrong.context.renderRestrictedDocuments(),/현장/);assert.doesNotMatch(wrong.content.innerHTML,/이전 위험/);
+  for(const status of [401,403]){const ui=screen(async()=>({ok:false,status,json:async()=>({error:'조회 권한 없음'})}));ui.state.page='documents';ui.state.detail=5;await assert.rejects(ui.context.renderRestrictedDocuments());assert.doesNotMatch(ui.content.innerHTML,/이전 위험/);}
+});
 
 test('제한 교육·TBM 상세는 저장된 필드와 첨부만 표시하고 오래된 화면의 링크를 막는다',async()=>{
   for(const type of ['education','tbm']){

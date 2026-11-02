@@ -48,6 +48,10 @@ test('현장 관리자 HTTP 경계: 위조·미분류·관계 검증·지연 본
    assert.equal((await send(`/api/documents/${training.id}/transition`,'POST',{action:'submit'},cookie)).status,403);
   }
   assert.equal((await send('/training-detail.js','GET',null,cookie)).status,200);
+  for(const actor of [undefined,cookie,global]){
+   const script=await send('/risk-detail.js','GET',null,actor);assert.equal(script.status,200);assert.match(script.headers.get('content-type'),/javascript/);const body=await script.text();assert.match(body,/export function riskDetailMarkup/);assert.match(body,/export function muscleDetailMarkup/);
+   const dependency=await send('/risk-scale.js','GET',null,actor);assert.equal(dependency.status,200);assert.match(dependency.headers.get('content-type'),/javascript/);
+  }
   assert.equal((await send('/api/documents','POST',{...input,siteId:b.id},cookie)).status,403);
   assert.equal((await send('/api/documents','POST',{...input,officeSetup:{}},cookie)).status,403);
   for(const type of ['notice','checklist','tbm','education','daily_report']){const created=await send('/api/documents','POST',{...input,type},cookie);assert.equal(created.status,201,`${type}: ${await created.clone().text()}`);const row=await created.json();assert.equal((await send(`/api/documents/${row.id}`,'PUT',{...input,type,title:'가상 수정',expectedEditVersion:row.edit_version},cookie)).status,200);}

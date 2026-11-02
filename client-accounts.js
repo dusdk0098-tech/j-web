@@ -1,4 +1,5 @@
 import { createHash,randomBytes,scryptSync,timingSafeEqual } from 'node:crypto';
+import { LoginFailures } from './login-failures.js';
 
 const loginPattern=/^[A-Za-z0-9_]{3,50}$/;
 const tokenHash=token=>typeof token==='string'&&/^[\w-]{43}$/.test(token)?createHash('sha256').update(token).digest('hex'):'';
@@ -14,7 +15,7 @@ const passwordValue=password=>{
 
 export class ClientAccounts {
   constructor(db,now=()=>Date.now()){
-    this.db=db;this.now=now;this.failures=[];this.accountFailures=new Map();
+    this.db=db;this.now=now;this.loginFailures=new LoginFailures();this.accountFailures=this.loginFailures.accounts;
     db.exec("CREATE TABLE IF NOT EXISTS client_accounts (id INTEGER PRIMARY KEY AUTOINCREMENT,kind TEXT NOT NULL CHECK(kind IN ('company','individual')),business_number TEXT NOT NULL,login_id TEXT NOT NULL COLLATE NOCASE UNIQUE,salt BLOB NOT NULL,password_hash BLOB NOT NULL,email TEXT NOT NULL,business_name TEXT NOT NULL,name TEXT NOT NULL,position TEXT NOT NULL,phone TEXT NOT NULL,active INTEGER NOT NULL DEFAULT 1 CHECK(active IN (0,1)),version TEXT NOT NULL,auth_version TEXT NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP); CREATE TABLE IF NOT EXISTS client_sessions (token_hash TEXT PRIMARY KEY,client_id INTEGER NOT NULL REFERENCES client_accounts(id),expires INTEGER NOT NULL,credential_hash BLOB NOT NULL)");
     db.prepare('DELETE FROM client_sessions WHERE expires<=?').run(now());
   }
@@ -36,12 +37,11 @@ export class ClientAccounts {
       this.db.exec('COMMIT');return {id:Number(id),loginId};
     }catch(error){this.db.exec('ROLLBACK');throw error;}
   }
-  login(loginId,password,oldToken=''){
+  login(loginId,password,oldToken='',peer='local'){
     const now=this.now(),key=typeof loginId==='string'&&loginPattern.test(loginId)?loginId.toLowerCase():'invalid';
-    this.failures=this.failures.filter(t=>t>now-300000);for(const [id,times] of this.accountFailures){const recent=times.filter(t=>t>now-300000);if(recent.length)this.accountFailures.set(id,recent);else this.accountFailures.delete(id);}
-    const failures=this.accountFailures.get(key)||[];if(this.failures.length>=100||failures.length>=10)throw Object.assign(new Error('잠시 후 다시 로그인해 주세요.'),{sessionStatus:429});
+    this.loginFailures.check(peer,key,now);
     const row=key==='invalid'?null:this.db.prepare('SELECT id,salt,password_hash,auth_version,active FROM client_accounts WHERE login_id=?').get(loginId),candidate=typeof password==='string'&&password.length<=256?password:'',hash=scryptSync(candidate,row?.salt||Buffer.alloc(16),32),expected=row?.password_hash||Buffer.alloc(32);
-    if(!row||!row.active||!timingSafeEqual(hash,expected)){this.failures.push(now);failures.push(now);this.accountFailures.set(key,failures);return null;}
+    if(!row||!row.active||!timingSafeEqual(hash,expected)){this.loginFailures.record(peer,key,now);return null;}
     const raw=randomBytes(32).toString('base64url'),newKey=tokenHash(raw),oldKey=tokenHash(oldToken);
     this.db.exec('BEGIN IMMEDIATE');try{
       const current=this.db.prepare('SELECT id,password_hash,auth_version,active FROM client_accounts WHERE id=?').get(row.id);

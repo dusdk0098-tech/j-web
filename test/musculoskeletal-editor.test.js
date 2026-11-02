@@ -5,6 +5,7 @@ import { Store } from '../store.js';
 import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
 import { riskScore, selectedMusculoskeletalItems } from '../public/risk-scale.js';
+import { muscleDetailMarkup } from '../public/risk-detail.js';
 
 const decode=value=>value.replace(/&(amp|lt|gt|quot|#39);/g,(_,key)=>({amp:'&',lt:'<',gt:'>',quot:'"','#39':"'"}[key]));
 // shortcut: 이 편집기의 입력 태그만 모의 처리하며, 화면 배치 검증에는 실제 DOM이 필요하다.
@@ -163,7 +164,7 @@ test('근골격계 상세와 결재 사본 렌더링에 개선 후 등급이 표
   const source=readFileSync(new URL('../public/app.js',import.meta.url),'utf8'),esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const riskFields=runInNewContext(`${source.match(/^const riskFields=.*;$/m)[0]}\nriskFields`),details={scale:'three-level',musculoskeletalItems:[{task:'선택한 <작업>',grade:'상',improvedGrade:'하',selected:true},{task:'선택 안 한 작업',improvedGrade:'중',selected:false}]};let html='';
   const content={querySelector(selector){assert.equal(selector,'.action-row');return {insertAdjacentHTML(position,value){assert.equal(position,'beforebegin');html=value;}};}};
-  runInNewContext(source.match(/^  if\(doc.type==='risk'&&details.musculoskeletalItems\?\.length\).*$/m)[0],{doc:{type:'risk'},details,content,esc,riskFields,riskScore,selectedMusculoskeletalItems});
+  runInNewContext(source.match(/^  if\(doc.type==='risk'&&details.musculoskeletalItems\?\.length\).*$/m)[0],{doc:{type:'risk'},details,content,esc,riskFields,muscleDetailMarkup});
   assert.match(html,/<strong>개선 후 위험 등급<\/strong> 하/);assert.match(html,/선택한 &lt;작업&gt;/);assert.doesNotMatch(html,/선택 안 한 작업|시험 점수:/);
   const start=source.indexOf('function capturedFields('),end=source.indexOf('function capturedFiles(',start),captured=runInNewContext(`${source.slice(start,end)}\ncapturedFields(details)`,{details,esc,riskFields,dailyFields:{},planFields:{},permitFields:{}});
   assert.match(captured,/<dt>개선 후 위험 등급<\/dt><dd>하<\/dd>/);assert.match(captured,/<dt>개선 후 위험 등급<\/dt><dd>중<\/dd>/);assert.match(captured,/선택한 &lt;작업&gt;/);
