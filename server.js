@@ -94,6 +94,7 @@ assets.add('/worker-list.js');
 assets.add('/attendance-matrix.js');
 assets.add('/restricted-month-editor.js');
 assets.add('/education-kinds.js');
+assets.add('/reviewer-education.js');
 assets.add('/education-reference.js');
 assets.add('/checklist-copy.js');
 assets.add('/permit-sources.js');
@@ -195,6 +196,12 @@ const server = http.createServer((req,res)=>adminRequests.run(req,async()=>{
       req.checkSession=()=>reviewerSessions.get(key)===session&&session.expires>Date.now()&&store.reviewer(session.id)?.site_id===reviewer.site_id?null:{status:401,error:'결재자 로그인이 필요합니다.'};
       if(await handleCommonWork(req,res,url,'/api/reviewer/common-work',reviewer))return;
       if(url.pathname==='/api/reviewer/session'&&req.method==='GET')return json(res,200,{reviewer});
+      const reviewerEducation=url.pathname.match(/^\/api\/reviewer\/education(?:\/(\d+)(?:\/attachments\/(\d+))?)?$/);
+      if(reviewerEducation&&req.method==='GET'){
+        const [,id,fileId]=reviewerEducation,result=fileId?store.reviewerEducationAttachment(reviewer.id,id,fileId):store.reviewerEducation(reviewer.id,id);checkRequestSession(req);
+        if(!result)return json(res,404,{error:'교육 자료를 찾을 수 없습니다.'});if(!fileId)return json(res,200,result);
+        const name=encodeURIComponent(result.name).replace(/[!'()*]/g,c=>`%${c.charCodeAt(0).toString(16).toUpperCase()}`);res.writeHead(200,{'Content-Type':'application/octet-stream','Content-Disposition':`attachment; filename="attachment"; filename*=UTF-8''${name}`,'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(result.data);
+      }
       const reviewerBasic=url.pathname.match(/^\/api\/reviewer\/basic-documents\/(\d+)(?:\/attachments\/(\d+))?$/);
       if((reviewerBasic||url.pathname==='/api/reviewer/basic-documents')&&req.method==='GET'){
         const [,id,fileId]=reviewerBasic||[],result=!id?{documents:store.reviewerBasicDocuments(reviewer.id)}:fileId?store.reviewerBasicAttachment(reviewer.id,id,fileId):store.reviewerBasicDocument(reviewer.id,id);checkRequestSession(req);
@@ -381,8 +388,8 @@ const server = http.createServer((req,res)=>adminRequests.run(req,async()=>{
       const session=workerSessions.get(workerKey(workerToken));if(!session||session.expires<=Date.now())return json(res,401,{error:'근로자 로그인이 필요합니다.'});
       const [,id,signature]=workerTraining,authorize=()=>{checkRequestSession(req);const doc=store.workerDocument(session.worker.site_id,session.worker.id,id);if(!['tbm','education'].includes(doc.type))throw new Error('교육 문서를 확인해 주세요.');return doc;},doc=authorize();
       if(signature&&doc.type!=='tbm')throw new Error('TBM 문서를 확인해 주세요.');
-      if(req.method==='GET'){if(signature){const saved=store.tbmSignature(id);authorize();if(!saved)return json(res,404,{error:'시험 서명을 찾을 수 없습니다.'});res.writeHead(200,{'Content-Type':'image/png','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(saved.signature);}return json(res,200,store.trainingState(id,authorize));}
-      if((req.method==='PUT'&&!signature)||(req.method==='POST'&&signature)){const input=await body(req),check=()=>{checkWorkerReport(req,workerKey(workerToken),session,input);authorize();if(typeof input.expectedVersion!=='string'||input.expectedVersion!==store.trainingStateVersion(id))throw Object.assign(new Error('교육 문서 또는 대상이 변경되었습니다. 다시 확인해 주세요.'),{sessionStatus:409});};if(signature)store.saveTbmSignature(id,input.signature,check);else store.setTrainingTargets(id,input.workerIds,check);return json(res,200,{ok:true});}
+      if(req.method==='GET'){if(signature){const saved=store.tbmSignature(id);authorize();if(!saved)return json(res,404,{error:'시험 서명을 찾을 수 없습니다.'});res.writeHead(200,{'Content-Type':'image/png','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(saved.signature);}const state=store.trainingState(id,authorize),{managers,...targets}=state.targets;return json(res,200,{...state,targets});}
+      if((req.method==='PUT'&&!signature)||(req.method==='POST'&&signature)){const input=await body(req),check=()=>{checkWorkerReport(req,workerKey(workerToken),session,input);authorize();if(input.managerIds!==undefined)throw Object.assign(new Error('관리자 교육 대상은 현장 관리자가 지정합니다.'),{sessionStatus:403});if(typeof input.expectedVersion!=='string'||input.expectedVersion!==store.trainingStateVersion(id))throw Object.assign(new Error('교육 문서 또는 대상이 변경되었습니다. 다시 확인해 주세요.'),{sessionStatus:409});};if(signature)store.saveTbmSignature(id,input.signature,check);else store.setTrainingTargets(id,input.workerIds,check);return json(res,200,{ok:true});}
     }
     const workerDocument=url.pathname.match(/^\/api\/worker\/documents\/(\d+)(?:\/(transition|attachments)(?:\/(\d+))?)?$/);
     if(workerDocument){
@@ -1139,7 +1146,7 @@ const server = http.createServer((req,res)=>adminRequests.run(req,async()=>{
       if (req.method === 'GET' && part === 'notice-reads') return json(res,200,store.noticeReads(id));
       if (req.method === 'GET' && part === 'training-checks') return json(res,200,store.trainingChecks(id));
       if (req.method === 'GET' && part === 'training-targets') return json(res,200,store.trainingTargets(id));
-      if (req.method === 'PUT' && part === 'training-targets') {const input=await body(req);store.setTrainingTargets(id,input.workerIds,()=>checkRequestSession(req));return json(res,200,{ok:true});}
+      if (req.method === 'PUT' && part === 'training-targets') {const input=await body(req);store.setTrainingTargets(id,input.workerIds,()=>{checkRequestSession(req);if((input.managerIds!==undefined||input.expectedEditVersion!==undefined)&&(!Number.isSafeInteger(input.expectedEditVersion)||store.document(id)?.edit_version!==input.expectedEditVersion))throw Object.assign(new Error('교육 문서 또는 대상이 변경되었습니다. 다시 확인해 주세요.'),{sessionStatus:409});},input.managerIds);return json(res,200,{ok:true});}
       if (req.method === 'GET' && !part) { const d=store.document(id); return d ? json(res,200,d) : json(res,404,{error:'문서를 찾을 수 없습니다.'}); }
       if (req.method === 'PUT' && !part) {const input=await body(req,150000);if(!Number.isSafeInteger(input.expectedEditVersion))throw Object.assign(new Error('문서 버전이 없습니다. 입력 내용을 복사한 뒤 화면을 새로고침해 주세요.'),{sessionStatus:409});return json(res,200,store.updateDocument(id,input,()=>checkRequestSession(req)));}
       if (req.method === 'DELETE' && !part) {const input=await body(req);store.deleteBasicDocument(input.siteId,id,input.expectedVersion);return json(res,200,{ok:true});}

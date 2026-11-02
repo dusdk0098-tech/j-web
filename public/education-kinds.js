@@ -26,3 +26,8 @@ export function readEducationMethod(root) {
 }
 
 export const educationAttachmentLabels=Object.freeze({general:'일반 첨부',education_photo:'교육 사진',education_material:'교육자료'});
+
+export function hasManagerEducationTargets(doc) {
+  const kind=JSON.parse(doc.details||'{}').kind||'';
+  return doc.type==='education'&&(/^supervisor(?:_|$)/.test(kind)||['msds','other'].includes(kind));
+}

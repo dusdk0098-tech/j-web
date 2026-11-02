@@ -8,6 +8,8 @@ import { once } from 'node:events';
 import { createServer } from 'node:net';
 import { runInNewContext } from 'node:vm';
 import { siteQrSession, printSiteQr, siteQrPrintAction } from '../public/site-qr.js';
+import { hasManagerEducationTargets } from '../public/education-kinds.js';
+import { changedTrainingWorkers } from '../public/training-groups.js';
 
 const source=readFileSync(new URL('../public/app.js',import.meta.url),'utf8');
 const part=(from,to)=>{const start=source.indexOf(from),end=source.indexOf(to,start);assert.ok(start>=0&&end>start,from);return source.slice(start,end);};
@@ -28,6 +30,8 @@ function screen(fetcher=async()=>({ok:true,status:200,json:async()=>[]})){
   const context={state,content,dialog,siteSelect:get('#site-select'),detailEpoch:1,workerListEpoch:0,sitePhotoEpoch:0,permitRoleCleanup:null,siteEducationCleanup:null,labels:{documents:'안전 문서',admins:'관리자 계정'},statusLabels:{draft:'임시저장'},esc,URLSearchParams,today:()=> '2026-11-02',document:{createElement:node,querySelector:selector=>selector.startsWith('dialog')?null:get(selector),querySelectorAll:()=>pages},$:get,location:{assign:path=>redirects.push(path)},flash:message=>flashes.push(message),showError:error=>errors.push(error.message),confirm:()=>true,FormData:class{constructor(form){return Object.entries(form.values||{});}},fetch:async(path,options)=>{requests.push({path,options});return fetcher(path,options);}};
   context.siteQrSession=siteQrSession;context.siteQrPrintAction=options=>siteQrPrintAction({...options,print:(dialog,mode)=>context.printSiteQr(dialog,mode)});
   context.mountRestrictedMonthEditor=()=>({dirty:()=>false,busy:()=>false});
+  context.hasManagerEducationTargets=hasManagerEducationTargets;
+  context.changedTrainingWorkers=changedTrainingWorkers;
   context.siteSelect.selectedOptions=[{textContent:'가상 첫 현장'}];
   const oldQueryAll=context.document.querySelectorAll;
   context.document.querySelectorAll=selector=>{
@@ -52,6 +56,30 @@ function screen(fetcher=async()=>({ok:true,status:200,json:async()=>[]})){
   return {context,state,content,dialog,nodes,get,pages,requests,errors,redirects,flashes,submit:async values=>{const form=get('#dialog-form');form.values=values;await form.onsubmit({preventDefault(){},currentTarget:form});}};
 }
 const response=data=>({ok:true,status:200,json:async()=>data});
+
+test('배정 현장 교육 상세 진입점에서 관리자·근로자 대상을 각각 선택하고 버전과 함께 저장한다',async()=>{
+  const doc={id:5,type:'education',title:'가상 교육',date:'2026-11-01',body:'',status:'draft',edit_version:8,details:'{"kind":"supervisor_new"}'},targets={configured:true,workers:[{id:20,name:'가상 출역자',present:1,selected:0},{id:21,name:'가상 미출역자',present:0,selected:1}],managers:[{id:10,name:'가상 직원',active:1,selected:0}]};
+  for(const conflict of [false,true]){
+    const ui=screen(async(path,options)=>options.method==='PUT'?(conflict?{ok:false,status:409,json:async()=>({error:'버전 충돌'})}:response({ok:true})):response(path==='/api/sites'?sites:path.endsWith('/training-targets')?targets:doc));
+    ui.state.page='documents';ui.state.detail=5;ui.state.admin={scope:'restricted',id:4};const formNodes=new Map();
+    ui.get('#dialog-body').querySelectorAll=selector=>{
+      const markup=ui.get('#dialog-body').innerHTML,all=selector==='[data-restricted-training-all]',kind=selector.match(/="(worker|manager)"/)?.[1],matches=[...markup.matchAll(all?/data-restricted-training-all="([^"]+)"/g:/data-restricted-training="([^"]+)" value="(\d+)" data-present="(\d+)" data-active="(\d+)" ([^>]*)/g)];
+      return matches.filter(match=>all||match[1]===kind).map(match=>{const key=all?'all-'+match[1]:match[2];if(!formNodes.has(key))formNodes.set(key,all?{dataset:{restrictedTrainingAll:match[1]},checked:false}:{value:match[2],dataset:{present:match[3],active:match[4]},checked:match[5].includes('checked')});return formNodes.get(key);}).filter(input=>!selector.endsWith(':checked')||input.checked);
+    };
+    await ui.context.renderRestrictedDocuments();assert.match(ui.content.innerHTML,/교육 대상 조회·설정/);await ui.get('#restricted-education-targets').onclick();assert.equal(ui.dialog.open,true);
+    for(const kind of ['manager','worker']){const all=formNodes.get('all-'+kind);all.checked=true;all.onchange();}
+    await ui.submit({});const writes=ui.requests.filter(request=>request.options.method==='PUT');assert.equal(writes.length,1);assert.deepEqual(JSON.parse(writes[0].options.body),{workerIds:[20,21],managerIds:[10],expectedEditVersion:8});
+    if(conflict){assert.equal(ui.dialog.open,true);assert.match(ui.get('#dialog-error').textContent,/버전 충돌/);assert.equal(formNodes.get('10').checked,true);}
+  }
+});
+
+test('교육 대상 조회·저장 콜백은 현장·계정 전환 뒤 새 창을 열거나 이전 대상을 저장하지 않는다',async()=>{
+  const doc={id:5,type:'education',title:'가상 교육',date:'2026-11-01',status:'draft',edit_version:8,details:'{"kind":"supervisor_new"}'};
+  for(const transition of ['site','account']){
+    const wait=delayed(),ui=screen(async path=>path.endsWith('/training-targets')?wait.promise:response(doc));ui.state.page='documents';ui.state.detail=5;ui.state.admin={scope:'restricted',id:4};
+    await ui.context.renderRestrictedDocuments();const opening=ui.get('#restricted-education-targets').onclick();if(transition==='site')ui.state.siteId=2;else ui.state.admin={scope:'restricted',id:99};wait.resolve(response({configured:true,workers:[],managers:[]}));await opening;assert.equal(ui.dialog.open,false);assert.equal(ui.requests.filter(request=>request.options.method==='PUT').length,0);
+  }
+});
 
 const licenseSection=ui=>ui.get('#dialog-body').children.find(child=>child.tag==='fieldset');
 const licenseRows=ui=>licenseSection(ui).children[2].children.map(element=>({name:element.children[0].children[0],number:element.children[1].children[0],remove:element.children[2]}));

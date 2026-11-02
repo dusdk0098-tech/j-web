@@ -35,6 +35,13 @@ export function adminSitePolicy(db,req,url,session){
     return null;
   }
   const workerSite=(id,siteId)=>positive(id)&&allowed(siteId)&&db.prepare('SELECT 1 FROM workers WHERE id=? AND site_id=?').get(Number(id),Number(siteId));
+  const training=path.match(/^\/api\/documents\/([1-9]\d*)\/training-targets$/);
+  if(training){
+    const row=doc(training[1]);if(owned(row)||row.type!=='education'||url.search)return denied();
+    if(method==='GET')return null;
+    if(method!=='PUT')return denied();if(input===undefined)return null;
+    return fields(['workerIds','managerIds','expectedEditVersion'])&&(input.workerIds===undefined?Array.isArray(input.managerIds):Array.isArray(input.workerIds)&&input.workerIds.every(id=>Number.isSafeInteger(id)&&workerSite(id,row.site_id)))&&Number.isSafeInteger(input.expectedEditVersion)&&input.expectedEditVersion>=0?null:denied();
+  }
   const qr=path.match(/^\/api\/sites\/([1-9]\d*)\/(access(?:\/(?:status|rotate|registration))?|invitation(?:\/status)?)$/);
   if(qr){
     if([...url.searchParams.keys()].some(key=>key!=='siteId'))return denied();

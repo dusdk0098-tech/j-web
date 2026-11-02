@@ -24,3 +24,8 @@ export function filterEducationReport(rows,categories){
   const selected=new Set(categories);
   return rows.filter(row=>selected.has(row.category));
 }
+
+export function changedTrainingWorkers(targets,selected){
+  const before=new Set(targets.workers.filter(worker=>!targets.configured||worker.selected).map(worker=>worker.id));
+  return selected.length===before.size&&selected.every(id=>before.has(id))?undefined:selected;
+}

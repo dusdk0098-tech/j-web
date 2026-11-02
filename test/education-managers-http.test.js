@@ -1,0 +1,48 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {mkdtempSync,rmSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import {pathToFileURL} from 'node:url';
+import {createServer} from 'node:net';
+import {spawn} from 'node:child_process';
+import {once} from 'node:events';
+import {Store} from '../store.js';
+import {AdminAccounts} from '../admin-accounts.js';
+
+test('관리자 대상 HTTP는 세션·현장·버전을 검사하고 직원에게 선정된 승인 문서의 첨부만 공개한다',{timeout:60000},async()=>{
+  const dir=mkdtempSync(join(tmpdir(),'jweb-manager-http-')),s=new Store(join(dir,'jweb.sqlite')),password='virtual-password-123',auth=new AdminAccounts(s.db);auth.bootstrap(password);
+  const a=s.createSite({name:'가상 A'}),b=s.createSite({name:'가상 B'});
+  for(const [loginId,siteId] of [['admin_a',a.id],['admin_b',b.id]])auth.create({loginId,name:'가상 관리자',password,scope:'restricted',siteIds:[siteId]});
+  const manager=s.createReviewer({siteId:a.id,loginId:'review_a',name:'가상 직원',password}),foreign=s.createReviewer({siteId:b.id,loginId:'review_b',name:'다른 직원',password});
+  const input={siteId:a.id,type:'education',title:'가상 교육',date:'2026-11-01',details:{kind:'supervisor_new',timeFrom:'09:00',timeTo:'10:00',educationPlace:'가상 교실',educationMethod:'강의식',instructor:'가상 강사'}},doc=s.createDocument(input),other=s.createDocument({...input,title:'다른 문서'}),file=s.addAttachment(doc.id,'가상.txt',Buffer.from('virtual')),otherFile=s.addAttachment(other.id,'다른.txt',Buffer.from('private'));
+  const reservation=createServer();await new Promise(resolve=>reservation.listen(0,'127.0.0.1',resolve));const port=reservation.address().port;await new Promise(resolve=>reservation.close(resolve));
+  const hook=`import {Store} from ${JSON.stringify(pathToFileURL(join(process.cwd(),'store.js')).href)};const original=Store.prototype.setTrainingTargets;Store.prototype.setTrainingTargets=function(...args){console.log('TARGET_SAVE');return original.apply(this,args)};`;
+  const child=spawn(process.execPath,['--import',`data:text/javascript,${encodeURIComponent(hook)}`,'server.js'],{cwd:process.cwd(),env:{...process.env,PORT:String(port),JWEB_DATA_DIR:dir},stdio:['ignore','pipe','pipe']});let locked=false;
+  try{
+    await Promise.race([once(child.stdout,'data'),once(child,'exit').then(()=>{throw Error('서버 시작 실패');})]);
+    const call=(path,method='GET',data,cookie)=>fetch(`http://127.0.0.1:${port}${path}`,{method,headers:{...(data?{'content-type':'application/json'}:{}),...(cookie?{cookie}:{})},...(data?{body:JSON.stringify(data)}:{})});
+    const login=async(loginId,review=false)=>(await call(review?'/api/reviewer/login':'/api/login','POST',{loginId,password})).headers.get('set-cookie').split(';')[0];
+    const admin=await login('admin_a'),otherAdmin=await login('admin_b'),reviewer=await login('review_a',true),otherReviewer=await login('review_b',true),path=`/api/documents/${doc.id}/training-targets`;
+    assert.equal((await call(path)).status,401);assert.equal((await call(path,'GET',null,otherAdmin)).status,403);
+    assert.equal((await call(path,'PUT',{managerIds:[manager.id]},admin)).status,403);
+    assert.equal((await call(path,'PUT',{managerIds:[manager.id],expectedEditVersion:s.document(doc.id).edit_version,unexpected:true},admin)).status,403);
+    assert.equal((await call(path,'PUT',{managerIds:[manager.id],expectedEditVersion:s.document(doc.id).edit_version},admin)).status,200);assert.equal(s.trainingTargets(doc.id).configured,false);
+    const selected={workerIds:[],managerIds:[manager.id],expectedEditVersion:s.document(doc.id).edit_version};
+    assert.equal((await call(path,'PUT',selected,otherAdmin)).status,403);assert.equal((await call(path,'PUT',selected,admin)).status,200);
+    assert.equal((await call(path,'PUT',{...selected,managerIds:[]},admin)).status,409);
+    assert.equal((await call(path,'PUT',{...selected,managerIds:[foreign.id],expectedEditVersion:s.document(doc.id).edit_version},admin)).status,400);
+    assert.equal(s.trainingTargets(doc.id).managers.find(p=>p.id===manager.id).selected,1);
+    const expectedEditVersion=s.document(doc.id).edit_version;s.db.exec('BEGIN IMMEDIATE');locked=true;const started=once(child.stdout,'data'),saving=call(path,'PUT',{workerIds:[],managerIds:[],expectedEditVersion},admin);saving.catch(()=>{});assert.match(String((await started)[0]),/TARGET_SAVE/);s.db.exec('DELETE FROM admin_sessions');s.db.exec('COMMIT');locked=false;assert.equal((await saving).status,401);assert.equal(s.trainingTargets(doc.id).managers.find(p=>p.id===manager.id).selected,1);
+    assert.equal((await call('/api/reviewer/education')).status,401);assert.deepEqual(await (await call('/api/reviewer/education','GET',null,reviewer)).json(),[]);
+    s.transition(doc.id,'submit');s.transition(doc.id,'approve');
+    assert.deepEqual((await (await call('/api/reviewer/education','GET',null,reviewer)).json()).map(row=>row.id),[doc.id]);
+    assert.equal((await call(`/api/reviewer/education/${doc.id}`,'GET',null,reviewer)).status,200);
+    assert.equal(await (await call(`/api/reviewer/education/${doc.id}/attachments/${file}`,'GET',null,reviewer)).text(),'virtual');
+    for(const url of [`/api/reviewer/education/${doc.id}`,`/api/reviewer/education/${doc.id}/attachments/${file}`])assert.equal((await call(url,'GET',null,otherReviewer)).status,404);
+    assert.equal((await call(`/api/reviewer/education/${doc.id}/attachments/${otherFile}`,'GET',null,reviewer)).status,404);
+    assert.equal((await call(`/api/reviewer/education/${other.id}/attachments/${file}`,'GET',null,reviewer)).status,404);
+    assert.equal((await call(`/api/reviewer/education/${doc.id}`,'PUT',{},reviewer)).status,404);
+    s.updateReviewer(a.id,manager.id,{active:false});assert.equal((await call(`/api/reviewer/education/${doc.id}/attachments/${file}`,'GET',null,reviewer)).status,401);
+  }finally{if(locked)s.db.exec('ROLLBACK');if(child.exitCode===null){const exited=once(child,'exit');child.kill();await exited;}s.close();rmSync(dir,{recursive:true,force:true});}
+});

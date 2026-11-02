@@ -11,7 +11,7 @@ import { normalizeRichText,richTextToPlain } from './public/rich-text.js';
 import { summarizeWorkerCounts } from './public/worker-list.js';
 import { matchesAttendanceQuery } from './public/attendance-matrix.js';
 import { safetyCostAmount } from './public/safety-cost.js';
-import { educationKinds } from './public/education-kinds.js';
+import { educationKinds, hasManagerEducationTargets } from './public/education-kinds.js';
 import { costImageType } from './cost-image.js';
 
 const siteArticleRow=row=>({...row,rich_body:row.rich_body===null?null:JSON.parse(row.rich_body)});
@@ -188,6 +188,7 @@ export class Store {
       CREATE TABLE IF NOT EXISTS worker_daily_training (worker_id INTEGER NOT NULL REFERENCES workers(id),date TEXT NOT NULL,kind TEXT NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(worker_id,date,kind));
       CREATE TABLE IF NOT EXISTS training_target_config (document_id INTEGER PRIMARY KEY REFERENCES documents(id));
       CREATE TABLE IF NOT EXISTS training_targets (document_id INTEGER NOT NULL REFERENCES documents(id),worker_id INTEGER NOT NULL REFERENCES workers(id),PRIMARY KEY(document_id,worker_id));
+      CREATE TABLE IF NOT EXISTS training_manager_targets (document_id INTEGER NOT NULL REFERENCES documents(id),reviewer_id INTEGER NOT NULL REFERENCES reviewers(id),PRIMARY KEY(document_id,reviewer_id));
       CREATE TABLE IF NOT EXISTS work_stops (id INTEGER PRIMARY KEY,site_id INTEGER NOT NULL REFERENCES sites(id),worker_id INTEGER REFERENCES workers(id),place TEXT NOT NULL,reason TEXT NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
       CREATE TABLE IF NOT EXISTS attachments (id INTEGER PRIMARY KEY,document_id INTEGER NOT NULL REFERENCES documents(id),name TEXT NOT NULL,data BLOB NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
       CREATE TABLE IF NOT EXISTS instruction_results (document_id INTEGER PRIMARY KEY REFERENCES documents(id),date TEXT NOT NULL,actor TEXT NOT NULL,content TEXT NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
@@ -218,7 +219,7 @@ export class Store {
       if(!this.db.prepare('PRAGMA table_info(documents)').all().some(column=>column.name==='edit_version'))this.db.exec('ALTER TABLE documents ADD COLUMN edit_version INTEGER NOT NULL DEFAULT 0');
       this.db.exec('CREATE TRIGGER IF NOT EXISTS document_edit_version AFTER UPDATE ON documents WHEN NEW.edit_version=OLD.edit_version BEGIN UPDATE documents SET edit_version=OLD.edit_version+1 WHERE id=NEW.id; END;');
       // 서명·첨부·결재 변경 뒤 오래된 편집이 새 자료를 지우지 않도록 같은 버전을 올린다.
-      for(const table of ['attachments','events','approval_steps','approval_cycles','office_reference_recipients','checklist_signatures','tbm_signatures','joint_inspection_signatures','meeting_signatures','training_targets','training_target_config'])for(const action of ['INSERT','UPDATE','DELETE']){
+      for(const table of ['attachments','events','approval_steps','approval_cycles','office_reference_recipients','checklist_signatures','tbm_signatures','joint_inspection_signatures','meeting_signatures','training_targets','training_manager_targets','training_target_config'])for(const action of ['INSERT','UPDATE','DELETE']){
         const ids=action==='INSERT'?'NEW.document_id':action==='DELETE'?'OLD.document_id':'OLD.document_id,NEW.document_id';
         this.db.exec('CREATE TRIGGER IF NOT EXISTS document_edit_'+table+'_'+action.toLowerCase()+' AFTER '+action+' ON '+table+' BEGIN UPDATE documents SET edit_version=edit_version+1 WHERE id IN ('+ids+'); END;');
       }this.db.exec('COMMIT');
@@ -1241,7 +1242,8 @@ export class Store {
     if(!doc || !['tbm','education'].includes(doc.type))throw new Error('교육 문서를 확인해 주세요.');
     const configured=!!this.db.prepare('SELECT 1 FROM training_target_config WHERE document_id=?').get(Number(documentId));
     const workers=this.db.prepare('SELECT w.id,w.name,w.company,COALESCE(a.present,0) AS present,a.company_snapshot AS attendance_company,a.occupation_snapshot AS attendance_occupation,EXISTS(SELECT 1 FROM training_targets t WHERE t.document_id=? AND t.worker_id=w.id) AS selected,EXISTS(SELECT 1 FROM worker_daily_training c WHERE c.worker_id=w.id AND c.date=? AND c.kind=?) AS daily_confirmed,EXISTS(SELECT 1 FROM worker_daily_training c WHERE c.worker_id=w.id AND c.date=? AND c.kind=? AND c.signature IS NOT NULL) AS daily_has_signature FROM workers w LEFT JOIN attendance a ON a.worker_id=w.id AND a.date=? WHERE w.site_id=? ORDER BY w.name,w.id').all(Number(documentId),doc.date,doc.type,doc.date,doc.type,doc.date,doc.site_id);
-    return {configured,workers,signedWorkers:workers.filter(w=>w.daily_has_signature&&(!configured||w.selected))};
+    const managers=hasManagerEducationTargets(doc)?this.db.prepare('SELECT r.id,r.name,r.active,EXISTS(SELECT 1 FROM training_manager_targets t WHERE t.document_id=? AND t.reviewer_id=r.id) AS selected FROM reviewers r WHERE r.site_id=? AND (r.active=1 OR EXISTS(SELECT 1 FROM training_manager_targets t WHERE t.document_id=? AND t.reviewer_id=r.id)) ORDER BY r.name,r.id').all(Number(documentId),doc.site_id,Number(documentId)):[];
+    return {configured,workers,managers,signedWorkers:workers.filter(w=>w.daily_has_signature&&(!configured||w.selected))};
   }
   trainingStateVersion(documentId){
     const doc=this.document(documentId),targets=this.trainingTargets(documentId),files=this.attachments(documentId),hash=createHash('sha256').update(JSON.stringify({doc,targets,files}));
@@ -1250,21 +1252,43 @@ export class Store {
   trainingState(documentId,onAuthorize=()=>{}){
     this.db.exec('BEGIN');try{onAuthorize();const doc=this.document(documentId),targets=this.trainingTargets(documentId),version=this.trainingStateVersion(documentId),hasSignature=doc.type==='tbm'&&!!this.tbmSignature(documentId);onAuthorize();this.db.exec('COMMIT');return {targets,version,hasSignature};}catch(error){this.db.exec('ROLLBACK');throw error;}
   }
-  setTrainingTargets(documentId,workerIds,onAuthorize=()=>{}) {
-    if(!Array.isArray(workerIds) || workerIds.length>1000 || workerIds.some(id=>!Number.isSafeInteger(id) || id<1) || new Set(workerIds).size!==workerIds.length)throw new Error('교육 대상자를 확인해 주세요.');
+  setTrainingTargets(documentId,workerIds,onAuthorize=()=>{},managerIds) {
+    const preserveWorkers=workerIds===undefined&&managerIds!==undefined;
+    if(!preserveWorkers&&(!Array.isArray(workerIds) || workerIds.length>1000 || workerIds.some(id=>!Number.isSafeInteger(id) || id<1) || new Set(workerIds).size!==workerIds.length))throw new Error('교육 대상자를 확인해 주세요.');
+    if(managerIds!==undefined&&(!Array.isArray(managerIds)||managerIds.length>1000||managerIds.some(id=>!Number.isSafeInteger(id)||id<1)||new Set(managerIds).size!==managerIds.length))throw new Error('관리자 교육 대상자를 확인해 주세요.');
     this.db.exec('BEGIN IMMEDIATE');
     try{
       onAuthorize();const doc=this.document(documentId);
       if(!doc || !['tbm','education'].includes(doc.type) || !['draft','rejected'].includes(doc.status))throw new Error('수정 가능한 교육 문서를 확인해 주세요.');
       const exists=this.db.prepare('SELECT 1 FROM workers WHERE id=? AND site_id=?');
-      if(workerIds.some(id=>!exists.get(id,doc.site_id)))throw new Error('같은 현장의 교육 대상자를 선택해 주세요.');
-      this.db.prepare('INSERT OR IGNORE INTO training_target_config(document_id) VALUES(?)').run(Number(documentId));
-      this.db.prepare('DELETE FROM training_targets WHERE document_id=?').run(Number(documentId));
-      const insert=this.db.prepare('INSERT INTO training_targets(document_id,worker_id) VALUES(?,?)');
-      for(const id of workerIds)insert.run(Number(documentId),id);
+      if(!preserveWorkers&&workerIds.some(id=>!exists.get(id,doc.site_id)))throw new Error('같은 현장의 교육 대상자를 선택해 주세요.');
+      if(managerIds!==undefined){
+        if(!hasManagerEducationTargets(doc)&&managerIds.length)throw new Error('관리자 대상이 있는 교육 종류를 선택해 주세요.');
+        const manager=this.db.prepare('SELECT 1 FROM reviewers WHERE id=? AND site_id=? AND active=1');
+        if(managerIds.some(id=>!manager.get(id,doc.site_id)))throw new Error('같은 현장의 활성 직원 계정을 선택해 주세요.');
+        this.db.prepare('DELETE FROM training_manager_targets WHERE document_id=?').run(Number(documentId));
+        const insertManager=this.db.prepare('INSERT INTO training_manager_targets(document_id,reviewer_id) VALUES(?,?)');
+        for(const id of managerIds)insertManager.run(Number(documentId),id);
+      }
+      if(!preserveWorkers){
+        this.db.prepare('INSERT OR IGNORE INTO training_target_config(document_id) VALUES(?)').run(Number(documentId));
+        this.db.prepare('DELETE FROM training_targets WHERE document_id=?').run(Number(documentId));
+        const insert=this.db.prepare('INSERT INTO training_targets(document_id,worker_id) VALUES(?,?)');
+        for(const id of workerIds)insert.run(Number(documentId),id);
+      }
       if(doc.type==='tbm')this.db.prepare('DELETE FROM tbm_signatures WHERE document_id=?').run(Number(documentId));
       this.db.exec('COMMIT');
     }catch(error){this.db.exec('ROLLBACK');throw error;}
+  }
+  reviewerEducation(reviewerId,documentId) {
+    const rows=this.db.prepare("SELECT d.id,d.title,d.date,d.body,d.details FROM reviewers r JOIN training_manager_targets t ON t.reviewer_id=r.id JOIN documents d ON d.id=t.document_id AND d.site_id=r.site_id WHERE r.id=? AND r.active=1 AND d.type='education' AND d.status='approved' ORDER BY d.date DESC,d.id DESC").all(Number(reviewerId)).filter(row=>hasManagerEducationTargets({...row,type:'education'}));
+    if(documentId===undefined)return rows.map(({id,title,date})=>({id,title,date}));
+    const doc=rows.find(row=>row.id===Number(documentId));
+    return doc?{document:doc,attachments:this.attachments(doc.id).map(({id,name,size,category})=>({id,name,size,category}))}:null;
+  }
+  reviewerEducationAttachment(reviewerId,documentId,fileId) {
+    const view=this.reviewerEducation(reviewerId,documentId);
+    return view?.attachments.some(file=>file.id===Number(fileId))?this.attachment(fileId):null;
   }
   workerSelfCheck(workerId,date) {
     return this.db.prepare('SELECT date,created_at,signature IS NOT NULL AS has_signature FROM worker_self_checks WHERE worker_id=? AND date=?').get(Number(workerId),dateValue(date)) || null;
@@ -1879,7 +1903,7 @@ export class Store {
     if(doc.type==='joint_inspection')return {type:'joint',authorSignature:!!this.jointSignature(doc.id)};
     if(doc.type==='office')return {type:'office',authorSignature:!!this.meetingSignature(doc.id),referenceRecipients:this.officeReferences(doc.id),reference:this.officeLinkedReferenceInfo(doc)?.reference||null};
     if(['work_council','safety_meeting','inspection','safety_log','patrol'].includes(doc.type))return {type:'meeting',authorSignature:!!this.meetingSignature(doc.id)};
-    if(['tbm','education'].includes(doc.type)){const targets=this.trainingTargets(doc.id);return {type:'training',authorSignature:doc.type==='tbm'&&!!this.tbmSignature(doc.id),configured:targets.configured,workers:targets.workers.filter(worker=>!targets.configured||worker.selected),signedWorkers:targets.signedWorkers,checks:this.trainingChecks(doc.id)};}
+    if(['tbm','education'].includes(doc.type)){const targets=this.trainingTargets(doc.id);return {type:'training',authorSignature:doc.type==='tbm'&&!!this.tbmSignature(doc.id),configured:targets.configured,workers:targets.workers.filter(worker=>!targets.configured||worker.selected),managers:targets.managers.filter(person=>person.selected).map(({id,name})=>({id,name})),signedWorkers:targets.signedWorkers,checks:this.trainingChecks(doc.id)};}
     if(doc.type!=='work_plan')return null;const details=JSON.parse(doc.details||'{}'),equipmentIds=details.equipmentIds||[],riggingIds=details.riggingIds||[],snapshots=Array.isArray(details.equipmentSnapshot)?details.equipmentSnapshot:null;
     const equipment=this.equipment(doc.site_id).filter(item=>equipmentIds.includes(item.id)).map(item=>{const snapshot=snapshots?.find(row=>row.id===item.id);return {info:snapshot||item,snapshot:!!snapshot,files:this.equipmentAttachments(doc.site_id,item.id)};});
     const rigging=this.rigging(doc.site_id).filter(item=>riggingIds.includes(item.id)).map(item=>({info:{...item,details:JSON.parse(item.details)},files:this.riggingPhotos(doc.site_id,item.id)}));
@@ -2313,6 +2337,7 @@ export class Store {
     if(doc.type==='risk' && action==='reject' && !opinion)throw new Error('반려 의견을 입력해 주세요.');
     let cycleId=doc.approval_cycle_id||null;this.db.exec('SAVEPOINT document_transition');
     try {
+      if(action==='submit'&&hasManagerEducationTargets(doc)&&this.db.prepare('SELECT 1 FROM training_manager_targets t JOIN reviewers r ON r.id=t.reviewer_id WHERE t.document_id=? AND (r.active<>1 OR r.site_id<>?)').get(Number(id),doc.site_id))throw new Error('관리자 교육 대상의 현장 배정과 활성 상태를 다시 확인해 주세요.');
       if(doc.type==='permit'&&action==='submit'){
         this.db.prepare('UPDATE documents SET id=id WHERE id=?').run(Number(id));const latest=this.document(id),roles=this.permitRoles(id).roles,ids=this.validatePermitRoles(latest,roles);
         if(['status','title','date','body','details'].some(key=>latest[key]!==doc[key])||JSON.stringify(this.approvalLine(id))!==JSON.stringify(line))throw new Error('작업허가서 또는 시험 결재선이 변경되었습니다. 다시 조회해 주세요.');
