@@ -40,7 +40,7 @@ function signaturePad(canvas){
   canvas.onpointerdown=e=>{e.preventDefault();drawing=true;signed=true;canvas.setPointerCapture(e.pointerId);const [x,y]=point(e);ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(x+.1,y+.1);ctx.stroke();};
   canvas.onpointermove=e=>{if(!drawing)return;const [x,y]=point(e);ctx.lineTo(x,y);ctx.stroke();};
   canvas.onpointerup=canvas.onpointercancel=()=>{drawing=false;};
-  return {clear(){ctx.clearRect(0,0,canvas.width,canvas.height);signed=false;},value(){if(!signed)throw Error('시험 서명을 입력해 주세요.');return canvas.toDataURL('image/png');}};
+  return {clear(){ctx.clearRect(0,0,canvas.width,canvas.height);signed=false;},hasValue(){return signed;},value(){if(!signed)throw Error('시험 서명을 입력해 주세요.');return canvas.toDataURL('image/png');}};
 }
 form.querySelector('.fields').insertAdjacentHTML('beforeend','<label>시험 아이디<input name="loginId" required pattern="[A-Za-z0-9_]{3,40}" autocomplete="username"></label><label>시험 암호<input name="password" type="password" required minlength="12" maxlength="256" autocomplete="new-password"></label>');
 form.querySelector('.fields').insertAdjacentHTML('beforeend','<label>가상 생년월일<input name="birthDate" type="date" required></label><label>가상 전화번호<input name="phone" type="tel" maxlength="30" required></label><label>가상 비상연락 대상<input name="emergencyName" maxlength="200"></label><label>가상 비상연락처<input name="emergencyPhone" type="tel" maxlength="30"></label><label>가상 주소<input name="address" maxlength="200"></label><label>가상 국적<input name="nationality" maxlength="200"></label>');
@@ -98,22 +98,24 @@ async function showWorker(worker,reportContext){
       }
     }catch(error){if(panel.isConnected){const status=document.createElement('p');status.textContent=error.message;panel.append(status);}}});
     const ppe=document.createElement('section');ppe.innerHTML='<h2>나의 가상 보호구 지급 내역</h2><p>시험 기록이며 실제 지급이나 수령을 증명하지 않습니다.</p><button type="button">목록 새로고침</button><ul></ul><p role="status"></p>';panel.append(ppe);
-    const ppeList=ppe.querySelector('ul'),ppeStatus=ppe.querySelector('[role=status]'),ppeRows=new Map();let ppeGeneration=0;
+    const ppeList=ppe.querySelector('ul'),ppeStatus=ppe.querySelector('[role=status]'),ppeRows=new Map(),ppeDrafts=new Set();let ppeGeneration=0;
     const loadPpe=async()=>{if(!workerPanelActive())return;const generation=++ppeGeneration;try{
       const response=await fetch('/api/worker/ppe-issues',{headers:{'X-Worker-Report-Context':JSON.stringify(reportContext)}}),rows=await response.json();if(!workerPanelActive()||generation!==ppeGeneration)return;if(response.status===409&&rows.sessionChanged){stopWorkerDay();dayStatus.textContent=rows.error||'로그인 세션이 변경되었습니다. 입력 내용을 복사한 뒤 다시 로그인해 주세요.';return;}if(!response.ok)throw Error(rows.error);
       const nextRows=new Map(),nodes=[];ppeStatus.textContent=rows.length?'':'기록이 없습니다.';
       for(const row of rows){
         const snapshot=JSON.stringify(row),existing=ppeRows.get(row.id);if(existing?.snapshot===snapshot){nextRows.set(row.id,existing);nodes.push(existing.li);continue;}
-        const li=document.createElement('li'),summary=document.createElement('p');summary.textContent=`${row.date} · ${row.item} · ${row.quantity}개 · ${row.receipt_at?'시험 수령 확인됨':'미확인'}`;li.append(summary);
+        const li=document.createElement('li'),summary=document.createElement('p'),entry={snapshot,li,pad:null};summary.textContent=`${row.date} · ${row.item} · ${row.quantity}개 · ${row.receipt_at?'시험 수령 확인됨':'미확인'}`;li.append(summary);
         if(row.receipt_at){const link=document.createElement('a');link.href=`/api/worker/ppe-issues/${row.id}/receipt`;link.textContent='시험 서명 다운로드';li.append(link);}
         else{
           const receipt=document.createElement('form');receipt.innerHTML='<p>가상 수령 서명</p><canvas width="320" height="120" class="signature-pad" aria-label="보호구 수령 시험 서명 입력 영역"></canvas><button type="button">서명 지우기</button> <button type="submit">시험 수령 확인</button>';
-          const pad=signaturePad(receipt.querySelector('canvas')),submit=receipt.querySelector('[type=submit]');receipt.querySelector('[type=button]').onclick=()=>pad.clear();
-          receipt.onsubmit=async event=>{event.preventDefault();if(!workerPanelActive()||!li.isConnected||ppeRows.get(row.id)?.li!==li||submit.disabled)return;submit.disabled=true;try{const result=await fetch(`/api/worker/ppe-issues/${row.id}/receipt`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({reportContext,version:row.version,signature:pad.value()})}),data=await result.json();if(!result.ok)throw Error(data.error);if(workerPanelActive())await loadPpe();}catch(error){if(workerPanelActive())ppeStatus.textContent=error.message;}finally{submit.disabled=false;}};
+          const pad=signaturePad(receipt.querySelector('canvas')),submit=receipt.querySelector('[type=submit]');entry.pad=pad;receipt.querySelector('[type=button]').onclick=()=>pad.clear();
+          receipt.onsubmit=async event=>{event.preventDefault();if(!workerPanelActive()||!li.isConnected||ppeRows.get(row.id)?.li!==li||submit.disabled)return;submit.disabled=true;try{const signature=pad.value(),result=await fetch(`/api/worker/ppe-issues/${row.id}/receipt`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({reportContext,version:row.version,signature})}),data=await result.json();if(!result.ok)throw Error(data.error);if(pad.hasValue()&&pad.value()===signature)pad.clear();if(workerPanelActive())await loadPpe();}catch(error){if(workerPanelActive())ppeStatus.textContent=error.message;}finally{submit.disabled=false;}};
           li.append(receipt);
         }
-        nextRows.set(row.id,{snapshot,li});nodes.push(li);
+        nextRows.set(row.id,entry);nodes.push(li);
       }
+      for(const [id,entry] of ppeRows)if(nextRows.get(id)!==entry&&entry.pad?.hasValue()){const notice=document.createElement('p'),discard=document.createElement('button');notice.textContent='지급 기록이 변경되거나 삭제되어 이전 서명은 제출할 수 없습니다. 내용을 확인한 뒤 직접 지워 주세요.';discard.type='button';discard.textContent='이전 서명 지우기';discard.onclick=()=>{ppeDrafts.delete(entry);entry.li.remove();};entry.li.append(notice,discard);ppeDrafts.add(entry);}
+      for(const entry of ppeDrafts)nodes.push(entry.li);
       ppeRows.clear();for(const [id,entry] of nextRows)ppeRows.set(id,entry);if(nodes.length!==ppeList.children.length||nodes.some((node,index)=>node!==ppeList.children[index]))ppeList.replaceChildren(...nodes);
     }catch(error){if(workerPanelActive()&&generation===ppeGeneration)ppeStatus.textContent=error.message;}};
     ppe.querySelector('button').onclick=loadPpe;ppeStatus.textContent='불러오는 중입니다.';initialLoads.push(loadPpe);
