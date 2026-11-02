@@ -1,0 +1,12 @@
+<!doctype html>
+<html lang="ko">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>직원 계정 찾기 | J웹</title><link rel="stylesheet" href="/style.css"><script type="module" src="/review-recovery.js"></script></head>
+<body><header class="top"><a class="brand" href="/"><span>J</span>웹 <small>현장 안전관리</small></a></header><main>
+<h1>직원 시험 계정 찾기</h1>
+<p>미리 확인한 시험 이메일을 사용합니다. 이메일 전달 설정이 없거나 이메일을 확인하지 않았다면 관리자에게 문의해 주세요.</p>
+<p id="recovery-status" role="status" aria-live="polite"></p>
+<form id="recovery-request" class="panel"><div class="fields"><label>이름<input name="name" maxlength="200" autocomplete="name" required></label><label>확인한 이메일<input name="email" type="email" maxlength="200" autocomplete="email" required></label></div><button type="submit">아이디·암호 찾기 메일 요청</button></form>
+<section id="recovery-verify" class="panel" hidden><p>이 이메일을 직원 시험 계정의 계정 찾기 주소로 확인합니다.</p><button type="button">이메일 확인</button></section>
+<form id="recovery-reset" class="panel" hidden><p>새 시험 암호를 입력하세요. 변경 후 기존 직원 로그인은 종료됩니다.</p><div class="fields"><label>새 시험 암호<input name="password" type="password" minlength="12" maxlength="256" autocomplete="new-password" required></label><label>새 시험 암호 확인<input name="confirmPassword" type="password" minlength="12" maxlength="256" autocomplete="new-password" required></label></div><button type="submit">시험 암호 변경</button></form>
+<p><a href="/review">직원 로그인으로 돌아가기</a></p>
+</main></body></html>
