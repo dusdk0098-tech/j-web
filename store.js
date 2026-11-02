@@ -1543,6 +1543,13 @@ export class Store {
   workerArrivals(siteId,date){
     date=dateValue(date);this.siteLocationPolicy(siteId);return this.db.prepare('SELECT a.worker_id,w.name,a.checked_at,a.version FROM worker_arrivals a JOIN workers w ON w.id=a.worker_id WHERE w.site_id=? AND a.date=? ORDER BY a.checked_at,a.worker_id').all(Number(siteId),date);
   }
+  workerAccessReport(siteId,date,onAuthorize=()=>{}){
+    siteId=Number(siteId);date=dateValue(date);this.db.exec('BEGIN');try{
+      onAuthorize();const arrivals=this.workerArrivals(siteId,date),events=this.workerLocationEvents(siteId,date),departures=this.workerDepartures(siteId,date);
+      const workers=this.db.prepare("SELECT w.id AS worker_id,w.name,w.category,w.company,w.occupation,CASE WHEN json_valid(j.profile) THEN json_extract(j.profile,'$.birthDate') END AS birth_date FROM workers w LEFT JOIN join_acknowledgements j ON j.worker_id=w.id WHERE w.site_id=? AND w.id IN (SELECT worker_id FROM worker_arrivals WHERE date=? UNION SELECT worker_id FROM worker_location_events WHERE site_id=? AND date=? UNION SELECT worker_id FROM worker_departures WHERE site_id=? AND date=?) ORDER BY w.name,w.id").all(siteId,date,siteId,date,siteId,date);
+      onAuthorize();this.db.exec('COMMIT');return {workers,arrivals,events,departures};
+    }catch(error){this.db.exec('ROLLBACK');throw error;}
+  }
   deleteWorkerArrival(siteId,workerId,date,version,onAuthorize=()=>{}){
     date=dateValue(date);if(typeof version!=='string'||!/^[a-f0-9]{32}$/.test(version))throw new Error('접속 기록을 다시 확인해 주세요.');this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();if(!this.db.prepare('DELETE FROM worker_arrivals WHERE worker_id=? AND date=? AND version=? AND EXISTS (SELECT 1 FROM workers WHERE id=worker_arrivals.worker_id AND site_id=?)').run(Number(workerId),date,version,Number(siteId)).changes)throw Object.assign(new Error('접속 기록이 변경되었습니다. 다시 조회해 주세요.'),{sessionStatus:409});this.db.exec('COMMIT');}catch(error){this.db.exec('ROLLBACK');throw error;}
   }
