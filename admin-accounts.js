@@ -1,4 +1,5 @@
-import { createHash,randomBytes,scryptSync,timingSafeEqual } from 'node:crypto';
+import { createHash,randomBytes,timingSafeEqual } from 'node:crypto';
+import { passwordHash as scryptSync, passwordSalt, passwordCandidate, withPasswordHashes, assertPasswordAccount } from './password-hashing.js';
 import { LoginFailures } from './login-failures.js';
 
 const loginPattern=/^[A-Za-z0-9_]{3,50}$/;
@@ -28,6 +29,16 @@ export class AdminAccounts {
     if(typeof loginId!=='string'||!loginPattern.test(loginId))throw new Error('관리자 아이디를 확인해 주세요.');
     return !this.db.prepare('SELECT 1 FROM admin_accounts WHERE login_id=?').get(loginId);
   }
+  async loginAsync(loginId,password,oldToken,peer){
+    loginId=loginId===undefined?'admin':loginId;
+    const key=typeof loginId==='string'&&loginPattern.test(loginId)?loginId.toLowerCase():'invalid',release=this.loginFailures.reserve(peer,key,this.now());
+    try{
+      const read=()=>key==='invalid'?null:this.db.prepare('SELECT * FROM admin_accounts WHERE login_id=?').get(loginId),row=read();
+      return await withPasswordHashes(peer,[{password:passwordCandidate(password),salt:row?.salt||Buffer.alloc(16)}],()=>{assertPasswordAccount(row,read());release();return this.login(loginId,password,oldToken,peer,row??null);});
+    }finally{release();}
+  }
+  createAsync(input,authorize,peer){return withPasswordHashes(peer,[{password:passwordValue(input.password)}],()=>this.create(input,authorize));}
+  updateAsync(id,input,authorize,peer){return input.password===undefined?this.update(id,input,authorize):withPasswordHashes(peer,[{password:passwordValue(input.password)}],()=>this.update(id,input,authorize));}
   bootstrap(password){
     if(this.db.prepare('SELECT 1 FROM admin_accounts LIMIT 1').get())return;
     this.create({loginId:'admin',name:'최초 관리자',password},()=>{},true);
@@ -35,7 +46,7 @@ export class AdminAccounts {
   create(input,authorize=()=>{},bootstrap=false){
     const loginId=value(input.loginId,'관리자 아이디',50),name=value(input.name,'이름',200),password=passwordValue(input.password);
     if(!loginPattern.test(loginId))throw Error('관리자 아이디는 영문·숫자·밑줄 3~50자입니다.');
-    const salt=randomBytes(16),hash=scryptSync(password,salt,32);
+    const salt=passwordSalt(password),hash=scryptSync(password,salt,32);
     this.db.exec('BEGIN IMMEDIATE');try{
       authorize();
       if(bootstrap&&this.db.prepare('SELECT 1 FROM admin_accounts LIMIT 1').get()){this.db.exec('COMMIT');return;}
@@ -48,7 +59,7 @@ export class AdminAccounts {
   }
   valid(token,now=this.now()){return !!this.session(token,now);}
   context(token){return this.valid(token)?createHash('sha256').update('admin-context:'+token).digest('hex'):null;}
-  login(loginId,password,oldToken='',peer='local'){
+  login(loginId,password,oldToken='',peer='local',verifiedAccount=undefined){
     loginId=loginId===undefined?'admin':loginId;
     const now=this.now(),key=typeof loginId==='string'&&loginPattern.test(loginId)?loginId.toLowerCase():'invalid';
     this.loginFailures.check(peer,key,now);
@@ -56,8 +67,10 @@ export class AdminAccounts {
     if(!row||!row.active||!timingSafeEqual(hash,expected)){this.loginFailures.record(peer,key,now);return null;}
     const raw=randomBytes(32).toString('base64url'),newKey=tokenHash(raw),oldKey=tokenHash(oldToken);
     this.db.exec('BEGIN IMMEDIATE');try{
-      const current=this.db.prepare('SELECT id,password_hash,auth_version,active FROM admin_accounts WHERE id=?').get(row.id);
+      const current=this.db.prepare('SELECT * FROM admin_accounts WHERE id=?').get(row.id);
+      if(verifiedAccount!==undefined)assertPasswordAccount(verifiedAccount,current);
       if(!current||!current.active||current.auth_version!==row.auth_version||current.password_hash.length!==row.password_hash.length||!timingSafeEqual(current.password_hash,row.password_hash)){this.db.exec('ROLLBACK');return null;}
+      this.db.prepare('DELETE FROM admin_sessions WHERE expires<=?').run(now);
       if(oldKey)this.db.prepare('DELETE FROM admin_sessions WHERE token_hash=?').run(oldKey);
       this.db.prepare('INSERT INTO admin_sessions(token_hash,admin_id,expires,credential_hash) VALUES(?,?,?,?)').run(newKey,current.id,now+28800000,credential(current));
       this.db.exec('COMMIT');this.accountFailures.delete(key);return raw;
@@ -94,7 +107,7 @@ export class AdminAccounts {
   update(id,input,authorize=()=>{}){
     if(!input||typeof input.version!=='string'||(input.active===undefined&&input.password===undefined&&input.name===undefined&&input.scope===undefined&&input.siteIds===undefined&&input.revoke!==true)||(input.active!==undefined&&typeof input.active!=='boolean'))throw new Error('변경할 관리자 계정 정보를 확인해 주세요.');
     const name=input.name===undefined?null:value(input.name,'이름',200);
-    let salt=null,hash=null;if(input.password!==undefined){salt=randomBytes(16);hash=scryptSync(passwordValue(input.password),salt,32);}
+    let salt=null,hash=null;if(input.password!==undefined){salt=passwordSalt(passwordValue(input.password));hash=scryptSync(passwordValue(input.password),salt,32);}
     this.db.exec('BEGIN IMMEDIATE');try{
       authorize();const account=this.db.prepare('SELECT * FROM admin_accounts WHERE id=?').get(Number(id));if(!account)throw new Error('관리자 계정을 확인해 주세요.');if(account.version!==input.version)throw Object.assign(new Error('관리자 계정이 변경되었습니다. 다시 조회해 주세요.'),{sessionStatus:409});
       const {scope,siteIds}=this.permissions(input,account),permissionsChanged=scope!==account.scope||JSON.stringify(siteIds)!==JSON.stringify(this.siteIds(account.id));

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtempSync,rmSync} from 'node:fs';
+import {mkdtempSync,rmSync,readFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join,resolve,sep} from 'node:path';
 import {pathToFileURL} from 'node:url';
@@ -48,7 +48,13 @@ test('현장 관리자 HTTP 경계: 위조·미분류·관계 검증·지연 본
    assert.equal((await send(`/api/documents/${training.id}/transition`,'POST',{action:'submit'},cookie)).status,403);
   }
   assert.equal((await send('/training-detail.js','GET',null,cookie)).status,200);
+  const plan=store.createDocument({...input,type:'work_plan',details:{company:'가상 계획 업체',place:'가상 장소',hazards:'가상 위험',measures:'가상 대책',periodFrom:'2026-11-01',periodTo:'2026-11-01',timeFrom:'07:00',timeTo:'16:00',workKinds:['기타']}});
+  assert.equal((await (await send(`/api/documents/${plan.id}`,'GET',null,cookie)).json()).details,plan.details);
+  assert.equal((await send(`/api/documents/${plan.id}`)).status,401);
+  const foreignPlan=store.createDocument({...input,siteId:b.id,type:'work_plan'});assert.equal((await send(`/api/documents/${foreignPlan.id}`,'GET',null,cookie)).status,403);
+  assert.equal((await send(`/api/documents/${plan.id}/transition`,'POST',{action:'submit'},cookie)).status,403);
   for(const actor of [undefined,cookie,global]){
+   const planScript=await send('/plan-detail.js','GET',null,actor);assert.equal(planScript.status,200);assert.match(planScript.headers.get('content-type'),/javascript/);assert.equal(await planScript.text(),readFileSync('public/plan-detail.js','utf8'));
    const script=await send('/risk-detail.js','GET',null,actor);assert.equal(script.status,200);assert.match(script.headers.get('content-type'),/javascript/);const body=await script.text();assert.match(body,/export function riskDetailMarkup/);assert.match(body,/export function muscleDetailMarkup/);
    const dependency=await send('/risk-scale.js','GET',null,actor);assert.equal(dependency.status,200);assert.match(dependency.headers.get('content-type'),/javascript/);
   }

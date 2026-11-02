@@ -1,4 +1,5 @@
-import { createHash, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
+import { passwordHash as scryptSync } from './password-hashing.js';
 
 export class LocalAuth {
   constructor(password) {

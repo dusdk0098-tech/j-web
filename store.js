@@ -1,6 +1,7 @@
 import { listPermitMeasures,savePermitMeasure,validatePermitMeasureSources } from './permit-measures.js';
 import { DatabaseSync } from 'node:sqlite';
-import { createHash, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
+import { passwordHash as scryptSync, passwordSalt, passwordCandidate, withPasswordHashes, assertPasswordAccount } from './password-hashing.js';
 import { dateValue, officeKinds, recordInput, muscleReferenceInput, text, transitions } from './domain.js';
 import { PNG } from 'pngjs';
 import { scheduleTypes, scheduleTargetRequired, validScheduleTime } from './public/schedule.js';
@@ -1586,6 +1587,18 @@ export class Store {
   }
   siteRegistrationExpiry(siteId){return this.db.prepare('SELECT expires_at FROM site_registration WHERE site_id=? AND expires_at>?').get(Number(siteId),Date.now())?.expires_at||null;}
   siteRegistrationOpen(siteId){return this.siteRegistrationExpiry(siteId)!==null;}
+  joinAsync(token,input,peer){return withPasswordHashes(peer,[{password:input.password}],()=>this.join(token,input));}
+  resetWorkerPasswordAsync(siteId,id,password,authorize,peer){return withPasswordHashes(peer,[{password}],()=>this.resetWorkerPassword(siteId,id,password,authorize));}
+  createReviewerAsync(input,authorize,peer){return withPasswordHashes(peer,[{password:input.password}],()=>this.createReviewer(input,authorize));}
+  updateReviewerAsync(siteId,id,input,authorize,peer){return input.password===undefined?this.updateReviewer(siteId,id,input,authorize):withPasswordHashes(peer,[{password:input.password}],()=>this.updateReviewer(siteId,id,input,authorize));}
+  authenticateReviewerAsync(loginId,password,withCredential,peer){
+    const read=()=>typeof loginId==='string'&&/^[A-Za-z0-9_]{3,40}$/.test(loginId)?this.db.prepare('SELECT * FROM reviewers WHERE login_id=?').get(loginId):null,row=read();
+    return withPasswordHashes(peer,[{password:passwordCandidate(password),salt:row?.salt||Buffer.alloc(16)}],()=>{assertPasswordAccount(row,read());return this.authenticateReviewer(loginId,password,withCredential,row??null);});
+  }
+  authenticateWorkerAsync(token,loginId,password,siteKey,withCredential,peer){
+    const site=siteKey?this.siteFromAccess(siteKey):this.invitation(token),read=()=>site&&typeof loginId==='string'&&/^[a-zA-Z0-9_]{3,40}$/.test(loginId)?this.db.prepare('SELECT * FROM worker_accounts WHERE site_id=? AND login_id=?').get(site.id,loginId):null,row=read();
+    return withPasswordHashes(peer,[{password:passwordCandidate(password),salt:row?.salt||Buffer.alloc(16)}],()=>{assertPasswordAccount(row,read());return this.authenticateWorker(token,loginId,password,siteKey,withCredential);});
+  }
   join(token,input) {
     const invite=input.siteKey?this.siteFromAccess(input.siteKey):this.invitation(token);
     if(input.siteKey&&invite&&!this.siteRegistrationOpen(invite.id))throw new Error('이 현장의 시험 가입이 중지되었거나 만료되었습니다.');
@@ -1609,7 +1622,7 @@ export class Store {
     // 가입 화면의 구분만 허용한다. 현장관리자 등 다른 구분은 관리자만 지정한다.
     if(!['직영','협력업체 근로자','협력업체 관리자','근로를 제공하지 않는 사람','기타 출입자'].includes(input.category))throw new Error('구분을 확인해 주세요.');
     if(this.db.prepare('SELECT 1 FROM worker_accounts WHERE site_id=? AND login_id=?').get(invite.id,input.loginId))throw new Error('이 현장에 이미 사용 중인 아이디입니다.');
-    const salt=randomBytes(16),passwordHash=scryptSync(input.password,salt,32);
+    const salt=passwordSalt(input.password),passwordHash=scryptSync(input.password,salt,32);
     this.db.exec('BEGIN IMMEDIATE');
     try {
       const current=input.siteKey?this.siteFromAccess(input.siteKey):this.invitation(token);
@@ -1640,7 +1653,7 @@ export class Store {
   }
   resetWorkerPassword(siteId,workerId,password,onAuthorize=()=>{}) {
     if(typeof password!=='string'||password.length<12||password.length>256)throw new Error('암호는 12자 이상 256자 이하여야 합니다.');
-    const salt=randomBytes(16),hash=scryptSync(password,salt,32);
+    const salt=passwordSalt(password),hash=scryptSync(password,salt,32);
     this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();
     const account=this.db.prepare('SELECT login_id FROM worker_accounts WHERE site_id=? AND worker_id=?').get(Number(siteId),Number(workerId));if(!account)throw new Error('선택한 현장의 시험 계정을 확인해 주세요.');
     this.db.prepare('UPDATE worker_accounts SET salt=?,password_hash=? WHERE site_id=? AND worker_id=?').run(salt,hash,Number(siteId),Number(workerId));this.db.prepare('DELETE FROM worker_sessions WHERE worker_id=?').run(Number(workerId));this.db.exec('COMMIT');return account.login_id;}catch(error){this.db.exec('ROLLBACK');throw error;}
@@ -1790,7 +1803,7 @@ export class Store {
     if(!Number.isSafeInteger(siteId))throw new Error('현장을 확인해 주세요.');
     if(typeof input.loginId!=='string'||!/^[A-Za-z0-9_]{3,40}$/.test(input.loginId))throw new Error('시험 아이디를 확인해 주세요.');
     if(typeof input.password!=='string'||input.password.length<12||input.password.length>256)throw new Error('시험 암호는 12자 이상 256자 이하여야 합니다.');
-    const salt=randomBytes(16),hash=scryptSync(input.password,salt,32);
+    const salt=passwordSalt(input.password),hash=scryptSync(input.password,salt,32);
     this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();if(!this.db.prepare('SELECT 1 FROM sites WHERE id=?').get(siteId))throw new Error('현장을 확인해 주세요.');if(this.db.prepare('SELECT 1 FROM reviewers WHERE login_id=?').get(input.loginId))throw new Error('이미 사용 중인 시험 아이디입니다.');
     const id=this.db.prepare('INSERT INTO reviewers(site_id,login_id,name,salt,password_hash,auth_version) VALUES(?,?,?,?,?,lower(hex(randomblob(16))))').run(siteId,input.loginId,name,salt,hash).lastInsertRowid,result=this.db.prepare('SELECT id,site_id,login_id,name,active FROM reviewers WHERE id=?').get(id);this.db.exec('COMMIT');return result;}catch(error){this.db.exec('ROLLBACK');throw error;}
   }
@@ -1798,10 +1811,11 @@ export class Store {
     if(input.active!==undefined&&typeof input.active!=='boolean')throw new Error('계정 상태를 확인해 주세요.');
     if(input.password!==undefined&&(typeof input.password!=='string'||input.password.length<12||input.password.length>256))throw new Error('시험 암호는 12자 이상 256자 이하여야 합니다.');
     if(input.active===undefined&&input.password===undefined)throw new Error('변경할 내용을 확인해 주세요.');
-    this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();const row=this.db.prepare('SELECT id FROM reviewers WHERE id=? AND site_id=?').get(Number(id),Number(siteId));if(!row)throw new Error('선택한 현장의 시험 결재자를 확인해 주세요.');if(input.password!==undefined){const salt=randomBytes(16),hash=scryptSync(input.password,salt,32);this.db.prepare('UPDATE reviewers SET salt=?,password_hash=? WHERE id=?').run(salt,hash,row.id);}if(input.active!==undefined)this.db.prepare('UPDATE reviewers SET active=? WHERE id=?').run(input.active?1:0,row.id);if(input.password!==undefined||input.active===false){this.db.prepare('UPDATE reviewers SET auth_version=lower(hex(randomblob(16))) WHERE id=?').run(row.id);this.db.prepare('DELETE FROM reviewer_sessions WHERE reviewer_id=?').run(row.id);}const result=this.db.prepare('SELECT id,site_id,login_id,name,active FROM reviewers WHERE id=?').get(row.id);this.db.exec('COMMIT');return result;}catch(error){this.db.exec('ROLLBACK');throw error;}
+    this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();const row=this.db.prepare('SELECT id FROM reviewers WHERE id=? AND site_id=?').get(Number(id),Number(siteId));if(!row)throw new Error('선택한 현장의 시험 결재자를 확인해 주세요.');if(input.password!==undefined){const salt=passwordSalt(input.password),hash=scryptSync(input.password,salt,32);this.db.prepare('UPDATE reviewers SET salt=?,password_hash=? WHERE id=?').run(salt,hash,row.id);}if(input.active!==undefined)this.db.prepare('UPDATE reviewers SET active=? WHERE id=?').run(input.active?1:0,row.id);if(input.password!==undefined||input.active===false){this.db.prepare('UPDATE reviewers SET auth_version=lower(hex(randomblob(16))) WHERE id=?').run(row.id);this.db.prepare('DELETE FROM reviewer_sessions WHERE reviewer_id=?').run(row.id);}const result=this.db.prepare('SELECT id,site_id,login_id,name,active FROM reviewers WHERE id=?').get(row.id);this.db.exec('COMMIT');return result;}catch(error){this.db.exec('ROLLBACK');throw error;}
   }
-  authenticateReviewer(loginId,password,withCredential=false){
+  authenticateReviewer(loginId,password,withCredential=false,verifiedAccount=undefined){
     const row=typeof loginId==='string'&&/^[A-Za-z0-9_]{3,40}$/.test(loginId)?this.db.prepare('SELECT * FROM reviewers WHERE login_id=?').get(loginId):null;
+    if(verifiedAccount!==undefined)assertPasswordAccount(verifiedAccount,row);
     const salt=row?.salt||Buffer.alloc(16),candidate=typeof password==='string'&&password.length<=256?password:'',hash=scryptSync(candidate,salt,32),expected=row?.password_hash||Buffer.alloc(32);
     if(!row||!row.active||!timingSafeEqual(hash,expected))return null;const reviewer={id:row.id,site_id:row.site_id,name:row.name};return withCredential?{reviewer,credentialHash:Buffer.from(row.password_hash),authVersion:row.auth_version}:reviewer;
   }

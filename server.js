@@ -15,6 +15,7 @@ import { ReviewerProfile } from './reviewer-profile.js';
 import { AdminAccounts } from './admin-accounts.js';
 import { ClientAccounts } from './client-accounts.js';
 import { LoginFailures } from './login-failures.js';
+import { passwordRequests } from './password-hashing.js';
 import { types } from './domain.js';
 import QRCode from 'qrcode';
 import { issueAccessQr,issueInvitationQr } from './qr-issue.js';
@@ -62,15 +63,7 @@ const reviewerProfile = new ReviewerProfile(store.db);
 const clients = new ClientAccounts(store.db);
 const workerSessions=new WorkerSessions(store.db);
 const reviewerSessions=new ReviewerSessions(store.db),reviewerLoginFailures=new LoginFailures(),reviewerAccountFailures=reviewerLoginFailures.accounts;
-const workerPeerFailures=new Map(),workerAccountFailures=new Map();
-function pruneWorkerFailures(now){
-  for(const failures of [workerPeerFailures,workerAccountFailures])for(const [key,times] of failures){const recent=times.filter(t=>t>now-5*60*1000);if(recent.length)failures.set(key,recent);else failures.delete(key);}
-}
-function recordWorkerFailure(failures,key,times,now){
-  // shortcut: 포화 시 가장 먼저 등록된 제한을 제거하므로 대규모 분산 공격에는 외부 공유 제한기가 필요하다.
-  if(!failures.has(key)&&failures.size>=10000)failures.delete(failures.keys().next().value);
-  times.push(now);failures.set(key,times);
-}
+const workerLoginFailures=new LoginFailures(),workerAccountFailures=workerLoginFailures.accounts;
 const workerKey=raw=>typeof raw==='string' && /^[\w-]{43}$/.test(raw)?createHash('sha256').update(raw).digest('hex'):'';
 const workerReportContext=(key,worker)=>({workerId:worker.id,siteId:worker.site_id,generation:createHash('sha256').update('worker-report:'+key).digest('hex')});
 function checkWorkerReport(req,key,session,input){checkRequestSession(req);if(input===undefined){try{input={reportContext:JSON.parse(req.headers['x-worker-report-context']||'null')};}catch{input={};}}const expected=workerReportContext(key,session.worker),actual=input.reportContext;if(!actual||actual.workerId!==expected.workerId||actual.siteId!==expected.siteId||actual.generation!==expected.generation)throw Object.assign(new Error('로그인 계정 또는 현장 세션이 변경되었습니다. 입력 내용을 복사한 뒤 다시 로그인해 주세요.'),{sessionStatus:409,sessionChanged:true});}
@@ -101,6 +94,7 @@ assets.add('/restricted-month-editor.js');
 assets.add('/education-kinds.js');
 assets.add('/training-detail.js');
 assets.add('/risk-detail.js');
+assets.add('/plan-detail.js');
 assets.add('/reviewer-education.js');
 assets.add('/education-reference.js');
 assets.add('/checklist-copy.js');
@@ -160,7 +154,7 @@ async function handleCommonWork(req,res,url,prefix,actor=null){
   json(res,404,{error:'요청한 경로가 없습니다.'});return true;
 }
 const adminRequests=adminWriteGuard(store.db);
-const server = http.createServer((req,res)=>adminRequests.run(req,async()=>{
+const server = http.createServer((req,res)=>passwordRequests.run(true,()=>adminRequests.run(req,async()=>{
   try {
     const host = req.headers.host || '';
     if (publicOrigin ? host!==new URL(publicOrigin).host : !/^(localhost|127\.0\.0\.1)(:\d+)?$/.test(host)) return json(res,403,{error:'허용된 접속 주소가 아닙니다.'});
@@ -172,7 +166,7 @@ const server = http.createServer((req,res)=>adminRequests.run(req,async()=>{
     if(url.pathname==='/api/session' && req.method==='GET')return json(res,200,{enabled:true,authenticated:auth.valid(token),admin:auth.session(token),context:auth.context(token)});
     if(url.pathname==='/api/login' && req.method==='POST'){
       const input=await body(req),peer=workerPeer(req);if(peer===null)return json(res,503,{error:'로그인 중계 설정을 확인해 주세요.'});
-      const newToken=auth.login(input.loginId,input.password,token,peer);
+      const newToken=await auth.loginAsync(input.loginId,input.password,token,peer);
       if(!newToken)return json(res,401,{error:'암호가 올바르지 않거나 잠시 로그인할 수 없습니다.'});
       auth.logout(token);res.setHeader('Set-Cookie',`jweb_session=${newToken}; HttpOnly; SameSite=Strict; Path=/; Max-Age=28800${secureCookie}`);return json(res,200,{ok:true});
     }
@@ -182,10 +176,10 @@ const server = http.createServer((req,res)=>adminRequests.run(req,async()=>{
     }
     const clientToken=(req.headers.cookie||'').split(';').map(x=>x.trim()).find(x=>x.startsWith('jweb_client='))?.slice(12)||'';
     if(url.pathname==='/api/client/id-check'&&req.method==='POST'){const input=await body(req);return json(res,200,{available:clients.available(input.loginId)});}
-    if(url.pathname==='/api/client/register'&&req.method==='POST'){const input=await body(req);return json(res,201,clients.register(input));}
+    if(url.pathname==='/api/client/register'&&req.method==='POST'){const input=await body(req);return json(res,201,await clients.registerAsync(input,workerPeer(req)));}
     if(url.pathname==='/api/client/login'&&req.method==='POST'){
       const input=await body(req),peer=workerPeer(req);if(peer===null)return json(res,503,{error:'로그인 중계 설정을 확인해 주세요.'});
-      const next=clients.login(input.loginId,input.password,clientToken,peer);if(!next)return json(res,401,{error:'아이디 또는 암호가 올바르지 않습니다.'});
+      const next=await clients.loginAsync(input.loginId,input.password,clientToken,peer);if(!next)return json(res,401,{error:'아이디 또는 암호가 올바르지 않습니다.'});
       res.setHeader('Set-Cookie','jweb_client='+next+'; HttpOnly; SameSite=Strict; Path=/; Max-Age=28800'+secureCookie);return json(res,200,{ok:true});
     }
     if(url.pathname==='/api/client/logout'&&req.method==='POST'){clients.logout(clientToken);res.setHeader('Set-Cookie','jweb_client=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0'+secureCookie);return json(res,200,{ok:true});}
@@ -194,8 +188,9 @@ const server = http.createServer((req,res)=>adminRequests.run(req,async()=>{
     if(url.pathname==='/api/reviewer/login'&&req.method==='POST'){
       const input=await body(req),now=Date.now(),accountKey=typeof input.loginId==='string'&&/^[A-Za-z0-9_]{3,40}$/.test(input.loginId)?input.loginId:'invalid',peer=workerPeer(req);
       if(peer===null)return json(res,503,{error:'로그인 중계 설정을 확인해 주세요.'});
-      reviewerLoginFailures.check(peer,accountKey,now);
-      const authenticated=store.authenticateReviewer(input.loginId,input.password,true);if(!authenticated){reviewerLoginFailures.record(peer,accountKey,now);return json(res,401,{error:'아이디 또는 암호가 올바르지 않습니다.'});}
+      const release=reviewerLoginFailures.reserve(peer,accountKey,now);let authenticated;
+      try{authenticated=await store.authenticateReviewerAsync(input.loginId,input.password,true,peer);}finally{release();}
+      if(!authenticated){reviewerLoginFailures.record(peer,accountKey,Date.now());return json(res,401,{error:'아이디 또는 암호가 올바르지 않습니다.'});}
       const raw=randomBytes(32).toString('base64url'),session={id:authenticated.reviewer.id,expires:now+8*60*60*1000};if(!reviewerSessions.issue(workerKey(raw),session,authenticated.credentialHash,authenticated.authVersion,workerKey(reviewerToken)))return json(res,401,{error:'아이디 또는 암호가 올바르지 않습니다.'});
       reviewerAccountFailures.delete(accountKey);for(const [key,item] of reviewerSessions)if(item.expires<=now)reviewerSessions.delete(key);res.setHeader('Set-Cookie',`jweb_reviewer=${raw}; HttpOnly; SameSite=Strict; Path=/; Max-Age=28800${secureCookie}`);return json(res,200,{ok:true});
     }
@@ -227,7 +222,7 @@ const server = http.createServer((req,res)=>adminRequests.run(req,async()=>{
       if(url.pathname==='/api/reviewer/board-permissions'&&req.method==='GET'){const canWriteNotice=store.reviewerCanWriteNotice(reviewer.id);checkRequestSession(req);return json(res,200,{canWriteNotice});}
       if(url.pathname==='/api/reviewer/profile'){
         if(req.method==='GET'){const result=reviewerProfile.get(reviewer.id);checkRequestSession(req);return json(res,200,result);}
-        if(req.method==='PUT'){const input=await body(req,120000),result=reviewerProfile.update(reviewer.id,input,()=>checkRequestSession(req));if(result.passwordChanged)res.setHeader('Set-Cookie',`jweb_reviewer=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0${secureCookie}`);return json(res,200,result);}
+        if(req.method==='PUT'){const input=await body(req,120000),result=await reviewerProfile.updateAsync(reviewer.id,input,()=>checkRequestSession(req),workerPeer(req));if(result.passwordChanged)res.setHeader('Set-Cookie',`jweb_reviewer=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0${secureCookie}`);return json(res,200,result);}
       }
       if(url.pathname==='/api/reviewer/profile/signature'&&req.method==='GET'){const signature=reviewerProfile.signature(reviewer.id);checkRequestSession(req);if(!signature)return json(res,404,{error:'시험 서명을 찾을 수 없습니다.'});res.writeHead(200,{'Content-Type':'image/png','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(signature);}
       if(url.pathname==='/api/reviewer/employment'){
@@ -344,13 +339,12 @@ const server = http.createServer((req,res)=>adminRequests.run(req,async()=>{
     if(url.pathname==='/api/worker/site'&&req.method==='GET'){const site=store.siteFromAccess(url.searchParams.get('key'));if(!site)return json(res,404,{error:'현장 접속 주소를 확인해 주세요.'});const canSignup=store.siteRegistrationOpen(site.id);return json(res,200,{...site,canSignup,locationRequired:store.siteLocationPolicy(site.id).enabled,...(canSignup?{companies:store.companies(site.id).map(c=>c.name),occupations:store.siteOccupations(site.id).map(o=>o.name)}:{})});}
     if(url.pathname==='/api/worker/login' && req.method==='POST'){
       const input=await body(req),now=Date.now(),site=input.siteKey?store.siteFromAccess(input.siteKey):store.invitation(input.token),identityMode=input.method==='identity',identity=identityMode&&site?store.workerLoginIdentity(site.id,input.name,input.birthDigits):null,loginId=identityMode?identity?.login_id:input.loginId,accountKey=site&&typeof loginId==='string'&&/^[a-zA-Z0-9_]{3,40}$/.test(loginId)?`${site.id}:${loginId}`:identityMode&&site?`${site.id}:identity:${createHash('sha256').update(JSON.stringify([input.name,input.birthDigits])).digest('hex')}`:'invalid';
-      pruneWorkerFailures(now);
       const peer=workerPeer(req);if(peer===null)return json(res,503,{error:'로그인 중계 설정을 확인해 주세요.'});
-      const peerFailures=workerPeerFailures.get(peer)||[],failures=workerAccountFailures.get(accountKey)||[];if(peerFailures.length>=100||failures.length>=10)return json(res,429,{error:'잠시 후 다시 로그인해 주세요.'});
-      const authenticated=store.authenticateWorker(input.token,loginId,input.password,input.siteKey,true);
-      if(!authenticated){recordWorkerFailure(workerPeerFailures,peer,peerFailures,now);recordWorkerFailure(workerAccountFailures,accountKey,failures,now);return json(res,401,{error:'가입 링크 또는 로그인 정보를 확인해 주세요.'});}
+      const release=workerLoginFailures.reserve(peer,accountKey,now);let authenticated;
+      try{authenticated=await store.authenticateWorkerAsync(input.token,loginId,input.password,input.siteKey,true,peer);}finally{release();}
+      if(!authenticated){workerLoginFailures.record(peer,accountKey,Date.now());return json(res,401,{error:'가입 링크 또는 로그인 정보를 확인해 주세요.'});}
       const {worker,credentialHash}=authenticated;
-      const current=new Date(now),date=new Date(now-current.getTimezoneOffset()*60000).toISOString().slice(0,10);
+      const current=new Date(),date=new Date(current.getTime()-current.getTimezoneOffset()*60000).toISOString().slice(0,10);
       if(store.workerAccessBlocked(worker.site_id,date))return json(res,403,{error:'해당 현장은 오늘 근로자 접속이 차단되었습니다.'});
       if(store.workerAccountBlock(worker.site_id,worker.id).blocked)return json(res,403,{error:'시험 계정의 접속이 차단되었습니다.'});
       const raw=randomBytes(32).toString('base64url');store.recordWorkerLogin(worker.id,date,credentialHash,()=>{const currentSite=input.siteKey?store.siteFromAccess(input.siteKey):store.invitation(input.token);if(!currentSite||currentSite.id!==worker.site_id||identityMode&&store.workerLoginIdentity(currentSite.id,input.name,input.birthDigits)?.worker_id!==worker.id){const error=new Error('가입 링크 또는 로그인 정보를 확인해 주세요.');error.sessionStatus=401;throw error;}workerSessions.delete(workerKey(workerToken));workerSessions.set(workerKey(raw),{worker,expires:now+8*60*60*1000});},input.location);
@@ -560,9 +554,9 @@ const server = http.createServer((req,res)=>adminRequests.run(req,async()=>{
       return json(res,405,{error:'지원하지 않는 요청입니다.'});
     }
     if(url.pathname==='/api/admin-accounts'&&req.method==='GET'){let rows;store.db.exec('BEGIN IMMEDIATE');try{checkRequestSession(req);auth.requireGlobal(token);rows=auth.list();store.db.exec('COMMIT');}catch(error){store.db.exec('ROLLBACK');throw error;}checkRequestSession(req);return json(res,200,rows);}
-    if(url.pathname==='/api/admin-accounts'&&req.method==='POST')return json(res,201,auth.create(await body(req),()=>{checkRequestSession(req);auth.requireGlobal(token);}));
+    if(url.pathname==='/api/admin-accounts'&&req.method==='POST')return json(res,201,await auth.createAsync(await body(req),()=>{checkRequestSession(req);auth.requireGlobal(token);},workerPeer(req)));
     const adminAccount=url.pathname.match(/^\/api\/admin-accounts\/(\d+)$/);
-    if(adminAccount&&req.method==='PUT')return json(res,200,auth.update(adminAccount[1],await body(req),()=>{checkRequestSession(req);auth.requireGlobal(token);}));
+    if(adminAccount&&req.method==='PUT')return json(res,200,await auth.updateAsync(adminAccount[1],await body(req),()=>{checkRequestSession(req);auth.requireGlobal(token);},workerPeer(req)));
     if(url.pathname.startsWith('/api/ai/')){
       try{
         if(url.pathname==='/api/ai/status'&&req.method==='GET')return json(res,200,aiChat.status());
@@ -631,12 +625,12 @@ const server = http.createServer((req,res)=>adminRequests.run(req,async()=>{
     if (url.pathname === '/api/types' && req.method === 'GET') return json(res,200,types);
     if(url.pathname==='/api/client-accounts'&&req.method==='GET'){const result=clients.list();checkRequestSession(req);return json(res,200,result);}
     const clientAccount=url.pathname.match(/^\/api\/client-accounts\/(\d+)$/);
-    if(clientAccount&&req.method==='PUT'){const input=await body(req);return json(res,200,clients.update(clientAccount[1],input,()=>checkRequestSession(req)));}
+    if(clientAccount&&req.method==='PUT'){const input=await body(req);return json(res,200,await clients.updateAsync(clientAccount[1],input,()=>checkRequestSession(req),workerPeer(req)));}
     const employmentProfile=url.pathname.match(/^\/api\/reviewers\/(\d+)\/employment$/);
     if(employmentProfile){if(req.method==='GET'){const result=employment.profile(url.searchParams.get('siteId'),employmentProfile[1]);checkRequestSession(req);return json(res,200,result);}if(req.method==='PUT'){const input=await body(req);return json(res,200,employment.saveProfile(input.siteId,employmentProfile[1],input,()=>checkRequestSession(req)));}}
-    if(url.pathname==='/api/reviewers'){if(req.method==='GET')return json(res,200,store.reviewers(url.searchParams.get('siteId')));if(req.method==='POST')return json(res,201,store.createReviewer(await body(req),()=>checkRequestSession(req)));}
+    if(url.pathname==='/api/reviewers'){if(req.method==='GET')return json(res,200,store.reviewers(url.searchParams.get('siteId')));if(req.method==='POST')return json(res,201,await store.createReviewerAsync(await body(req),()=>checkRequestSession(req),workerPeer(req)));}
     const reviewerAccount=url.pathname.match(/^\/api\/reviewers\/(\d+)$/);
-    if(reviewerAccount&&req.method==='PUT'){const input=await body(req),account=store.updateReviewer(input.siteId,reviewerAccount[1],input,()=>checkRequestSession(req));if(input.password!==undefined){reviewerAccountFailures.delete(account.login_id);}return json(res,200,account);}
+    if(reviewerAccount&&req.method==='PUT'){const input=await body(req),account=await store.updateReviewerAsync(input.siteId,reviewerAccount[1],input,()=>checkRequestSession(req),workerPeer(req));if(input.password!==undefined){reviewerAccountFailures.delete(account.login_id);}return json(res,200,account);}
     const reviewerNoticeWrite=url.pathname.match(/^\/api\/reviewers\/(\d+)\/notice-write$/);
     if(reviewerNoticeWrite&&req.method==='PUT'){const input=await body(req);return json(res,200,store.setReviewerNoticeWrite(input.siteId,reviewerNoticeWrite[1],input,()=>checkRequestSession(req)));}
     const reviewerFinalApproval=url.pathname.match(/^\/api\/reviewers\/(\d+)\/final-approval$/);
@@ -713,7 +707,7 @@ const server = http.createServer((req,res)=>adminRequests.run(req,async()=>{
     if (inviteSite && req.method === 'DELETE') return json(res,200,{revoked:store.revokeInvitations(inviteSite[1],()=>checkRequestSession(req))});
     if (url.pathname === '/api/join') {
       if (req.method === 'GET') {const invite=store.invitation(url.searchParams.get('token'));return invite?json(res,200,{id:invite.id,name:invite.name,siteKey:store.siteAccessKey(invite.id),locationRequired:store.siteLocationPolicy(invite.id).enabled,companies:store.companies(invite.id).map(c=>c.name),occupations:store.siteOccupations(invite.id).map(o=>o.name)}):json(res,404,{error:'유효하지 않거나 만료된 가입 링크입니다.'});}
-      if (req.method === 'POST') {const input=await body(req),worker=store.join(input.token,input);return json(res,201,{ok:true,siteKey:store.siteAccessKey(worker.site_id)});}
+      if (req.method === 'POST') {const input=await body(req),worker=await store.joinAsync(input.token,input,workerPeer(req));return json(res,201,{ok:true,siteKey:store.siteAccessKey(worker.site_id)});}
     }
     if (url.pathname === '/api/sites') {
       if (req.method === 'GET') {const actor=auth.session(token),rows=store.sites();checkRequestSession(req);return json(res,200,actor.scope==='global'?rows:rows.filter(site=>actor.siteIds.includes(site.id)));}
@@ -969,7 +963,7 @@ const server = http.createServer((req,res)=>adminRequests.run(req,async()=>{
     const workerAccountBlock=url.pathname.match(/^\/api\/workers\/(\d+)\/access-block$/);
     if(workerAccountBlock){if(req.method==='GET')return json(res,200,store.workerAccountBlock(url.searchParams.get('siteId'),workerAccountBlock[1]));if(req.method==='PUT'){const input=await body(req),result=store.setWorkerAccountBlock(input.siteId,workerAccountBlock[1],input,()=>checkRequestSession(req));return json(res,200,result);}}
     const workerPassword=url.pathname.match(/^\/api\/workers\/(\d+)\/password$/);
-    if(workerPassword&&req.method==='PUT'){const input=await body(req),siteId=Number(input.siteId),id=Number(workerPassword[1]),loginId=store.resetWorkerPassword(siteId,id,input.password,()=>checkRequestSession(req));for(const [key,session] of workerSessions)if(session.worker.id===id&&session.worker.site_id===siteId)Map.prototype.delete.call(workerSessions,key);workerAccountFailures.delete(`${siteId}:${loginId}`);return json(res,200,{ok:true});}
+    if(workerPassword&&req.method==='PUT'){const input=await body(req),siteId=Number(input.siteId),id=Number(workerPassword[1]),loginId=await store.resetWorkerPasswordAsync(siteId,id,input.password,()=>checkRequestSession(req),workerPeer(req));for(const [key,session] of workerSessions)if(session.worker.id===id&&session.worker.site_id===siteId)Map.prototype.delete.call(workerSessions,key);workerAccountFailures.delete(`${siteId}:${loginId}`);return json(res,200,{ok:true});}
     const workerFiles=url.pathname.match(/^\/api\/workers\/(\d+)\/files(?:\/(\d+))?$/);
     if(workerFiles){
       const [,workerId,fileId]=workerFiles,siteId=url.searchParams.get('siteId');
@@ -1176,11 +1170,12 @@ const server = http.createServer((req,res)=>adminRequests.run(req,async()=>{
     }
     return json(res,404,{error:'요청한 경로가 없습니다.'});
   } catch (e) {
+    if(e.retryAfter===1)res.setHeader('Retry-After','1');
     if(req.adminWriteFailure)return json(res,req.adminWriteFailure.status,{error:req.adminWriteFailure.error});
     // 의도한 오류는 일반 Error나 코드가 있는 오류(SQLite, URL)로 던져지고, TypeError 등 코드 없는 오류는 버그다.
     if(!(e instanceof Error)||e.constructor!==Error&&!e.code){console.error(e);return json(res,500,{error:'요청을 처리하지 못했습니다.'});}
-    if(e.code==='ERR_SQLITE_ERROR'&&Number.isInteger(e.errcode)&&[5,6].includes(e.errcode&255))return json(res,503,{error:'데이터베이스가 사용 중입니다. 잠시 후 다시 시도해 주세요.'});return json(res,[401,403,409,429].includes(e.sessionStatus)?e.sessionStatus:400,{error:e.message || '요청을 처리하지 못했습니다.',...(e.sessionChanged?{sessionChanged:true}:{})}); }
-}));
+    if(e.code==='ERR_SQLITE_ERROR'&&Number.isInteger(e.errcode)&&[5,6].includes(e.errcode&255))return json(res,503,{error:'데이터베이스가 사용 중입니다. 잠시 후 다시 시도해 주세요.'});return json(res,[401,403,409,429,503].includes(e.sessionStatus)?e.sessionStatus:400,{error:e.message || '요청을 처리하지 못했습니다.',...(e.sessionChanged?{sessionChanged:true}:{})}); }
+})));
 const port = Number(process.env.PORT || 4173);
 server.listen(port, '127.0.0.1', () => console.log(`J웹: http://127.0.0.1:${port} (관리자 로그인 활성)`));
 function stop() { server.close(() => { store.close(); process.exit(0); }); }

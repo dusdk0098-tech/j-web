@@ -49,7 +49,8 @@ test('관리자·발주처·결재자 HTTP 주소 격리, 계정 합산, 위조 
       assert.equal((await send(path,id)).status,429);
       assert.equal((await send(path,id,password,'127.0.0.2')).status,200);
       const results=await Promise.all(Array.from({length:20},()=>send(path,id,'wrong','127.0.0.2')));
-      assert.equal(results.filter(r=>r.status===401).length,10);assert.equal(results.filter(r=>r.status===429).length,10);
+      const guesses=results.filter(r=>r.status===401).length;assert.ok(guesses>0&&guesses<=10);assert.ok(results.some(r=>r.status===503));assert.ok(results.every(r=>[401,429,503].includes(r.status)));
+      for(let i=guesses;i<10;i++)assert.equal((await send(path,id,'wrong','127.0.0.2')).status,401);
       assert.equal((await send(path,id,password,'127.0.0.3')).status,429);
       writeFileSync(clock,String(offset+=300001));assert.equal((await send(path,id)).status,200);
       for(const headers of [{'x-jweb-client-address':'192.0.2.1','x-jweb-proxy-secret':'forged'},{'x-jweb-client-address':'invalid','x-jweb-proxy-secret':secret}]){const result=await send(path,id,password,'127.0.0.1',headers);assert.equal(result.status,503);assert.equal(result.cookie,undefined);}

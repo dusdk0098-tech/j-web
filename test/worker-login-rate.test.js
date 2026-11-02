@@ -1,4 +1,5 @@
 import test from 'node:test';
+import { LoginFailures } from '../login-failures.js';
 import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -36,7 +37,8 @@ for(const tls of [false,true])test(`${tls?'HTTPS 중계':'HTTP 직접'}: 발신�
     for(let i=0;i<100;i++){const response=await login({...a,loginId:`missing_${i}`,password:'wrong'},'127.0.0.1',{'x-forwarded-for':`192.0.2.${i+1}`,...(tls?{'x-jweb-client-address':`192.0.2.${i+1}`,'x-jweb-proxy-secret':'forged'}:{})});assert.equal(response.status,401);assert.deepEqual(response.body,{error:'가입 링크 또는 로그인 정보를 확인해 주세요.'});assert.equal(response.headers['set-cookie'],undefined);}
     for(let i=0;i<5;i++)assert.equal((await login(i%2?a:b)).status,429);
     for(const user of [a,b])assert.equal((await login(user,'127.0.0.2')).status,200,'다른 실제 발신자 정상 로그인');
-    const concurrent=await Promise.all(Array.from({length:20},()=>login({...a,password:'wrong'},'127.0.0.2')));assert.equal(concurrent.filter(r=>r.status===401).length,10);assert.equal(concurrent.filter(r=>r.status===429).length,10);
+    const concurrent=await Promise.all(Array.from({length:20},()=>login({...a,password:'wrong'},'127.0.0.2'))),guesses=concurrent.filter(r=>r.status===401).length;assert.ok(guesses>0&&guesses<=10);assert.ok(concurrent.some(r=>r.status===503));assert.ok(concurrent.every(r=>[401,429,503].includes(r.status)));
+    for(let i=guesses;i<10;i++)assert.equal((await login({...a,password:'wrong'},'127.0.0.2')).status,401);
     assert.equal((await login(a,'127.0.0.3')).status,429,'계정 제한은 다른 IP에서도 유지');assert.equal((await login(b,'127.0.0.3')).status,200,'동일 아이디의 다른 현장 계정은 격리');
     writeFileSync(clock,String(5*60*1000+1));assert.equal((await login(a)).status,200,'발신자와 계정 제한 모두 만료');
     for(let i=0;i<9;i++)assert.equal((await login({...a,password:'wrong'},'127.0.0.2')).status,401);
@@ -55,8 +57,8 @@ for(const tls of [false,true])test(`${tls?'HTTPS 중계':'HTTP 직접'}: 발신�
   }
 });
 
-test('실패 기록 상한·최초 등록 키 제거·만료 정리 및 프록시 신뢰 경계',()=>{
-  const source=readFileSync('server.js','utf8'),helpers=source.slice(source.indexOf('const workerPeerFailures='),source.indexOf('const workerKey='));
+test('실패 기록 상한 보존·만료 정리 및 프록시 신뢰 경계',()=>{
+  const source=readFileSync('server.js','utf8');
   const peerSource=source.slice(source.indexOf('function workerPeer('),source.indexOf('const secureCookie='));
   runInNewContext(`${peerSource}
     const request=(peer,address,secret)=>({socket:{remoteAddress:peer},headers:{'x-jweb-client-address':address,'x-jweb-proxy-secret':secret}});
@@ -67,17 +69,14 @@ test('실패 기록 상한·최초 등록 키 제거·만료 정리 및 프록�
     assert.equal(workerPeer(request('::ffff:127.0.0.1','::ffff:192.0.2.7',secret)),'192.0.2.7');
     proxySecretHash=null;assert.equal(workerPeer(request('127.0.0.1','192.0.2.7',secret)),null);assert.equal(workerPeer(request('127.0.0.1',undefined,undefined)),'127.0.0.1');
   `,{assert,secret,isIP,createHash,timingSafeEqual,proxySecretHash:createHash('sha256').update(secret).digest()});
-  runInNewContext(`${helpers}
-    for(const map of [workerPeerFailures,workerAccountFailures]){
-      for(let i=0;i<10000;i++)recordWorkerFailure(map,String(i),[],1000);
-      recordWorkerFailure(map,'0',map.get('0'),1001);
-      recordWorkerFailure(map,'new',[],1002);
-      assert.equal(map.size,10000);assert.equal(map.has('0'),false);assert.equal(map.has('1'),true);
-    }
-    pruneWorkerFailures(301000);
-    assert.equal(workerPeerFailures.size,1);assert.equal(workerAccountFailures.size,1);
-    pruneWorkerFailures(301002);assert.equal(workerPeerFailures.size,0);assert.equal(workerAccountFailures.size,0);
-  `,{assert});
+  const rates=new LoginFailures();
+  for(const map of [rates.peers,rates.accounts])for(let i=0;i<10000;i++)map.set(String(i),[1000]);
+  assert.throws(()=>rates.check('new','1',1002),error=>error.sessionStatus===429);
+  assert.throws(()=>rates.check('1','new',1002),error=>error.sessionStatus===429);
+  for(const map of [rates.peers,rates.accounts]){assert.equal(map.size,10000);assert.equal(map.has('0'),true);}
+  rates.check('new','new',301002);
+  assert.equal(rates.peers.size,0);assert.equal(rates.accounts.size,0);
+
 });
 
 test('HTTPS 중계는 공유 비밀 누락·짧은 값으로 시작하지 않는다',()=>{
