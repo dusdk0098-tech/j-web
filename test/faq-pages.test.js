@@ -11,7 +11,7 @@ class Surface{
   set textContent(value){this.innerHTML=value;}
   insertAdjacentHTML(_position,value){this.html+=value;}
   querySelector(selector){return this.nodes[selector]??={};}
-  querySelectorAll(selector){if(selector==='article')return this.articles;if(selector==='[data-board-delete]')return this.nodes[selector]??=[...this.innerHTML.matchAll(/data-board-delete="(\d+)"/g)].map(match=>({dataset:{boardDelete:match[1]}}));if(selector==='[data-delete]')return this.nodes[selector]??=[...this.innerHTML.matchAll(/data-delete="(\d+)"/g)].map(match=>({dataset:{delete:match[1]}}));return [];}
+  querySelectorAll(selector){if(selector==='article')return this.articles;if(selector==='[data-community-open]')return this.nodes[selector]??=[...this.innerHTML.matchAll(/data-community-open="(\d+)"/g)].map(match=>({dataset:{communityOpen:match[1]}}));if(selector==='[data-board-delete]')return this.nodes[selector]??=[...this.innerHTML.matchAll(/data-board-delete="(\d+)"/g)].map(match=>({dataset:{boardDelete:match[1]}}));if(selector==='[data-delete]')return this.nodes[selector]??=[...this.innerHTML.matchAll(/data-delete="(\d+)"/g)].map(match=>({dataset:{delete:match[1]}}));return [];}
 }
 function harness(role){
   const source=readFileSync(new URL(role==='admin'?'../public/app.js':'../public/board-view.js',import.meta.url),'utf8');
@@ -22,10 +22,12 @@ function harness(role){
   if(role==='admin'){
     const a=source.indexOf("  if(state.page==='board'){");code='(async()=>{'+source.slice(a,source.indexOf("  if(state.page==='schedules'){",a))+'})();';
   }else{
-    const a=source.indexOf('  const load=');runInNewContext('let sequence=0,faqPageNumber=1,canWriteNotice=false,currentKind="faq";'+source.slice(a,source.indexOf('  form.onsubmit=',a)),context);code='load();';
+    const a=source.indexOf('  const load=');runInNewContext('let sequence=0,faqPageNumber=1,communityPostId=null,canWriteNotice=false,currentKind="faq";'+source.slice(a,source.indexOf('  form.onsubmit=',a)),context);code='load();';
   }
   return {surface,context,options,bodies,nodes,load:()=>runInNewContext(code,context),setRows:value=>{rows=value;},setActive:value=>{active=value;},get renders(){return renders;},page:()=>role==='admin'?context.state.faqPage:runInNewContext('faqPageNumber',context),setPage:value=>{if(role==='admin')context.state.faqPage=value;else runInNewContext(`faqPageNumber=${value}`,context);}};
 }
+async function openCommunity(h,role,id){const button=h.surface.querySelectorAll('[data-community-open]').find(item=>Number(item.dataset.communityOpen)===id);assert.ok(button,`글 ${id}가 목록에 있어야 합니다`);await button.onclick();if(role==='admin')await h.load();}
+async function backCommunity(h,role){await h.surface.querySelector('[data-community-back]').onclick();if(role==='admin')await h.load();}
 for(const role of ['admin','staff'])test(`${role} FAQ 가상 UI: 23건 페이지 이동·표시 행 연결·초기화·권한·빈 마지막 페이지`,async()=>{
   const h=harness(role);await h.load();assert.equal(h.surface.articles.length,10);assert.match(h.surface.innerHTML,/현재 1 \/ 총 3 페이지/);assert.match(h.surface.innerHTML,/data-faq-prev disabled/);assert.match(h.surface.innerHTML,/aria-label="FAQ 페이지 이동"/);
   const first=h.options[0];assert.equal(first.row.id,1);assert.equal(first.active(),true);
@@ -42,10 +44,11 @@ for(const role of ['admin','staff'])test(`${role} FAQ 가상 UI: 23건 페이지
 });
 
 for(const role of ['admin','staff'])test(`${role} 커뮤니티: 상단 안내 유지·15건 페이지 이동·오래된 화면 차단`,async()=>{
-  const h=harness(role),top=[{id:91,kind:'community_info',title:'상단 하나',body:'안내',highlighted:1},{id:92,kind:'community_general',title:'상단 둘',body:'안내',highlighted:1}],normal=Array.from({length:32},(_,i)=>({id:i+1,kind:'community_info',title:`가상 글 ${i+1}`,body:'내용',highlighted:0}));
-  if(role==='admin')h.context.state.boardKind='community_all';else h.context.kind.value='community_all';h.setRows([...normal,...top]);await h.load();assert.equal(h.surface.articles.length,17);assert.match(h.surface.innerHTML,/커뮤니티 페이지 이동/);assert.match(h.surface.innerHTML,/현재 1 \/ 총 3 페이지/);assert.equal(h.options[0].row.id,91);
-  const previous=h.options[0];await h.surface.querySelector('[data-faq-next]').onclick();if(role==='admin')await h.load();assert.equal(previous.active(),false);assert.equal(h.page(),2);assert.equal(h.surface.articles.length,17);assert.equal(h.options.at(-1).row.id,30);
-  await h.surface.querySelector('[data-faq-next]').onclick();if(role==='admin')await h.load();assert.equal(h.page(),3);assert.equal(h.surface.articles.length,4);assert.equal(h.options.at(-1).row.id,32);
+  const h=harness(role),top=[{id:91,kind:'community_info',title:'상단 하나',body:'안내',highlighted:1},{id:92,kind:'community_general',title:'상단 둘',body:'안내',highlighted:1}],normal=Array.from({length:32},(_,i)=>({id:i+1,kind:'community_info',title:`가상 글 ${i+1}`,body:`가상 상세 본문 ${i+1}`,highlighted:0}));
+  if(role==='admin'){h.context.state.boardKind='community_all';h.context.state.query='가상';}else{h.context.kind.value='community_all';h.context.query.value='가상';}h.setRows([...normal,...top]);await h.load();assert.equal(h.surface.articles.length,17);assert.match(h.surface.innerHTML,/커뮤니티 페이지 이동/);assert.match(h.surface.innerHTML,/현재 1 \/ 총 3 페이지/);assert.equal(h.options.length,0);assert.doesNotMatch(h.surface.innerHTML,/가상 상세 본문/);
+  await openCommunity(h,role,91);assert.equal(h.surface.articles.length,1);assert.equal(h.options[0].row.id,91);assert.doesNotMatch(h.surface.innerHTML,/data-faq-next/);const previous=h.options[0];await backCommunity(h,role);assert.equal(previous.active(),false);assert.equal(h.page(),1);
+  await h.surface.querySelector('[data-faq-next]').onclick();if(role==='admin')await h.load();assert.equal(h.page(),2);assert.equal(h.surface.articles.length,17);await openCommunity(h,role,30);assert.equal(h.options.at(-1).row.id,30);assert.match(h.surface.innerHTML,/가상 상세 본문 30/);await backCommunity(h,role);assert.equal(h.page(),2);assert.equal(role==='admin'?h.context.state.query:h.context.query.value,'가상');
+  await h.surface.querySelector('[data-faq-next]').onclick();if(role==='admin')await h.load();assert.equal(h.page(),3);assert.equal(h.surface.articles.length,4);assert.match(h.surface.innerHTML,/가상 글 32/);
   h.setRows(top);if(role==='admin')h.context.state.query='무일치';else h.context.query.value='무일치';await h.load();assert.equal(h.page(),1);assert.equal(h.surface.articles.length,2);assert.match(h.surface.innerHTML,/상단 하나/);
 });
 
@@ -53,16 +56,24 @@ for(const role of ['admin','staff'])test(`${role} 커뮤니티: 페이지를 바
   const h=harness(role),rows=Array.from({length:20},(_,i)=>({id:i+1,author_id:77,kind:'community_info',title:`가상 글 ${i+1}`,body:'본문',version:`v${i+1}`}));
   if(role==='admin')h.context.state.boardKind='community_info';else h.context.kind.value='community_info';
   h.setRows(rows);let deletes=0,resolveDelete;h.context.api=(_url,options)=>options?.method==='DELETE'?(deletes++,new Promise(resolve=>{resolveDelete=resolve;})):Promise.resolve(rows);
-  await h.load();const selector=role==='admin'?'[data-board-delete]':'[data-delete]',old=h.surface.querySelectorAll(selector)[0];h.setPage(2);await old.onclick();assert.equal(deletes,0);
-  h.setPage(1);await h.load();const pending=h.surface.querySelectorAll(selector)[0].onclick();assert.equal(deletes,1);h.setPage(2);await h.load();const before=h.surface.innerHTML;resolveDelete();await pending;
-  assert.equal(h.page(),2);assert.equal(h.surface.innerHTML,before);assert.equal(h.renders,0);assert.equal(h.context.status.textContent,'');
+  await h.load();await openCommunity(h,role,1);const selector=role==='admin'?'[data-board-delete]':'[data-delete]',old=h.surface.querySelectorAll(selector)[0];await backCommunity(h,role);await h.surface.querySelector('[data-faq-next]').onclick();if(role==='admin')await h.load();await old.onclick();assert.equal(deletes,0);
+  await h.surface.querySelector('[data-faq-prev]').onclick();if(role==='admin')await h.load();await openCommunity(h,role,1);const pending=h.surface.querySelectorAll(selector)[0].onclick();assert.equal(deletes,1);await backCommunity(h,role);const before=h.surface.innerHTML,renders=h.renders;resolveDelete();await pending;
+  assert.equal(h.page(),1);assert.equal(h.surface.innerHTML,before);assert.equal(h.renders,renders);assert.equal(h.context.status.textContent,'');
+});
+
+for(const role of ['admin','staff'])test(`${role} 커뮤니티: 조회 권한이 없어진 상세는 내용 없이 목록으로 돌아간다`,async()=>{
+  const h=harness(role),row={id:1,kind:'community_info',title:'가상 제목',body:'가상 본문',author_id:77};if(role==='admin')h.context.state.boardKind='community_info';else h.context.kind.value='community_info';h.setRows([row]);await h.load();await openCommunity(h,role,1);const previous=h.options.at(-1),count=h.options.length;h.setRows([]);await h.load();assert.match(h.surface.innerHTML,/글을 찾을 수 없습니다/);assert.doesNotMatch(h.surface.innerHTML,/가상 본문/);assert.equal(h.options.length,count);await backCommunity(h,role);assert.equal(previous.active(),false);assert.match(h.surface.innerHTML,/가상 글이 없습니다|시험 글이 없습니다/);
+});
+
+for(const role of ['admin','staff'])test(`${role} 커뮤니티: 상세 조회 대기 중 게시판을 바꾸면 이전 응답을 표시하지 않는다`,async()=>{
+  const h=harness(role),row={id:1,kind:'community_info',title:'가상 제목',body:'가상 본문'};if(role==='admin')h.context.state.boardKind='community_info';else h.context.kind.value='community_info';h.setRows([row]);await h.load();let resolve;h.context.api=()=>new Promise(done=>{resolve=done;});const button=h.surface.querySelectorAll('[data-community-open]')[0];const pending=role==='admin'?(await button.onclick(),h.load()):button.onclick();if(role==='admin')h.context.state.boardKind='notice';else h.context.kind.value='notice';h.surface.innerHTML='다른 화면';resolve([row]);await pending;assert.equal(h.surface.innerHTML,'다른 화면');assert.equal(h.options.length,0);
 });
 
 test('새 커뮤니티 분류는 관리자·직원 목록과 작성 권한에 연결된다',async()=>{
   const rows=[['community_event','이벤트'],['community_resources','자료실'],['community_market','직거래장터']].map(([kind,label],i)=>({id:i+1,kind,title:`가상 ${label}`,body:'내용',author_id:77,version:'v'}));
   const admin=harness('admin');admin.context.state.boardKind='community_all';admin.setRows(rows);await admin.load();for(const row of rows)assert.match(admin.surface.innerHTML,new RegExp(`value="${row.kind}"`));
-  const staff=harness('staff');staff.context.kind.value='community_all';staff.setRows(rows);await staff.load();for(const row of rows)assert.match(staff.surface.innerHTML,new RegExp(row.title));assert.match(staff.surface.innerHTML,/이벤트 · 가상 이벤트/);assert.match(staff.surface.innerHTML,/자료실 · 가상 자료실/);assert.match(staff.surface.innerHTML,/직거래장터 · 가상 직거래장터/);
-  for(const row of rows){staff.context.kind.value=row.kind;staff.setRows([row]);await staff.load();assert.equal(staff.surface.innerHTML.includes('data-edit='),row.kind!=='community_event');}
+  const staff=harness('staff');staff.context.kind.value='community_all';staff.setRows(rows);await staff.load();for(const row of rows)assert.match(staff.surface.innerHTML,new RegExp(row.title));assert.match(staff.surface.innerHTML,/이벤트 · <button[^>]*>가상 이벤트/);assert.match(staff.surface.innerHTML,/자료실 · <button[^>]*>가상 자료실/);assert.match(staff.surface.innerHTML,/직거래장터 · <button[^>]*>가상 직거래장터/);
+  for(const row of rows){staff.context.kind.value=row.kind;staff.setRows([row]);await staff.load();assert.doesNotMatch(staff.surface.innerHTML,/data-edit=/);await openCommunity(staff,'staff',row.id);assert.equal(staff.surface.innerHTML.includes('data-edit='),row.kind!=='community_event');await backCommunity(staff,'staff');}
   const source=readFileSync(new URL('../public/board-view.js',import.meta.url),'utf8'),optionStart=source.indexOf('  kind.insertAdjacentHTML('),optionEnd=source.indexOf('\n',optionStart),choice={insertAdjacentHTML(_where,html){this.html=html;}};assert.ok(optionStart>=0);runInNewContext(source.slice(optionStart,optionEnd),{kind:choice});for(const row of rows)assert.match(choice.html,new RegExp(`value="${row.kind}"`));
   const syncStart=source.indexOf('sync=()=>{categoryLabel.hidden='),syncEnd=source.indexOf('};\n  const load=',syncStart);assert.ok(syncStart>=0&&syncEnd>syncStart);
   for(const row of rows){const context={kind:{value:row.kind},categoryLabel:{},secretLabel:{},form:{elements:{secret:{}}},canWriteNotice:false};runInNewContext(`let ${source.slice(syncStart,syncEnd+1)};sync();`,context);assert.equal(context.form.hidden,row.kind==='community_event');}
