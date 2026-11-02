@@ -36,6 +36,11 @@ test('관리자 대상 HTTP는 세션·현장·버전을 검사하고 직원에�
     const expectedEditVersion=s.document(doc.id).edit_version;s.db.exec('BEGIN IMMEDIATE');locked=true;const started=once(child.stdout,'data'),saving=call(path,'PUT',{workerIds:[],managerIds:[],expectedEditVersion},admin);saving.catch(()=>{});assert.match(String((await started)[0]),/TARGET_SAVE/);s.db.exec('DELETE FROM admin_sessions');s.db.exec('COMMIT');locked=false;assert.equal((await saving).status,401);assert.equal(s.trainingTargets(doc.id).managers.find(p=>p.id===manager.id).selected,1);
     assert.equal((await call('/api/reviewer/education')).status,401);assert.deepEqual(await (await call('/api/reviewer/education','GET',null,reviewer)).json(),[]);
     s.transition(doc.id,'submit');s.transition(doc.id,'approve');
+    const stats=`/api/education/manager-assignments?siteId=${a.id}&from=2026-11-01&to=2026-11-30`,globalAdmin=await login(undefined);
+    assert.equal((await call(stats)).status,401);assert.equal((await call(stats,'GET',null,await login('admin_a'))).status,403);
+    const assignments=await (await call(stats,'GET',null,globalAdmin)).json();assert.deepEqual(assignments.map(row=>[row.id,row.document_id,row.kind]),[[manager.id,doc.id,'supervisor_new']]);
+    assert.deepEqual(await (await call(`/api/education/manager-assignments?siteId=${b.id}&from=2026-11-01&to=2026-11-30`,'GET',null,globalAdmin)).json(),[]);
+    assert.deepEqual(await (await call(`/api/education/manager-assignments?siteId=${a.id}&from=2026-10-01&to=2026-10-31`,'GET',null,globalAdmin)).json(),[]);
     assert.deepEqual((await (await call('/api/reviewer/education','GET',null,reviewer)).json()).map(row=>row.id),[doc.id]);
     assert.equal((await call(`/api/reviewer/education/${doc.id}`,'GET',null,reviewer)).status,200);
     assert.equal(await (await call(`/api/reviewer/education/${doc.id}/attachments/${file}`,'GET',null,reviewer)).text(),'virtual');

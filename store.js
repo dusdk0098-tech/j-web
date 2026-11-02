@@ -1286,6 +1286,10 @@ export class Store {
     from=dateValue(from);to=dateValue(to);if(from>to)throw new Error('조회 시작일은 종료일보다 늦을 수 없습니다.');
     return this.db.prepare("SELECT w.id,w.name,w.company,w.category,NULLIF(json_extract(j.profile,'$.birthDate'),'') AS birth_date,d.type,COALESCE(NULLIF(json_extract(d.details,'$.kind'),''),'unspecified') AS kind,COUNT(*) AS count,json_group_array(json_object('id',d.id,'date',d.date,'title',d.title)) AS documents FROM worker_training_checks c JOIN workers w ON w.id=c.worker_id LEFT JOIN join_acknowledgements j ON j.worker_id=w.id JOIN documents d ON d.id=c.document_id AND d.site_id=w.site_id WHERE w.site_id=? AND d.date BETWEEN ? AND ? AND d.type IN ('tbm','education') AND d.status='approved' GROUP BY w.id,d.type,kind ORDER BY w.name,w.id,d.type,kind").all(Number(siteId),from,to).map(row=>({...row,documents:JSON.parse(row.documents)}));
   }
+  managerEducationAssignments(siteId,from,to){
+    from=dateValue(from);to=dateValue(to);if(from>to)throw new Error('조회 시작일은 종료일보다 늦을 수 없습니다.');
+    return this.db.prepare("SELECT r.id,r.name,r.active,d.id AS document_id,d.title,d.date,d.details FROM training_manager_targets t JOIN reviewers r ON r.id=t.reviewer_id JOIN documents d ON d.id=t.document_id AND d.site_id=r.site_id WHERE d.site_id=? AND d.date BETWEEN ? AND ? AND d.type='education' AND d.status='approved' ORDER BY r.name,r.id,d.date,d.id").all(Number(siteId),from,to).filter(row=>hasManagerEducationTargets({type:'education',details:row.details})).map(({details,...row})=>({...row,kind:JSON.parse(details||'{}').kind||''}));
+  }
   trainingTargets(documentId) {
     const doc=this.document(documentId);
     if(!doc || !['tbm','education'].includes(doc.type))throw new Error('교육 문서를 확인해 주세요.');

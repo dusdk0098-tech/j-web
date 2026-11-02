@@ -58,10 +58,13 @@ test('선정 직원은 승인 교육과 그 첨부만 조회하며 다른 현장
   const {s,manager,peer,foreign,doc}=setup();try{
     s.setTrainingTargets(doc.id,[],()=>{},[manager.id]);
     assert.deepEqual(s.reviewerEducation(manager.id),[]);assert.equal(s.reviewerEducation(manager.id,doc.id),null);
+    assert.deepEqual(s.managerEducationAssignments(manager.site_id,'2026-11-01','2026-11-30'),[]);
     const file=s.addAttachment(doc.id,'가상.txt',Buffer.from('virtual'));
     s.transition(doc.id,'submit');const cycle=s.approvalCycle(doc.id,s.document(doc.id).approval_cycle_id);
     assert.deepEqual(cycle.linked.managers,[{id:manager.id,name:manager.name}]);
     s.transition(doc.id,'approve');assert.equal(s.reviewerEducation(manager.id,doc.id).document.id,doc.id);
+    assert.deepEqual(s.managerEducationAssignments(manager.site_id,'2026-11-01','2026-11-30').map(row=>[row.id,row.document_id,row.kind]),[[manager.id,doc.id,'supervisor_new']]);
+    assert.throws(()=>s.managerEducationAssignments(manager.site_id,'2026-11-30','2026-11-01'),/시작일/);
     assert.equal(Buffer.from(s.reviewerEducationAttachment(manager.id,doc.id,file).data).toString(),'virtual');
     for(const person of [peer,foreign]){assert.deepEqual(s.reviewerEducation(person.id),[]);assert.equal(s.reviewerEducation(person.id,doc.id),null);assert.equal(s.reviewerEducationAttachment(person.id,doc.id,file),null);}
     assert.equal(s.reviewerEducationAttachment(manager.id,doc.id,file+999),null);

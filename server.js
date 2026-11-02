@@ -1066,6 +1066,7 @@ const server = http.createServer((req,res)=>passwordRequests.run(true,()=>adminR
     }
     if (url.pathname === '/api/attendance/month' && req.method === 'GET') return json(res,200,adminAttendanceRows(req,store.monthlyAttendance(url.searchParams.get('siteId'),url.searchParams.get('month'))));
     if (url.pathname === '/api/education/report' && req.method === 'GET') return json(res,200,store.educationReport(url.searchParams.get('siteId'),url.searchParams.get('from'),url.searchParams.get('to')));
+    if (url.pathname === '/api/education/manager-assignments' && req.method === 'GET') return json(res,200,store.managerEducationAssignments(url.searchParams.get('siteId'),url.searchParams.get('from'),url.searchParams.get('to')));
     if (url.pathname === '/api/education/daily-report' && req.method === 'GET') return json(res,200,store.dailyTrainingReport(url.searchParams.get('siteId'),url.searchParams.get('from'),url.searchParams.get('to')));
     if (url.pathname === '/api/monthly-site-activity' && req.method === 'GET') return json(res,200,store.monthlySiteActivity(url.searchParams.get('month')));
     if (url.pathname === '/api/weekly-activity' && req.method === 'GET') return json(res,200,store.weeklyActivity(url.searchParams.get('siteId'),url.searchParams.get('start')));
