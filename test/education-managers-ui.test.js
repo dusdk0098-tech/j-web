@@ -44,3 +44,9 @@ test('직원 교육 시험 서명은 오류 뒤 남고 중복 제출을 막는�
   let saving=confirm.onclick();await confirm.onclick();assert.equal(requests.length,1);assert.deepEqual(requests[0],{expectedEditVersion:7,signature:'가상 서명'});finish.reject(Error('가상 오류'));await saving;assert.equal(feedback.textContent,'가상 오류');assert.equal(confirm.disabled,false);
   saving=confirm.onclick();finish.resolve({ok:true});await saving;assert.equal(confirm.disabled,true);assert.match(feedback.textContent,/저장/);
 });
+
+test('직원은 확인한 교육 상세에서 저장된 시험 서명을 다시 본다',async()=>{
+  const elements=new Map(),node=()=>({innerHTML:'',textContent:'',isConnected:true,querySelector:selector=>{if(!elements.has(selector))elements.set(selector,node());return elements.get(selector);},querySelectorAll:selector=>selector==='[data-open]'?[open]:[]}),open={dataset:{open:'5'}},target=node();
+  const api=async path=>path==='/api/reviewer/education'?[{id:5,title:'가상 교육',date:'2026-11-01'}]:{document:{id:5,title:'가상 교육',details:'{}',confirmed_at:'2026-11-01'},attachments:[],signature:'YWJj'};
+  await mountReviewerEducation({target,api,active:()=>true});await open.onclick();assert.match(elements.get('[data-detail]').innerHTML,/data:image\/png;base64,YWJj/);assert.match(elements.get('[data-detail]').innerHTML,/시험 참가 확인 완료/);
+});

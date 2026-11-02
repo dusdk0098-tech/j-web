@@ -1338,7 +1338,11 @@ export class Store {
     const rows=this.db.prepare("SELECT d.id,d.title,d.date,d.body,d.details,d.edit_version,c.created_at AS confirmed_at FROM reviewers r JOIN training_manager_targets t ON t.reviewer_id=r.id JOIN documents d ON d.id=t.document_id AND d.site_id=r.site_id LEFT JOIN reviewer_education_checks c ON c.reviewer_id=r.id AND c.document_id=d.id AND c.edit_version=d.edit_version WHERE r.id=? AND r.active=1 AND d.type='education' AND d.status='approved' ORDER BY d.date DESC,d.id DESC").all(Number(reviewerId)).filter(row=>hasManagerEducationTargets({...row,type:'education'}));
     if(documentId===undefined)return rows.map(({id,title,date})=>({id,title,date}));
     const doc=rows.find(row=>row.id===Number(documentId));
-    return doc?{document:doc,attachments:this.attachments(doc.id).map(({id,name,size,category})=>({id,name,size,category}))}:null;
+    return doc?{document:doc,attachments:this.attachments(doc.id).map(({id,name,size,category})=>({id,name,size,category})),signature:doc.confirmed_at?this.managerEducationSignature(this.reviewer(reviewerId).site_id,reviewerId,doc.id):null}:null;
+  }
+  managerEducationSignature(siteId,reviewerId,documentId) {
+    const row=this.db.prepare("SELECT c.signature,d.details FROM reviewer_education_checks c JOIN reviewers r ON r.id=c.reviewer_id JOIN training_manager_targets t ON t.reviewer_id=r.id AND t.document_id=c.document_id JOIN documents d ON d.id=c.document_id AND d.site_id=r.site_id AND d.edit_version=c.edit_version WHERE d.id=? AND r.id=? AND d.site_id=? AND d.type='education' AND d.status='approved'").get(Number(documentId),Number(reviewerId),Number(siteId));
+    return row&&hasManagerEducationTargets({type:'education',details:row.details})?Buffer.from(row.signature).toString('base64'):null;
   }
   reviewerEducationAttachment(reviewerId,documentId,fileId) {
     const view=this.reviewerEducation(reviewerId,documentId);
