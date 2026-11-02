@@ -1,3 +1,16 @@
+import { workerPreviewArticles } from './worker-preview.js';
+
+const joinedOnDay=(value,date)=>{if(typeof value!=='string')return false;const iso=value.replace(' ','T'),time=Date.parse(iso+(/(?:Z|[+-]\d{2}:\d{2})$/.test(iso)?'':'Z'));return Number.isFinite(time)&&new Date(time+9*60*60*1000).toISOString().slice(0,10)===date;};
+
+export async function joinedBatchPreview(report,api) {
+  const rows=await api(`/api/workers/joined-on?${new URLSearchParams({siteId:String(report.site.id),date:report.date})}`);
+  const worker=rows.find(row=>row.id===report.worker.id&&row.site_id===report.site.id&&row.version===report.worker.version&&row.joined_at===report.worker.joined_at&&joinedOnDay(row.joined_at,report.date));
+  if(!worker)throw Error('가입 기록 또는 현장이 변경되었습니다. 다시 조회해 주세요.');
+  const result=await api('/api/workers/preview',{method:'POST',body:JSON.stringify({siteId:report.site.id,items:[{id:worker.id,version:worker.version}]})});
+  if(result.workers?.length!==1||result.workers[0].id!==worker.id||result.workers[0].site_id!==report.site.id||result.workers[0].join?.created_at!==worker.joined_at)throw Error('가입 기록이 변경되었습니다. 다시 조회해 주세요.');
+  return result;
+}
+
 export function selectBatchDocuments(documents,selectedIds) {
   if(!Array.isArray(documents)||!Array.isArray(selectedIds)||selectedIds.length===0)throw new Error('미리 볼 문서를 선택해 주세요.');
   if(selectedIds.length>20)throw new Error('한 번에 문서 20개까지 선택할 수 있습니다.');
@@ -21,10 +34,10 @@ export async function siteDocumentsForDay(sites,date,api) {
 export async function siteReportsForDay(sites,date,api) {
   if(!Array.isArray(sites)||!sites.length||!/^\d{4}-\d{2}-\d{2}$/.test(date))throw Error('현장과 날짜를 선택해 주세요.');
   const result=await Promise.all(sites.map(async site=>{
-    const [ppe,attendance]=await Promise.all([api(`/api/ppe-issues?${new URLSearchParams({siteId:String(site.id),month:date.slice(0,7)})}`),api(`/api/attendance?${new URLSearchParams({siteId:String(site.id),date})}`)]);
+    const [ppe,attendance,joined]=await Promise.all([api(`/api/ppe-issues?${new URLSearchParams({siteId:String(site.id),month:date.slice(0,7)})}`),api(`/api/attendance?${new URLSearchParams({siteId:String(site.id),date})}`),api(`/api/workers/joined-on?${new URLSearchParams({siteId:String(site.id),date})}`)]);
     const rows=ppe.rows.filter(row=>row.date===date),totals=new Map();
     for(const row of rows)totals.set(row.item,(totals.get(row.item)||0)+row.quantity);
-    return [{kind:'ppe-summary',title:'보호구 당일 요약',rows:[...totals].map(([item,quantity])=>({item,quantity}))},{kind:'ppe-detail',title:'보호구 당일 상세',rows},{kind:'attendance',title:'출역일보',rows:attendance.filter(row=>row.present)}].map(report=>({...report,site,date}));
+    return [{kind:'ppe-summary',title:'보호구 당일 요약',rows:[...totals].map(([item,quantity])=>({item,quantity}))},{kind:'ppe-detail',title:'보호구 당일 상세',rows},{kind:'attendance',title:'출역일보',rows:attendance.filter(row=>row.present)},...joined.filter(worker=>worker.site_id===site.id&&joinedOnDay(worker.joined_at,date)).map(worker=>({kind:'joined-worker',title:`신규 가입 서류 · ${worker.name}`,worker}))].map(report=>({...report,site,date}));
   }));
   return result.flat().map((report,index)=>({...report,id:index+1}));
 }
@@ -32,7 +45,8 @@ export async function siteReportsForDay(sites,date,api) {
 export function dailyBatchReport(report,esc) {
   const table=(heads,rows)=>rows.length?`<div class="table-wrap"><table><thead><tr>${heads.map(head=>`<th>${esc(head)}</th>`).join('')}</tr></thead><tbody>${rows.map(row=>`<tr>${row.map(value=>`<td>${esc(value)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`:'<p>해당 날짜의 기록이 없습니다.</p>';
   let body;
-  if(report.kind==='ppe-summary')body=table(['보호구','수량'],report.rows.map(row=>[row.item,row.quantity]));
+  if(report.kind==='joined-worker')body=`<p>가입기록 일자: ${esc(report.date)} (한국시간 UTC+09:00). 등록일과 다르며 현재 인적사항·보호구·첨부 이름을 표시합니다. 첨부 원문은 포함하지 않습니다.</p>`+workerPreviewArticles(report.preview.workers);
+  else if(report.kind==='ppe-summary')body=table(['보호구','수량'],report.rows.map(row=>[row.item,row.quantity]));
   else if(report.kind==='ppe-detail')body=table(['이름','구분','소속','직종','보호구','수량','시험 수령 확인'],report.rows.map(row=>[row.worker.name,row.worker.category,row.worker.company,row.worker.occupation,row.item,row.quantity,row.receipt_at?'시험 확인 기록 있음':'미확인']));
   else if(report.kind==='attendance'){
     const recorded=report.rows.filter(row=>row.units_hundredths!=null);

@@ -8,7 +8,7 @@ const esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;
 const site={id:1,name:'<가상 현장>'},date='2026-11-01';
 test('당일 보호구 재집계·전체 내역과 두 현장 출역 스냅샷을 구분한다',async()=>{
   const paths=[],worker={name:'<시험>',category:'근로자',company:'가상',occupation:'가상직종'},rows=Array.from({length:23},(_,i)=>({date,item:'안전모',quantity:i+1,worker}));
-  const reports=await siteReportsForDay([site,{id:2,name:'둘째'}],date,async path=>{paths.push(path);return path.startsWith('/api/ppe')?{rows:[...rows,{date:'2026-11-02',item:'안전화',quantity:900,worker}],totals:[{item:'틀린 월 합계',quantity:999}]}:[{name:'<시험>',present:1,company:'현재',occupation:'현재',attendance_category:'과거구분',attendance_company:'과거소속',attendance_occupation:'과거직종',units_hundredths:0},{name:'미기록자',present:1,units_hundredths:null},{name:'미출역자',present:0,units_hundredths:999}];});
+  const reports=await siteReportsForDay([site,{id:2,name:'둘째'}],date,async path=>{paths.push(path);if(path.startsWith('/api/workers/joined-on'))return [];return path.startsWith('/api/ppe')?{rows:[...rows,{date:'2026-11-02',item:'안전화',quantity:900,worker}],totals:[{item:'틀린 월 합계',quantity:999}]}:[{name:'<시험>',present:1,company:'현재',occupation:'현재',attendance_category:'과거구분',attendance_company:'과거소속',attendance_occupation:'과거직종',units_hundredths:0},{name:'미기록자',present:1,units_hundredths:null},{name:'미출역자',present:0,units_hundredths:999}];});
   assert.equal(reports.length,6);assert.deepEqual(reports[0].rows,[{item:'안전모',quantity:276}]);assert.equal(reports[1].rows.length,23);assert.equal(reports[2].rows.length,2);assert.equal(reports[3].site.id,2);
   assert.ok(paths.includes('/api/ppe-issues?siteId=2&month=2026-11'));assert.ok(paths.includes('/api/attendance?siteId=1&date=2026-11-01'));
   const html=dailyBatchReport(reports[2],esc);assert.match(html,/과거소속/);assert.match(html,/>0.00</);assert.match(html,/공수 미기록 1명/);assert.match(html,/&lt;시험&gt;/);assert.doesNotMatch(html,/미출역자|>현재<|<시험>/);
@@ -27,12 +27,12 @@ function harness(api,preview=()=>{}){
 }
 test('조회 A→B→A 및 겹친 요청·오래된 오류가 새 결과를 덮지 않는다',async()=>{
   const pending=[];const h=harness(path=>new Promise((resolve,reject)=>pending.push({path,resolve,reject})));
-  const first=h.nodes['#site-print-search'].onclick();assert.equal(pending.length,3);
+  const first=h.nodes['#site-print-search'].onclick();assert.equal(pending.length,4);
   h.nodes['#site-print-date'].value='2026-11-02';h.nodes['#site-print-date'].onchange();h.nodes['#site-print-date'].value=date;h.nodes['#site-print-date'].onchange();
   const next=h.nodes['#site-print-search'].onclick();
-  for(const request of pending.slice(3))request.resolve(request.path.startsWith('/api/ppe')?{rows:[]}:[]);await next;
+  for(const request of pending.slice(4))request.resolve(request.path.startsWith('/api/ppe')?{rows:[]}:[]);await next;
   const html=h.target.innerHTML;assert.match(html,/보호구 당일 요약/);assert.match(html,/출역일보/);
-  pending[0].reject(Error('오래된 권한 오류'));pending[1].resolve({rows:[]});pending[2].resolve([]);await first;
+  pending[0].reject(Error('오래된 권한 오류'));pending[1].resolve({rows:[]});pending[2].resolve([]);pending[3].resolve([]);await first;
   assert.equal(h.target.innerHTML,html);assert.deepEqual(h.errors,[]);
   const failed=harness(async()=>{throw Error('로그인 만료');});await failed.nodes['#site-print-search'].onclick();assert.deepEqual(failed.errors,['로그인 만료']);assert.equal(failed.target.innerHTML,'');
   const changed=harness(async path=>{changed.stop();return path.startsWith('/api/ppe')?{rows:[]}:[];});await changed.nodes['#site-print-search'].onclick();assert.equal(changed.target.innerHTML,'');

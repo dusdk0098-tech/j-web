@@ -1112,6 +1112,12 @@ export class Store {
     siteId=Number(siteId);if(!Number.isSafeInteger(siteId)||siteId<1)throw new Error('현장을 선택해 주세요.');const now=new Date(),date=dateValue(asOf??new Date(now.getTime()-now.getTimezoneOffset()*60000).toISOString().slice(0,10));
     this.db.exec('BEGIN');try{onAuthorize();if(!this.db.prepare('SELECT 1 FROM sites WHERE id=?').get(siteId))throw new Error('현장을 선택해 주세요.');const workers=this.workers(siteId,query,filters,includeProfileData),birth=this.db.prepare("SELECT CASE WHEN json_valid(profile) THEN json_extract(profile,'$.birthDate') ELSE NULL END AS birthDate FROM join_acknowledgements WHERE worker_id=?"),summary=summarizeWorkerCounts(workers.map(worker=>({category:worker.category,birthDate:includeProfileData?birth.get(worker.id)?.birthDate:undefined})),date);if(!includeProfileData){delete summary.ages;delete summary.ageDecades;}onAuthorize();this.db.exec('COMMIT');return {workers,summary};}catch(error){this.db.exec('ROLLBACK');throw error;}
   }
+  joinedWorkersForDay(siteId,date,onAuthorize=()=>{}){
+    siteId=Number(siteId);date=dateValue(date);onAuthorize();
+    if(!Number.isSafeInteger(siteId)||siteId<1||!this.db.prepare('SELECT 1 FROM sites WHERE id=?').get(siteId))throw Error('현장을 선택해 주세요.');
+    const rows=this.db.prepare("SELECT w.*,j.created_at AS joined_at FROM workers w JOIN join_acknowledgements j ON j.worker_id=w.id WHERE w.site_id=? AND date(j.created_at,'+9 hours')=? ORDER BY w.id").all(siteId,date).map(row=>({...workerRow(row),joined_at:row.joined_at}));
+    onAuthorize();return rows;
+  }
   previewWorkers(siteId,items,onAuthorize=()=>{}){
     siteId=Number(siteId);if(!Number.isSafeInteger(siteId)||siteId<1||!Array.isArray(items)||!items.length||items.length>20||items.some(item=>!item||!Number.isSafeInteger(item.id)||item.id<1||typeof item.version!=='string'||!/^[a-f0-9]{64}$/.test(item.version))||new Set(items.map(item=>item.id)).size!==items.length)throw new Error('선택한 출입자를 확인해 주세요.');
     this.db.exec('BEGIN');try{onAuthorize();const site=this.db.prepare('SELECT name FROM sites WHERE id=?').get(siteId);if(!site)throw new Error('현장을 선택해 주세요.');const workers=items.map(item=>{const row=this.db.prepare('SELECT * FROM workers WHERE id=? AND site_id=?').get(item.id,siteId);if(!row)throw new Error('선택한 현장의 출입자를 확인해 주세요.');if(workerVersion(row)!==item.version)throw Object.assign(new Error('출입자 정보가 변경되었습니다. 다시 조회해 주세요.'),{sessionStatus:409});const signature=this.joinSignature(siteId,row.id);return {...workerRow(row),join:this.joinAcknowledgement(siteId,row.id),files:this.workerFiles(siteId,row.id),ppe:this.workerPpeIssues(siteId,row.id),signature:signature?'data:image/png;base64,'+Buffer.from(signature).toString('base64'):null};});onAuthorize();this.db.exec('COMMIT');return {siteName:site.name,workers};}catch(error){this.db.exec('ROLLBACK');throw error;}
@@ -2194,15 +2200,17 @@ export class Store {
   }
   attachment(id) {return this.db.prepare('SELECT * FROM attachments WHERE id=?').get(Number(id));}
   copyNoticeAttachments(id,sourceId){
+    this.db.exec('BEGIN IMMEDIATE');
+    try{
     const target=this.document(id),source=Number.isSafeInteger(sourceId)&&sourceId>0?this.document(sourceId):null;
     if(!target||target.type!=='notice'||!['draft','rejected'].includes(target.status))throw new Error('수정 가능한 공지를 확인해 주세요.');
     if(!source||source.id===target.id||source.type!=='notice'||source.status!=='approved'||source.site_id!==target.site_id||source.date>=target.date)throw new Error('같은 현장의 이전 게시 공지를 선택해 주세요.');
     const files=this.attachments(source.id),existing=this.attachments(target.id);
     if(!files.length)throw new Error('선택한 공지에 첨부파일이 없습니다.');
     if(existing.length+files.length>20)throw new Error('첨부파일은 문서당 20개까지 가능합니다.');
-    this.db.exec('SAVEPOINT copy_notice_attachments');
-    try{this.db.prepare("INSERT INTO attachments(document_id,name,data,category) SELECT ?,name,data,'general' FROM attachments WHERE document_id=? ORDER BY id").run(target.id,source.id);this.db.exec('RELEASE copy_notice_attachments');}catch(error){this.db.exec('ROLLBACK TO copy_notice_attachments');this.db.exec('RELEASE copy_notice_attachments');throw error;}
+    this.db.prepare("INSERT INTO attachments(document_id,name,data,category) SELECT ?,name,data,'general' FROM attachments WHERE document_id=? ORDER BY id").run(target.id,source.id);this.db.exec('COMMIT');
     return {copied:files.length};
+    }catch(error){this.db.exec('ROLLBACK');throw error;}
   }
   addAttachment(id,name,data,category='general',onAuthorize=()=>{}) {
     this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();

@@ -950,6 +950,7 @@ const server = http.createServer((req,res)=>passwordRequests.run(true,()=>adminR
       if (req.method === 'GET'){const rows=store.workers(url.searchParams.get('siteId'),url.searchParams.get('q') || '',Object.fromEntries(url.searchParams),!req.adminRestricted);checkRequestSession(req);return json(res,200,rows);}
       if (req.method === 'POST') return json(res,201,store.createWorker(await body(req),()=>checkRequestSession(req)));
     }
+    if(url.pathname==='/api/workers/joined-on'&&req.method==='GET'){if(req.adminRestricted)return json(res,403,{error:'전역 관리자 권한이 필요합니다.'});return json(res,200,store.joinedWorkersForDay(url.searchParams.get('siteId'),url.searchParams.get('date'),()=>checkRequestSession(req)));}
     if(url.pathname==='/api/workers/preview'&&req.method==='POST'){const input=await body(req),result=store.previewWorkers(input.siteId,input.items,()=>checkRequestSession(req));return json(res,200,result);}
     const worker=url.pathname.match(/^\/api\/workers\/(\d+)$/);
     const workerRegistration=url.pathname.match(/^\/api\/workers\/(\d+)\/registration\/general$/);
