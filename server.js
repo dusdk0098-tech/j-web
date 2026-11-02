@@ -453,13 +453,14 @@ const server = http.createServer((req,res)=>passwordRequests.run(true,()=>adminR
     if(url.pathname==='/api/worker/instructions' && ['GET','POST'].includes(req.method)){
       const key=workerKey(workerToken),session=workerSessions.get(key);
       if(!session||session.expires<=Date.now()){workerSessions.delete(key);return json(res,401,{error:'근로자 로그인이 필요합니다.'});}
-      if(req.method==='GET')return json(res,200,store.workerInstructions(session.worker.id));
+      if(req.method==='GET'){if(req.headers['x-worker-report-context']!==undefined)checkWorkerReport(req,key,session);return json(res,200,store.workerInstructions(session.worker.id));}
       const input=await body(req);return json(res,201,store.respondInstruction(session.worker.id,input.documentId,input,()=>checkWorkerReport(req,key,session,input)));
     }
     const workerInstructionAttachments=url.pathname.match(/^\/api\/worker\/instructions\/(\d+)\/attachments(?:\/(\d+))?$/);
     if(workerInstructionAttachments && req.method==='GET'){
       const key=workerKey(workerToken),session=workerSessions.get(key);
       if(!session||session.expires<=Date.now()){workerSessions.delete(key);return json(res,401,{error:'근로자 로그인이 필요합니다.'});}
+      if(req.headers['x-worker-report-context']!==undefined)checkWorkerReport(req,key,session);
       const [,id,fileId]=workerInstructionAttachments,files=store.workerInstructionAttachments(session.worker.id,id);
       if(!fileId)return json(res,200,files);
       if(!files.some(file=>file.id===Number(fileId)))return json(res,404,{error:'첨부파일을 찾을 수 없습니다.'});
@@ -472,6 +473,7 @@ const server = http.createServer((req,res)=>passwordRequests.run(true,()=>adminR
       if(!session||session.expires<=Date.now()){workerSessions.delete(key);return json(res,401,{error:'근로자 로그인이 필요합니다.'});}
       const [,id,photoId]=workerInstructionPhotos;
       if(req.method==='GET'){
+        if(req.headers['x-worker-report-context']!==undefined)checkWorkerReport(req,key,session);
         const photos=store.workerInstructionPhotos(session.worker.id,id);
         if(!photoId)return json(res,200,photos);
         if(!photos.some(photo=>photo.id===Number(photoId)))return json(res,404,{error:'시험 사진을 찾을 수 없습니다.'});
@@ -1120,9 +1122,9 @@ const server = http.createServer((req,res)=>passwordRequests.run(true,()=>adminR
     const permitCheck=url.pathname.match(/^\/api\/documents\/(\d+)\/permit-checks(?:\/(\d+))?$/);
     const permitRoles=url.pathname.match(/^\/api\/documents\/(\d+)\/permit-roles$/);
     if(permitRoles){if(req.method==='GET'){const result=store.permitRoles(permitRoles[1]);checkRequestSession(req);return json(res,200,result);}if(req.method==='PUT'){const input=await body(req);return json(res,200,store.setPermitRoles(permitRoles[1],input,()=>checkRequestSession(req)));}}
-    if(permitCheck){const [,id,checkId]=permitCheck;if(!checkId&&req.method==='GET')return json(res,200,store.permitChecks(id));if(!checkId&&req.method==='POST')return json(res,201,{id:store.savePermitCheck(id,await body(req,120000),null,()=>checkRequestSession(req))});if(checkId&&req.method==='PUT')return json(res,200,{id:store.savePermitCheck(id,await body(req,120000),checkId,()=>checkRequestSession(req))});if(checkId&&req.method==='DELETE'){store.deletePermitCheck(id,checkId,()=>checkRequestSession(req));return json(res,200,{ok:true});}}
+    if(permitCheck){const [,id,checkId]=permitCheck;if(!checkId&&req.method==='GET')return json(res,200,store.permitChecks(id));if(!checkId&&req.method==='POST')return json(res,201,{id:store.savePermitCheck(id,await body(req,120000),null,()=>checkRequestSession(req))});if(checkId&&req.method==='PUT')return json(res,200,{id:store.savePermitCheck(id,await body(req,120000).then(input=>({...input,expectedVersion:input?.expectedVersion??null})),checkId,()=>checkRequestSession(req))});if(checkId&&req.method==='DELETE'){store.deletePermitCheck(id,checkId,()=>checkRequestSession(req),(await body(req,65536,true)).expectedVersion??null);return json(res,200,{ok:true});}}
     const permitExtension=url.pathname.match(/^\/api\/documents\/(\d+)\/permit-extensions(?:\/(\d+))?(?:\/(signature))?$/);
-    if(permitExtension){const [,id,extensionId,signature]=permitExtension;if(!extensionId&&!signature&&req.method==='GET')return json(res,200,store.permitExtensions(id));if(!extensionId&&!signature&&req.method==='POST')return json(res,201,{id:store.savePermitExtension(id,await body(req),null,()=>checkRequestSession(req))});if(extensionId&&!signature&&req.method==='PUT')return json(res,200,{id:store.savePermitExtension(id,await body(req),extensionId,()=>checkRequestSession(req))});if(extensionId&&!signature&&req.method==='DELETE'){store.deletePermitExtension(id,extensionId,()=>checkRequestSession(req));return json(res,200,{ok:true});}if(extensionId&&signature&&req.method==='GET'){const image=store.permitExtensionSignature(id,extensionId);if(!image)return json(res,404,{error:'시험 서명을 찾을 수 없습니다.'});res.writeHead(200,{'Content-Type':'image/png','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(image);}}
+    if(permitExtension){const [,id,extensionId,signature]=permitExtension;if(!extensionId&&!signature&&req.method==='GET')return json(res,200,store.permitExtensions(id));if(!extensionId&&!signature&&req.method==='POST')return json(res,201,{id:store.savePermitExtension(id,await body(req),null,()=>checkRequestSession(req))});if(extensionId&&!signature&&req.method==='PUT')return json(res,200,{id:store.savePermitExtension(id,await body(req).then(input=>({...input,expectedVersion:input?.expectedVersion??null})),extensionId,()=>checkRequestSession(req))});if(extensionId&&!signature&&req.method==='DELETE'){store.deletePermitExtension(id,extensionId,()=>checkRequestSession(req),(await body(req,65536,true)).expectedVersion??null);return json(res,200,{ok:true});}if(extensionId&&signature&&req.method==='GET'){const image=store.permitExtensionSignature(id,extensionId,url.searchParams.get('expectedVersion'));if(!image)return json(res,404,{error:'시험 서명을 찾을 수 없습니다.'});res.writeHead(200,{'Content-Type':'image/png','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(image);}}
     const riskImprovement=url.pathname.match(/^\/api\/documents\/(\d+)\/risk-improvement$/);
     if(riskImprovement&&req.method==='PUT')return json(res,200,store.updateRiskImprovement(riskImprovement[1],await body(req),()=>checkRequestSession(req)));
     const riskActivity=url.pathname.match(/^\/api\/documents\/(\d+)\/risk-activities(?:\/(\d+))?$/);

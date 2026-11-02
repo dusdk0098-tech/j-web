@@ -264,6 +264,12 @@ export class Store {
       this.db.exec("UPDATE site_articles SET version=lower(hex(randomblob(16))) WHERE version=''");
       this.db.exec("UPDATE board_posts SET version=lower(hex(randomblob(16))) WHERE version=''");
       this.db.exec("UPDATE reviewers SET auth_version=lower(hex(randomblob(16))) WHERE auth_version=''");
+      for(const table of ['permit_checks','permit_extensions']){
+        if(!this.db.prepare(`PRAGMA table_info(${table})`).all().some(c=>c.name==='version'))this.db.exec(`ALTER TABLE ${table} ADD COLUMN version TEXT NOT NULL DEFAULT ''`);
+        this.db.exec(`UPDATE ${table} SET version=lower(hex(randomblob(32))) WHERE version='';
+          CREATE TRIGGER IF NOT EXISTS ${table}_created_version AFTER INSERT ON ${table} BEGIN UPDATE ${table} SET version=lower(hex(randomblob(32))) WHERE id=NEW.id; END;
+          CREATE TRIGGER IF NOT EXISTS ${table}_changed_version AFTER UPDATE ON ${table} WHEN NEW.version=OLD.version BEGIN UPDATE ${table} SET version=lower(hex(randomblob(32))) WHERE id=NEW.id; END;`);
+      }
       this.db.exec('COMMIT');
     }catch(error){this.db.exec('ROLLBACK');throw error;}
     if (!this.db.prepare('PRAGMA table_info(meal_checks)').all().some(c=>c.name==='tax_snapshot')) this.db.exec('ALTER TABLE meal_checks ADD COLUMN tax_snapshot INTEGER CHECK(tax_snapshot IS NULL OR tax_snapshot BETWEEN 0 AND 999999999)');
@@ -2067,26 +2073,27 @@ export class Store {
   savePermitCheck(documentId,input,id=null,onAuthorize=()=>{}){
     const date=dateValue(input.date);if(!Array.isArray(input.items)||input.items.length<1||input.items.length>20)throw new Error('점검 항목은 1개부터 20개까지 입력해 주세요.');
     const items=input.items.map(item=>{if(!item||typeof item!=='object'||Array.isArray(item)||!['pass','fail'].includes(item.result)||typeof item.action!=='string'||item.action.length>1000)throw new Error('점검 결과를 확인해 주세요.');const name=text(item.name,'점검 항목',500),action=item.action.trim();if(item.result==='pass'&&action)throw new Error('적정 항목의 조치 내용을 비워 주세요.');return {name,result:item.result,action};});
-    this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();this.permitChecks(documentId);let result;
+    this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();this.permitChecks(documentId);if(id!==null)this.assertPermitRecordVersion('permit_checks',documentId,id,input.expectedVersion);let result;
       if(id!==null){if(!this.db.prepare('UPDATE permit_checks SET date=?,items=? WHERE id=? AND document_id=?').run(date,JSON.stringify(items),Number(id),Number(documentId)).changes)throw new Error('시험 점검을 찾을 수 없습니다.');result=Number(id);}
       else result=this.db.prepare('INSERT INTO permit_checks(document_id,date,items) VALUES(?,?,?)').run(Number(documentId),date,JSON.stringify(items)).lastInsertRowid;
       this.db.exec('COMMIT');return result;
     }catch(error){this.db.exec('ROLLBACK');throw error;}
   }
-  deletePermitCheck(documentId,id,onAuthorize=()=>{}){this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();this.permitChecks(documentId);if(!this.db.prepare('DELETE FROM permit_checks WHERE id=? AND document_id=?').run(Number(id),Number(documentId)).changes)throw new Error('시험 점검을 찾을 수 없습니다.');this.db.exec('COMMIT');}catch(error){this.db.exec('ROLLBACK');throw error;}}
-  permitExtensions(documentId){const doc=this.document(documentId);if(!doc||doc.type!=='permit')throw new Error('시험 작업허가서를 확인해 주세요.');return this.db.prepare('SELECT id,date_from,date_to,time_from,time_to,created_at FROM permit_extensions WHERE document_id=? ORDER BY date_from DESC,id DESC').all(Number(documentId));}
-  permitExtensionSignature(documentId,id){this.permitExtensions(documentId);return this.db.prepare('SELECT signature FROM permit_extensions WHERE id=? AND document_id=?').get(Number(id),Number(documentId))?.signature||null;}
+  assertPermitRecordVersion(table,documentId,id,expectedVersion){if(expectedVersion!==undefined&&(typeof expectedVersion!=='string'||!/^[a-f0-9]{64}$/.test(expectedVersion)||this.db.prepare(`SELECT version FROM ${table} WHERE id=? AND document_id=?`).get(Number(id),Number(documentId))?.version!==expectedVersion))throw Object.assign(new Error('점검 또는 연장 기록이 변경되었습니다. 입력과 서명은 유지됩니다. 필요한 내용을 복사한 뒤 다시 열어 주세요.'),{sessionStatus:409});}
+  deletePermitCheck(documentId,id,onAuthorize=()=>{},expectedVersion){this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();this.permitChecks(documentId);this.assertPermitRecordVersion('permit_checks',documentId,id,expectedVersion);if(!this.db.prepare('DELETE FROM permit_checks WHERE id=? AND document_id=?').run(Number(id),Number(documentId)).changes)throw new Error('시험 점검을 찾을 수 없습니다.');this.db.exec('COMMIT');}catch(error){this.db.exec('ROLLBACK');throw error;}}
+  permitExtensions(documentId){const doc=this.document(documentId);if(!doc||doc.type!=='permit')throw new Error('시험 작업허가서를 확인해 주세요.');return this.db.prepare('SELECT id,date_from,date_to,time_from,time_to,created_at,version FROM permit_extensions WHERE document_id=? ORDER BY date_from DESC,id DESC').all(Number(documentId));}
+  permitExtensionSignature(documentId,id,expectedVersion){this.permitExtensions(documentId);const row=this.db.prepare('SELECT signature,version FROM permit_extensions WHERE id=? AND document_id=?').get(Number(id),Number(documentId));if(expectedVersion!==undefined&&(typeof expectedVersion!=='string'||!/^[a-f0-9]{64}$/.test(expectedVersion)||row?.version!==expectedVersion))throw Object.assign(new Error('연장 기록이 변경되었습니다. 다시 조회해 주세요.'),{sessionStatus:409});return row?.signature||null;}
   savePermitExtension(documentId,input,id=null,onAuthorize=()=>{}){
     const from=dateValue(input.dateFrom),to=dateValue(input.dateTo),timeFrom=input.timeFrom??'',timeTo=input.timeTo??'',valid=time=>typeof time==='string'&&/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(time);
     if(from>to||typeof timeFrom!=='string'||typeof timeTo!=='string'||(timeFrom||timeTo)&&(!valid(timeFrom)||!valid(timeTo)||from===to&&timeFrom>timeTo))throw new Error('연장 기간과 시간을 확인해 주세요.');
     const signature=signatureBytes(input.signature);
-    this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();this.permitExtensions(documentId);let result;
+    this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();this.permitExtensions(documentId);if(id!==null)this.assertPermitRecordVersion('permit_extensions',documentId,id,input.expectedVersion);let result;
       if(id!==null){if(!this.db.prepare('UPDATE permit_extensions SET date_from=?,date_to=?,time_from=?,time_to=?,signature=? WHERE id=? AND document_id=?').run(from,to,timeFrom,timeTo,signature,Number(id),Number(documentId)).changes)throw new Error('시험 연장 기록을 찾을 수 없습니다.');result=Number(id);}
       else result=this.db.prepare('INSERT INTO permit_extensions(document_id,date_from,date_to,time_from,time_to,signature) VALUES(?,?,?,?,?,?)').run(Number(documentId),from,to,timeFrom,timeTo,signature).lastInsertRowid;
       this.db.exec('COMMIT');return result;
     }catch(error){this.db.exec('ROLLBACK');throw error;}
   }
-  deletePermitExtension(documentId,id,onAuthorize=()=>{}){this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();this.permitExtensions(documentId);if(!this.db.prepare('DELETE FROM permit_extensions WHERE id=? AND document_id=?').run(Number(id),Number(documentId)).changes)throw new Error('시험 연장 기록을 찾을 수 없습니다.');this.db.exec('COMMIT');}catch(error){this.db.exec('ROLLBACK');throw error;}}
+  deletePermitExtension(documentId,id,onAuthorize=()=>{},expectedVersion){this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();this.permitExtensions(documentId);this.assertPermitRecordVersion('permit_extensions',documentId,id,expectedVersion);if(!this.db.prepare('DELETE FROM permit_extensions WHERE id=? AND document_id=?').run(Number(id),Number(documentId)).changes)throw new Error('시험 연장 기록을 찾을 수 없습니다.');this.db.exec('COMMIT');}catch(error){this.db.exec('ROLLBACK');throw error;}}
   riskActivities(documentId){const doc=this.document(documentId);if(!doc||doc.type!=='risk')throw new Error('위험성평가를 확인해 주세요.');return this.db.prepare('SELECT a.*,EXISTS(SELECT 1 FROM risk_activity_signatures s WHERE s.activity_id=a.id) AS has_signature FROM risk_activities a WHERE a.document_id=? ORDER BY a.date DESC,a.id DESC').all(Number(documentId));}
   riskActivitySignature(documentId,id){return this.db.prepare('SELECT s.signature,s.created_at FROM risk_activity_signatures s JOIN risk_activities a ON a.id=s.activity_id JOIN documents d ON d.id=a.document_id WHERE d.id=? AND d.type=\'risk\' AND a.id=?').get(Number(documentId),Number(id))||null;}
   checkRiskActivityRevision(documentId,id,expectedRevision){

@@ -47,7 +47,31 @@ test('허가서가 바뀌거나 관리 세션이 만료된 뒤에는 대기 중�
     }
     const created=await send(`${basePath}/permit-checks`,'POST',check,admin);assert.equal(created.status,201);const checkId=(await created.json()).id;
     const extended=await send(`${basePath}/permit-extensions`,'POST',extension,admin);assert.equal(extended.status,201);const extensionId=(await extended.json()).id;
-    for(const [method,path,input] of [['POST','permit-checks',check],['PUT',`permit-checks/${checkId}`,{...check,date:'2026-10-31'}],['DELETE',`permit-checks/${checkId}`,undefined],['POST','permit-extensions',extension],['PUT',`permit-extensions/${extensionId}`,{...extension,dateTo:'2026-11-01'}],['DELETE',`permit-extensions/${extensionId}`,undefined]]){
+    for(const [part,id,input,table] of [['permit-checks',checkId,check,'permit_checks'],['permit-extensions',extensionId,extension,'permit_extensions']]){
+      const path=`${basePath}/${part}/${id}`,version=()=>db.prepare(`SELECT version FROM ${table} WHERE id=?`).get(id).version;
+      for(const expectedVersion of [undefined,null,'',[],123,'a'.repeat(64)]){
+        assert.equal((await send(path,'PUT',{...input,expectedVersion},admin)).status,409);
+        assert.equal((await send(path,'DELETE',expectedVersion===undefined?undefined:{expectedVersion},admin)).status,409);
+      }
+      const old=version();assert.equal((await send(path,'PUT',{...input,expectedVersion:old},admin)).status,200);
+      assert.notEqual(version(),old);assert.equal((await send(path,'PUT',{...input,expectedVersion:old},admin)).status,409);assert.equal((await send(path,'DELETE',{expectedVersion:old},admin)).status,409);
+      if(part==='permit-extensions'){
+        assert.equal((await send(path+'/signature','GET',undefined,admin)).status,409);
+        assert.equal((await send(path+`/signature?expectedVersion=${old}`,'GET',undefined,admin)).status,409);
+        const image=await send(path+`/signature?expectedVersion=${version()}`,'GET',undefined,admin);assert.equal(image.status,200);assert.deepEqual(Buffer.from(await image.arrayBuffer()),PNG.sync.write(png));
+      }
+      for(const method of ['PUT','DELETE']){
+        const expectedVersion=version();db.exec('BEGIN IMMEDIATE');locked=true;
+        const waiting=once(child.stdout,'data'),pending=send(path,method,{...(method==='PUT'?input:{}),expectedVersion},admin);pending.catch(()=>{});
+        assert.match(String((await waiting)[0]),/WAITING/);db.prepare(`UPDATE ${table} SET created_at=created_at WHERE id=?`).run(id);db.exec('COMMIT');locked=false;
+        assert.equal((await pending).status,409);assert.notEqual(version(),expectedVersion);
+      }
+      const removedVersion=version();assert.equal((await send(path,'DELETE',{expectedVersion:removedVersion},admin)).status,200);
+      const replacement=await send(`${basePath}/${part}`,'POST',input,admin);assert.equal(replacement.status,201);assert.equal((await replacement.json()).id,id);
+      assert.equal((await send(path,'DELETE',{expectedVersion:removedVersion},admin)).status,409);assert.equal((await send(path,'PUT',{...input,expectedVersion:removedVersion},admin)).status,409);
+      if(part==='permit-extensions')assert.equal((await send(path+`/signature?expectedVersion=${removedVersion}`,'GET',undefined,admin)).status,409);
+    }
+    for(const [method,path,input] of [['POST','permit-checks',check],['PUT',`permit-checks/${checkId}`,{...check,date:'2026-10-31',expectedVersion:db.prepare('SELECT version FROM permit_checks WHERE id=?').get(checkId).version}],['DELETE',`permit-checks/${checkId}`,{expectedVersion:db.prepare('SELECT version FROM permit_checks WHERE id=?').get(checkId).version}],['POST','permit-extensions',extension],['PUT',`permit-extensions/${extensionId}`,{...extension,dateTo:'2026-11-01',expectedVersion:db.prepare('SELECT version FROM permit_extensions WHERE id=?').get(extensionId).version}],['DELETE',`permit-extensions/${extensionId}`,{expectedVersion:db.prepare('SELECT version FROM permit_extensions WHERE id=?').get(extensionId).version}]]){
       const cookie=(await send('/api/login','POST',{password:'virtual-admin-password'})).headers.get('set-cookie').split(';')[0],armed=once(child.stdout,'data');child.stdin.write('expire\n');assert.match(String((await armed)[0]),/ARMED/);
       db.exec('BEGIN IMMEDIATE');locked=true;const started=once(child.stdout,'data'),pending=send(`${basePath}/${path}`,method,input,cookie);pending.catch(()=>{});assert.match(String((await started)[0]),/WAITING/);db.exec('COMMIT');locked=false;
       assert.equal((await pending).status,401);assert.deepEqual(db.prepare('SELECT date FROM permit_checks WHERE document_id=?').all(doc.id).map(row=>row.date),[check.date]);assert.deepEqual(db.prepare('SELECT date_to FROM permit_extensions WHERE document_id=?').all(doc.id).map(row=>row.date_to),[extension.dateTo]);
