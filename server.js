@@ -12,7 +12,7 @@ import { CommonWork } from './common-work.js';
 import { Messages } from './messages.js';
 import { EmploymentCertificates } from './employment-certificates.js';
 import { ReviewerProfile } from './reviewer-profile.js';
-import { ReviewerRecovery, recoveryDelivery } from './reviewer-recovery.js';
+import { ReviewerRecovery, ClientRecovery, recoveryDelivery } from './reviewer-recovery.js';
 import { AdminAccounts } from './admin-accounts.js';
 import { ClientAccounts } from './client-accounts.js';
 import { LoginFailures } from './login-failures.js';
@@ -61,10 +61,11 @@ const commonWork = new CommonWork(store.db);
 const messages = new Messages(store.db);
 const employment = new EmploymentCertificates(store.db);
 const reviewerProfile = new ReviewerProfile(store.db);
+const clients = new ClientAccounts(store.db);
 const recoverySender=recoveryDelivery();
 if(recoverySender&&!recoverySender.local&&!publicOrigin)throw new Error('계정 찾기에는 HTTPS 공개 주소가 필요합니다.');
 const reviewerRecovery=new ReviewerRecovery(store.db,reviewerProfile,recoverySender);
-const clients = new ClientAccounts(store.db);
+const clientRecovery=new ClientRecovery(store.db,recoverySender);
 const workerSessions=new WorkerSessions(store.db);
 const reviewerSessions=new ReviewerSessions(store.db),reviewerLoginFailures=new LoginFailures(),reviewerAccountFailures=reviewerLoginFailures.accounts;
 const workerLoginFailures=new LoginFailures(),workerAccountFailures=workerLoginFailures.accounts;
@@ -97,6 +98,7 @@ assets.add('/worker-preview.js');
 assets.add('/reviewer-login.js');
 assets.add('/reviewer-session.js');
 assets.add('/review-recovery');assets.add('/review-recovery.js');
+assets.add('/client-recovery');
 assets.add('/worker-identity-remember.js');
 assets.add('/worker-list.js');
 assets.add('/attendance-matrix.js');
@@ -188,6 +190,23 @@ const server = http.createServer((req,res)=>passwordRequests.run(true,()=>adminR
       auth.logout(token);res.setHeader('Set-Cookie',`jweb_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0${secureCookie}`);return json(res,200,{ok:true});
     }
     const clientToken=(req.headers.cookie||'').split(';').map(x=>x.trim()).find(x=>x.startsWith('jweb_client='))?.slice(12)||'';
+    if(url.pathname==='/api/client/recovery/request'&&req.method==='POST'){
+      const input=await body(req),started=Date.now(),message=clientRecovery.prepareRequest(input,workerPeer(req),requestOrigin);
+      await new Promise(resolve=>setTimeout(resolve,Math.max(0,250-(Date.now()-started))));clientRecovery.queue(message);
+      return json(res,202,{ok:true,message:'일치하는 확인 이메일이 있으면 계정 찾기 메일을 보내도록 요청했습니다.'});
+    }
+    if(url.pathname==='/api/client/recovery/verify'&&req.method==='POST'){const input=await body(req);return json(res,200,clientRecovery.verify(input.token,workerPeer(req)));}
+    if(url.pathname==='/api/client/recovery/reset'&&req.method==='POST'){
+      const input=await body(req),result=await clientRecovery.reset(input,workerPeer(req));clients.accountFailures.delete(result.loginId.toLowerCase());
+      clientRecovery.queue({to:result.email,subject:'J웹 시험 암호 변경',text:'발주처 시험 계정의 암호가 변경되었습니다. 본인이 변경하지 않았다면 관리자에게 문의해 주세요.'});
+      return json(res,200,{ok:true});
+    }
+    if(url.pathname==='/api/client/recovery/status'||url.pathname==='/api/client/recovery/verification'){
+      const client=clients.session(clientToken);if(!client)return json(res,401,{error:'발주처 시험 로그인이 필요합니다.'});
+      const authorize=()=>{const current=clients.session(clientToken);if(!current||current.id!==client.id)throw Object.assign(Error('발주처 로그인 세션이 변경되었습니다. 다시 로그인해 주세요.'),{sessionStatus:401});};
+      if(url.pathname.endsWith('/status')&&req.method==='GET'){const result=clientRecovery.status(client.id);authorize();return json(res,200,result);}
+      if(url.pathname.endsWith('/verification')&&req.method==='POST'){const input=await body(req);if(input.clientId!==client.id)return json(res,409,{error:'발주처 계정이 변경되었습니다. 다시 로그인해 주세요.'});return json(res,200,await clientRecovery.startVerification(client.id,input.version,workerPeer(req),requestOrigin,authorize));}
+    }
     if(url.pathname==='/api/client/id-check'&&req.method==='POST'){const input=await body(req);return json(res,200,{available:clients.available(input.loginId)});}
     if(url.pathname==='/api/client/register'&&req.method==='POST'){const input=await body(req);return json(res,201,await clients.registerAsync(input,workerPeer(req)));}
     if(url.pathname==='/api/client/login'&&req.method==='POST'){
@@ -623,7 +642,7 @@ const server = http.createServer((req,res)=>passwordRequests.run(true,()=>adminR
       res.writeHead(200,{'Content-Type':'application/pdf','Content-Length':bytes.length,'Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Content-Disposition':'attachment'});return res.end(bytes);
     }
     if (req.method === 'GET' && assets.has(url.pathname)) {
-      const path = url.pathname === '/' ? '/index.html' : url.pathname === '/join' ? '/join.html' : url.pathname === '/login' ? '/login.html' : url.pathname === '/review' ? '/review.html' : url.pathname === '/review-recovery' ? '/review-recovery.html' : url.pathname === '/client' ? '/client.html' : url.pathname === '/employment-certificate' ? '/employment-certificate.html' : url.pathname;
+      const path = url.pathname === '/' ? '/index.html' : url.pathname === '/join' ? '/join.html' : url.pathname === '/login' ? '/login.html' : url.pathname === '/review' ? '/review.html' : url.pathname === '/review-recovery' ? '/review-recovery.html' : url.pathname === '/client-recovery' ? '/client-recovery.html' : url.pathname === '/client' ? '/client.html' : url.pathname === '/employment-certificate' ? '/employment-certificate.html' : url.pathname;
       res.writeHead(200, {'Content-Type':mime[extname(path)],'X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer','Content-Security-Policy':`default-src 'self'; img-src 'self' data: blob:; style-src 'self'${url.pathname==='/offline-forms.html'?" 'unsafe-inline'":''}; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; object-src 'none'; frame-ancestors 'none'`});
       return res.end(readFileSync(join(root,'public',path.slice(1))));
     }

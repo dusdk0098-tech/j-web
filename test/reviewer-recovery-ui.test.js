@@ -6,19 +6,25 @@ import { mountReviewerProfile } from '../public/reviewer-profile.js';
 
 const source=readFileSync(new URL('../public/review-recovery.js',import.meta.url),'utf8');
 const event={preventDefault(){}};
-function page(hash,fetch){
-  const requestButton={disabled:false},verifyButton={disabled:false},resetButton={disabled:false},status={textContent:''};
-  const request={hidden:false,elements:{name:{value:'가상 직원'},email:{value:'worker@example.test'}},querySelector:()=>requestButton};
+function page(hash,fetch,pathname='/review-recovery'){
+  const requestButton={disabled:false},verifyButton={disabled:false},resetButton={disabled:false},status={textContent:''},identityLabel={textContent:''};
+  const request={hidden:false,elements:{name:{value:'가상 직원'},email:{value:'worker@example.test'},mode:{value:'id'},identity:{value:'가상 발주처'},phone:{value:'010-0000-0000'}},querySelector:()=>requestButton};
   const verify={hidden:true,querySelector:()=>verifyButton};
   const reset={hidden:true,elements:{password:{value:'virtual-new-password-456',disabled:false},confirmPassword:{value:'virtual-new-password-456',disabled:false}},querySelector:()=>resetButton,reset(){this.elements.password.value='';this.elements.confirmPassword.value='';}};
-  const elements={'#recovery-request':request,'#recovery-verify':verify,'#recovery-reset':reset,'#recovery-status':status},history=[];
-  runInNewContext(source,{document:{querySelector:selector=>elements[selector]},location:{hash,pathname:'/review-recovery'},history:{replaceState:(...args)=>history.push(args)},URLSearchParams,fetch});
-  return {request,verify,reset,status,requestButton,verifyButton,resetButton,history};
+  const elements={'#recovery-request':request,'#recovery-verify':verify,'#recovery-reset':reset,'#recovery-status':status,'#recovery-identity-label':identityLabel},history=[];
+  runInNewContext(source,{document:{querySelector:selector=>elements[selector]},location:{hash,pathname},history:{replaceState:(...args)=>history.push(args)},URLSearchParams,fetch});
+  return {request,verify,reset,status,requestButton,verifyButton,resetButton,history,identityLabel};
 }
 
 test('계정 찾기 화면은 이름과 이메일을 보내고 일반 응답을 표시한다',async()=>{
   let request;const ui=page('',async(path,options)=>{request={path,body:JSON.parse(options.body)};return {ok:true,json:async()=>({message:'가상 요청 완료'})};});
   await ui.request.onsubmit(event);assert.equal(request.path,'/api/reviewer/recovery/request');assert.deepEqual(request.body,{name:'가상 직원',email:'worker@example.test'});assert.equal(ui.status.textContent,'가상 요청 완료');assert.equal(ui.requestButton.disabled,false);
+});
+
+test('발주처 찾기는 선택한 방식과 휴대전화를 발주처 API에 보낸다',async()=>{
+  let request;const ui=page('',async(path,options)=>{request={path,body:JSON.parse(options.body)};return {ok:true,json:async()=>({message:'가상 요청 완료'})};},'/client-recovery');
+  assert.equal(ui.identityLabel.textContent,'이름');ui.request.elements.mode.value='password';ui.request.elements.mode.onchange();assert.equal(ui.identityLabel.textContent,'아이디');ui.request.elements.identity.value='virtual_client';
+  await ui.request.onsubmit(event);assert.equal(request.path,'/api/client/recovery/request');assert.deepEqual(request.body,{mode:'password',identity:'virtual_client',phone:'010-0000-0000',email:'worker@example.test'});assert.equal(ui.status.textContent,'가상 요청 완료');
 });
 
 test('이메일 확인 링크를 주소에서 지우고 확인 버튼으로 한 번 전송한다',async()=>{
