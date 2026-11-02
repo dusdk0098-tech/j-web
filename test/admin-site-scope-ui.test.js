@@ -7,7 +7,7 @@ import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { createServer } from 'node:net';
 import { runInNewContext } from 'node:vm';
-import { siteQrSession } from '../public/site-qr.js';
+import { siteQrSession, printSiteQr } from '../public/site-qr.js';
 
 const source=readFileSync(new URL('../public/app.js',import.meta.url),'utf8');
 const part=(from,to)=>{const start=source.indexOf(from),end=source.indexOf(to,start);assert.ok(start>=0&&end>start,from);return source.slice(start,end);};
@@ -110,6 +110,47 @@ test('월별 조회 경계·버전 충돌 입력 보존·재조회 및 늦은 �
   assert.deepEqual(JSON.parse(ui.requests.at(-1).options.body),{siteId:1,workerId:3,month:'2024-02',expectedVersion:'v1',company:'새 가상 소속'});
   const wait=delayed(),late=screen(async()=>wait.promise);const pending=late.context.showRestrictedMonth(()=>true);late.dialog.close();wait.resolve(response([row]));await pending;assert.equal(late.get('#restricted-month-results').innerHTML,'');
   for(const month of ['2024-00','2024-13','0000-01','']){const invalid=screen();invalid.get('#restricted-month').value=month;await invalid.context.showRestrictedMonth(()=>true);assert.equal(invalid.requests.length,0);}
+});
+
+function qrScreen(fetcher){
+  const ui=screen(fetcher),result=ui.get('#restricted-qr-result'),printed=[];let elements=[];
+  Object.defineProperty(result,'innerHTML',{get(){return this.markup||'';},set(value){
+    this.markup=value;for(const element of elements){element.isConnected=false;ui.nodes.delete('#'+element.id);}elements=[];
+    for(const [,id] of value.matchAll(/id="([^"]+)"/g)){const element=ui.get('#'+id);Object.assign(element,{id,isConnected:true,complete:false,naturalWidth:0});elements.push(element);}
+  }});
+  ui.dialog.dataset={};ui.dialog.querySelector=selector=>ui.nodes.get(selector)||null;
+  ui.context.printSiteQr=(dialog,mode)=>printSiteQr(dialog,mode,()=>printed.push({mode:dialog.dataset.qrPrint,image:dialog.querySelector(mode==='access'?'#login-qr-image':'#invite-qr-image').id}));
+  return {...ui,printed};
+}
+const qrResult={image:'data:image/png;base64,virtual',link:'https://example.invalid/virtual',expiresAt:'2026-11-03T00:00:00.000Z'};
+
+test('제한 QR 접속·초대·교체는 공통 출력 구조와 해당 이미지 준비 검사를 사용한다',async()=>{
+  const ui=qrScreen(async()=>response(qrResult));await ui.context.showRestrictedQr();
+  assert.match(ui.get('#dialog-body').innerHTML,/<div id="restricted-qr-result" class="qr">/);
+  for(const kind of ['access','invite','rotate']){
+    await ui.get('[data-restricted-qr="'+kind+'"]').onclick();
+    const mode=kind==='invite'?'invite':'access',id=mode==='invite'?'invite-qr-image':'login-qr-image',button=ui.get('#restricted-qr-print'),image=ui.get('#'+id),markup=ui.get('#restricted-qr-result').innerHTML,before=ui.printed.length;
+    assert.match(markup,/<h3 class="qr-site-name">가상 첫 현장<\/h3>/);assert.match(markup,new RegExp('id="'+id+'"'));assert.match(markup,/https:\/\/example.invalid\/virtual/);
+    if(mode==='invite'){assert.match(markup,/<div id="invite-result">/);assert.match(markup,/유효기간:/);assert.doesNotMatch(markup,/id="login-qr/);}else{assert.match(markup,/id="login-qr-address"/);assert.doesNotMatch(markup,/id="invite-qr/);}
+    button.onclick();assert.equal(ui.printed.length,before);assert.match(ui.get('#dialog-error').textContent,/이미지/);
+    image.complete=true;button.onclick();assert.equal(ui.printed.length,before);assert.match(ui.get('#dialog-error').textContent,/이미지/);
+    image.naturalWidth=256;button.onclick();assert.deepEqual(ui.printed.at(-1),{mode,image:id});assert.equal(ui.printed.length,before+1);assert.equal(ui.get('#dialog-error').textContent,'');
+  }
+});
+
+test('제한 QR 구 출력 버튼은 새 요청·오류·현장·계정·화면·다른 창 이후 인쇄하지 않는다',async()=>{
+  for(const transition of ['site','account','page','close','dialog','request','failure']){
+    const wait=delayed();let defer=false;const ui=qrScreen(async()=>defer?wait.promise:response(qrResult));await ui.context.showRestrictedQr();await ui.get('[data-restricted-qr="access"]').onclick();
+    const stale=ui.get('#restricted-qr-print');Object.assign(ui.get('#login-qr-image'),{complete:true,naturalWidth:256});let pending;
+    if(transition==='site')ui.state.siteId=2;
+    if(transition==='account')ui.state.admin={id:99};
+    if(transition==='page'){ui.state.page='documents';ui.context.detailEpoch++;}
+    if(transition==='close')ui.dialog.close();
+    if(transition==='dialog')ui.context.showDialog('다른 창','새 입력',async()=>{});
+    if(['request','failure'].includes(transition)){defer=true;pending=ui.get('[data-restricted-qr="invite"]').onclick();assert.equal(stale.isConnected,false);}
+    stale.onclick();assert.equal(ui.printed.length,0);
+    if(pending){wait.resolve(transition==='failure'?{ok:false,status:403,json:async()=>({error:'가상 거절'})}:response(qrResult));await pending;if(transition==='request')Object.assign(ui.get('#invite-qr-image'),{complete:true,naturalWidth:256});stale.onclick();assert.equal(ui.printed.length,0);}
+  }
 });
 
 test('제한 QR 실패시 이전 주소 제거·재시도·닫힌 창과 현장 및 계정 전환 응답 무시',async()=>{

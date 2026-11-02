@@ -967,7 +967,7 @@ async function showRestrictedQr(){
   if(!state.siteId){flash('먼저 현장을 선택해 주세요.',true);return;}
   const siteId=state.siteId,admin=state.admin,epoch=detailEpoch;
   const scope=()=>state.siteId===siteId&&state.admin===admin&&detailEpoch===epoch;
-  showDialog('배정 현장 QR·가입 관리','<p>교체하면 기존 접속 주소가 중지됩니다.</p><div id="restricted-qr-result"></div><p id="restricted-qr-status" role="status"></p><div class="filters">'+[['access','현장 QR 조회'],['status','상태 확인'],['openRegistration','현장 QR 가입 열기'],['invite','별도 가입 QR 발급'],['rotate','현장 QR 교체'],['revoke','가입 QR 모두 중지']].map(([key,label])=>`<button type="button" data-restricted-qr="${key}">${label}</button>`).join('')+'</div>',async()=>{},scope);
+  showDialog('배정 현장 QR·가입 관리','<div class="qr"><p>교체하면 기존 접속 주소가 중지됩니다.</p><p id="restricted-qr-status" role="status"></p><div class="filters">'+[['access','현장 QR 조회'],['status','상태 확인'],['openRegistration','현장 QR 가입 열기'],['invite','별도 가입 QR 발급'],['rotate','현장 QR 교체'],['revoke','가입 QR 모두 중지']].map(([key,label])=>`<button type="button" data-restricted-qr="${key}">${label}</button>`).join('')+'</div></div><div id="restricted-qr-result" class="qr"></div>',async()=>{},scope);
   $('#dialog-form button[type=submit]').textContent='닫기';
   const submit=$('#dialog-form').onsubmit,current=()=>scope()&&dialog.open&&$('#dialog-form').onsubmit===submit;
   const session=siteQrSession(siteId,siteSelect.selectedOptions[0].textContent,(path,options)=>api(path,options,current));let busy=false;
@@ -977,7 +977,11 @@ async function showRestrictedQr(){
     if(['rotate','revoke'].includes(kind)&&!confirm(kind==='rotate'?'기존 접속 주소가 중지됩니다. 새 QR을 다시 전달해야 합니다. 교체할까요?':'이 현장의 모든 가입 QR과 현장 QR 가입을 중지할까요?'))return;
     busy=true;$('#restricted-qr-result').innerHTML='';$('#restricted-qr-status').textContent='확인 중입니다.';$('#dialog-error').textContent='';
     try{const result=await session[kind]();if(!current())return;
-      if(result?.image&&result?.link)$('#restricted-qr-result').innerHTML=`<img alt="배정 현장 ${kind==='invite'?'가입':'접속'} QR" style="max-width:100%;height:auto" src="${esc(result.image)}"><p style="overflow-wrap:anywhere">${esc(result.link)}</p>`;
+      if(result?.image&&result?.link){
+        const mode=kind==='invite'?'invite':'access',label=mode==='invite'?'가입':'접속';
+        $('#restricted-qr-result').innerHTML=`<h3 class="qr-site-name">${esc(session.siteName)}</h3>${mode==='invite'?'<div id="invite-result">':''}<h4 class="qr-access-title">현장 ${label}</h4><img id="${mode==='invite'?'invite':'login'}-qr-image" alt="배정 현장 ${label} QR" src="${esc(result.image)}"><p class="qr-access-label">${label} 주소</p><p class="qr-address" style="overflow-wrap:anywhere"${mode==='access'?' id="login-qr-address"':''}>${esc(result.link)}</p>${mode==='invite'?`<p>유효기간: ${esc(new Date(result.expiresAt).toLocaleString('ko-KR'))}까지</p></div>`:''}<button type="button" id="restricted-qr-print" class="outline">${label} QR 인쇄</button>`;
+        const printButton=$('#restricted-qr-print');printButton.onclick=()=>{if(!current()||busy||!printButton.isConnected)return;try{printSiteQr(dialog,mode);$('#dialog-error').textContent='';}catch(error){$('#dialog-error').textContent=error.message;}};
+      }
       $('#restricted-qr-status').textContent=kind==='revoke'?'가입을 중지했습니다.':result?.registrationExpiresAt||result?.expiresAt?`가입 가능 기한: ${new Date(result.registrationExpiresAt||result.expiresAt).toLocaleString('ko-KR')}`:kind==='status'?'상태를 확인했습니다. 현재 현장 QR 가입은 닫혀 있습니다.':'처리했습니다. 상태 확인으로 가입 기한을 확인할 수 있습니다.';
     }catch(error){if(current()){$('#restricted-qr-result').innerHTML='';$('#restricted-qr-status').textContent='확인하지 못했습니다. 다시 시도해 주세요.';$('#dialog-error').textContent=error.message;}}
     finally{busy=false;}
