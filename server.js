@@ -1,6 +1,7 @@
 import { adminSitePolicy, adminAttendanceRows, adminEquipmentRows } from './admin-site-policy.js';
 import { adminWriteGuard } from './admin-write-guard.js';
 import http from 'node:http';
+import { isIP } from 'node:net';
 import { readFileSync, mkdirSync, readdirSync } from 'node:fs';
 import { dirname, extname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -19,7 +20,7 @@ import { issueAccessQr,issueInvitationQr } from './qr-issue.js';
 import { workerSpreadsheet, wageSpreadsheet } from './exports.js';
 import { sessionToken, WorkerSessions, ReviewerSessions } from './auth.js';
 import { workerSitePath } from './public/worker-link.js';
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { costImageType } from './cost-image.js';
 import { AiChat, AI_BODY_LIMIT } from './ai-chat.js';
 
@@ -29,6 +30,17 @@ if(process.env.JWEB_PUBLIC_ORIGIN){
   let parsed;try{parsed=new URL(process.env.JWEB_PUBLIC_ORIGIN);}catch{throw new Error('HTTPS 공개 주소를 확인해 주세요.');}
   if(parsed.protocol!=='https:'||parsed.username||parsed.password||parsed.pathname!=='/'||parsed.search||parsed.hash||parsed.origin!==process.env.JWEB_PUBLIC_ORIGIN)throw new Error('HTTPS 공개 주소는 경로 없이 입력해 주세요.');
   publicOrigin=parsed.origin;
+}
+const proxySecret=process.env.JWEB_PROXY_SECRET;
+if(proxySecret!==undefined&&!/^[a-zA-Z0-9_-]{32,256}$/.test(proxySecret))throw new Error('중계 공유 비밀은 영문·숫자·밑줄·하이픈 32~256자로 설정해 주세요.');
+const proxySecretHash=proxySecret?createHash('sha256').update(proxySecret).digest():null;
+function workerPeer(req){
+  const peer=req.socket.remoteAddress,secret=req.headers['x-jweb-proxy-secret'],address=req.headers['x-jweb-client-address'];
+  if(['127.0.0.1','::1','::ffff:127.0.0.1'].includes(peer)&&(secret!==undefined||address!==undefined)){
+    if(!proxySecretHash||typeof secret!=='string'||typeof address!=='string'||!isIP(address)||!timingSafeEqual(proxySecretHash,createHash('sha256').update(secret).digest()))return null;
+    return address.replace(/^::ffff:(?=\d+\.)/,'');
+  }
+  return peer?.replace(/^::ffff:(?=\d+\.)/,'');
 }
 const secureCookie=publicOrigin?'; Secure':'';
 const dataDir = process.env.JWEB_DATA_DIR || join(root, 'data');
@@ -46,8 +58,15 @@ const reviewerProfile = new ReviewerProfile(store.db);
 const clients = new ClientAccounts(store.db);
 const workerSessions=new WorkerSessions(store.db);
 const reviewerSessions=new ReviewerSessions(store.db),reviewerAccountFailures=new Map();let reviewerFailures=[];
-let workerFailures=[];
-const workerAccountFailures=new Map();
+const workerPeerFailures=new Map(),workerAccountFailures=new Map();
+function pruneWorkerFailures(now){
+  for(const failures of [workerPeerFailures,workerAccountFailures])for(const [key,times] of failures){const recent=times.filter(t=>t>now-5*60*1000);if(recent.length)failures.set(key,recent);else failures.delete(key);}
+}
+function recordWorkerFailure(failures,key,times,now){
+  // shortcut: 포화 시 가장 먼저 등록된 제한을 제거하므로 대규모 분산 공격에는 외부 공유 제한기가 필요하다.
+  if(!failures.has(key)&&failures.size>=10000)failures.delete(failures.keys().next().value);
+  times.push(now);failures.set(key,times);
+}
 const workerKey=raw=>typeof raw==='string' && /^[\w-]{43}$/.test(raw)?createHash('sha256').update(raw).digest('hex'):'';
 const workerReportContext=(key,worker)=>({workerId:worker.id,siteId:worker.site_id,generation:createHash('sha256').update('worker-report:'+key).digest('hex')});
 function checkWorkerReport(req,key,session,input){checkRequestSession(req);if(input===undefined){try{input={reportContext:JSON.parse(req.headers['x-worker-report-context']||'null')};}catch{input={};}}const expected=workerReportContext(key,session.worker),actual=input.reportContext;if(!actual||actual.workerId!==expected.workerId||actual.siteId!==expected.siteId||actual.generation!==expected.generation)throw Object.assign(new Error('로그인 계정 또는 현장 세션이 변경되었습니다. 입력 내용을 복사한 뒤 다시 로그인해 주세요.'),{sessionStatus:409,sessionChanged:true});}
@@ -307,10 +326,11 @@ const server = http.createServer((req,res)=>adminRequests.run(req,async()=>{
     if(url.pathname==='/api/worker/site'&&req.method==='GET'){const site=store.siteFromAccess(url.searchParams.get('key'));if(!site)return json(res,404,{error:'현장 접속 주소를 확인해 주세요.'});const canSignup=store.siteRegistrationOpen(site.id);return json(res,200,{...site,canSignup,locationRequired:store.siteLocationPolicy(site.id).enabled,...(canSignup?{companies:store.companies(site.id).map(c=>c.name),occupations:store.siteOccupations(site.id).map(o=>o.name)}:{})});}
     if(url.pathname==='/api/worker/login' && req.method==='POST'){
       const input=await body(req),now=Date.now(),site=input.siteKey?store.siteFromAccess(input.siteKey):store.invitation(input.token),identityMode=input.method==='identity',identity=identityMode&&site?store.workerLoginIdentity(site.id,input.name,input.birthDigits):null,loginId=identityMode?identity?.login_id:input.loginId,accountKey=site&&typeof loginId==='string'&&/^[a-zA-Z0-9_]{3,40}$/.test(loginId)?`${site.id}:${loginId}`:identityMode&&site?`${site.id}:identity:${createHash('sha256').update(JSON.stringify([input.name,input.birthDigits])).digest('hex')}`:'invalid';
-      workerFailures=workerFailures.filter(t=>t>now-5*60*1000);for(const [key,times] of workerAccountFailures){const recent=times.filter(t=>t>now-5*60*1000);if(recent.length)workerAccountFailures.set(key,recent);else workerAccountFailures.delete(key);}
-      const failures=workerAccountFailures.get(accountKey)||[];if(workerFailures.length>=100||failures.length>=10)return json(res,429,{error:'잠시 후 다시 로그인해 주세요.'});
+      pruneWorkerFailures(now);
+      const peer=workerPeer(req);if(peer===null)return json(res,503,{error:'로그인 중계 설정을 확인해 주세요.'});
+      const peerFailures=workerPeerFailures.get(peer)||[],failures=workerAccountFailures.get(accountKey)||[];if(peerFailures.length>=100||failures.length>=10)return json(res,429,{error:'잠시 후 다시 로그인해 주세요.'});
       const authenticated=store.authenticateWorker(input.token,loginId,input.password,input.siteKey,true);
-      if(!authenticated){workerFailures.push(now);failures.push(now);workerAccountFailures.set(accountKey,failures);return json(res,401,{error:'가입 링크 또는 로그인 정보를 확인해 주세요.'});}
+      if(!authenticated){recordWorkerFailure(workerPeerFailures,peer,peerFailures,now);recordWorkerFailure(workerAccountFailures,accountKey,failures,now);return json(res,401,{error:'가입 링크 또는 로그인 정보를 확인해 주세요.'});}
       const {worker,credentialHash}=authenticated;
       const current=new Date(now),date=new Date(now-current.getTimezoneOffset()*60000).toISOString().slice(0,10);
       if(store.workerAccessBlocked(worker.site_id,date))return json(res,403,{error:'해당 현장은 오늘 근로자 접속이 차단되었습니다.'});
