@@ -9,6 +9,8 @@
     "proxy": "node https-proxy.js",
     "backup": "node db-copy.js backup",
     "restore": "node db-copy.js restore",
+    "backup-encrypted": "node db-copy.js backup-encrypted",
+    "restore-encrypted": "node db-copy.js restore-encrypted",
     "test": "node --test"
   },
   "engines": {

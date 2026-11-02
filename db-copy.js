@@ -1,10 +1,13 @@
 import { DatabaseSync } from 'node:sqlite';
-import { randomBytes } from 'node:crypto';
-import { chmodSync, linkSync, lstatSync, mkdtempSync, realpathSync, rmdirSync, statSync, unlinkSync } from 'node:fs';
+import { createCipheriv,createDecipheriv,randomBytes,scryptSync } from 'node:crypto';
+import { appendFileSync,chmodSync,closeSync,createReadStream,createWriteStream,fstatSync,fsyncSync,linkSync,lstatSync,mkdtempSync,openSync,readSync,realpathSync,rmdirSync,statSync,unlinkSync,writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
+import { pipeline } from 'node:stream/promises';
 import { fileURLToPath } from 'node:url';
 
 const root=dirname(fileURLToPath(import.meta.url));
+const magic=Buffer.from('JWEBBK01'),saltLength=16,ivLength=12,tagLength=16,headerLength=magic.length+saltLength+ivLength,maxPlaintext=2**36-32;
 
 function exists(path){
   try{lstatSync(path);return true;}catch(error){if(error.code==='ENOENT')return false;throw error;}
@@ -52,14 +55,70 @@ function copyDatabase(source,destination,resetAccess=false){
   }
 }
 
+function backupPassword(){
+  const value=process.env.JWEB_BACKUP_PASSWORD;
+  if(typeof value!=='string'||value.length<12||value.length>1024)throw new Error('JWEB_BACKUP_PASSWORD에 12자 이상 1024자 이하의 백업 암호를 설정해 주세요.');
+  return value;
+}
+
+function removeTemporary(dir,name){
+  if(!dir)return;
+  for(const suffix of ['','-wal','-shm','-journal'])try{unlinkSync(join(dir,name)+suffix);}catch(error){if(error.code!=='ENOENT')throw error;}
+  rmdirSync(dir);
+}
+
+async function encryptedBackup(source,destination,password){
+  const requested=resolve(destination),parent=realpathSync(dirname(requested));
+  if(!statSync(parent).isDirectory()||!basename(requested).toLowerCase().endsWith('.jwbk'))throw new Error('백업 대상은 기존 폴더의 .jwbk 파일로 지정해 주세요.');
+  const output=join(parent,basename(requested));available(output);
+  const privateDir=mkdtempSync(join(realpathSync(tmpdir()),'jweb-private-'));let encryptedDir,key;
+  try{
+    const plain=join(privateDir,'snapshot.sqlite');copyDatabase(source,plain);
+    if(statSync(plain).size>maxPlaintext)throw new Error('암호화 백업에 사용할 수 있는 데이터 크기를 초과했습니다.');
+    encryptedDir=mkdtempSync(join(parent,'.jweb-encrypted-'));const staged=join(encryptedDir,'backup.jwbk');
+    const salt=randomBytes(saltLength),iv=randomBytes(ivLength),header=Buffer.concat([magic,salt,iv]);
+    key=scryptSync(password,salt,32,{N:32768,r:8,p:1,maxmem:64*1024*1024});
+    const cipher=createCipheriv('aes-256-gcm',key,iv);cipher.setAAD(header);
+    writeFileSync(staged,header,{flag:'wx',mode:0o600});await pipeline(createReadStream(plain),cipher,createWriteStream(staged,{flags:'a'}));appendFileSync(staged,cipher.getAuthTag());
+    const fd=openSync(staged,'r+');try{fsyncSync(fd);}finally{closeSync(fd);}chmodSync(staged,0o600);available(output);linkSync(staged,output);return output;
+  }finally{
+    key?.fill(0);
+    try{removeTemporary(encryptedDir,'backup.jwbk');}finally{removeTemporary(privateDir,'snapshot.sqlite');}
+  }
+}
+
+function readExact(fd,length,position){
+  const bytes=Buffer.alloc(length);let read=0;
+  while(read<length){const count=readSync(fd,bytes,read,length-read,position+read);if(!count)throw new Error('암호화 백업이 잘렸습니다.');read+=count;}
+  return bytes;
+}
+
+async function encryptedRestore(source,destination,password){
+  const input=realpathSync(resolve(source)),fd=openSync(input,'r');let header,tag,size;
+  try{
+    const info=fstatSync(fd);size=info.size;
+    if(!info.isFile()||!Number.isSafeInteger(size)||size<=headerLength+tagLength||size-headerLength-tagLength>maxPlaintext)throw new Error('암호화 백업 형식을 확인해 주세요.');
+    header=readExact(fd,headerLength,0);tag=readExact(fd,tagLength,size-tagLength);
+    if(!header.subarray(0,magic.length).equals(magic))throw new Error('지원하는 암호화 백업 형식이 아닙니다.');
+  }finally{closeSync(fd);}
+  const privateDir=mkdtempSync(join(realpathSync(tmpdir()),'jweb-private-'));let key;
+  try{
+    const plain=join(privateDir,'snapshot.sqlite'),salt=header.subarray(magic.length,magic.length+saltLength),iv=header.subarray(magic.length+saltLength);
+    key=scryptSync(password,salt,32,{N:32768,r:8,p:1,maxmem:64*1024*1024});
+    const decipher=createDecipheriv('aes-256-gcm',key,iv);decipher.setAAD(header);decipher.setAuthTag(tag);
+    try{await pipeline(createReadStream(input,{start:headerLength,end:size-tagLength-1}),decipher,createWriteStream(plain,{flags:'wx',mode:0o600}));}catch(error){if(error.code)throw error;throw new Error('백업 암호를 확인하거나 백업 파일의 손상 여부를 확인해 주세요.');}
+    return copyDatabase(plain,destination,true);
+  }finally{key?.fill(0);removeTemporary(privateDir,'snapshot.sqlite');}
+}
+
 if(process.argv[1]&&resolve(process.argv[1])===fileURLToPath(import.meta.url)){
   try{
     const [action,...args]=process.argv.slice(2);
     let source,destination;
-    if(action==='backup'&&args.length===1){source=join(process.env.JWEB_DATA_DIR||join(root,'data'),'jweb.sqlite');destination=args[0];}
-    else if(action==='restore'&&args.length===2){source=args[0];destination=join(args[1],'jweb.sqlite');}
-    else throw new Error('사용법: npm run backup -- 백업파일.sqlite 또는 npm run restore -- 백업파일.sqlite 새데이터폴더');
-    const output=copyDatabase(source,destination,action==='restore');
+    if(['backup','backup-encrypted'].includes(action)&&args.length===1){source=join(process.env.JWEB_DATA_DIR||join(root,'data'),'jweb.sqlite');destination=args[0];}
+    else if(['restore','restore-encrypted'].includes(action)&&args.length===2){source=args[0];destination=join(args[1],'jweb.sqlite');}
+    else throw new Error('사용법: npm run backup -- 백업파일.sqlite, npm run restore -- 백업파일.sqlite 새데이터폴더, npm run backup-encrypted -- 백업파일.jwbk 또는 npm run restore-encrypted -- 백업파일.jwbk 새데이터폴더');
+    const output=action==='backup-encrypted'?await encryptedBackup(source,destination,backupPassword()):action==='restore-encrypted'?await encryptedRestore(source,destination,backupPassword()):copyDatabase(source,destination,action==='restore');
     console.log(`데이터 사본을 만들었습니다: ${output}\n사본을 사용할 때는 다시 로그인해 주세요.`);
   }catch(error){console.error(error.message);process.exitCode=1;}
 }
