@@ -44,7 +44,7 @@ function screen(){
     part("    const list=notices.querySelector",'    const archive=document'),
     part('    let checkGeneration=','    const stop=document'),
     part('    const dayStatus=','    startWorkerLoads(initialLoads,'),
-    'globalThis.actions={refreshWorkerDay,stopWorkerDay,loadDaily,loadTraining,loadCheck,loadNotices,dayStatus,trainingStatus,noticeStatus};'
+    'globalThis.actions={refreshWorkerDay,stopWorkerDay,loadDaily,loadTraining,loadCheck,loadNotices,loadMeetings,dayStatus,trainingStatus,noticeStatus};'
   ].join('\n');
   runInNewContext(code,context);
   const reply=async(request,data,status=200)=>{request.resolve({ok:status>=200&&status<300,status,json:async()=>data});await tick();};
@@ -163,7 +163,7 @@ test('전날 점검 저장이 자정을 넘어 끝나면 새 날짜를 재조회
   await ui.fire();await ui.reply(ui.pending('/api/worker/session'),ui.session('2026-11-01'));
   await ui.reply(ui.pending('/api/worker/daily-training'),[]);await ui.reply(ui.pending('/api/worker/training'),ui.items(2));
   await ui.reply(save,{check:{date:'2026-10-31',has_signature:true}});await action;
-  const current=ui.pending('/api/worker/self-check');assert.notEqual(current,save);assert.equal(current.options,undefined);
+  const current=ui.pending('/api/worker/self-check');assert.notEqual(current,save);assert.equal(current.options.method,undefined);assert.equal(JSON.parse(current.options.headers['X-Worker-Report-Context']).generation,'original');
   await ui.reply(current,{check:null});assert.equal(ui.checkForm.hidden,false);assert.equal(ui.checkForm.querySelector('button').disabled,false);
 });
 
@@ -288,5 +288,51 @@ test('응답 없는 세션 확인은 15초에 중단하고 60초 뒤 재시도�
 
 test('같은 근로자의 다른 로그인 세대는 기존 입력을 보존하고 저장을 멈춘다',async()=>{const ui=screen();await ui.start();ui.checkForm.elements.sober.checked=true;await ui.event('focus');await ui.reply(ui.pending('/api/worker/session'),ui.session(undefined,{reportContext:{workerId:1,siteId:7,generation:'new'}}));const before=ui.requests.length;await ui.checkForm.onsubmit({preventDefault(){}});assert.equal(ui.requests.length,before);assert.equal(ui.panel.isConnected,true);assert.equal(ui.checkForm.elements.sober.checked,true);assert.match(ui.context.actions.dayStatus.textContent,/입력 내용을 복사/);});
 test('공지 세션409는 서명과 기존 화면을 보존한다',async()=>{const ui=screen();await ui.start();const row=ui.noticeList.children[0],button=row.children.at(-1);row.children[2].signature='가상 보존';const action=button.onclick(),request=ui.pending('/api/worker/notices/1/confirm'),before=ui.requests.length;assert.equal(JSON.parse(request.options.body).reportContext.generation,'original');await ui.reply(request,{error:'입력 내용을 복사',sessionChanged:true},409);await action;assert.equal(ui.requests.length,before);assert.equal(ui.noticeList.children[0],row);assert.equal(row.children[2].signature,'가상 보존');assert.equal(button.disabled,false);});
+
+test('공지와 교육 조회가 다른 로그인으로 전환되면 입력을 보존하고 이후 저장을 멈춘다',async()=>{
+  for(const [path,load,list] of [['/api/worker/notices','loadNotices','noticeList'],['/api/worker/training','loadTraining','trainingList']]){
+    const ui=screen();await ui.start();const row=ui[list].children[0],canvas=row.children[2];canvas.signature='보존할 가상 서명';
+    const pending=ui.context.actions[load](),request=ui.pending(path);assert.equal(JSON.parse(request.options.headers['X-Worker-Report-Context']).generation,'original');
+    await ui.reply(request,{error:'입력 내용을 복사한 뒤 다시 로그인해 주세요.',sessionChanged:true},409);await pending;
+    assert.equal(ui[list].children[0],row);assert.equal(canvas.signature,'보존할 가상 서명');assert.match(ui.context.actions.dayStatus.textContent,/입력 내용을 복사/);
+    const count=ui.requests.length;await row.children[4].onclick();assert.equal(ui.requests.length,count);
+  }
+});
+
+test('오래된 공지·교육 조회의 세션 오류는 최신 화면을 중단하지 않는다',async()=>{
+  for(const [path,load,list] of [['/api/worker/notices','loadNotices','noticeList'],['/api/worker/training','loadTraining','trainingList']]){
+    const ui=screen();await ui.start();const old=ui.context.actions[load](),oldRequest=ui.pending(path),current=ui.context.actions[load](),currentRequest=ui.pending(path);
+    await ui.reply(currentRequest,path.endsWith('notices')?ui.noticeItems():ui.items());await current;
+    await ui.reply(oldRequest,{error:'이전 세션',sessionChanged:true},409);await old;assert.equal(ui.context.actions.dayStatus.textContent,'');
+    const before=ui.requests.length,action=ui[list].children[0].children[4].onclick();assert.equal(ui.requests.length,before+1);await ui.reply(ui.requests.at(-1),{error:'가상 저장 오류'},400);await action;
+  }
+});
+
+test('자가점검·일일교육·회의 조회의 계정 변경은 작성 중 입력을 보존한다',async()=>{
+  for(const [path,load] of [['/api/worker/self-check','loadCheck'],['/api/worker/daily-training','loadDaily'],['/api/worker/meetings','loadMeetings']]){
+    const ui=screen();await ui.start();ui.checkForm.elements.sober.checked=true;ui.dailyForm.elements.rights.checked=true;const row=ui.meetingList.children[0],canvas=row.children[3];canvas.signature='보존할 회의 서명';
+    const pending=ui.context.actions[load](),request=ui.pending(path);assert.equal(JSON.parse(request.options.headers['X-Worker-Report-Context']).generation,'original');await ui.reply(request,{error:'입력 내용을 복사한 뒤 다시 로그인해 주세요.',sessionChanged:true},409);await pending;
+    assert.equal(ui.checkForm.elements.sober.checked,true);assert.equal(ui.dailyForm.elements.rights.checked,true);assert.equal(ui.meetingList.children[0],row);assert.equal(canvas.signature,'보존할 회의 서명');assert.match(ui.context.actions.dayStatus.textContent,/입력 내용을 복사/);
+    const before=ui.requests.length;await row.children[5].onclick();await ui.checkForm.onsubmit({preventDefault(){}});await ui.dailyForm.onsubmit({preventDefault(){}});assert.equal(ui.requests.length,before);
+  }
+});
+
+test('이전 자가점검·일일교육·회의 조회의 세션 오류는 최신 조회를 중단하지 않는다',async()=>{
+  for(const [path,load] of [['/api/worker/self-check','loadCheck'],['/api/worker/daily-training','loadDaily'],['/api/worker/meetings','loadMeetings']]){
+    const ui=screen();await ui.start();const old=ui.context.actions[load](),oldRequest=ui.pending(path),current=ui.context.actions[load](),currentRequest=ui.pending(path),data=path.endsWith('self-check')?{check:null}:path.endsWith('daily-training')?[]:[{id:1,date:'2026-10-31',type:'safety_meeting',title:'가상 회의',details:{},body:'가상 본문',files:[],role:'worker'}];
+    await ui.reply(currentRequest,data);await current;await ui.reply(oldRequest,{error:'이전 세션',sessionChanged:true},409);await old;assert.equal(ui.context.actions.dayStatus.textContent,'');
+    const before=ui.requests.length,action=ui.meetingList.children[0].children[5].onclick();assert.equal(ui.requests.length,before+1);await ui.reply(ui.requests.at(-1),{error:'가상 저장 오류'},400);await action;
+  }
+});
+
+test('한 일일 조회에서 계정 변경을 감지하면 동시에 진행 중인 다른 응답도 반영하지 않는다',async()=>{
+  for(const first of ['notice','training']){
+    const ui=screen();await ui.start();const noticeRow=ui.noticeList.children[0],trainingRow=ui.trainingList.children[0];
+    const notice=ui.context.actions.loadNotices(),noticeRequest=ui.pending('/api/worker/notices'),training=ui.context.actions.loadTraining(),trainingRequest=ui.pending('/api/worker/training');
+    if(first==='notice'){await ui.reply(noticeRequest,{error:'계정 변경',sessionChanged:true},409);await notice;await ui.reply(trainingRequest,ui.items(99));await training;}
+    else{await ui.reply(trainingRequest,{error:'계정 변경',sessionChanged:true},409);await training;await ui.reply(noticeRequest,ui.noticeItems(99));await notice;}
+    assert.equal(ui.noticeList.children[0],noticeRow);assert.equal(ui.trainingList.children[0],trainingRow);assert.match(ui.context.actions.dayStatus.textContent,/계정 변경/);
+  }
+});
 
 test('회의도 최초 세션으로 제출하고 409와 복귀 조회에서 서명을 유지한다',async()=>{const ui=screen();await ui.start();const row=ui.meetingList.children[0],button=row.children[5],canvas=row.children[3];canvas.signature='가상 유지';const action=button.onclick(),request=ui.pending('/api/worker/meetings');assert.equal(JSON.parse(request.options.body).reportContext.generation,'original');await ui.reply(request,{error:'입력 내용을 복사',sessionChanged:true},409);await action;assert.equal(ui.meetingList.children[0],row);assert.equal(canvas.signature,'가상 유지');assert.equal(button.disabled,false);await ui.event('focus');await ui.reply(ui.pending('/api/worker/session'),ui.session());await ui.finishLoads();assert.equal(ui.meetingList.children[0],row);assert.equal(canvas.signature,'가상 유지');await ui.event('visibilitychange',true);const count=ui.requests.length;await button.onclick();assert.equal(ui.requests.length,count);});
