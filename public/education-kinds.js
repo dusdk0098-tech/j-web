@@ -3,3 +3,8 @@ export const educationKinds=Object.freeze({
   supervisor_new:'관리감독자 신규 채용 시 교육',supervisor_regular:'관리감독자 정기·위험성평가 전파교육',supervisor_special:'관리감독자 특별교육',supervisor_changed:'관리감독자 작업내용 변경 시 교육',
   supervisor:'관리감독자 교육 (세부 구분 미기록)',msds:'물질안전보건교육(MSDS)',other:'기타교육'
 });
+
+export function requireEducationSubmission(details={}) {
+  const missing=[...(!String(details.timeFrom??'').trim()||!String(details.timeTo??'').trim()?['교육시간']:[]),...Object.entries({educationPlace:'교육장소',educationMethod:'교육방법',instructor:'교육강사'}).filter(([key])=>!String(details[key]??'').trim()).map(([,label])=>label)];
+  if(missing.length)throw Error('시험 결재 요청 전에 '+missing.join(', ')+' 항목을 입력하고 저장해 주세요.');
+}

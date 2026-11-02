@@ -411,7 +411,7 @@ test('주간 위험 신고 건수는 현장과 현지 날짜로 제한된다',()
 test('주간 활동은 TBM과 교육의 승인 문서별 확인을 분리한다',()=>{
   const s=new Store(':memory:');try{
     const site=s.createSite({name:'가상 현장'}),worker=s.createWorker({siteId:site.id,name:'가상 근로자',category:'직영',company:'가상 회사',occupation:'목공'});
-    for(const type of ['tbm','education']){const d=s.createDocument({siteId:site.id,date:'2024-02-29',type,title:'가상 교육'});s.transition(d.id,'submit');s.transition(d.id,'approve');s.confirmWorkerTraining(worker.id,d.id,'2024-02-29',true);}
+    for(const type of ['tbm','education']){const d=s.createDocument({siteId:site.id,date:'2024-02-29',type,title:'가상 교육',details:{timeFrom:'09:00',timeTo:'10:00',educationPlace:'가상 장소',educationMethod:'가상 방식',instructor:'가상 강사'}});s.transition(d.id,'submit');s.transition(d.id,'approve');s.confirmWorkerTraining(worker.id,d.id,'2024-02-29',true);}
     const day=s.weeklyActivity(site.id,'2024-02-27')[2];assert.deepEqual(day.trainingByType,{tbm:1,education:1});assert.equal(day.trainingChecks,2);assert.deepEqual(s.weeklyActivity(site.id,'2024-03-01')[0].trainingByType,{tbm:0,education:0});
   }finally{s.close();}
 });
@@ -472,7 +472,7 @@ test('당일 종류별 확인 통계는 현장·기간·서명 여부를 문서�
 });
 
 test('교육 통계는 확인된 승인 문서만 현장·기간·근로자·종류별로 집계한다',()=>{
-  const s=new Store(':memory:');try{const a=s.createSite({name:'가상 A'}),b=s.createSite({name:'가상 B'}),worker=s.createWorker({siteId:a.id,name:'가상 근로자',category:'직영',company:'가상 회사',occupation:'목공'}),other=s.createWorker({siteId:b.id,name:'다른 근로자',category:'직영',company:'가상 회사',occupation:'목공'}),add=(siteId,date,kind)=>s.createDocument({siteId,type:'education',title:'가상 교육',date,details:{kind}});for(const [siteId,w,date,kind] of [[a.id,worker,'2026-10-28','regular'],[a.id,worker,'2026-10-29','regular'],[a.id,worker,'2026-10-29','special'],[b.id,other,'2026-10-29','regular']]){const d=add(siteId,date,kind);s.transition(d.id,'submit');s.transition(d.id,'approve');s.confirmWorkerTraining(w.id,d.id,date,true);}add(a.id,'2026-10-29','regular');s.confirmDailyTraining(worker.id,'2026-10-29',['education'],true);s.db.prepare('INSERT INTO join_acknowledgements(worker_id,notice_version,equipment,profile) VALUES(?,?,?,?)').run(worker.id,'demo-v1','[]',JSON.stringify({birthDate:'1990-01-02'}));const rows=s.educationReport(a.id,'2026-10-01','2026-10-31');assert.equal(rows[0].birth_date,'1990-01-02');assert.equal(s.educationReport(b.id,'2026-10-01','2026-10-31')[0].birth_date,null);assert.deepEqual(rows.map(r=>[r.kind,r.count]),[['regular',2],['special',1]]);assert.deepEqual(rows[0].documents.map(d=>d.date).sort(),['2026-10-28','2026-10-29']);assert.equal(s.educationReport(a.id,'2026-10-29','2026-10-29').find(r=>r.kind==='regular').count,1);assert.throws(()=>s.educationReport(a.id,'2026-11-01','2026-10-01'),/시작일/);}finally{s.close();}
+  const s=new Store(':memory:');try{const a=s.createSite({name:'가상 A'}),b=s.createSite({name:'가상 B'}),worker=s.createWorker({siteId:a.id,name:'가상 근로자',category:'직영',company:'가상 회사',occupation:'목공'}),other=s.createWorker({siteId:b.id,name:'다른 근로자',category:'직영',company:'가상 회사',occupation:'목공'}),add=(siteId,date,kind)=>s.createDocument({siteId,type:'education',title:'가상 교육',date,details:{kind,timeFrom:'09:00',timeTo:'10:00',educationPlace:'가상 장소',educationMethod:'가상 방식',instructor:'가상 강사'}});for(const [siteId,w,date,kind] of [[a.id,worker,'2026-10-28','regular'],[a.id,worker,'2026-10-29','regular'],[a.id,worker,'2026-10-29','special'],[b.id,other,'2026-10-29','regular']]){const d=add(siteId,date,kind);s.transition(d.id,'submit');s.transition(d.id,'approve');s.confirmWorkerTraining(w.id,d.id,date,true);}add(a.id,'2026-10-29','regular');s.confirmDailyTraining(worker.id,'2026-10-29',['education'],true);s.db.prepare('INSERT INTO join_acknowledgements(worker_id,notice_version,equipment,profile) VALUES(?,?,?,?)').run(worker.id,'demo-v1','[]',JSON.stringify({birthDate:'1990-01-02'}));const rows=s.educationReport(a.id,'2026-10-01','2026-10-31');assert.equal(rows[0].birth_date,'1990-01-02');assert.equal(s.educationReport(b.id,'2026-10-01','2026-10-31')[0].birth_date,null);assert.deepEqual(rows.map(r=>[r.kind,r.count]),[['regular',2],['special',1]]);assert.deepEqual(rows[0].documents.map(d=>d.date).sort(),['2026-10-28','2026-10-29']);assert.equal(s.educationReport(a.id,'2026-10-29','2026-10-29').find(r=>r.kind==='regular').count,1);assert.throws(()=>s.educationReport(a.id,'2026-11-01','2026-10-01'),/시작일/);}finally{s.close();}
 });
 
 test('체크리스트 첨부가 변경되면 해당 문서의 시험 서명만 삭제한다',()=>{
@@ -1279,7 +1279,7 @@ test('교육 대상은 현장별로 제한되고 결재 요청 후 변경할 수
     const a=s.createSite({name:'가상 A'}),b=s.createSite({name:'가상 B'});
     const add=siteId=>s.createWorker({siteId,name:'가상 근로자',category:'직영',company:'가상 업체',occupation:'목공'});
     const one=add(a.id),two=add(a.id),other=add(b.id);
-    const doc=s.createDocument({siteId:a.id,type:'education',title:'가상 교육',date:'2026-10-28'});
+    const doc=s.createDocument({siteId:a.id,type:'education',title:'가상 교육',date:'2026-10-28',details:{timeFrom:'09:00',timeTo:'10:00',educationPlace:'가상 장소',educationMethod:'가상 방식',instructor:'가상 강사'}});
     assert.equal(s.trainingTargets(doc.id).configured,false);
     s.setTrainingTargets(doc.id,[one.id]);
     assert.throws(()=>s.setTrainingTargets(doc.id,[other.id]),/현장/);
