@@ -652,6 +652,10 @@ const server = http.createServer((req,res)=>passwordRequests.run(true,()=>adminR
     if(workerAccessBlocks){if(req.method==='GET')return json(res,200,store.workerAccessBlocks(workerAccessBlocks[1],url.searchParams.get('month')));if(req.method==='PUT'){const input=await body(req);store.setWorkerAccessBlock(workerAccessBlocks[1],input.date,input.kind,input.blocked,()=>{checkRequestSession(req);const now=new Date(),today=new Date(now.getTime()-now.getTimezoneOffset()*60000).toISOString().slice(0,10);if(input.kind==='ended'&&input.date!==today)throw new Error('작업 종료는 오늘만 설정할 수 있습니다.');},input.expectedBlocked);return json(res,200,{ok:true});}}
     const managerChecks=url.pathname.match(/^\/api\/sites\/(\d+)\/manager-checks$/);
     const managerDayOff=url.pathname.match(/^\/api\/sites\/(\d+)\/manager-checks\/day-off$/);
+    const printSelfChecks=url.pathname.match(/^\/api\/sites\/(\d+)\/print-self-checks$/);
+    if(printSelfChecks&&req.method==='GET')return json(res,200,store.sitePrintSelfChecks(printSelfChecks[1],url.searchParams.get('date'),()=>checkRequestSession(req)));
+    const managerSignature=url.pathname.match(/^\/api\/sites\/(\d+)\/manager-checks\/signature$/);
+    if(managerSignature&&req.method==='GET'){const signature=store.managerSelfCheckSignature(managerSignature[1],url.searchParams.get('date'));checkRequestSession(req);if(!signature)return json(res,404,{error:'시험 서명을 찾을 수 없습니다.'});res.writeHead(200,{'Content-Type':'image/png','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(signature);}
     if(managerDayOff && req.method==='POST'){const now=new Date(),date=new Date(now.getTime()-now.getTimezoneOffset()*60000).toISOString().slice(0,10);store.saveManagerDayOff(managerDayOff[1],date,()=>checkRequestSession(req));return json(res,201,{ok:true});}
     if(managerChecks && req.method==='GET')return json(res,200,store.managerChecks(managerChecks[1]));
     const staffChecks=url.pathname.match(/^\/api\/sites\/(\d+)\/reviewer-manager-checks$/);

@@ -1,4 +1,5 @@
 import { workerPreviewArticles } from './worker-preview.js';
+import { managerCheckQuestions } from './reviewer-manager-check.js';
 
 const joinedOnDay=(value,date)=>{if(typeof value!=='string')return false;const iso=value.replace(' ','T'),time=Date.parse(iso+(/(?:Z|[+-]\d{2}:\d{2})$/.test(iso)?'':'Z'));return Number.isFinite(time)&&new Date(time+9*60*60*1000).toISOString().slice(0,10)===date;};
 
@@ -34,6 +35,7 @@ export async function siteDocumentsForDay(sites,date,api) {
 export async function reloadDailyBatchRows(report,api) {
   const {kind,site,date}=report;
   if(kind==='attendance')return (await api(`/api/attendance?${new URLSearchParams({siteId:String(site.id),date})}`)).filter(row=>row.present);
+  if(kind==='self-check'){const row=report.rows[0];return (await api(`/api/sites/${site.id}/print-self-checks?${new URLSearchParams({date})}`)).filter(item=>item.role===row.role&&item.id===row.id);}
   if(!['ppe-summary','ppe-detail'].includes(kind))throw Error('출력할 보고서 종류를 확인해 주세요.');
   const rows=(await api(`/api/ppe-issues?${new URLSearchParams({siteId:String(site.id),month:date.slice(0,7)})}`)).rows.filter(row=>row.date===date);
   if(kind==='ppe-detail')return rows;
@@ -44,10 +46,11 @@ export async function reloadDailyBatchRows(report,api) {
 export async function siteReportsForDay(sites,date,api) {
   if(!Array.isArray(sites)||!sites.length||!/^\d{4}-\d{2}-\d{2}$/.test(date))throw Error('현장과 날짜를 선택해 주세요.');
   const result=await Promise.all(sites.map(async site=>{
-    const [ppe,attendance,joined]=await Promise.all([api(`/api/ppe-issues?${new URLSearchParams({siteId:String(site.id),month:date.slice(0,7)})}`),api(`/api/attendance?${new URLSearchParams({siteId:String(site.id),date})}`),api(`/api/workers/joined-on?${new URLSearchParams({siteId:String(site.id),date})}`)]);
+    const [ppe,attendance,joined,checks]=await Promise.all([api(`/api/ppe-issues?${new URLSearchParams({siteId:String(site.id),month:date.slice(0,7)})}`),api(`/api/attendance?${new URLSearchParams({siteId:String(site.id),date})}`),api(`/api/workers/joined-on?${new URLSearchParams({siteId:String(site.id),date})}`),api(`/api/sites/${site.id}/print-self-checks?${new URLSearchParams({date})}`)]);
     const rows=ppe.rows.filter(row=>row.date===date),totals=new Map();
     for(const row of rows)totals.set(row.item,(totals.get(row.item)||0)+row.quantity);
-    return [{kind:'ppe-summary',title:'보호구 당일 요약',rows:[...totals].map(([item,quantity])=>({item,quantity}))},{kind:'ppe-detail',title:'보호구 당일 상세',rows},{kind:'attendance',title:'출역일보',rows:attendance.filter(row=>row.present)},...joined.filter(worker=>worker.site_id===site.id&&joinedOnDay(worker.joined_at,date)).map(worker=>({kind:'joined-worker',title:`신규 가입 서류 · ${worker.name}`,worker}))].map(report=>({...report,site,date}));
+    const labels={manager:'관리자',reviewer:'직원',worker:'출입자'};
+    return [{kind:'ppe-summary',title:'보호구 당일 요약',rows:[...totals].map(([item,quantity])=>({item,quantity}))},{kind:'ppe-detail',title:'보호구 당일 상세',rows},{kind:'attendance',title:'출역일보',rows:attendance.filter(row=>row.present)},...joined.filter(worker=>worker.site_id===site.id&&joinedOnDay(worker.joined_at,date)).map(worker=>({kind:'joined-worker',title:`신규 가입 서류 · ${worker.name}`,worker})),...checks.map(row=>({kind:'self-check',title:`${labels[row.role]||'구분 미기록'} 자가점검 · ${row.name}`,rows:[row]}))].map(report=>({...report,site,date}));
   }));
   return result.flat().map((report,index)=>({...report,id:index+1}));
 }
@@ -61,6 +64,12 @@ export function dailyBatchReport(report,esc) {
   else if(report.kind==='attendance'){
     const recorded=report.rows.filter(row=>row.units_hundredths!=null);
     body=`<p>출역 ${report.rows.length}명 · 기록된 공수 ${recorded.length?(recorded.reduce((sum,row)=>sum+row.units_hundredths,0)/100).toFixed(2):'미기록'} · 공수 미기록 ${report.rows.length-recorded.length}명</p><p>이름은 현재 정보이며 구분·소속·직종은 출역 당시 기록입니다.</p>`+table(['이름','구분','소속','직종','공수'],report.rows.map(row=>[row.name,row.attendance_category??'기록 없음',row.attendance_company??'기록 없음',row.attendance_occupation??'기록 없음',row.units_hundredths==null?'미기록':(row.units_hundredths/100).toFixed(2)]));
+  }else if(report.kind==='self-check'){
+    const row=report.rows[0],workerQuestions={equipment:'안전장구 확인',sober:'음주하지 않음',exercise:'안전체조 확인',briefing:'주의사항 안내 확인'};
+    if(!row||!['manager','reviewer','worker'].includes(row.role))throw Error('자가점검 기록을 다시 확인해 주세요.');
+    const answers=row.role==='worker'?row.answers?Object.entries(workerQuestions).map(([key,label])=>`<li>${esc(label)}: ${row.answers[key]===true?'확인':row.answers[key]===false?'미확인':'미기록'}</li>`).join(''):'':Array.isArray(row.answers)?managerCheckQuestions.map((question,i)=>`<li>${esc(question)} ${esc(row.answers[i]?.answer||'미기록')}${row.answers[i]?.note?' · '+esc(row.answers[i].note):''}</li>`).join(''):'';
+    const path=row.role==='manager'?`/api/sites/${report.site.id}/manager-checks/signature`:row.role==='reviewer'?`/api/sites/${report.site.id}/reviewer-manager-checks/${row.id}/signature`:`/api/sites/${report.site.id}/self-checks/${row.id}/signature`;
+    body=`<p>${esc(row.name)} · ${row.role==='manager'?'관리자 계정 미기록':row.role==='reviewer'?'직원':esc(row.category||'구분 미기록')+' · '+esc(row.company||'소속 미기록')}</p><p>기록 시각: ${esc(row.created_at||'미기록')} (UTC)${row.role==='worker'?' · 구분과 소속은 현재 정보입니다.':''}</p>`+(answers?`<ul>${answers}</ul>`:'<p>답변 미기록</p>')+(row.has_signature?`<p>시험 서명</p><img class="signature-pad" src="${esc(path+'?'+new URLSearchParams({date:report.date,...(row.role==='worker'?{preview:'1'}:{})}))}" alt="시험 자가점검 서명">`:'<p>시험 서명 없음</p>');
   }else throw Error('출력할 보고서 종류를 확인해 주세요.');
   return `<h2>가상 ${esc(report.title)}</h2><p>현장: ${esc(report.site.name)} · 조회일: ${esc(report.date)}</p><p>조회 당시의 시험 자료이며 실제 출역·지급·수령을 증명하지 않습니다.</p>${body}`;
 }

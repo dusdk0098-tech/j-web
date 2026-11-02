@@ -351,6 +351,19 @@ export class Store {
   managerChecks(siteId) {
     return this.db.prepare("SELECT date,answers,created_at,'check' AS kind FROM manager_self_checks WHERE site_id=? UNION ALL SELECT date,NULL AS answers,created_at,'day_off' AS kind FROM manager_days_off WHERE site_id=? ORDER BY date DESC LIMIT 30").all(Number(siteId),Number(siteId));
   }
+  sitePrintSelfChecks(siteId,date,onAuthorize=()=>{}){
+    date=dateValue(date);siteId=Number(siteId);
+    this.db.exec('BEGIN');try{
+      onAuthorize();if(!this.db.prepare('SELECT 1 FROM sites WHERE id=?').get(siteId))throw new Error('현장을 선택해 주세요.');
+      const manager=this.db.prepare('SELECT answers,created_at,signature IS NOT NULL AS has_signature FROM manager_self_checks WHERE site_id=? AND date=?').get(siteId,date);
+      const staff=this.db.prepare("SELECT r.id,r.name,c.answers,c.created_at,c.signature IS NOT NULL AS has_signature FROM reviewer_manager_checks c JOIN reviewers r ON r.id=c.reviewer_id WHERE c.site_id=? AND c.date=? AND c.kind='check' ORDER BY r.name,r.id").all(siteId,date);
+      const workers=this.db.prepare('SELECT w.id,w.name,w.category,w.company,c.answers,c.created_at,c.signature IS NOT NULL AS has_signature FROM worker_self_checks c JOIN workers w ON w.id=c.worker_id WHERE w.site_id=? AND c.date=? ORDER BY w.name,w.id').all(siteId,date);
+      const parse=row=>({...row,answers:row.answers?JSON.parse(row.answers):null});
+      const rows=[...(manager?[{role:'manager',id:0,name:'현장 관리자',...parse(manager)}]:[]),...staff.map(row=>({role:'reviewer',...parse(row)})),...workers.map(row=>({role:'worker',...parse(row)}))];
+      onAuthorize();this.db.exec('COMMIT');return rows;
+    }catch(error){this.db.exec('ROLLBACK');throw error;}
+  }
+  managerSelfCheckSignature(siteId,date){return this.db.prepare('SELECT signature FROM manager_self_checks WHERE site_id=? AND date=?').get(Number(siteId),dateValue(date))?.signature||null;}
   saveManagerCheck(siteId,date,answers,signature,onAuthorize=()=>{}) {
     date=dateValue(date);
     if(!this.db.prepare('SELECT 1 FROM sites WHERE id=?').get(Number(siteId)))throw new Error('현장을 선택해 주세요.');
