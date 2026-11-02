@@ -23,5 +23,11 @@ test('커뮤니티 상단 안내 HTTP는 공개 범위와 관리자 권한을 �
     const promoted=await (await send(`/api/board-posts/${own.id}`,'PUT',{...basePost,shared:true,highlighted:true,expectedVersion:own.version},admin)).json();assert.equal(promoted.highlighted,1);
     const edited=await (await send(`/api/reviewer/board-posts/${own.id}`,'PUT',{...basePost,title:'가상 수정',version:promoted.version,highlighted:false},author)).json();assert.equal(edited.highlighted,1);
     const hidden=await send(`/api/board-posts/${publicPin.id}`,'PUT',{...basePost,shared:false,expectedVersion:publicPin.version},admin);assert.equal(hidden.status,200);assert.deepEqual((await (await send(path,'GET',undefined,reader)).json()).map(row=>row.id),[own.id]);
+    const added=[];
+    for(const kind of ['community_resources','community_market']){const response=await send('/api/reviewer/board-posts','POST',{...basePost,kind},author);assert.equal(response.status,201);const post=await response.json();added.push(post);const rows=await (await send('/api/reviewer/board-posts?'+new URLSearchParams({kind}),'GET',undefined,reader)).json();assert.ok(rows.some(row=>row.id===post.id));assert.equal((await send(`/api/reviewer/board-posts/${post.id}`,'DELETE',{kind,version:post.version},reader)).status,400);}
+    assert.equal((await send('/api/reviewer/board-posts','POST',{...basePost,kind:'community_event'},author)).status,400);
+    const eventResponse=await send('/api/board-posts','POST',{...basePost,kind:'community_event',shared:true,highlighted:true},admin);assert.equal(eventResponse.status,201);const event=await eventResponse.json();
+    const all=await (await send('/api/reviewer/board-posts?kind=community_all','GET',undefined,reader)).json();for(const post of [...added,event])assert.ok(all.some(row=>row.id===post.id));
+    assert.deepEqual((await (await send(path,'GET',undefined,reader)).json()).map(row=>row.id),[event.id,own.id]);
   }finally{if(child.exitCode===null){const exited=once(child,'exit');child.kill();await exited;}rmSync(dir,{recursive:true,force:true});}
 });

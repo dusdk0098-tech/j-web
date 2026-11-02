@@ -16,3 +16,10 @@ test('이전 게시글 이관과 서식 저장·검색·수정은 본문과 권�
     store.close();store=new Store(path);assert.deepEqual(store.boardPosts(base.kind)[0].rich_body,post.rich_body);
   }finally{store.close();rmSync(dir,{recursive:true,force:true});}
 });
+
+test('새 커뮤니티 분류와 공개 상태는 데이터베이스 재시작 후에도 유지된다',()=>{
+  const dir=mkdtempSync(join(tmpdir(),'jweb-community-restart-')),path=join(dir,'data.sqlite');let store=new Store(path);try{
+    const site=store.createSite({name:'가상'}),actor=store.createReviewer({siteId:site.id,loginId:'new_board_author',name:'가상 작성자',password:'virtual-password-123'}),base={title:'가상 글',body:'본문',secret:false},event=store.saveBoardPost({...base,kind:'community_event',shared:true,highlighted:true}),resource=store.saveReviewerBoardPost(actor,{...base,kind:'community_resources'}),market=store.saveReviewerBoardPost(actor,{...base,kind:'community_market'});
+    store.close();store=new Store(path);assert.deepEqual(store.reviewerBoardPosts(actor,'community_all').map(row=>row.id),[market.id,resource.id,event.id]);assert.deepEqual(store.boardPosts('community_all','없는 검색').map(row=>row.id),[event.id]);assert.equal(store.boardPosts('community_event')[0].highlighted,1);
+  }finally{store.close();rmSync(dir,{recursive:true,force:true});}
+});

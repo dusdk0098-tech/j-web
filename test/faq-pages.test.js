@@ -57,6 +57,16 @@ for(const role of ['admin','staff'])test(`${role} 커뮤니티: 페이지를 바
   h.setPage(1);await h.load();const pending=h.surface.querySelectorAll(selector)[0].onclick();assert.equal(deletes,1);h.setPage(2);await h.load();const before=h.surface.innerHTML;resolveDelete();await pending;
   assert.equal(h.page(),2);assert.equal(h.surface.innerHTML,before);assert.equal(h.renders,0);assert.equal(h.context.status.textContent,'');
 });
+
+test('새 커뮤니티 분류는 관리자·직원 목록과 작성 권한에 연결된다',async()=>{
+  const rows=[['community_event','이벤트'],['community_resources','자료실'],['community_market','직거래장터']].map(([kind,label],i)=>({id:i+1,kind,title:`가상 ${label}`,body:'내용',author_id:77,version:'v'}));
+  const admin=harness('admin');admin.context.state.boardKind='community_all';admin.setRows(rows);await admin.load();for(const row of rows)assert.match(admin.surface.innerHTML,new RegExp(`value="${row.kind}"`));
+  const staff=harness('staff');staff.context.kind.value='community_all';staff.setRows(rows);await staff.load();for(const row of rows)assert.match(staff.surface.innerHTML,new RegExp(row.title));assert.match(staff.surface.innerHTML,/이벤트 · 가상 이벤트/);assert.match(staff.surface.innerHTML,/자료실 · 가상 자료실/);assert.match(staff.surface.innerHTML,/직거래장터 · 가상 직거래장터/);
+  for(const row of rows){staff.context.kind.value=row.kind;staff.setRows([row]);await staff.load();assert.equal(staff.surface.innerHTML.includes('data-edit='),row.kind!=='community_event');}
+  const source=readFileSync(new URL('../public/board-view.js',import.meta.url),'utf8'),optionStart=source.indexOf('  kind.insertAdjacentHTML('),optionEnd=source.indexOf('\n',optionStart),choice={insertAdjacentHTML(_where,html){this.html=html;}};assert.ok(optionStart>=0);runInNewContext(source.slice(optionStart,optionEnd),{kind:choice});for(const row of rows)assert.match(choice.html,new RegExp(`value="${row.kind}"`));
+  const syncStart=source.indexOf('sync=()=>{categoryLabel.hidden='),syncEnd=source.indexOf('};\n  const load=',syncStart);assert.ok(syncStart>=0&&syncEnd>syncStart);
+  for(const row of rows){const context={kind:{value:row.kind},categoryLabel:{},secretLabel:{},form:{elements:{secret:{}}},canWriteNotice:false};runInNewContext(`let ${source.slice(syncStart,syncEnd+1)};sync();`,context);assert.equal(context.form.hidden,row.kind==='community_event');}
+});
 for(const role of ['admin','staff'])test(`${role} FAQ 가상 UI: 역순 응답·분류·현장 또는 화면 이탈 후 무효화`,async()=>{
   const h=harness(role);await h.load();const original=h.options[0];let resolves=[];h.context.api=()=>new Promise(resolve=>resolves.push(resolve));
   const older=h.load();if(role==='admin'){h.context.detailEpoch++;h.context.renderEpoch++;}const newer=h.load();resolves[1]([generated[22]]);await newer;resolves[0]([generated[0]]);await older;assert.match(h.surface.innerHTML,/가상 23/);assert.doesNotMatch(h.surface.innerHTML,/가상 1<\/h3>/);assert.equal(original.active(),false);

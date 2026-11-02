@@ -35,3 +35,15 @@ test('커뮤니티의 상단 안내는 분류·공개 권한을 지키며 검색
     assert.throws(()=>store.saveBoardPost({...base,kind:'general',highlighted:true}),/상단/);
   }finally{store.close();}
 });
+
+test('새 커뮤니티 분류는 전체 목록·검색·상단 표시와 작성 권한을 지킨다',()=>{
+  const store=new Store(':memory:');try{
+    const site=store.createSite({name:'가상 현장'}),make=id=>store.createReviewer({siteId:site.id,loginId:id,name:id,password:'virtual-password-123'}),author=make('extra_author'),reader=make('extra_reader'),base={title:'가상 제목',body:'가상 내용',secret:false};
+    const event=store.saveBoardPost({...base,kind:'community_event',shared:true,highlighted:true}),resource=store.saveReviewerBoardPost(author,{...base,kind:'community_resources'}),market=store.saveReviewerBoardPost(author,{...base,kind:'community_market'}),hidden=store.saveBoardPost({...base,kind:'community_market',shared:false,highlighted:true});
+    assert.deepEqual(store.boardPosts('community_all').map(row=>row.id),[hidden.id,market.id,resource.id,event.id]);assert.deepEqual(store.reviewerBoardPosts(reader,'community_all').map(row=>row.id),[market.id,resource.id,event.id]);
+    assert.deepEqual(store.boardPosts('community_all','없는 검색').map(row=>row.id),[hidden.id,event.id]);assert.deepEqual(store.reviewerBoardPosts(reader,'community_all','없는 검색').map(row=>row.id),[event.id]);
+    assert.deepEqual(store.reviewerBoardPosts(reader,'community_resources').map(row=>row.id),[resource.id]);assert.deepEqual(store.reviewerBoardPosts(reader,'community_market').map(row=>row.id),[market.id]);
+    assert.throws(()=>store.saveReviewerBoardPost(author,{...base,kind:'community_event'}),/게시판/);assert.throws(()=>store.deleteReviewerBoardPost(reader,'community_market',market.id,market.version),/게시글/);
+    const updated=store.saveReviewerBoardPost(author,{...base,kind:'community_resources',title:'수정',version:resource.version},resource.id);assert.equal(updated.title,'수정');store.deleteReviewerBoardPost(author,'community_resources',resource.id,updated.version);assert.deepEqual(store.reviewerBoardPosts(reader,'community_resources'),[]);
+  }finally{store.close();}
+});

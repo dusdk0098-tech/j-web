@@ -23,9 +23,10 @@ function validateBoardFile(name,data){
   if(typeof name!=='string'||!name.trim()||name.length>200||/[\\/\x00-\x1f\x7f]/.test(name))throw Error('파일 이름을 확인해 주세요.');
   if(!(data instanceof Uint8Array)||!data.length||data.length>2*1024*1024)throw Error('파일은 1바이트 이상 2MB 이하여야 합니다.');
 }
-const communityKinds=['community_notice','community_info','community_question','community_general'];
+const communityKinds=['community_notice','community_event','community_info','community_resources','community_question','community_general','community_market'];
+const communitySlots=communityKinds.map(()=>'?').join(',');
 const boardKinds=['notice','system_notice','faq','question','general',...communityKinds];
-const reviewerBoardKinds=['notice','question','general','community_info','community_question','community_general'];
+const reviewerBoardKinds=['notice','question','general','community_info','community_resources','community_question','community_general','community_market'];
 const workerDocumentPermission={risk:'risk',work_plan:'work_plan',tbm:'training',education:'training'};
 const workerVersion=worker=>createHash('sha256').update(JSON.stringify([worker.id,worker.site_id,worker.name,worker.category,worker.company,worker.occupation,worker.created_date,worker.memo,worker.registration_type,worker.licenses_json])).digest('hex');
 const workerRow=({licenses_json,...row})=>({...row,licenses:JSON.parse(licenses_json),version:workerVersion({...row,licenses_json})});
@@ -396,7 +397,7 @@ export class Store {
   boardPosts(kind,query='',category=''){
     if(!['','서비스이용','결제'].includes(category)||(category&&kind!=='faq'))throw Error('FAQ 분류를 확인해 주세요.');
     if(![...boardKinds,'community_all'].includes(kind)||typeof query!=='string'||query.length>200)throw new Error('게시판 또는 검색어를 확인해 주세요.');
-    return this.db.prepare("SELECT * FROM board_posts WHERE (kind=? OR (?='community_all' AND kind IN ('community_notice','community_info','community_question','community_general'))) AND (instr(title,?)>0 OR instr(body,?)>0 OR (highlighted=1 AND kind IN ('community_notice','community_info','community_question','community_general'))) AND (?='' OR category=?) ORDER BY id DESC").all(kind,kind,query,query,category,category).map(boardPostRow);
+    return this.db.prepare(`SELECT * FROM board_posts WHERE (kind=? OR (?='community_all' AND kind IN (${communitySlots}))) AND (instr(title,?)>0 OR instr(body,?)>0 OR (highlighted=1 AND kind IN (${communitySlots}))) AND (?='' OR category=?) ORDER BY id DESC`).all(kind,kind,...communityKinds,query,query,...communityKinds,category,category).map(boardPostRow);
   }
   validateBoardImages(id,rich){
     for(const image of boardImages(rich)){
@@ -437,7 +438,7 @@ export class Store {
   reviewerBoardPosts(actor,kind,query='',category=''){
     if(!['','서비스이용','결제'].includes(category)||(category&&kind!=='faq'))throw Error('FAQ 분류를 확인해 주세요.');
     if(![...boardKinds,'community_all'].includes(kind)||typeof query!=='string'||query.length>200)throw new Error('게시판 또는 검색어를 확인해 주세요.');
-    return this.db.prepare("SELECT id,kind,title,body,rich_body,secret,created_at,author_id,author_name,version,category,highlighted FROM board_posts WHERE (kind=? OR (?='community_all' AND kind IN ('community_notice','community_info','community_question','community_general'))) AND (author_id=? OR (shared=1 AND secret=0)) AND (instr(title,?)>0 OR instr(body,?)>0 OR (highlighted=1 AND kind IN ('community_notice','community_info','community_question','community_general'))) AND (?='' OR category=?) ORDER BY id DESC").all(kind,kind,Number(actor.id),query,query,category,category).map(boardPostRow);
+    return this.db.prepare(`SELECT id,kind,title,body,rich_body,secret,created_at,author_id,author_name,version,category,highlighted FROM board_posts WHERE (kind=? OR (?='community_all' AND kind IN (${communitySlots}))) AND (author_id=? OR (shared=1 AND secret=0)) AND (instr(title,?)>0 OR instr(body,?)>0 OR (highlighted=1 AND kind IN (${communitySlots}))) AND (?='' OR category=?) ORDER BY id DESC`).all(kind,kind,...communityKinds,Number(actor.id),query,query,...communityKinds,category,category).map(boardPostRow);
   }
   boardCommentsPost(id,version,actor=null){
     const post=this.db.prepare('SELECT * FROM board_posts WHERE id=?').get(Number(id));
