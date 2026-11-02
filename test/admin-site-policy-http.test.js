@@ -56,6 +56,7 @@ test('현장 관리자 HTTP 경계: 위조·미분류·관계 검증·지연 본
   for(const actor of [undefined,cookie,global]){
    const planScript=await send('/plan-detail.js','GET',null,actor);assert.equal(planScript.status,200);assert.match(planScript.headers.get('content-type'),/javascript/);assert.equal(await planScript.text(),readFileSync('public/plan-detail.js','utf8'));
    const script=await send('/risk-detail.js','GET',null,actor);assert.equal(script.status,200);assert.match(script.headers.get('content-type'),/javascript/);const body=await script.text();assert.match(body,/export function riskDetailMarkup/);assert.match(body,/export function muscleDetailMarkup/);
+   const mode=await send('/risk-activity-mode.js','GET',null,actor);assert.equal(mode.status,200);assert.match(mode.headers.get('content-type'),/javascript/);assert.equal(await mode.text(),readFileSync('public/risk-activity-mode.js','utf8'));
    const dependency=await send('/risk-scale.js','GET',null,actor);assert.equal(dependency.status,200);assert.match(dependency.headers.get('content-type'),/javascript/);
   }
   assert.equal((await send('/api/documents','POST',{...input,siteId:b.id},cookie)).status,403);
