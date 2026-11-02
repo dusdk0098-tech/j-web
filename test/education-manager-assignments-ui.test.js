@@ -12,7 +12,7 @@ test('직원 지정 현황은 이수와 구분하고 현장 변경 후에는 화
   runInNewContext(source.slice(start,end)+';globalThis.showAssignments=renderManagerEducationAssignments;',context);
   let pending=context.showAssignments(1,'2026-11-01','2026-11-30','2026-11','');
   state.siteId=2;resolve([{id:1,name:'가상 직원',document_id:7,title:'가상 교육',date:'2026-11-01',kind:'supervisor',active:1}]);await pending;assert.equal(section,undefined);
-  state.siteId=1;pending=context.showAssignments(1,'2026-11-01','2026-11-30','2026-11','');resolve([{id:1,name:'가상 직원',document_id:7,title:'가상 교육',date:'2026-11-01',kind:'supervisor',active:1}]);await pending;
-  assert.match(section.innerHTML,/지정은 참가 확인이나 교육 이수를 의미하지 않습니다/);assert.match(section.innerHTML,/가상 교육/);
+  state.siteId=1;pending=context.showAssignments(1,'2026-11-01','2026-11-30','2026-11','');resolve([{id:1,name:'가상 직원',document_id:7,title:'가상 교육',date:'2026-11-01',kind:'supervisor',active:1,confirmed_at:'2026-11-01'},{id:1,name:'가상 직원',document_id:8,title:'미확인 교육',date:'2026-11-02',kind:'supervisor',active:1,confirmed_at:null}]);await pending;
+  assert.match(section.innerHTML,/시험 확인은 실제 교육 이수를 증명하지 않습니다/);assert.match(section.innerHTML,/가상 교육/);assert.match(section.innerHTML,/1건/);assert.match(section.innerHTML,/확인 완료/);assert.match(section.innerHTML,/미확인/);
   state.siteId=2;button.onclick();assert.equal(state.detail,undefined);state.siteId=1;button.onclick();assert.equal(state.detail,7);
 });

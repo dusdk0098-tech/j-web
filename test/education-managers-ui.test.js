@@ -36,3 +36,11 @@ test('직원 교육 목록·상세의 늦은 응답은 로그아웃·계정 전�
     else{await mounting;const opening=button.onclick();active=false;target.isConnected=false;resolve({document:{id:5,title:'늦은 비공개 내용',details:'{}'},attachments:[]});await opening;assert.equal(elements.get('[data-detail]').innerHTML,'');}
   }
 });
+
+test('직원 교육 시험 서명은 오류 뒤 남고 중복 제출을 막는다',async()=>{
+  const elements=new Map(),node=()=>({innerHTML:'',textContent:'',isConnected:true,disabled:false,querySelector:selector=>{if(!elements.has(selector))elements.set(selector,node());return elements.get(selector);},querySelectorAll:selector=>selector==='[data-open]'?[open]:[]}),open={dataset:{open:'5'}},target=node(),requests=[];let finish;
+  const api=async(path,options)=>{if(path==='/api/reviewer/education')return [{id:5,title:'가상 교육',date:'2026-11-01'}];if(!options)return {document:{id:5,title:'가상 교육',details:'{}',edit_version:7},attachments:[]};requests.push(JSON.parse(options.body));return new Promise((resolve,reject)=>finish={resolve,reject});};
+  await mountReviewerEducation({target,api,pad:()=>()=> '가상 서명',active:()=>true});await open.onclick();const confirm=elements.get('[data-confirm]'),feedback=elements.get('[data-confirm-status]');
+  let saving=confirm.onclick();await confirm.onclick();assert.equal(requests.length,1);assert.deepEqual(requests[0],{expectedEditVersion:7,signature:'가상 서명'});finish.reject(Error('가상 오류'));await saving;assert.equal(feedback.textContent,'가상 오류');assert.equal(confirm.disabled,false);
+  saving=confirm.onclick();finish.resolve({ok:true});await saving;assert.equal(confirm.disabled,true);assert.match(feedback.textContent,/저장/);
+});

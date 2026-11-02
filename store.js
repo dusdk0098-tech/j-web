@@ -194,6 +194,7 @@ export class Store {
       CREATE TABLE IF NOT EXISTS manager_days_off (site_id INTEGER NOT NULL REFERENCES sites(id),date TEXT NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(site_id,date));
       CREATE TABLE IF NOT EXISTS reviewer_manager_checks (reviewer_id INTEGER NOT NULL REFERENCES reviewers(id),site_id INTEGER NOT NULL REFERENCES sites(id),date TEXT NOT NULL,kind TEXT NOT NULL CHECK(kind IN ('check','day_off')),answers TEXT,signature BLOB,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(reviewer_id,site_id,date),CHECK((kind='check' AND answers IS NOT NULL AND json_valid(answers) AND signature IS NOT NULL) OR (kind='day_off' AND answers IS NULL AND signature IS NULL)));
       CREATE TABLE IF NOT EXISTS worker_training_checks (worker_id INTEGER NOT NULL REFERENCES workers(id),document_id INTEGER NOT NULL REFERENCES documents(id),created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(worker_id,document_id));
+      CREATE TABLE IF NOT EXISTS reviewer_education_checks (reviewer_id INTEGER NOT NULL REFERENCES reviewers(id),document_id INTEGER NOT NULL REFERENCES documents(id),edit_version INTEGER NOT NULL,signature BLOB NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(reviewer_id,document_id));
       CREATE TABLE IF NOT EXISTS worker_daily_training (worker_id INTEGER NOT NULL REFERENCES workers(id),date TEXT NOT NULL,kind TEXT NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(worker_id,date,kind));
       CREATE TABLE IF NOT EXISTS training_target_config (document_id INTEGER PRIMARY KEY REFERENCES documents(id));
       CREATE TABLE IF NOT EXISTS training_targets (document_id INTEGER NOT NULL REFERENCES documents(id),worker_id INTEGER NOT NULL REFERENCES workers(id),PRIMARY KEY(document_id,worker_id));
@@ -1288,7 +1289,7 @@ export class Store {
   }
   managerEducationAssignments(siteId,from,to){
     from=dateValue(from);to=dateValue(to);if(from>to)throw new Error('조회 시작일은 종료일보다 늦을 수 없습니다.');
-    return this.db.prepare("SELECT r.id,r.name,r.active,d.id AS document_id,d.title,d.date,d.details FROM training_manager_targets t JOIN reviewers r ON r.id=t.reviewer_id JOIN documents d ON d.id=t.document_id AND d.site_id=r.site_id WHERE d.site_id=? AND d.date BETWEEN ? AND ? AND d.type='education' AND d.status='approved' ORDER BY r.name,r.id,d.date,d.id").all(Number(siteId),from,to).filter(row=>hasManagerEducationTargets({type:'education',details:row.details})).map(({details,...row})=>({...row,kind:JSON.parse(details||'{}').kind||''}));
+    return this.db.prepare("SELECT r.id,r.name,r.active,d.id AS document_id,d.title,d.date,d.details,c.created_at AS confirmed_at FROM training_manager_targets t JOIN reviewers r ON r.id=t.reviewer_id JOIN documents d ON d.id=t.document_id AND d.site_id=r.site_id LEFT JOIN reviewer_education_checks c ON c.reviewer_id=r.id AND c.document_id=d.id AND c.edit_version=d.edit_version WHERE d.site_id=? AND d.date BETWEEN ? AND ? AND d.type='education' AND d.status='approved' ORDER BY r.name,r.id,d.date,d.id").all(Number(siteId),from,to).filter(row=>hasManagerEducationTargets({type:'education',details:row.details})).map(({details,...row})=>({...row,kind:JSON.parse(details||'{}').kind||''}));
   }
   trainingTargets(documentId) {
     const doc=this.document(documentId);
@@ -1334,7 +1335,7 @@ export class Store {
     }catch(error){this.db.exec('ROLLBACK');throw error;}
   }
   reviewerEducation(reviewerId,documentId) {
-    const rows=this.db.prepare("SELECT d.id,d.title,d.date,d.body,d.details FROM reviewers r JOIN training_manager_targets t ON t.reviewer_id=r.id JOIN documents d ON d.id=t.document_id AND d.site_id=r.site_id WHERE r.id=? AND r.active=1 AND d.type='education' AND d.status='approved' ORDER BY d.date DESC,d.id DESC").all(Number(reviewerId)).filter(row=>hasManagerEducationTargets({...row,type:'education'}));
+    const rows=this.db.prepare("SELECT d.id,d.title,d.date,d.body,d.details,d.edit_version,c.created_at AS confirmed_at FROM reviewers r JOIN training_manager_targets t ON t.reviewer_id=r.id JOIN documents d ON d.id=t.document_id AND d.site_id=r.site_id LEFT JOIN reviewer_education_checks c ON c.reviewer_id=r.id AND c.document_id=d.id AND c.edit_version=d.edit_version WHERE r.id=? AND r.active=1 AND d.type='education' AND d.status='approved' ORDER BY d.date DESC,d.id DESC").all(Number(reviewerId)).filter(row=>hasManagerEducationTargets({...row,type:'education'}));
     if(documentId===undefined)return rows.map(({id,title,date})=>({id,title,date}));
     const doc=rows.find(row=>row.id===Number(documentId));
     return doc?{document:doc,attachments:this.attachments(doc.id).map(({id,name,size,category})=>({id,name,size,category}))}:null;
@@ -1342,6 +1343,9 @@ export class Store {
   reviewerEducationAttachment(reviewerId,documentId,fileId) {
     const view=this.reviewerEducation(reviewerId,documentId);
     return view?.attachments.some(file=>file.id===Number(fileId))?this.attachment(fileId):null;
+  }
+  confirmReviewerEducation(reviewerId,documentId,version,signature,onAuthorize=()=>{}) {
+    this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();const view=this.reviewerEducation(reviewerId,documentId);if(!view)throw new Error('지정된 승인 교육을 확인해 주세요.');if(!Number.isSafeInteger(version)||view.document.edit_version!==version)throw Object.assign(new Error('교육 문서가 변경되었습니다. 서명을 보존하고 다시 확인해 주세요.'),{sessionStatus:409});const bytes=signatureBytes(signature);this.db.prepare('INSERT INTO reviewer_education_checks(reviewer_id,document_id,edit_version,signature) VALUES(?,?,?,?) ON CONFLICT(reviewer_id,document_id) DO UPDATE SET edit_version=excluded.edit_version,signature=excluded.signature,created_at=CURRENT_TIMESTAMP WHERE reviewer_education_checks.edit_version<>excluded.edit_version').run(Number(reviewerId),Number(documentId),version,bytes);this.db.exec('COMMIT');}catch(error){this.db.exec('ROLLBACK');throw error;}
   }
   workerSelfCheck(workerId,date) {
     return this.db.prepare('SELECT date,created_at,signature IS NOT NULL AS has_signature FROM worker_self_checks WHERE worker_id=? AND date=?').get(Number(workerId),dateValue(date)) || null;

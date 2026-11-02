@@ -1,8 +1,8 @@
 import {educationKinds} from './education-kinds.js';
 const esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
-export async function mountReviewerEducation({target,api,active}){
-  target.innerHTML='<h2>관리자 교육 자료</h2><p>J웹의 독립 조회 기능입니다. 본인이 지정된 승인 교육만 표시합니다. 자료 열람은 참가 확인이나 서명을 생성하지 않습니다.</p><button type="button" data-reload>다시 조회</button><p data-status role="status"></p><div data-list></div><section data-detail></section>';
+export async function mountReviewerEducation({target,api,active,pad}){
+  target.innerHTML='<h2>관리자 교육 자료</h2><p>본인이 지정된 승인 교육만 표시합니다. 시험 확인은 실제 교육 이수나 본인 확인을 증명하지 않습니다.</p><button type="button" data-reload>다시 조회</button><p data-status role="status"></p><div data-list></div><section data-detail></section>';
   const list=target.querySelector('[data-list]'),detail=target.querySelector('[data-detail]'),status=target.querySelector('[data-status]');
   let epoch=0;
   const live=()=>active()&&target.isConnected;
@@ -17,8 +17,9 @@ export async function mountReviewerEducation({target,api,active}){
           const id=Number(button.dataset.open),data=await api(`/api/reviewer/education/${id}`);if(!live()||request!==epoch)return;
           const doc=data.document,fields=JSON.parse(doc.details||'{}');
           if(doc.id!==id)throw Error('교육 자료를 다시 확인해 주세요.');
-          detail.innerHTML=`<h3>${esc(doc.title)}</h3><p>${esc(doc.date)} · ${esc(educationKinds[fields.kind]||'교육')}</p><p>${esc(fields.timeFrom)} ~ ${esc(fields.timeTo)} · ${esc(fields.educationPlace)} · ${esc(fields.instructor)}</p><div class="detail-body">${esc(doc.body)}</div>${data.attachments.map(file=>`<p><a href="/api/reviewer/education/${id}/attachments/${file.id}">${esc(file.name)}</a></p>`).join('')}`;
+          detail.innerHTML=`<h3>${esc(doc.title)}</h3><p>${esc(doc.date)} · ${esc(educationKinds[fields.kind]||'교육')}</p><p>${esc(fields.timeFrom)} ~ ${esc(fields.timeTo)} · ${esc(fields.educationPlace)} · ${esc(fields.instructor)}</p><div class="detail-body">${esc(doc.body)}</div>${data.attachments.map(file=>`<p><a href="/api/reviewer/education/${id}/attachments/${file.id}">${esc(file.name)}</a></p>`).join('')}${doc.confirmed_at?'<p>시험 참가 확인 완료</p>':'<canvas data-signature width="320" height="120" class="signature-pad" aria-label="시험 서명 입력 영역"></canvas><button type="button" data-clear>서명 지우기</button> <button type="button" data-confirm>시험 참가 확인</button><p data-confirm-status role="status"></p>'}`;
           detail.querySelectorAll('a').forEach(link=>link.onclick=event=>{if(!live()||request!==epoch)event.preventDefault();});status.textContent='';
+          if(!doc.confirmed_at){const confirm=detail.querySelector('[data-confirm]'),feedback=detail.querySelector('[data-confirm-status]'),signature=pad(detail.querySelector('[data-signature]'),detail.querySelector('[data-clear]'));confirm.onclick=async()=>{if(!live()||request!==epoch||confirm.disabled)return;confirm.disabled=true;try{await api(`/api/reviewer/education/${id}/confirmation`,{method:'POST',body:JSON.stringify({expectedEditVersion:doc.edit_version,signature:signature()})});if(live()&&request===epoch){confirm.disabled=true;feedback.textContent='시험 참가 확인을 저장했습니다.';}}catch(error){if(live()&&request===epoch){feedback.textContent=error.message;confirm.disabled=false;}}};}
         }catch(error){if(live()&&request===epoch)status.textContent=error.message;}
       });
     }catch(error){if(live()&&generation===epoch)status.textContent=error.message;}

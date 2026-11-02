@@ -9,6 +9,7 @@ import {spawn} from 'node:child_process';
 import {once} from 'node:events';
 import {Store} from '../store.js';
 import {AdminAccounts} from '../admin-accounts.js';
+import {PNG} from 'pngjs';
 
 test('관리자 대상 HTTP는 세션·현장·버전을 검사하고 직원에게 선정된 승인 문서의 첨부만 공개한다',{timeout:60000},async()=>{
   const dir=mkdtempSync(join(tmpdir(),'jweb-manager-http-')),s=new Store(join(dir,'jweb.sqlite')),password='virtual-password-123',auth=new AdminAccounts(s.db);auth.bootstrap(password);
@@ -17,7 +18,7 @@ test('관리자 대상 HTTP는 세션·현장·버전을 검사하고 직원에�
   const manager=s.createReviewer({siteId:a.id,loginId:'review_a',name:'가상 직원',password}),foreign=s.createReviewer({siteId:b.id,loginId:'review_b',name:'다른 직원',password});
   const input={siteId:a.id,type:'education',title:'가상 교육',date:'2026-11-01',details:{kind:'supervisor_new',timeFrom:'09:00',timeTo:'10:00',educationPlace:'가상 교실',educationMethod:'강의식',instructor:'가상 강사'}},doc=s.createDocument(input),other=s.createDocument({...input,title:'다른 문서'}),file=s.addAttachment(doc.id,'가상.txt',Buffer.from('virtual')),otherFile=s.addAttachment(other.id,'다른.txt',Buffer.from('private'));
   const reservation=createServer();await new Promise(resolve=>reservation.listen(0,'127.0.0.1',resolve));const port=reservation.address().port;await new Promise(resolve=>reservation.close(resolve));
-  const hook=`import {Store} from ${JSON.stringify(pathToFileURL(join(process.cwd(),'store.js')).href)};const original=Store.prototype.setTrainingTargets;Store.prototype.setTrainingTargets=function(...args){console.log('TARGET_SAVE');return original.apply(this,args)};`;
+  const hook=`import {Store} from ${JSON.stringify(pathToFileURL(join(process.cwd(),'store.js')).href)};const original=Store.prototype.setTrainingTargets;Store.prototype.setTrainingTargets=function(...args){console.log('TARGET_SAVE');return original.apply(this,args)};const confirm=Store.prototype.confirmReviewerEducation;Store.prototype.confirmReviewerEducation=function(...args){console.log('EDUCATION_CONFIRM');return confirm.apply(this,args)};`;
   const child=spawn(process.execPath,['--import',`data:text/javascript,${encodeURIComponent(hook)}`,'server.js'],{cwd:process.cwd(),env:{...process.env,PORT:String(port),JWEB_DATA_DIR:dir},stdio:['ignore','pipe','pipe']});let locked=false;
   try{
     await Promise.race([once(child.stdout,'data'),once(child,'exit').then(()=>{throw Error('서버 시작 실패');})]);
@@ -41,6 +42,12 @@ test('관리자 대상 HTTP는 세션·현장·버전을 검사하고 직원에�
     const assignments=await (await call(stats,'GET',null,globalAdmin)).json();assert.deepEqual(assignments.map(row=>[row.id,row.document_id,row.kind]),[[manager.id,doc.id,'supervisor_new']]);
     assert.deepEqual(await (await call(`/api/education/manager-assignments?siteId=${b.id}&from=2026-11-01&to=2026-11-30`,'GET',null,globalAdmin)).json(),[]);
     assert.deepEqual(await (await call(`/api/education/manager-assignments?siteId=${a.id}&from=2026-10-01&to=2026-10-31`,'GET',null,globalAdmin)).json(),[]);
+    const detail=await (await call(`/api/reviewer/education/${doc.id}`,'GET',null,reviewer)).json(),png=new PNG({width:1,height:1});png.data[3]=255;const signature=`data:image/png;base64,${PNG.sync.write(png).toString('base64')}`,confirmation=`/api/reviewer/education/${doc.id}/confirmation`,payload={expectedEditVersion:detail.document.edit_version,signature};
+    assert.equal((await call(confirmation,'POST',payload)).status,401);assert.equal((await call(confirmation,'POST',payload,otherReviewer)).status,400);assert.equal((await call(confirmation,'POST',{...payload,expectedEditVersion:payload.expectedEditVersion-1},reviewer)).status,409);
+    assert.equal((await call(confirmation,'POST',payload,reviewer)).status,200);assert.equal((await call(confirmation,'POST',payload,reviewer)).status,200);
+    assert.ok((await (await call(`/api/reviewer/education/${doc.id}`,'GET',null,reviewer)).json()).document.confirmed_at);assert.ok((await (await call(stats,'GET',null,globalAdmin)).json())[0].confirmed_at);
+    assert.equal(s.db.prepare('SELECT count(*) AS n FROM reviewer_education_checks').get().n,1);
+    s.db.prepare('UPDATE documents SET title=title WHERE id=?').run(doc.id);assert.equal((await (await call(stats,'GET',null,globalAdmin)).json())[0].confirmed_at,null);assert.equal((await call(confirmation,'POST',payload,reviewer)).status,409);
     assert.deepEqual((await (await call('/api/reviewer/education','GET',null,reviewer)).json()).map(row=>row.id),[doc.id]);
     assert.equal((await call(`/api/reviewer/education/${doc.id}`,'GET',null,reviewer)).status,200);
     assert.equal(await (await call(`/api/reviewer/education/${doc.id}/attachments/${file}`,'GET',null,reviewer)).text(),'virtual');
@@ -48,6 +55,8 @@ test('관리자 대상 HTTP는 세션·현장·버전을 검사하고 직원에�
     assert.equal((await call(`/api/reviewer/education/${doc.id}/attachments/${otherFile}`,'GET',null,reviewer)).status,404);
     assert.equal((await call(`/api/reviewer/education/${other.id}/attachments/${file}`,'GET',null,reviewer)).status,404);
     assert.equal((await call(`/api/reviewer/education/${doc.id}`,'PUT',{},reviewer)).status,404);
+    const current=(await (await call(`/api/reviewer/education/${doc.id}`,'GET',null,reviewer)).json()).document.edit_version;
+    s.db.exec('BEGIN IMMEDIATE');locked=true;const entered=once(child.stdout,'data'),waiting=call(confirmation,'POST',{...payload,expectedEditVersion:current},reviewer);waiting.catch(()=>{});assert.match(String((await entered)[0]),/EDUCATION_CONFIRM/);s.db.prepare('DELETE FROM reviewer_sessions WHERE reviewer_id=?').run(manager.id);s.db.exec('COMMIT');locked=false;assert.equal((await waiting).status,401);assert.equal(s.db.prepare('SELECT edit_version FROM reviewer_education_checks WHERE reviewer_id=?').get(manager.id).edit_version,payload.expectedEditVersion);
     s.updateReviewer(a.id,manager.id,{active:false});assert.equal((await call(`/api/reviewer/education/${doc.id}/attachments/${file}`,'GET',null,reviewer)).status,401);
   }finally{if(locked)s.db.exec('ROLLBACK');if(child.exitCode===null){const exited=once(child,'exit');child.kill();await exited;}s.close();rmSync(dir,{recursive:true,force:true});}
 });

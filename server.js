@@ -252,6 +252,8 @@ const server = http.createServer((req,res)=>passwordRequests.run(true,()=>adminR
       if(url.pathname==='/api/reviewer/logout'&&req.method==='POST'){reviewerSessions.delete(key);res.setHeader('Set-Cookie',`jweb_reviewer=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0${secureCookie}`);return json(res,200,{ok:true});}
       if(await handleCommonWork(req,res,url,'/api/reviewer/common-work',reviewer))return;
       if(url.pathname==='/api/reviewer/session'&&req.method==='GET')return json(res,200,{reviewer,context});
+      const reviewerEducationConfirm=url.pathname.match(/^\/api\/reviewer\/education\/(\d+)\/confirmation$/);
+      if(reviewerEducationConfirm&&req.method==='POST'){const input=await body(req);store.confirmReviewerEducation(reviewer.id,Number(reviewerEducationConfirm[1]),input.expectedEditVersion,input.signature,()=>checkRequestSession(req));return json(res,200,{ok:true});}
       const reviewerEducation=url.pathname.match(/^\/api\/reviewer\/education(?:\/(\d+)(?:\/attachments\/(\d+))?)?$/);
       if(reviewerEducation&&req.method==='GET'){
         const [,id,fileId]=reviewerEducation,result=fileId?store.reviewerEducationAttachment(reviewer.id,id,fileId):store.reviewerEducation(reviewer.id,id);checkRequestSession(req);
