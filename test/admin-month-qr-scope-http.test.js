@@ -39,6 +39,19 @@ test('제한 관리자 월·QR: 허용 범위, 충돌, 위조, 지연 본문, SQ
   assert.equal((await send(qrPath+'/access/registration','POST',{},cookie)).status,200);assert.equal(store.siteRegistrationOpen(a.id),true);
   assert.equal((await send(qrPath+'/invitation','POST',{},cookie)).status,201);assert.equal((await send(qrPath+'/invitation','DELETE',undefined,cookie)).status,200);assert.equal(store.siteRegistrationOpen(a.id),false);
   assert.equal((await send(qrPath+'/access/rotate','POST',{},cookie)).status,200);assert.notEqual(store.siteAccessKey(a.id),oldKey);
+  const invitation=store.createInvitation(a.id),foreign=store.createInvitation(b.id),statusPath=qrPath+'/invitation/status';
+  assert.equal((await send(statusPath,'POST',{token:invitation.token})).status,401);
+  assert.equal((await send('/api/sites/'+c.id+'/invitation/status','POST',{token:invitation.token},cookie)).status,403);
+  for(const actorCookie of [cookie,global]){
+    const response=await send(statusPath,'POST',{token:invitation.token},actorCookie);assert.equal(response.status,200);assert.deepEqual(await response.json(),{valid:true,expiresAt:invitation.expiresAt});
+    assert.deepEqual(await (await send(statusPath,'POST',{token:foreign.token},actorCookie)).json(),{valid:false});
+  }
+  for(const input of [{token:invitation.token,siteId:a.id},{token:'bad'},{token:[invitation.token]},{}])assert.equal((await send(statusPath,'POST',input,cookie)).status,403);
+  assert.equal((await send(statusPath,'GET',undefined,cookie)).status,403);
+  store.db.prepare('UPDATE invitations SET expires_at=0 WHERE site_id=?').run(a.id);
+  assert.deepEqual(await (await send(statusPath,'POST',{token:invitation.token},cookie)).json(),{valid:false});
+  const pendingInvite=store.createInvitation(a.id,true);assert.deepEqual(await (await send(statusPath,'POST',{token:pendingInvite.token},cookie)).json(),{valid:false});
+  store.discardPendingInvitation(pendingInvite.token);const revoked=store.createInvitation(a.id);store.revokeInvitations(a.id);assert.deepEqual(await (await send(statusPath,'POST',{token:revoked.token},cookie)).json(),{valid:false});
   const update=(id,values)=>auth.update(id,{version:auth.list().find(x=>x.id===id).version,...values});
   const delayed=async(path,method,data,change)=>{const req=http.request(base+path,{method,headers:{cookie,'content-type':'application/json'}}),answer=new Promise((r,j)=>{req.on('response',res=>{res.resume();r(res.statusCode)});req.on('error',j)});req.write('{');await new Promise(r=>setTimeout(r,70));change();req.end(JSON.stringify(data).slice(1));return answer};
   const before=store.db.prepare('SELECT company_snapshot FROM attendance WHERE worker_id=?').get(wa.id).company_snapshot;

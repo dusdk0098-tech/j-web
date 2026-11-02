@@ -94,6 +94,7 @@ assets.add('/worker-list.js');
 assets.add('/attendance-matrix.js');
 assets.add('/restricted-month-editor.js');
 assets.add('/education-kinds.js');
+assets.add('/education-reference.js');
 assets.add('/checklist-copy.js');
 assets.add('/permit-sources.js');
 assets.add('/permit-measures.js');
@@ -661,6 +662,8 @@ const server = http.createServer((req,res)=>adminRequests.run(req,async()=>{
       const photo=store.workStopPhoto(stopPhoto[1],stopPhoto[2],url.searchParams.get('version'));checkRequestSession(req);if(!photo)return json(res,404,{error:'사진을 찾을 수 없습니다.'});
       res.writeHead(200,{'Content-Type':'application/octet-stream','Content-Disposition':'attachment; filename="work-stop-photo"','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(photo);
     }
+    const inviteStatus=url.pathname.match(/^\/api\/sites\/(\d+)\/invitation\/status$/);
+    if(inviteStatus&&req.method==='POST'){const input=await body(req,65536,true),invite=store.invitation(input.token);checkRequestSession(req);const valid=!!invite&&invite.id===Number(inviteStatus[1]);return json(res,200,{valid,...(valid?{expiresAt:invite.expires_at}:{})});}
     const inviteSite=url.pathname.match(/^\/api\/sites\/(\d+)\/invitation$/);
     const locationPolicy=url.pathname.match(/^\/api\/sites\/(\d+)\/location-policy$/),locationEvents=url.pathname.match(/^\/api\/sites\/(\d+)\/location-events(?:\/(\d+))?$/);
     const workerDepartures=url.pathname.match(/^\/api\/sites\/(\d+)\/worker-departures(?:\/(\d+))?$/);

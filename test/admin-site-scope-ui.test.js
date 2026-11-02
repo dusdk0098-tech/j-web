@@ -7,7 +7,7 @@ import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { createServer } from 'node:net';
 import { runInNewContext } from 'node:vm';
-import { siteQrSession, printSiteQr } from '../public/site-qr.js';
+import { siteQrSession, printSiteQr, siteQrPrintAction } from '../public/site-qr.js';
 
 const source=readFileSync(new URL('../public/app.js',import.meta.url),'utf8');
 const part=(from,to)=>{const start=source.indexOf(from),end=source.indexOf(to,start);assert.ok(start>=0&&end>start,from);return source.slice(start,end);};
@@ -26,7 +26,7 @@ function screen(fetcher=async()=>({ok:true,status:200,json:async()=>[]})){
   const state={page:'admins',siteId:1,detail:null,admin:{...account},sites,types:{notice:'일반 공지'}};
   const dialog={open:false,showModal(){this.open=true;},close(){this.open=false;}};
   const context={state,content,dialog,siteSelect:get('#site-select'),detailEpoch:1,workerListEpoch:0,sitePhotoEpoch:0,permitRoleCleanup:null,siteEducationCleanup:null,labels:{documents:'안전 문서',admins:'관리자 계정'},statusLabels:{draft:'임시저장'},esc,URLSearchParams,today:()=> '2026-11-02',document:{createElement:node,querySelector:selector=>selector.startsWith('dialog')?null:get(selector),querySelectorAll:()=>pages},$:get,location:{assign:path=>redirects.push(path)},flash:message=>flashes.push(message),showError:error=>errors.push(error.message),confirm:()=>true,FormData:class{constructor(form){return Object.entries(form.values||{});}},fetch:async(path,options)=>{requests.push({path,options});return fetcher(path,options);}};
-  context.siteQrSession=siteQrSession;
+  context.siteQrSession=siteQrSession;context.siteQrPrintAction=options=>siteQrPrintAction({...options,print:(dialog,mode)=>context.printSiteQr(dialog,mode)});
   context.mountRestrictedMonthEditor=()=>({dirty:()=>false,busy:()=>false});
   context.siteSelect.selectedOptions=[{textContent:'가상 첫 현장'}];
   const oldQueryAll=context.document.querySelectorAll;
@@ -122,10 +122,10 @@ function qrScreen(fetcher){
   ui.context.printSiteQr=(dialog,mode)=>printSiteQr(dialog,mode,()=>printed.push({mode:dialog.dataset.qrPrint,image:dialog.querySelector(mode==='access'?'#login-qr-image':'#invite-qr-image').id}));
   return {...ui,printed};
 }
-const qrResult={image:'data:image/png;base64,virtual',link:'https://example.invalid/virtual',expiresAt:'2026-11-03T00:00:00.000Z'};
+const qrResult={image:'data:image/png;base64,virtual',link:'https://example.invalid/virtual',accessFingerprint:'virtual',valid:true,expiresAt:'2026-11-03T00:00:00.000Z'};
 
 test('제한 QR 접속·초대·교체는 공통 출력 구조와 해당 이미지 준비 검사를 사용한다',async()=>{
-  const ui=qrScreen(async()=>response(qrResult));await ui.context.showRestrictedQr();
+  const ui=qrScreen(async path=>response(path.endsWith('/status')?{accessFingerprint:'virtual',valid:true,expiresAt:Date.now()+60000}:qrResult));await ui.context.showRestrictedQr();
   assert.match(ui.get('#dialog-body').innerHTML,/<div id="restricted-qr-result" class="qr">/);
   for(const kind of ['access','invite','rotate']){
     await ui.get('[data-restricted-qr="'+kind+'"]').onclick();
@@ -134,7 +134,7 @@ test('제한 QR 접속·초대·교체는 공통 출력 구조와 해당 이미�
     if(mode==='invite'){assert.match(markup,/<div id="invite-result">/);assert.match(markup,/유효기간:/);assert.doesNotMatch(markup,/id="login-qr/);}else{assert.match(markup,/id="login-qr-address"/);assert.doesNotMatch(markup,/id="invite-qr/);}
     button.onclick();assert.equal(ui.printed.length,before);assert.match(ui.get('#dialog-error').textContent,/이미지/);
     image.complete=true;button.onclick();assert.equal(ui.printed.length,before);assert.match(ui.get('#dialog-error').textContent,/이미지/);
-    image.naturalWidth=256;button.onclick();assert.deepEqual(ui.printed.at(-1),{mode,image:id});assert.equal(ui.printed.length,before+1);assert.equal(ui.get('#dialog-error').textContent,'');
+    image.naturalWidth=256;await button.onclick();assert.equal(ui.printed.length,before);button.onclick();assert.deepEqual(ui.printed.at(-1),{mode,image:id});assert.equal(ui.printed.length,before+1);assert.equal(ui.get('#dialog-error').textContent,'');
   }
 });
 

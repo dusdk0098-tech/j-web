@@ -35,12 +35,12 @@ export function adminSitePolicy(db,req,url,session){
     return null;
   }
   const workerSite=(id,siteId)=>positive(id)&&allowed(siteId)&&db.prepare('SELECT 1 FROM workers WHERE id=? AND site_id=?').get(Number(id),Number(siteId));
-  const qr=path.match(/^\/api\/sites\/([1-9]\d*)\/(access(?:\/(?:status|rotate|registration))?|invitation)$/);
+  const qr=path.match(/^\/api\/sites\/([1-9]\d*)\/(access(?:\/(?:status|rotate|registration))?|invitation(?:\/status)?)$/);
   if(qr){
     if([...url.searchParams.keys()].some(key=>key!=='siteId'))return denied();
     if(!allowed(qr[1])||url.searchParams.has('siteId')&&Number(url.searchParams.get('siteId'))!==Number(qr[1]))return denied();
     const valid=qr[2]==='access/status'?method==='GET':qr[2]==='invitation'?['POST','DELETE'].includes(method):method==='POST';
-    return valid&&(input===undefined||fields([]))?null:denied();
+    return valid&&(input===undefined||(qr[2]==='invitation/status'?fields(['token'])&&typeof input.token==='string'&&/^[\w-]{43}$/.test(input.token):fields([])))?null:denied();
   }
   if(path==='/api/attendance/month'&&method==='GET'&&([...url.searchParams.keys()].some(key=>!['siteId','month'].includes(key))||url.searchParams.getAll('month').length!==1))return denied();
   if(path==='/api/attendance/month/cells'&&method==='PUT'){

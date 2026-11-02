@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {runInNewContext} from 'node:vm';
-import {requireEducationSubmission} from '../public/education-kinds.js';
+import {requireEducationSubmission,readEducationMethod} from '../public/education-kinds.js';
 
 const admin=readFileSync(new URL('../public/app.js',import.meta.url),'utf8');
 const worker=readFileSync(new URL('../public/worker-documents.js',import.meta.url),'utf8');
@@ -55,9 +55,9 @@ test('근로자 실제 결재 버튼은 누락·편집 중 요청을 차단하�
 test('근로자 교육 임시저장은 불완전해도 전송하며 실패 입력을 유지한다',async()=>{
   const start=worker.indexOf('    form.onsubmit='),end=worker.indexOf("    if(doc&&type==='work_plan')",start);
   for(const failed of [false,true]){
-    const button={disabled:false},form={isConnected:true,elements:Object.fromEntries(['title','date','body','kind','otherTitle','audience',...Object.keys(complete)].map(key=>[key,{value:key==='body'?'가상 입력':''}])),querySelector:()=>button},editor={clears:0,replaceChildren(){this.clears++;}},calls=[],status={textContent:''};
-    runInNewContext(worker.slice(start,end),{form,editor,status,type:'education',doc:null,reportContext:{siteId:1},send:async(path,method,input)=>{calls.push(input);if(failed)throw Error('가상 전송 오류');},message:error=>{status.textContent=error.message;},updateList:async()=>{}});
-    await form.onsubmit({preventDefault(){}});assert.equal(calls.length,1);assert.equal(calls[0].details.timeFrom,'');assert.equal(calls[0].details.educationPlace,'');assert.equal(editor.clears,failed?0:1);assert.equal(form.elements.body.value,'가상 입력');assert.equal(button.disabled,false);assert.match(status.textContent,failed?/전송 오류/:/저장했습니다/);
+    const button={disabled:false},form={isConnected:true,elements:Object.fromEntries(['title','date','body','kind','otherTitle','audience','textbook',...Object.keys(complete)].map(key=>[key,{value:key==='body'?'가상 입력':key==='textbook'?'가상 교재':''}])),querySelector:()=>button},editor={clears:0,replaceChildren(){this.clears++;}},calls=[],status={textContent:''};
+    runInNewContext(worker.slice(start,end),{form,editor,status,fields:{querySelectorAll:()=>[{value:'강의식'},{value:'토의식'}]},readEducationMethod,type:'education',doc:null,reportContext:{siteId:1},send:async(path,method,input)=>{calls.push(input);if(failed)throw Error('가상 전송 오류');},message:error=>{status.textContent=error.message;},updateList:async()=>{}});
+    await form.onsubmit({preventDefault(){}});assert.equal(calls.length,1);assert.equal(calls[0].details.timeFrom,'');assert.equal(calls[0].details.educationPlace,'');assert.equal(calls[0].details.textbook,'가상 교재');assert.equal(calls[0].details.educationMethod,'강의식, 토의식');assert.equal(editor.clears,failed?0:1);assert.equal(form.elements.body.value,'가상 입력');assert.equal(button.disabled,false);assert.match(status.textContent,failed?/전송 오류/:/저장했습니다/);
   }
 });
 
@@ -65,11 +65,11 @@ test('관리자 교육 임시저장 콜백과 대화상자는 불완전 저장·
   const start=admin.indexOf('async data=>{',admin.indexOf('async function editDocument(')),end=admin.indexOf('\n  });',start),dialogStart=admin.indexOf('function showDialog('),dialogEnd=admin.indexOf("\n$('#dialog-close')",dialogStart);
   assert.ok(start>=0&&end>start&&dialogEnd>dialogStart);
   for(const failed of [false,true]){
-    const calls=[],nodes=Object.fromEntries(['#dialog-title','#dialog-body','#dialog-error','#dialog-form','#dialog-form button[type=submit]'].map(key=>[key,{}])),data={type:'education',title:'가상 교육',date:'2026-11-02',body:'가상 입력'},dialog={open:false,showModal(){this.open=true;},close(){this.open=false;}},state={siteId:1};
-    const context={doc:null,state,$:key=>nodes[key],dialog,FormData:class{constructor(){return Object.entries(data);}},api:async(path,options)=>{calls.push(JSON.parse(options.body));if(failed)throw Error('가상 전송 오류');return {id:7};},flash(){},render:async()=>{}};
+    const calls=[],nodes=Object.fromEntries(['#dialog-title','#dialog-body','#dialog-error','#dialog-form','#dialog-form button[type=submit]'].map(key=>[key,{querySelectorAll:()=>[{value:'시청각'},{value:'토의식'}]}])),data={type:'education',title:'가상 교육',date:'2026-11-02',body:'가상 입력',textbook:'가상 교재'},dialog={open:false,showModal(){this.open=true;},close(){this.open=false;}},state={siteId:1};
+    const context={readEducationMethod,doc:null,state,$:key=>nodes[key],dialog,FormData:class{constructor(){return Object.entries(data);}},api:async(path,options)=>{calls.push(JSON.parse(options.body));if(failed)throw Error('가상 전송 오류');return {id:7};},flash(){},render:async()=>{}};
     const save=runInNewContext('('+admin.slice(start,end)+'\n})',context);
     const show=runInNewContext(admin.slice(dialogStart,dialogEnd)+';showDialog',context);
     show('가상 교육','가상 편집 화면',save);await nodes['#dialog-form'].onsubmit({preventDefault(){},currentTarget:{}});
-    assert.equal(calls.length,1);assert.equal(calls[0].details.timeFrom,'');assert.equal(calls[0].details.instructor,'');assert.equal(dialog.open,failed);assert.equal(data.body,'가상 입력');assert.equal(nodes['#dialog-body'].innerHTML,'가상 편집 화면');assert.equal(nodes['#dialog-form button[type=submit]'].disabled,false);if(failed)assert.equal(nodes['#dialog-error'].textContent,'가상 전송 오류');
+    assert.equal(calls.length,1);assert.equal(calls[0].details.timeFrom,'');assert.equal(calls[0].details.instructor,'');assert.equal(calls[0].details.textbook,'가상 교재');assert.equal(calls[0].details.educationMethod,'시청각, 토의식');assert.equal(dialog.open,failed);assert.equal(data.body,'가상 입력');assert.equal(nodes['#dialog-body'].innerHTML,'가상 편집 화면');assert.equal(nodes['#dialog-form button[type=submit]'].disabled,false);if(failed)assert.equal(nodes['#dialog-error'].textContent,'가상 전송 오류');
   }
 });
