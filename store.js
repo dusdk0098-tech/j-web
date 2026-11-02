@@ -13,6 +13,7 @@ import { summarizeWorkerCounts } from './public/worker-list.js';
 import { matchesAttendanceQuery } from './public/attendance-matrix.js';
 import { safetyCostAmount } from './public/safety-cost.js';
 import { educationKinds, hasManagerEducationTargets } from './public/education-kinds.js';
+import { checklistCategories, checklistCategoryForKind } from './public/checklist-copy.js';
 import { costImageType } from './cost-image.js';
 
 const siteArticleRow=row=>({...row,rich_body:row.rich_body===null?null:JSON.parse(row.rich_body)});
@@ -1688,7 +1689,8 @@ export class Store {
     if(!timingSafeEqual(hash,account?.password_hash||Buffer.alloc(32))||!account)return null;
     const worker=this.db.prepare('SELECT workers.id,workers.name,workers.site_id,sites.name AS site_name FROM workers JOIN sites ON sites.id=workers.site_id WHERE workers.id=?').get(account.worker_id);return withCredential&&worker?{worker,credentialHash:Buffer.from(account.password_hash)}:worker;
   }
-  documents(siteId, type = '', query = '', from = '', to = '', riskKind = '', riskContractorId = '', instructionCompanyId = '', permitCompany = '', permitFrom = '', permitTo = '', educationKind = '', workPlanCompany = '') {
+  documents(siteId, type = '', query = '', from = '', to = '', riskKind = '', riskContractorId = '', instructionCompanyId = '', permitCompany = '', permitFrom = '', permitTo = '', educationKind = '', workPlanCompany = '', checklistCategory = '') {
+    if(typeof checklistCategory!=='string'||checklistCategory&&(type!=='checklist'||!Object.hasOwn(checklistCategories,checklistCategory)))throw new Error('체크리스트 분류 검색 조건을 확인해 주세요.');
     if(typeof workPlanCompany!=='string')throw new Error('작업업체명 검색 조건을 확인해 주세요.');
     workPlanCompany=workPlanCompany.trim();
     if(workPlanCompany&&type!=='work_plan')throw new Error('작업계획서 검색 조건을 확인해 주세요.');
@@ -1705,6 +1707,7 @@ export class Store {
     if(instructionCompanyId&&(!/^[1-9]\d*$/.test(String(instructionCompanyId))||!Number.isSafeInteger(Number(instructionCompanyId))||!this.companies(siteId).some(company=>company.id===Number(instructionCompanyId))))throw new Error('같은 현장의 협력사를 선택해 주세요.');
     if(permitCompany&&permitCompany!=='direct'&&(!/^[1-9]\d*$/.test(String(permitCompany))||!Number.isSafeInteger(Number(permitCompany))||!this.companies(siteId).some(company=>company.id===Number(permitCompany))))throw new Error('같은 현장의 협력사를 선택해 주세요.');
     const rows=this.db.prepare("SELECT documents.*,EXISTS(SELECT 1 FROM approval_steps WHERE document_id=documents.id) AS has_approval_line,EXISTS(SELECT 1 FROM instruction_results WHERE document_id=documents.id) AS has_instruction_result,COALESCE((SELECT source_document_id FROM work_plan_copies WHERE document_id=documents.id),(SELECT source_document_id FROM office_document_copies WHERE document_id=documents.id)) AS copied_from,COALESCE((SELECT w.name FROM worker_authored_documents a JOIN workers w ON w.id=a.worker_id AND w.site_id=documents.site_id WHERE a.document_id=documents.id),(SELECT r.name FROM office_document_authors a JOIN reviewers r ON r.id=a.reviewer_id AND r.site_id=documents.site_id WHERE a.document_id=documents.id)) AS author_name FROM documents WHERE (site_id=? OR (type='basic' AND status='approved' AND json_extract(details,'$.shared')=1)) AND (?='' OR type=?) AND (title LIKE ? OR body LIKE ? OR details LIKE ?) AND (?='' OR date>=?) AND (?='' OR date<=?) ORDER BY date DESC,id DESC").all(siteId,type,type,...Array(3).fill(`%${query}%`),from,from,to,to);
+    if(checklistCategory)return rows.filter(doc=>checklistCategoryForKind(JSON.parse(doc.details)?.kind)===checklistCategory);
     if(workPlanCompany)return rows.filter(doc=>{const company=JSON.parse(doc.details)?.company;return typeof company==='string'&&company.includes(workPlanCompany);});
     if(educationKind)return rows.filter(doc=>JSON.parse(doc.details).kind===educationKind);
     if(instructionCompanyId)return rows.filter(doc=>JSON.parse(doc.details).companyId===Number(instructionCompanyId));

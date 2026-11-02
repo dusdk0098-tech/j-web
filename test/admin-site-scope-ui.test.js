@@ -15,6 +15,7 @@ import { trainingDetailMarkup } from '../public/training-detail.js';
 import { riskDetailMarkup, muscleDetailMarkup } from '../public/risk-detail.js';
 import { planDetailMarkup } from '../public/plan-detail.js';
 import { educationAttachmentLabels } from '../public/education-kinds.js';
+import { checklistCategories } from '../public/checklist-copy.js';
 
 const source=readFileSync(new URL('../public/app.js',import.meta.url),'utf8');
 const part=(from,to)=>{const start=source.indexOf(from),end=source.indexOf(to,start);assert.ok(start>=0&&end>start,from);return source.slice(start,end);};
@@ -41,6 +42,7 @@ function screen(fetcher=async()=>({ok:true,status:200,json:async()=>[]})){
   context.siteQrSession=siteQrSession;context.siteQrPrintAction=options=>siteQrPrintAction({...options,print:(dialog,mode)=>context.printSiteQr(dialog,mode)});
   context.mountRestrictedMonthEditor=()=>({dirty:()=>false,busy:()=>false});
   context.hasManagerEducationTargets=hasManagerEducationTargets;
+  context.checklistCategories=checklistCategories;
   context.changedTrainingWorkers=changedTrainingWorkers;
   context.attendanceNoticesMarkup=attendanceNoticesMarkup;
   context.trainingDetailMarkup=trainingDetailMarkup;context.educationAttachmentLabels=educationAttachmentLabels;
@@ -70,6 +72,18 @@ function screen(fetcher=async()=>({ok:true,status:200,json:async()=>[]})){
   return {context,state,content,dialog,nodes,get,pages,requests,errors,redirects,flashes,submit:async values=>{const form=get('#dialog-form');form.values=values;await form.onsubmit({preventDefault(){},currentTarget:form});}};
 }
 const response=data=>({ok:true,status:200,json:async()=>data});
+
+test('제한 관리자의 체크리스트 분류는 검색·상세 복귀·초기화에 유지된다',async()=>{
+  const doc={id:5,site_id:1,type:'notice',title:'가상 문서',date:'2026-11-02',body:'가상 본문',status:'approved'};
+  const ui=screen(async path=>path==='/api/sites'?response(sites):response(path.includes('?')?[doc]:doc));
+  ui.state.page='documents';ui.state.admin={id:4,scope:'restricted'};ui.state.types.checklist='체크리스트';await ui.context.renderRestrictedDocuments();
+  assert.match(ui.content.innerHTML,/id="restricted-document-category"/);const type=ui.get('#restricted-document-type'),category=ui.get('#restricted-document-category');assert.equal(category.disabled,true);
+  type.value='checklist';type.onchange();assert.equal(category.disabled,false);category.value='weather';ui.get('#restricted-document-q').value='가상';await ui.get('#restricted-document-search').onclick();
+  let params=new URLSearchParams(ui.requests.at(-1).path.split('?')[1]);assert.equal(params.get('checklistCategory'),'weather');assert.equal(params.get('type'),'checklist');assert.equal(params.get('q'),'가상');
+  ui.content.querySelectorAll('[data-restricted-doc]')[0].onclick();await ui.context.renderPending;ui.get('#restricted-back').onclick();await ui.context.renderPending;assert.equal(ui.get('#restricted-document-category').value,'weather');
+  ui.get('#restricted-document-type').value='notice';ui.get('#restricted-document-type').onchange();assert.equal(ui.get('#restricted-document-category').value,'');assert.equal(ui.get('#restricted-document-category').disabled,true);
+  await ui.get('#restricted-document-reset').onclick();params=new URLSearchParams(ui.requests.at(-1).path.split('?')[1]);assert.equal(params.has('checklistCategory'),false);assert.equal(params.has('type'),false);
+});
 
 test('제한 문서 검색은 조건을 전달하고 상세 복귀·실패 때 입력을 보존한다',async()=>{
   let fail=false;const doc={id:5,site_id:1,type:'notice',title:'가상 문서',date:'2026-11-02',body:'본문',status:'approved'};

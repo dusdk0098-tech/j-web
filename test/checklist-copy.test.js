@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {checklistSources,mergeChecklistAnswers} from '../public/checklist-copy.js';
+import {checklistSources,mergeChecklistAnswers,checklistCategoryForKind} from '../public/checklist-copy.js';
 import {readFileSync,mkdtempSync,rmSync} from 'node:fs';
 import {runInNewContext} from 'node:vm';
 import {tmpdir} from 'node:os';
@@ -30,7 +30,7 @@ test('작성 화면은 이전 기록을 선택해 빈 칸에 적용하고 현장
   const firstAnswer={value:'X'},firstNote={value:''},secondAnswer={value:''},secondNote={value:'현재 비고'},rows=[{querySelector:key=>key==='[data-answer]'?firstAnswer:firstNote},{querySelector:key=>key==='[data-answer]'?secondAnswer:secondNote}];
   const nodes={'#daily-fields':{innerHTML:''},'#dialog-form [name=checklistKind]':kind,'#rain-checks':{innerHTML:''},'#checklist-category':{value:''},'#checklist-search':{value:''},'#checklist-copy':copyButton,'#checklist-copy-list':copyList,'#wind-photo-note':photoNote,'#dialog-form input[name=date]':date};
   const calls=[],state={siteId:7,page:'documents'},prior={id:5,site_id:7,type:'checklist',date:'2026-10-29',title:'<가상>',details:JSON.stringify({kind:'wind',answers:[{answer:'O',note:'이전 비고'},{answer:'O',note:'이전 설명'}],photoNote:'이전 사진 설명'})};
-  const context={select:{value:'checklist'},details:{kind:'wind',answers:[]},$:key=>nodes[key],document:{querySelectorAll:()=>rows},esc:s=>String(s).replace(/</g,'&lt;').replace(/>/g,'&gt;'),filterChecklistKinds(){},checklistSources,mergeChecklistAnswers,siteId:7,state,dialog:{open:true},doc:{id:10},URLSearchParams,api:async path=>{calls.push(path);return [prior];}};
+  const context={select:{value:'checklist'},details:{kind:'wind',answers:[]},$:key=>nodes[key],document:{querySelectorAll:()=>rows},esc:s=>String(s).replace(/</g,'&lt;').replace(/>/g,'&gt;'),filterChecklistKinds(){},checklistSources,mergeChecklistAnswers,checklistCategoryForKind,siteId:7,state,dialog:{open:true},doc:{id:10},URLSearchParams,api:async path=>{calls.push(path);return [prior];}};
   for(const name of ['rainChecks','windChecks','thawChecks','heatChecks','coldChecks','wetSeasonChecks','heavyRainChecks','electricalChecks','fireChecks','formworkChecks','fallingChecks','confinedChecks','excavationChecks','semiannualChecks','morningChecks','afternoonChecks','eveningChecks'])context[name]=name==='windChecks'?['가상 1','가상 2']:[];
   runInNewContext('function render(){'+source.slice(start,end)+'}\nglobalThis.render=render;',context);context.render();await copyButton.onclick();
   assert.match(calls[0],/siteId=7&type=checklist&to=2026-10-30/);assert.match(copyList.innerHTML,/&lt;가상&gt;/);assert.doesNotMatch(copyList.innerHTML,/<가상>/);

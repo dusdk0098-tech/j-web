@@ -1,3 +1,7 @@
+export const checklistCategories=Object.freeze({daily:'일일 점검',weather:'기상별 점검',general:'일반 점검',semiannual:'반기점검'});
+const checklistKindCategories=Object.freeze({morning:'daily',afternoon:'daily',evening:'daily',rain:'weather',wind:'weather',thaw:'weather',heat:'weather',cold:'weather',wet_season:'weather',heavy_rain:'weather',electrical:'general',fire:'general',formwork:'general',falling:'general',confined:'general',excavation:'general',semiannual:'semiannual'});
+export function checklistCategoryForKind(kind){return typeof kind==='string'&&Object.hasOwn(checklistKindCategories,kind)?checklistKindCategories[kind]:'';}
+
 export function checklistSources(rows,siteId,kind,date,excludeId){
   if(!Array.isArray(rows))throw Error('이전 점검 목록을 확인해 주세요.');
   return rows.filter(row=>row.site_id===siteId&&row.type==='checklist'&&row.id!==excludeId&&row.date<=date).flatMap(row=>{
