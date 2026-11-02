@@ -30,6 +30,11 @@ function screen(fetcher=async()=>({ok:true,status:200,json:async()=>[]})){
   const get=key=>{if(!nodes.has(key))nodes.set(key,node());return nodes.get(key);};
   const pages=['dashboard','documents','workers','attendance','equipment-attendance','admins','clients','site-activity','statistics','board','new-unverified-menu'].map(page=>({...node(),dataset:{page}}));
   const content={...node(),querySelector:get,querySelectorAll:selector=>{const equipmentMatch=selector.match(/^\[data-equipment-attendance-(edit|delete)\]$/);if(equipmentMatch){const kind=equipmentMatch[1];return [...content.innerHTML.matchAll(new RegExp('data-equipment-attendance-'+kind+'="(\\d+)"','g'))].map(([,id])=>Object.assign(get('[data-equipment-attendance-'+kind+'="'+id+'"]'),{isConnected:true,dataset:{['equipmentAttendance'+kind[0].toUpperCase()+kind.slice(1)]:id}}));}const match=selector.match(/^\[data-restricted-(doc|worker|presence|units)\]$/);if(!match)return [];const kind=match[1],key='restricted'+kind[0].toUpperCase()+kind.slice(1);return [...content.innerHTML.matchAll(new RegExp('data-restricted-'+kind+'="(\\d+)"','g'))].map(([,id])=>Object.assign(get('[data-restricted-'+kind+'="'+id+'"]'),{dataset:{[key]:id}}));}};
+  const originalQueryAll=content.querySelectorAll;
+  content.querySelectorAll=selector=>{
+    if(selector!=='[data-restricted-doc]')return originalQueryAll(selector);
+    return [...get('#restricted-document-results').innerHTML.matchAll(/data-restricted-doc="(\d+)"/g)].map(([,id])=>Object.assign(get('[data-restricted-doc="'+id+'"]'),{dataset:{restrictedDoc:id}}));
+  };
   const state={page:'admins',siteId:1,detail:null,admin:{...account},sites,types:{notice:'일반 공지'}};
   const dialog={open:false,showModal(){this.open=true;},close(){this.open=false;}};
   const context={state,content,dialog,siteSelect:get('#site-select'),detailEpoch:1,workerListEpoch:0,sitePhotoEpoch:0,permitRoleCleanup:null,siteEducationCleanup:null,labels:{documents:'안전 문서',admins:'관리자 계정'},statusLabels:{draft:'임시저장'},esc,URLSearchParams,today:()=> '2026-11-02',document:{createElement:node,querySelector:selector=>selector.startsWith('dialog')?null:get(selector),querySelectorAll:()=>pages},$:get,location:{assign:path=>redirects.push(path)},flash:message=>flashes.push(message),showError:error=>errors.push(error.message),confirm:()=>true,FormData:class{constructor(form){return Object.entries(form.values||{});}},fetch:async(path,options)=>{requests.push({path,options});return fetcher(path,options);}};
@@ -65,6 +70,44 @@ function screen(fetcher=async()=>({ok:true,status:200,json:async()=>[]})){
   return {context,state,content,dialog,nodes,get,pages,requests,errors,redirects,flashes,submit:async values=>{const form=get('#dialog-form');form.values=values;await form.onsubmit({preventDefault(){},currentTarget:form});}};
 }
 const response=data=>({ok:true,status:200,json:async()=>data});
+
+test('제한 문서 검색은 조건을 전달하고 상세 복귀·실패 때 입력을 보존한다',async()=>{
+  let fail=false;const doc={id:5,site_id:1,type:'notice',title:'가상 문서',date:'2026-11-02',body:'본문',status:'approved'};
+  const ui=screen(async path=>path==='/api/sites'?response(sites):fail?{ok:false,status:400,json:async()=>({error:'조회 실패'})}:response(path.includes('?')?[doc]:doc));
+  ui.state.page='documents';ui.state.admin={id:4,scope:'restricted'};await ui.context.renderRestrictedDocuments();
+  assert.equal(ui.requests.at(-1).path,'/api/documents?siteId=1');
+  for(const [key,value] of Object.entries({type:'notice',q:'가상 & 제목',from:'2026-11-01',to:'2026-11-30'}))ui.get('#restricted-document-'+key).value=value;
+  await ui.get('#restricted-document-search').onclick();const params=new URLSearchParams(ui.requests.at(-1).path.split('?')[1]);assert.equal(params.get('q'),'가상 & 제목');assert.equal(params.get('type'),'notice');assert.equal(params.get('from'),'2026-11-01');
+  ui.content.querySelectorAll('[data-restricted-doc]')[0].onclick();await ui.context.renderPending;ui.get('#restricted-back').onclick();await ui.context.renderPending;assert.equal(ui.get('#restricted-document-q').value,'가상 & 제목');
+  fail=true;await ui.get('#restricted-document-search').onclick();assert.match(ui.get('#restricted-document-status').textContent,/조회 실패/);assert.equal(ui.get('#restricted-document-q').value,'가상 & 제목');
+  const before=ui.requests.length;for(const dates of [['2026-02-30',''],['2026-11-30','2026-11-01'],['bad','']]){ui.get('#restricted-document-from').value=dates[0];ui.get('#restricted-document-to').value=dates[1];await ui.get('#restricted-document-search').onclick();assert.equal(ui.requests.length,before);assert.equal(ui.get('#restricted-document-from').value,dates[0]);}
+  fail=false;await ui.get('#restricted-document-reset').onclick();assert.equal(ui.requests.at(-1).path,'/api/documents?siteId=1');
+});
+
+test('제한 문서 검색은 같은 조건 재조회와 현장·계정 전환의 지연 응답을 차단한다',async()=>{
+  const waits=[],ui=screen(()=>{const wait=delayed();waits.push(wait);return wait.promise;});ui.state.page='documents';
+  const first=ui.context.renderRestrictedDocuments(),second=ui.get('#restricted-document-search').onclick();
+  waits[1].resolve(response([{id:2,title:'최신 결과'}]));await second;waits[0].resolve(response([{id:1,title:'이전 결과'}]));await first;assert.match(ui.get('#restricted-document-results').innerHTML,/최신 결과/);assert.doesNotMatch(ui.get('#restricted-document-results').innerHTML,/이전 결과/);
+  for(const change of ['site','account','aba']){ui.get('#restricted-document-q').value='이전 현장 검색';const pending=ui.get('#restricted-document-search').onclick(),wait=waits.at(-1);if(change==='account')ui.state.admin={id:99};else {ui.state.siteId=2;ui.context.detailEpoch++;if(change==='aba')ui.state.siteId=1;}
+    ui.get('#restricted-document-results').innerHTML='새 화면';wait.resolve(response([{id:3,title:'오래된 응답'}]));await pending;assert.equal(ui.get('#restricted-document-results').innerHTML,'새 화면');
+    const next=ui.context.renderRestrictedDocuments();waits.at(-1).resolve(response([]));await next;assert.equal(ui.get('#restricted-document-q').value,'');
+  }
+});
+
+test('제한 문서 검색의 이전 인증 오류는 새 결과를 덮지 않는다',async()=>{
+  const waits=[],ui=screen(()=>{const wait=delayed();waits.push(wait);return wait.promise;});ui.state.page='documents';const first=ui.context.renderRestrictedDocuments(),second=ui.get('#restricted-document-search').onclick();
+  waits[1].resolve(response([{id:1,title:'새 검색 결과'}]));await second;waits[0].resolve({ok:false,status:401,json:async()=>({error:'이전 세션 오류'})});await first;
+  assert.match(ui.get('#restricted-document-results').innerHTML,/새 검색 결과/);assert.deepEqual(ui.redirects,[]);assert.equal(ui.get('#restricted-document-status').textContent,'1건 조회했습니다.');
+});
+
+test('제한 문서 목록 A→B→A 이동 뒤 첫 A 응답과 이전 검색 조건을 재사용하지 않는다',async()=>{
+  const waits=[],ui=screen(()=>{const wait=delayed();waits.push(wait);return wait.promise;});ui.state.page='documents';
+  const first=ui.context.renderRestrictedDocuments();ui.get('#restricted-document-q').value='첫 현장 조건';const oldSearch=ui.get('#restricted-document-search').onclick();
+  ui.state.siteId=2;ui.context.detailEpoch++;const middle=ui.context.renderRestrictedDocuments();waits[2].resolve(response([]));await middle;
+  ui.state.siteId=1;ui.context.detailEpoch++;const last=ui.context.renderRestrictedDocuments();waits[3].resolve(response([{id:4,title:'새 A 결과'}]));await last;
+  waits[0].resolve(response([{id:1,title:'옛 A 결과'}]));waits[1].resolve(response([{id:2,title:'옛 검색 결과'}]));await Promise.all([first,oldSearch]);
+  assert.match(ui.get('#restricted-document-results').innerHTML,/새 A 결과/);assert.doesNotMatch(ui.get('#restricted-document-results').innerHTML,/옛/);assert.equal(ui.get('#restricted-document-q').value,'');
+});
 
 test('제한 작업계획서 기본정보는 명시된 필드·기존 시간·작업구분만 읽고 HTML과 중첩 자료를 차단한다',async()=>{
   const ui=screen(),details=Object.fromEntries(Object.keys(ui.context.planFields).map(key=>[key,'가상 <'+key+'> & 설명']));
@@ -395,7 +438,7 @@ test('현장·문서·관리자 목록의 이전 응답과 이전 배정 폼은 
   for(const target of ['sites','documents','accounts']){
     const wait=delayed(),ui=screen(async()=>wait.promise);ui.content.innerHTML='새 화면';
     const pending=target==='sites'?ui.context.loadSites():target==='documents'?(ui.state.page='documents',ui.context.renderRestrictedDocuments()):ui.context.renderAccounts();
-    ui.context.detailEpoch++;ui.state.page='documents';ui.state.siteId=2;wait.resolve(response(target==='accounts'?[account]:sites));await pending;
+    ui.context.detailEpoch++;ui.state.page='documents';ui.state.siteId=2;ui.content.innerHTML='새 화면';wait.resolve(response(target==='accounts'?[account]:sites));await pending;
     assert.equal(ui.content.innerHTML,'새 화면');assert.equal(ui.state.siteId,2);
   }
   const ui=screen(async()=>response([account]));await ui.context.renderAccounts();ui.get('[data-admin-scope="1"]').onclick();ui.context.detailEpoch++;await ui.submit({scope:'restricted'});assert.equal(ui.requests.length,1);
@@ -441,7 +484,11 @@ test('실제 HTTP 로그인→배정 현장 선택→공지·근로자·출역·
     for(const name of ['가상 배정 첫 현장','가상 배정 둘째 현장','가상 미배정 현장']){const result=await send('/api/sites','POST',{name},globalCookie);assert.equal(result.status,201);created.push(await result.json());}
     const createdAccount=await send('/api/admin-accounts','POST',{loginId:'scope_ui',name:'가상 제한 관리자',password:'virtual-password-123',scope:'restricted',siteIds:created.slice(0,2).map(s=>s.id)},globalCookie);assert.equal(createdAccount.status,201);const limited=await createdAccount.json(),cookie=await login('scope_ui'),session=await(await send('/api/session','GET',null,cookie)).json();
     const ui=screen((path,options)=>fetch(base+path,{...options,headers:{...options.headers,cookie,'x-admin-context':session.context}}));ui.context.applyAdminScope(session.admin);await ui.context.render();assert.equal(ui.state.siteId,created[0].id);assert.equal(ui.state.sites.length,2);assert.doesNotMatch(ui.get('#site-select').innerHTML,/미배정/);
-    ui.get('#site-select').value=String(created[1].id);ui.get('#site-select').onchange();await ui.context.renderPending;assert.equal(ui.state.siteId,created[1].id);ui.get('#restricted-notice-add').onclick();await ui.submit({title:'가상 제한 공지',date:'2026-11-02',body:'가상 본문'});assert.equal(ui.dialog.open,false);assert.match(ui.content.innerHTML,/가상 제한 공지/);assert.deepEqual(ui.errors,[]);
+    ui.get('#site-select').value=String(created[1].id);ui.get('#site-select').onchange();await ui.context.renderPending;assert.equal(ui.state.siteId,created[1].id);ui.get('#restricted-notice-add').onclick();await ui.submit({title:'가상 제한 공지',date:'2026-11-02',body:'가상 본문'});assert.equal(ui.dialog.open,false);assert.match(ui.get('#restricted-document-results').innerHTML,/가상 제한 공지/);assert.deepEqual(ui.errors,[]);
+    for(const [key,value] of Object.entries({type:'notice',q:'가상 본문',from:'2026-11-02',to:'2026-11-02'}))ui.get('#restricted-document-'+key).value=value;
+    await ui.get('#restricted-document-search').onclick();assert.match(ui.get('#restricted-document-results').innerHTML,/가상 제한 공지/);
+    ui.get('#restricted-document-from').value='2026-11-03';ui.get('#restricted-document-to').value='2026-11-04';await ui.get('#restricted-document-search').onclick();assert.match(ui.get('#restricted-document-results').innerHTML,/조회 조건에 맞는 문서가 없습니다/);
+    await ui.get('#restricted-document-reset').onclick();assert.match(ui.get('#restricted-document-results').innerHTML,/가상 제한 공지/);
     const equipmentResponse=await send('/api/equipment','POST',{siteId:created[1].id,kind:'가상 UI 장비',model:'가상 형식',registration:'가상-031',capacity:'가상 용량',manufacturer:'가상 제조사',owner:'민감소유주'},globalCookie);assert.equal(equipmentResponse.status,201);const equipment=await equipmentResponse.json();
     ui.state.page='equipment-attendance';await ui.context.render();ui.get('#equipment-attendance-add').onclick();assert.doesNotMatch(ui.get('#dialog-body').innerHTML,/driverBirth|driverPhone/);await ui.submit({equipmentId:String(equipment.id),date:'2026-11-02',driverName:'가상 UI 운전원',note:'가상 출역 메모'});assert.equal(ui.dialog.open,false);assert.match(ui.content.innerHTML,/가상 UI 장비/);assert.doesNotMatch(ui.content.innerHTML,/민감소유주|생년월일|연락처/);
     const equipmentList=async()=>(await(await send('/api/equipment-attendance?siteId='+created[1].id+'&month=2026-11','GET',null,cookie)).json());let record=(await equipmentList())[0];assert.equal(record.note,'가상 출역 메모');ui.get('[data-equipment-attendance-edit="'+record.id+'"]').onclick();assert.equal((await send('/api/equipment-attendance/'+record.id,'PUT',{siteId:created[1].id,date:record.date,driverName:'가상 다른 수정',note:'가상 충돌용',expectedVersion:record.version},cookie)).status,200);await ui.submit({date:'2026-11-03',driverName:'가상 UI 변경',note:'충돌 보존'});assert.equal(ui.dialog.open,true);assert.equal(ui.get('#dialog-form').values.note,'충돌 보존');assert.ok(ui.get('#dialog-error').textContent);ui.dialog.close();await ui.context.render();
