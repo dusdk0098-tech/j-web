@@ -89,6 +89,7 @@ assets.add('/board-create.js');
 assets.add('/board-inline-image.js');
 assets.add('/worker-preview.js');
 assets.add('/reviewer-login.js');
+assets.add('/worker-identity-remember.js');
 assets.add('/worker-list.js');
 assets.add('/attendance-matrix.js');
 assets.add('/restricted-month-editor.js');
