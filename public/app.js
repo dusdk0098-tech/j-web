@@ -3,6 +3,7 @@ import { faqPage,faqPager } from './faq-pages.js';
 import { mountManualPlanPrint } from './plan-manual-print.js';
 import { boardCreateMarkup,boardCreation } from './board-create.js';
 import { mountPermitMeasures } from './permit-measures.js';
+import { mountNotifications } from './notification-view.js';
 import { mountPlanPdfPrint,planPdfSnapshot } from './plan-pdf.js';
 import { riskScaleOptions, riskScore, copyRiskItem, copyRiskImprovement, groupRiskItems, selectedMusculoskeletalItems } from './risk-scale.js';
 import { selectBatchDocuments, selectBatchItems, siteDocumentsForDay } from './batch-print.js';
@@ -1349,10 +1350,11 @@ async function render(){
     return;
   }
   if(state.page==='incident-guide'){
-    content.innerHTML=`<section class="panel"><h2>사고 대응 안내</h2><p>사고 정도에 따라 현장의 대응 절차와 관계 기관의 최신 안내를 확인하세요. 실제 신고와 알림 전송은 이 화면에서 처리되지 않습니다.</p><p><a href="https://www.csi.go.kr/por/about_acd_001.do" target="_blank" rel="noopener noreferrer">건설사고 신고 절차 · 건설공사 안전관리종합정보망</a></p><p><a href="https://law.go.kr/LSW/lsLinkCommonInfo.do?chrClsCd=010202&amp;lspttninfSeq=154171" target="_blank" rel="noopener noreferrer">산업재해 발생 보고 규정 · 국가법령정보센터</a></p><p>적용 대상과 신고 방법은 사고 상황과 현행 규정을 확인하세요.</p>${['경상','중상','사망'].map(severity=>`<details><summary>${severity} 사고</summary><p>현장의 대응 절차와 위의 공식 신고 안내를 확인한 뒤 필요한 기록을 작성하세요.</p><button type="button" data-incident-report="${severity}">가상 재해 보고서 작성</button></details>`).join('')}<p><button type="button" id="incident-report-list">가상 재해 보고서 목록</button></p><p class="muted">공사 중단 알림 전송 기능은 연결되지 않았습니다.</p></section>`;
+    content.innerHTML=`<section class="panel"><h2>사고 대응 안내</h2><p>사고 정도에 따라 현장의 대응 절차와 관계 기관의 최신 안내를 확인하세요. 실제 신고는 관계 기관의 절차에 따라 직접 처리하세요.</p><p><a href="https://www.csi.go.kr/por/about_acd_001.do" target="_blank" rel="noopener noreferrer">건설사고 신고 절차 · 건설공사 안전관리종합정보망</a></p><p><a href="https://law.go.kr/LSW/lsLinkCommonInfo.do?chrClsCd=010202&amp;lspttninfSeq=154171" target="_blank" rel="noopener noreferrer">산업재해 발생 보고 규정 · 국가법령정보센터</a></p><p>적용 대상과 신고 방법은 사고 상황과 현행 규정을 확인하세요.</p>${['경상','중상','사망'].map(severity=>`<details><summary>${severity} 사고</summary><p>현장의 대응 절차와 위의 공식 신고 안내를 확인한 뒤 필요한 기록을 작성하세요.</p><button type="button" data-incident-report="${severity}">가상 재해 보고서 작성</button></details>`).join('')}<p><button type="button" id="incident-report-list">가상 재해 보고서 목록</button></p><p class="muted">공사 중단 알림은 아래 업체 설정 상태와 발송 대상을 확인한 뒤 요청할 수 있습니다.</p></section>`;
     content.querySelector('h2').insertAdjacentHTML('afterend','<h3>비상상황 초기 대응 참고</h3><ul><li>위험한 작업을 중지하고 현장의 비상 절차에 따라 대피합니다.</li><li>응급 상황에는 <a href="tel:119">119에 신고</a>하고, 구조자에게 사고 상황을 알립니다.</li><li>위험한 장소에 무리하게 진입하지 말고 현장 책임자와 긴급 대응 인력에 연락합니다.</li></ul><p><a href="https://www.kosha.or.kr/ebook/fcatalog/access/ecatalogt.jsp?Dir=560&amp;callmode=normal&amp;catimage=&amp;eclang=ko&amp;start=20&amp;um=s" target="_blank" rel="noopener noreferrer">비상상황 대응 참고자료 · 안전보건공단</a></p><h3>중대재해 발생 보고 확인</h3><p>중대재해에 해당하는 경우 지방고용노동관서 보고 기준을 즉시 확인하세요. 이 시험 화면은 신고하거나 보고하지 않습니다.</p><p><a href="https://1350.moel.go.kr/home/hp/data/faqView.do?faq_idx=1000001497" target="_blank" rel="noopener noreferrer">중대재해 발생보고 안내 · 고용노동부</a></p>');
     content.querySelectorAll('[data-incident-report]').forEach(button=>button.onclick=()=>editDocument(null,{severity:button.dataset.incidentReport},'incident').catch(showError));
-    $('#incident-report-list').onclick=()=>{state.page='documents';state.type='incident';state.detail=null;state.query='';state.documentFrom='';state.documentTo='';render().catch(showError);};return;
+    $('#incident-report-list').onclick=()=>{state.page='documents';state.type='incident';state.detail=null;state.query='';state.documentFrom='';state.documentTo='';render().catch(showError);};
+    if(state.admin?.scope==='global'&&state.siteId){const siteId=Number(state.siteId),panel=document.createElement('section');panel.className='panel';content.append(panel);await mountNotifications(panel,{api,siteId,siteName:siteSelect.selectedOptions[0]?.textContent||'',current:()=>state.page==='incident-guide'&&Number(state.siteId)===siteId&&panel.isConnected});}return;
   }
   if(state.page==='site-activity'){
     const generation=state.siteActivityGeneration=(state.siteActivityGeneration||0)+1;

@@ -23,6 +23,8 @@ import { workerSitePath } from './public/worker-link.js';
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { costImageType } from './cost-image.js';
 import { AiChat, AI_BODY_LIMIT } from './ai-chat.js';
+import { sensAlimtalk } from './sens-alimtalk.js';
+import { NotificationOutbox } from './notification-outbox.js';
 
 const root = dirname(fileURLToPath(import.meta.url));
 let publicOrigin='';
@@ -49,6 +51,7 @@ mkdirSync(dataDir, { recursive: true });
 const store = new Store(join(dataDir, 'jweb.sqlite'));
 const auth=new AdminAccounts(store.db);auth.bootstrap(process.env.JWEB_ADMIN_PASSWORD);
 const aiChat = new AiChat(store.db);
+const notificationOutbox = new NotificationOutbox(store.db,sensAlimtalk(),{systemWrite:fn=>adminRequests.exit(fn)});
 const personalNotes = new PersonalNotes(store.db);
 const stickerRequests = new StickerRequests(store.db);
 const commonWork = new CommonWork(store.db);
@@ -76,6 +79,7 @@ const mime = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; cha
 const assets = new Set(['/','/app.js','/office-template.js','/common-work-view.js','/rich-text.js','/rich-editor.js','/reviewer-office.js','/reviewer-profile.js','/employment-view.js','/employment-certificate','/employment-certificate.js','/messages-view.js','/board-view.js','/faq-pages.js','/schedule.js','/batch-print.js','/date-range.js','/daily-quantities.js','/risk-scale.js','/musculoskeletal.js','/worker-link.js','/worker-location.js','/remember-worker.js','/worker-documents.js','/worker-loads.js','/join-choices.js','/join-flow.js','/worker-fields.js','/site-qr.js','/tbm-sources.js','/training-groups.js','/site-statistics.js','/restaurant-price.js','/salary-summary.js','/attendance-meals.js','/joint-examples.js','/safety-log-sources.js','/style.css','/jweb-icon.svg','/jweb-icon-192.png','/jweb-icon-512.png','/worker-guide.html','/offline-forms.html','/join','/join.js','/login','/login.js','/review','/review.js']);
 const json = (res, code, value) => { res.writeHead(code, {'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}); res.end(JSON.stringify(value)); };
 assets.add('/admin-session.js');
+assets.add('/notification-view.js');
 assets.add('/client');assets.add('/client.js');
 assets.add('/common-work-print.js');
 assets.add('/personal-notes-tools.js');
@@ -538,6 +542,16 @@ const server = http.createServer((req,res)=>adminRequests.run(req,async()=>{
     if(url.pathname.startsWith('/api/') && url.pathname!=='/api/join' && !auth.valid(token))return json(res,401,{error:'관리자 로그인이 필요합니다.'});
     if(url.pathname.startsWith('/api/')&&url.pathname!=='/api/join'){
       req.checkSession=()=>{if(!auth.valid(token))return {status:401,error:'관리자 로그인이 필요합니다.'};if((req.headers['x-admin-context']||!['GET','HEAD'].includes(req.method)&&(req.headers.origin||req.headers['sec-fetch-site']))&&req.headers['x-admin-context']!==auth.context(token))return {status:409,error:'관리자 세션이 변경되었습니다. 입력 내용을 복사하고 새로고침해 주세요.'};return adminSitePolicy(store.db,req,url,()=>auth.session(token));};checkRequestSession(req);req.adminProtected=true;const writeHead=res.writeHead;res.writeHead=function(...args){if(args[0]<400&&!url.pathname.startsWith('/api/admin-accounts'))checkRequestSession(req);return writeHead.apply(this,args);};
+    }
+    if(url.pathname==='/api/notifications/status'&&req.method==='GET'){auth.requireGlobal(token);return json(res,200,notificationOutbox.status());}
+    const notificationRoute=url.pathname.match(/^\/api\/sites\/([1-9]\d*)\/notifications(?:\/(preview|[\w-]{43})(?:\/(send|results\/(\d{1,2})))?)?$/);
+    if(notificationRoute){
+      const [,site,part,action,index]=notificationRoute,siteId=Number(site),authorize=()=>{checkRequestSession(req);auth.requireGlobal(token);};authorize();
+      if(!part&&req.method==='GET')return json(res,200,notificationOutbox.list(siteId,authorize));
+      if(part==='preview'&&!action&&req.method==='POST')return json(res,200,notificationOutbox.prepare(siteId,await body(req),token,authorize));
+      if(part&&action==='send'&&req.method==='POST')return json(res,200,await notificationOutbox.send(siteId,part,await body(req),token,authorize));
+      if(part&&index!==undefined&&req.method==='POST'){await body(req);return json(res,200,await notificationOutbox.refresh(siteId,part,Number(index),authorize));}
+      return json(res,405,{error:'지원하지 않는 요청입니다.'});
     }
     if(url.pathname==='/api/admin-accounts'&&req.method==='GET'){let rows;store.db.exec('BEGIN IMMEDIATE');try{checkRequestSession(req);auth.requireGlobal(token);rows=auth.list();store.db.exec('COMMIT');}catch(error){store.db.exec('ROLLBACK');throw error;}checkRequestSession(req);return json(res,200,rows);}
     if(url.pathname==='/api/admin-accounts'&&req.method==='POST')return json(res,201,auth.create(await body(req),()=>{checkRequestSession(req);auth.requireGlobal(token);}));
