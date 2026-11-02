@@ -429,7 +429,7 @@ const server = http.createServer((req,res)=>passwordRequests.run(true,()=>adminR
       const now=new Date(),date=new Date(now.getTime()-now.getTimezoneOffset()*60000).toISOString().slice(0,10);store.recordWorkerLogin(session.worker.id,date,null,()=>{checkWorkerReport(req,key,session,input);const failure=workerSessionError(workerToken,session);if(failure)throw Object.assign(new Error(failure.error),{sessionStatus:failure.status});const currentSite=input.siteKey?store.siteFromAccess(input.siteKey):store.invitation(input.token);if(!currentSite||currentSite.id!==session.worker.site_id)throw new Error('유효한 현장 접속 주소를 확인해 주세요.');},input.location);return json(res,200,{ok:true,siteKey:store.siteAccessKey(session.worker.site_id)});
     }
     if(url.pathname==='/api/worker/permissions'&&req.method==='GET'){
-      const session=workerSessions.get(workerKey(workerToken));if(!session||session.expires<=Date.now())return json(res,401,{error:'근로자 로그인이 필요합니다.'});return json(res,200,store.workerPermissions(session.worker.site_id,session.worker.id));
+      const key=workerKey(workerToken),session=workerSessions.get(key);if(!session||session.expires<=Date.now())return json(res,401,{error:'근로자 로그인이 필요합니다.'});if(req.headers['x-worker-report-context']!==undefined)checkWorkerReport(req,key,session);return json(res,200,store.workerPermissions(session.worker.site_id,session.worker.id));
     }
     if(url.pathname==='/api/worker/muscle-references'&&req.method==='GET'){
       const session=workerSessions.get(workerKey(workerToken));if(!session||session.expires<=Date.now())return json(res,401,{error:'근로자 로그인이 필요합니다.'});
@@ -469,6 +469,7 @@ const server = http.createServer((req,res)=>passwordRequests.run(true,()=>adminR
     }
     if(url.pathname==='/api/worker/managed-attendance'&&['GET','PUT'].includes(req.method)){
       const session=workerSessions.get(workerKey(workerToken));if(!session||session.expires<=Date.now())return json(res,401,{error:'근로자 로그인이 필요합니다.'});const {site_id:siteId,id:workerId}=session.worker;
+      if(req.method==='GET'&&req.headers['x-worker-report-context']!==undefined)checkWorkerReport(req,workerKey(workerToken),session);
       if(!store.workerPermissions(siteId,workerId).includes('attendance'))return json(res,403,{error:'출역 관리 시험 권한이 필요합니다.'});
       if(req.method==='GET')return json(res,200,store.delegatedAttendance(siteId,workerId,url.searchParams.get('date')));
       const input=await body(req);if(!store.workerPermissions(siteId,workerId).includes('attendance'))return json(res,403,{error:'출역 관리 시험 권한이 필요합니다.'});const now=new Date();if(input.date!==new Date(now.getTime()-now.getTimezoneOffset()*60000).toISOString().slice(0,10))return json(res,400,{error:'출역은 오늘 날짜만 변경할 수 있습니다.'});store.setDelegatedAttendance(siteId,workerId,input,()=>{checkWorkerReport(req,workerKey(workerToken),session,input);const current=new Date(),today=new Date(current.getTime()-current.getTimezoneOffset()*60000).toISOString().slice(0,10);if(input.date!==today)throw Object.assign(new Error('오늘 날짜가 바뀌었습니다. 다시 조회해 주세요.'),{sessionStatus:409});});return json(res,200,{ok:true});
