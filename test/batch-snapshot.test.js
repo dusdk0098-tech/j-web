@@ -8,7 +8,7 @@ import {spawn} from 'node:child_process';
 import {once} from 'node:events';
 import {runInNewContext} from 'node:vm';
 import {freezeBatchImages} from '../public/batch-images.js';
-import {reloadDailyBatchRows,dailyBatchReport,joinedBatchPreview} from '../public/batch-print.js';
+import {reloadDailyBatchRows,dailyBatchReport,hazardReportBody,joinedBatchPreview} from '../public/batch-print.js';
 import {workerPreviewArticles} from '../public/worker-preview.js';
 
 const app=readFileSync(new URL('../public/app.js',import.meta.url),'utf8');
@@ -18,7 +18,7 @@ function harness(){
   const values=new Map([['/api/documents/1',{id:1,site_id:1,edit_version:1}],['/api/documents/1/attachments',[{id:2,name:'가상 파일'}]],['/api/documents/1/tbm-signature',{hasSignature:true,createdAt:'가상 시각'}]]);
   let prints=0,session={authenticated:true,admin:{scope:'global'},context:'virtual-session'},gate=null;
   const api=async path=>{reads.push(path);if(gate)await gate;if(path==='/api/session')return session;if(!session.authenticated)throw Error('로그인 만료');if(!values.has(path))throw Error('미예상 조회');return structuredClone(values.get(path));};
-  const context={detailEpoch:0,state,adminSession:Promise.resolve({context:'virtual-session'}),api,reloadDailyBatchRows,dailyBatchReport,joinedBatchPreview,esc:value=>String(value??''),
+  const context={detailEpoch:0,state,adminSession:Promise.resolve({context:'virtual-session'}),api,reloadDailyBatchRows,dailyBatchReport,hazardReportBody,joinedBatchPreview,esc:value=>String(value??''),
     freezeBatchImages:async()=>({dispose(){},check:async()=>{}}),
     content:{style:{},children:[],append(){},querySelectorAll:()=>[]},document:{body:{inert:false},createDocumentFragment:()=>({append(){},querySelectorAll:()=>[]}),createElement:()=>({append(){},querySelectorAll:()=>[]})},
     $:id=>nodes[id]??={},flash(){},showError:error=>errors.push(error.message),window:{print(){prints++;}},render:async()=>{},
