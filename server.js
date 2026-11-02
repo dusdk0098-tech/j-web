@@ -114,6 +114,8 @@ assets.add('/reviewer-basic-documents.js');
 assets.add('/permit-roles.js');
 assets.add('/ai-chat.js');assets.add('/ai-chat.css');
 function checkRequestSession(req){const failure=req.checkSession?.();if(failure)throw Object.assign(new Error(failure.error),{sessionStatus:failure.status});}
+function currentDocumentAdmin(req,token){checkRequestSession(req);const admin=auth.session(token);if(!admin)throw Object.assign(new Error('관리자 로그인이 필요합니다.'),{sessionStatus:401});return admin;}
+function withDocumentAuthor(doc){return {...doc,author_name:store.documentAuthor(doc.id)};}
 async function boardAttachmentRequest(req,res,url,match,actor){
   const [,id,fileId]=match,version=url.searchParams.get('version'),authorize=()=>checkRequestSession(req);
   if(!fileId&&req.method==='GET')return json(res,200,store.boardAttachments(id,version,actor,authorize));
@@ -924,7 +926,7 @@ const server = http.createServer((req,res)=>passwordRequests.run(true,()=>adminR
     }
     const costItem=url.pathname.match(/^\/api\/safety-costs\/(\d+)$/);
     if(costItem&&req.method==='PUT')return json(res,200,store.updateSafetyCost(costItem[1],await body(req),()=>checkRequestSession(req)));
-    if(url.pathname==='/api/safety-cost-reports'&&req.method==='POST')return json(res,201,store.createSafetyCostReport(await body(req),()=>checkRequestSession(req)));
+    if(url.pathname==='/api/safety-cost-reports'&&req.method==='POST')return json(res,201,withDocumentAuthor(store.createSafetyCostReport(await body(req),()=>checkRequestSession(req),()=>currentDocumentAdmin(req,token))));
     const costMonthFile=url.pathname.match(/^\/api\/safety-cost-month-files(?:\/(\d+))?$/);
     if(costMonthFile){const siteId=url.searchParams.get('siteId'),month=url.searchParams.get('month'),id=costMonthFile[1];
       if(!id&&req.method==='GET')return json(res,200,store.safetyCostMonthFiles(siteId,month));
@@ -1021,15 +1023,14 @@ const server = http.createServer((req,res)=>passwordRequests.run(true,()=>adminR
     if (url.pathname === '/api/attendance/delegated-events' && req.method === 'GET') return json(res,200,store.delegatedAttendanceEvents(url.searchParams.get('siteId'),url.searchParams.get('date')));
     if(url.pathname==='/api/office-approval-default'&&req.method==='GET'){const result=store.officeApprovalDefault(url.searchParams.get('siteId'),url.searchParams.get('kind'),url.searchParams.get('otherKind')||'');checkRequestSession(req);return json(res,200,result);}
     if(url.pathname==='/api/office-reference-preview'&&req.method==='GET'){const siteId=Number(url.searchParams.get('siteId')),id=Number(url.searchParams.get('id'));if(!Number.isSafeInteger(siteId)||siteId<1||!Number.isSafeInteger(id)||id<1)throw new Error('현장과 참조 문서를 확인해 주세요.');const result=store.officeReferenceInfo(siteId,id);checkRequestSession(req);return json(res,200,result);}
-    const currentDocumentAdmin=()=>{checkRequestSession(req);const admin=auth.session(token);if(!admin)throw Object.assign(new Error('관리자 로그인이 필요합니다.'),{sessionStatus:401});return admin;};
     if (url.pathname === '/api/documents') {
       if (req.method === 'GET') {const rows=store.documents(url.searchParams.get('siteId'),url.searchParams.get('type') || '',url.searchParams.get('q') || '',url.searchParams.get('from') || '',url.searchParams.get('to') || '',url.searchParams.get('riskKind') || '',url.searchParams.get('riskContractorId') || '',url.searchParams.get('instructionCompanyId') || '',url.searchParams.get('permitCompany') || '',url.searchParams.get('permitFrom') || '',url.searchParams.get('permitTo') || '',url.searchParams.get('educationKind') || '',url.searchParams.get('workPlanCompany') || '',url.searchParams.get('checklistCategory') || '');checkRequestSession(req);const actor=auth.session(token);return json(res,200,actor.scope==='global'?rows:rows.filter(row=>actor.siteIds.includes(row.site_id)));}
-      if (req.method === 'POST') {const input=await body(req,220000);return json(res,201,input.officeSetup===undefined?store.createAuthorizedDocument(input,()=>checkRequestSession(req),currentDocumentAdmin):store.createOfficeDraft(input,()=>checkRequestSession(req),null,currentDocumentAdmin));}
+      if (req.method === 'POST') {const input=await body(req,220000);return json(res,201,withDocumentAuthor(input.officeSetup===undefined?store.createAuthorizedDocument(input,()=>checkRequestSession(req),()=>currentDocumentAdmin(req,token)):store.createOfficeDraft(input,()=>checkRequestSession(req),null,()=>currentDocumentAdmin(req,token))));}
     }
     const copyWorkPlan=url.pathname.match(/^\/api\/documents\/(\d+)\/copy-work-plan$/);
-    if(copyWorkPlan&&req.method==='POST')return json(res,201,store.copyWorkPlan(copyWorkPlan[1],await body(req),()=>checkRequestSession(req),currentDocumentAdmin));
+    if(copyWorkPlan&&req.method==='POST')return json(res,201,withDocumentAuthor(store.copyWorkPlan(copyWorkPlan[1],await body(req),()=>checkRequestSession(req),()=>currentDocumentAdmin(req,token))));
     const copyOffice=url.pathname.match(/^\/api\/documents\/(\d+)\/copy-office$/);
-    if(copyOffice&&req.method==='POST')return json(res,201,store.copyOfficeDocument(copyOffice[1],await body(req),()=>checkRequestSession(req),currentDocumentAdmin));
+    if(copyOffice&&req.method==='POST')return json(res,201,withDocumentAuthor(store.copyOfficeDocument(copyOffice[1],await body(req),()=>checkRequestSession(req),()=>currentDocumentAdmin(req,token))));
     if (url.pathname === '/api/daily-report/previous' && req.method === 'GET') return json(res,200,store.previousDailyReport(url.searchParams.get('siteId'),url.searchParams.get('before')));
     if (url.pathname === '/api/joint-inspection/previous' && req.method === 'GET') return json(res,200,store.previousJointInspection(url.searchParams.get('siteId'),url.searchParams.get('before')));
     if (url.pathname === '/api/inspection/previous' && req.method === 'GET') return json(res,200,store.previousInspections(url.searchParams.get('siteId'),url.searchParams.get('before'),url.searchParams.get('excludeId')));
@@ -1172,16 +1173,16 @@ const server = http.createServer((req,res)=>passwordRequests.run(true,()=>adminR
     if (match) {
       const [,id,part] = match;
       if (req.method === 'GET' && part === 'events') return json(res,200,store.events(id));
-      if (req.method === 'POST' && part === 'publish-notice') return json(res,200,store.publishNotice(id,()=>checkRequestSession(req)));
+      if (req.method === 'POST' && part === 'publish-notice') return json(res,200,withDocumentAuthor(store.publishNotice(id,()=>checkRequestSession(req))));
       if (req.method === 'POST' && part === 'copy-notice-files') {const input=await body(req);return json(res,200,store.copyNoticeAttachments(id,input.sourceId));}
       if (req.method === 'GET' && part === 'notice-reads') return json(res,200,store.noticeReads(id));
       if (req.method === 'GET' && part === 'training-checks') return json(res,200,store.trainingChecks(id));
       if (req.method === 'GET' && part === 'training-targets') return json(res,200,store.trainingTargets(id));
       if (req.method === 'PUT' && part === 'training-targets') {const input=await body(req);store.setTrainingTargets(id,input.workerIds,()=>{checkRequestSession(req);if((input.managerIds!==undefined||input.expectedEditVersion!==undefined)&&(!Number.isSafeInteger(input.expectedEditVersion)||store.document(id)?.edit_version!==input.expectedEditVersion))throw Object.assign(new Error('교육 문서 또는 대상이 변경되었습니다. 다시 확인해 주세요.'),{sessionStatus:409});},input.managerIds);return json(res,200,{ok:true});}
-      if (req.method === 'GET' && !part) { const d=store.document(id); return d ? json(res,200,d) : json(res,404,{error:'문서를 찾을 수 없습니다.'}); }
-      if (req.method === 'PUT' && !part) {const input=await body(req,220000);if(!Number.isSafeInteger(input.expectedEditVersion))throw Object.assign(new Error('문서 버전이 없습니다. 입력 내용을 복사한 뒤 화면을 새로고침해 주세요.'),{sessionStatus:409});return json(res,200,store.updateDocument(id,input,()=>checkRequestSession(req)));}
+      if (req.method === 'GET' && !part) { const d=store.document(id); return d ? json(res,200,withDocumentAuthor(d)) : json(res,404,{error:'문서를 찾을 수 없습니다.'}); }
+      if (req.method === 'PUT' && !part) {const input=await body(req,220000);if(!Number.isSafeInteger(input.expectedEditVersion))throw Object.assign(new Error('문서 버전이 없습니다. 입력 내용을 복사한 뒤 화면을 새로고침해 주세요.'),{sessionStatus:409});return json(res,200,withDocumentAuthor(store.updateDocument(id,input,()=>checkRequestSession(req))));}
       if (req.method === 'DELETE' && !part) {const input=await body(req);store.deleteBasicDocument(input.siteId,id,input.expectedVersion);return json(res,200,{ok:true});}
-      if (req.method === 'POST' && part === 'transition') {const input=await body(req);return json(res,200,store.managedTransition(id,{...input,expectedEditVersion:input.expectedEditVersion??null},()=>checkRequestSession(req),input.expectedCycleId??null));}
+      if (req.method === 'POST' && part === 'transition') {const input=await body(req);return json(res,200,withDocumentAuthor(store.managedTransition(id,{...input,expectedEditVersion:input.expectedEditVersion??null},()=>checkRequestSession(req),input.expectedCycleId??null)));}
     }
     return json(res,404,{error:'요청한 경로가 없습니다.'});
   } catch (e) {
