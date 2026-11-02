@@ -6,7 +6,7 @@ import { mountPermitMeasures } from './permit-measures.js';
 import { mountNotifications } from './notification-view.js';
 import { mountPlanPdfPrint,planPdfSnapshot } from './plan-pdf.js';
 import { riskScaleOptions, riskScore, copyRiskItem, copyRiskImprovement, groupRiskItems, selectedMusculoskeletalItems } from './risk-scale.js';
-import { selectBatchDocuments, selectBatchItems, siteDocumentsForDay } from './batch-print.js';
+import { selectBatchDocuments, selectBatchItems, mountSiteBatchResults, dailyBatchReport } from './batch-print.js';
 import { paginateWorkers, workerSummaryMarkup } from './worker-list.js';
 import { managerCheckQuestions } from './reviewer-manager-check.js';
 import { weeklyPpeMarkup } from './weekly-ppe.js';
@@ -53,7 +53,7 @@ function applyAdminScope(admin) {
   const global=admin?.scope==='global';
   document.querySelectorAll('[data-page]').forEach(button=>{button.hidden=!global&&!['documents','workers','attendance','equipment-attendance'].includes(button.dataset.page);});
   for(const selector of ['#site-add','#sticker-requests','#ai-chat'])$(selector).hidden=!global;
-  if(!global){state.page='documents';state.detail=null;document.querySelector('.sidebar-help').textContent='배정 현장의 문서 요약·일반 공지 임시저장, 근로자 기본정보, 날짜별 출역·공수와 장비 출역을 관리합니다. 다른 기능은 전역 관리자에게 요청하세요.';}
+  if(!global){state.page='documents';state.detail=null;document.querySelector('.sidebar-help').textContent='배정 현장의 문서 요약·일반 공지 임시저장·수정, 근로자 기본정보, 날짜별 출역·공수와 장비 출역을 관리합니다. 다른 기능은 전역 관리자에게 요청하세요.';}
 }
 let sitePhotoEpoch=0,workerListEpoch=0,detailEpoch=0,workerSelfCheckEpoch=0,ppeDetailEpoch=0,workerEditEpoch=0,joinRecordEpoch=0;
 let permitRoleCleanup=null,siteEducationCleanup=null;
@@ -922,12 +922,16 @@ async function renderDetail(){
   if(doc.type==='permit')for(const control of content.querySelectorAll('button,input[type=file]')){if(['back','print'].includes(control.id))continue;const handler=control.onclick;if(handler)control.onclick=function(...args){if(this.disabled||!currentDetail())return;return handler.apply(this,args);};}
   return doc;
 }
-async function showBatchPreview(ids,reports=[],siteId=state.siteId,includeDailyPhotos=false,siteDocuments=null,autoPrint=false){
+async function showBatchPreview(ids,reports=[],siteId=state.siteId,includeDailyPhotos=false,siteDocuments=null,autoPrint=false,dailyReports=[]){
   if(document.body.inert)return;
-  const page=state.page;let epoch=detailEpoch,expectedSite=state.siteId,expectedDetail=state.detail,printButton;
-  const active=()=>detailEpoch===epoch&&state.page===page&&state.siteId===expectedSite&&state.detail===expectedDetail;
+  const page=state.page,admin=state.admin;let epoch=detailEpoch,expectedSite=state.siteId,expectedDetail=state.detail,printButton;
+  const active=()=>state.admin===admin&&detailEpoch===epoch&&state.page===page&&state.siteId===expectedSite&&state.detail===expectedDetail;
   const fragment=document.createDocumentFragment(),wasInert=document.body.inert;document.body.inert=true;content.style.visibility='hidden';
   try{
+    if(ids.length+reports.length+dailyReports.length>20)throw Error('한 번에 문서 20개까지 선택할 수 있습니다.');
+    const checkReports=async()=>{const initial=await adminSession,session=await api('/api/session',{},active);if(!active())return;if(!session?.authenticated||session.admin?.scope!=='global'||!initial.context||session.context!==initial.context)throw Error('관리자 로그인 또는 권한이 변경되었습니다. 새로고침해 주세요.');};
+    if(dailyReports.length){await checkReports();if(!active())return;}
+    for(const report of dailyReports){const group=document.createElement('article');group.className='panel batch-document';group.innerHTML=dailyBatchReport(report,esc);fragment.append(group);}
     for(const [index,id] of ids.entries()){
       flash(`문서 미리보기를 준비 중입니다. ${index+1}/${ids.length}`);const selected=siteDocuments?.find(doc=>doc.id===id);if(siteDocuments&&!selected)throw Error('선택한 현장 문서를 다시 확인해 주세요.');if(selected)state.siteId=selected.site_id;state.detail=id;expectedSite=state.siteId;expectedDetail=id;const pending=renderDetail();epoch=detailEpoch;const rendered=await pending;if(!active())return;if(!rendered||rendered.id!==id||(selected&&rendered.site_id!==selected.site_id))throw Error('문서 또는 현장이 변경되었습니다. 다시 조회해 주세요.');
       const group=document.createElement('article');group.className='batch-document';for(const child of [...content.children])group.append(child.cloneNode(true));
@@ -936,8 +940,8 @@ async function showBatchPreview(ids,reports=[],siteId=state.siteId,includeDailyP
     }
     const statuses={received:'접수',reviewing:'검토 중',resolved:'조치 완료'};for(const report of reports){const group=document.createElement('article');group.className='panel batch-document';group.innerHTML=`<h2>가상 의견·위험신고: ${esc(report.title)}</h2><p>${esc(report.reporter)} · ${esc(report.created_at)} (UTC) · ${esc(statuses[report.status]||'상태 미확인')}</p><p class="detail-body">${esc(report.body)}</p><p class="detail-body">가상 조치 내용: ${esc(report.response||'없음')}</p><h3>가상 답변</h3>${report.replies.length?report.replies.map(reply=>`<p class="detail-body">${esc(reply.created_at)} (UTC) · ${esc(reply.body)}</p>`).join(''):'<p>답변 없음</p>'}${report.has_photo?`<figure><img class="worker-hazard-photo" src="/api/sites/${siteId}/hazard-reports/${report.id}/photo?preview=1" alt="가상 신고 사진"><figcaption><a href="/api/sites/${siteId}/hazard-reports/${report.id}/photo">시험 사진 다운로드</a></figcaption></figure>`:''}`;fragment.append(group);}
     state.siteId=siteId;state.detail=null;content.innerHTML='<section class="panel batch-controls"><h2>선택 문서 미리보기</h2><p>'+(includeDailyPhotos?'일보 첨부 사진과 같은 현장·날짜의 현장사진을 포함합니다. 사진은 조회 당시 목록입니다.':'문서 상세 화면의 내용과 선택한 가상 신고를 모았습니다. 일반 첨부파일은 별도로 확인하세요.')+'</p><button type="button" id="batch-back">목록으로</button> <button type="button" id="batch-print">인쇄</button></section>';content.append(fragment);$('#batch-back').onclick=()=>render().catch(showError);$('#batch-print').onclick=()=>{if([...content.querySelectorAll('.batch-document img')].some(img=>!img.complete||!img.naturalWidth)){flash('이미지가 아직 준비되지 않았거나 불러오지 못했습니다. 확인 후 다시 시도해 주세요.',true);return;}window.print();};flash('선택 문서 미리보기가 준비되었습니다.');
-    expectedSite=siteId;expectedDetail=null;printButton=$('#batch-print');const print=printButton.onclick;printButton.onclick=()=>{autoPrint=false;if(active()&&$('#batch-print')===printButton)print();};
-  }catch(error){if(!active())return;state.siteId=siteId;state.detail=null;await render();throw error;}finally{content.style.visibility='';document.body.inert=wasInert;}
+    expectedSite=siteId;expectedDetail=null;printButton=$('#batch-print');const print=printButton.onclick;printButton.onclick=async()=>{autoPrint=false;if(!active()||$('#batch-print')!==printButton||printButton.disabled)return;printButton.disabled=true;try{if(dailyReports.length)await checkReports();if(active()&&$('#batch-print')===printButton)print();}catch(error){if(active())showError(error);}finally{if(active())printButton.disabled=false;}};
+  }catch(error){if(!active())return;state.siteId=siteId;state.detail=null;expectedSite=siteId;expectedDetail=null;const recovery=render();epoch=detailEpoch;await recovery;if(!active())return;showError(error);throw error;}finally{content.style.visibility='';document.body.inert=wasInert;}
   if(autoPrint){try{await Promise.all([...content.querySelectorAll('.batch-document img')].map(image=>typeof image.decode==='function'?image.decode():image.complete&&image.naturalWidth?Promise.resolve():Promise.reject()));if(autoPrint)printButton.onclick();}catch{if(active()&&$('#batch-print')===printButton)flash('이미지를 불러오지 못했습니다. 다시 조회해 주세요.',true);}}
 }
 async function renderDailyTrainingStatistics(siteId,from,to,month,day){
@@ -1084,12 +1088,20 @@ async function renderRestrictedWorkforce(){
   });
 }
 async function renderRestrictedDocuments(){
-  const epoch=detailEpoch,siteId=state.siteId,detailId=state.detail,current=()=>detailEpoch===epoch&&state.page==='documents'&&state.siteId===siteId&&state.detail===detailId;
+  const epoch=detailEpoch,siteId=state.siteId,detailId=state.detail,actor=state.admin,current=()=>detailEpoch===epoch&&state.page==='documents'&&state.siteId===siteId&&state.detail===detailId&&state.admin===actor;
+  const editNotice=doc=>{
+    if(!current())return;
+    showDialog(doc?'일반 공지 수정':'일반 공지 임시저장',field('title','제목',doc?.title||'')+field('date','작성일',doc?.date||today(),'date')+'<label>본문<textarea name="body" maxlength="20000">'+esc(doc?.body||'')+'</textarea></label><p>임시저장 또는 반려된 일반 공지만 수정합니다. 게시·결재는 전역 관리자에게 요청하세요.</p>',data=>api(doc?`/api/documents/${doc.id}`:'/api/documents',{method:doc?'PUT':'POST',body:JSON.stringify({siteId,type:'notice',title:data.title,date:data.date,body:data.body,...(doc?{expectedEditVersion:doc.edit_version,details:JSON.parse(doc.details||'{}')}:{})})},current),current);
+  };
   content.textContent='배정 현장의 문서를 불러오는 중입니다.';
   if(detailId){
     const doc=await api('/api/documents/'+detailId,{},current);if(!current())return;
-    content.innerHTML=`<section class="panel"><button type="button" id="restricted-back">목록으로</button><h2>${esc(doc.title)}</h2><p>${esc(state.types[doc.type]||doc.type)} · ${esc(doc.date)} · ${esc(statusLabels[doc.status]||doc.status)}</p><p class="detail-body">${esc(doc.body)}</p><p>문서 제목·본문 요약입니다. 세부 서식, 첨부·서명, 결재·수정은 이 화면에서 지원하지 않습니다.</p></section>`;
+    content.innerHTML=`<section class="panel"><button type="button" id="restricted-back">목록으로</button><h2>${esc(doc.title)}</h2><p>${esc(state.types[doc.type]||doc.type)} · ${esc(doc.date)} · ${esc(statusLabels[doc.status]||doc.status)}</p><p class="detail-body">${esc(doc.body)}</p><p>문서 제목·본문 요약입니다. 임시저장·반려된 일반 공지는 수정할 수 있습니다. 세부 서식, 첨부·서명, 결재와 다른 유형의 수정은 이 화면에서 지원하지 않습니다.</p></section>`;
     $('#restricted-back').onclick=()=>{state.detail=null;render().catch(showError);};
+    if(doc.type==='notice'&&['draft','rejected'].includes(doc.status)){
+      content.insertAdjacentHTML('beforeend','<button type="button" id="restricted-notice-edit">일반 공지 수정</button>');
+      $('#restricted-notice-edit').onclick=()=>editNotice(doc);
+    }
     if(doc.type==='education'){
       content.insertAdjacentHTML('beforeend','<button type="button" id="restricted-education-targets">교육 대상 조회·설정</button>');
       $('#restricted-education-targets').onclick=async()=>{try{
@@ -1105,9 +1117,9 @@ async function renderRestrictedDocuments(){
     return;
   }
   const docs=await api('/api/documents?'+new URLSearchParams({siteId:String(siteId)}),{},current);if(!current())return;
-  content.innerHTML=`<section class="panel"><h2>배정 현장 문서</h2><p>배정된 현장의 문서 요약 조회와 일반 공지 임시저장만 지원합니다. 결재·게시·다른 문서 작성은 전역 관리자에게 요청하세요.</p><button type="button" id="restricted-notice-add">일반 공지 임시저장</button>${docs.length?'<ul>'+docs.map(doc=>`<li><button type="button" data-restricted-doc="${doc.id}">${esc(doc.title)}</button> · ${esc(doc.date)} · ${esc(statusLabels[doc.status]||doc.status)}</li>`).join('')+'</ul>':'<p>등록된 문서가 없습니다.</p>'}</section>`;
+  content.innerHTML=`<section class="panel"><h2>배정 현장 문서</h2><p>배정된 현장의 문서 요약 조회와 일반 공지 임시저장·수정을 지원합니다. 결재·게시·다른 문서 작성은 전역 관리자에게 요청하세요.</p><button type="button" id="restricted-notice-add">일반 공지 임시저장</button>${docs.length?'<ul>'+docs.map(doc=>`<li><button type="button" data-restricted-doc="${doc.id}">${esc(doc.title)}</button> · ${esc(doc.date)} · ${esc(statusLabels[doc.status]||doc.status)}</li>`).join('')+'</ul>':'<p>등록된 문서가 없습니다.</p>'}</section>`;
   content.querySelectorAll('[data-restricted-doc]').forEach(button=>button.onclick=()=>{if(!current())return;state.detail=Number(button.dataset.restrictedDoc);render().catch(showError);});
-  $('#restricted-notice-add').onclick=()=>showDialog('일반 공지 임시저장',field('title','제목')+field('date','작성일',today(),'date')+'<label>본문<textarea name="body" maxlength="20000"></textarea></label><p>임시저장만 합니다. 게시·결재는 전역 관리자에게 요청하세요.</p>',data=>api('/api/documents',{method:'POST',body:JSON.stringify({siteId,type:'notice',title:data.title,date:data.date,body:data.body})},current),current);
+  $('#restricted-notice-add').onclick=()=>editNotice(null);
 }
 async function render(){
   siteEducationCleanup?.();
@@ -1133,15 +1145,12 @@ async function render(){
   if(!state.siteId&&state.page!=='board'&&state.page!=='clients'&&state.page!=='admins'){content.innerHTML='<section class="panel empty">먼저 현장을 추가해 주세요. 시험을 위해 가상의 현장명을 사용하세요.</section>';return;}
   if(state.detail)return renderDetail();
   if(state.page==='site-print'){
-    const epoch=detailEpoch,sites=await api('/api/sites');if(state.page!=='site-print'||detailEpoch!==epoch)return;
+    const epoch=detailEpoch,admin=state.admin,current=()=>state.page==='site-print'&&detailEpoch===epoch&&state.admin===admin,sites=await api('/api/sites',{},current);if(!current())return;
     const selected=state.sitePrintSites||[state.siteId],date=state.sitePrintDate||today();
     content.innerHTML=`<section class="panel"><h2>현장별 가상 서류 출력</h2><p>선택한 현장의 같은 날짜에 작성된 가상 안전 문서를 모아 최대 20개까지 미리보고 인쇄합니다. 일반 첨부파일은 별도로 확인하세요.</p><label>작성일 <input id="site-print-date" type="date" value="${esc(date)}"></label><fieldset><legend>현장 선택</legend>${sites.map(site=>`<label><input type="checkbox" data-print-site="${site.id}" ${selected.includes(site.id)?'checked':''}> ${esc(site.name)}</label>`).join('')}</fieldset><button type="button" id="site-print-all">현장 전체 선택</button> <button type="button" id="site-print-search">문서 조회</button><div id="site-print-results" role="status"></div></section>`;
     content.querySelector('fieldset').insertAdjacentHTML('afterend','<p><a href="/offline-forms.html" target="_blank" rel="noopener noreferrer">오프라인 빈 시험 서식 열기</a> · <a href="/offline-forms.html" download="jweb-offline-forms.html">서식 파일 저장</a></p><p>미리 저장한 파일은 인터넷과 서버 없이 열 수 있습니다. 독립적인 시험용 예시이며 실제 업무나 공식 서식으로 사용할 수 없습니다.</p>');
     content.querySelector('fieldset').insertAdjacentHTML('afterend',`<div class="filters"><label>상단에서 선택한 현장의 장비 출역 월 <input type="month" id="site-print-equipment-month" value="${esc(state.equipmentAttendanceMonth||today().slice(0,7))}"></label><button type="button" id="site-print-equipment">장비 출역 보기·인쇄</button></div>`);$('#site-print-equipment').onclick=()=>{const month=$('#site-print-equipment-month').value;if(!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)){flash('장비 출역 월을 확인해 주세요.',true);return;}state.equipmentAttendanceMonth=month;state.page='equipment-attendance';render().catch(showError);};
-    const chosen=()=>[...content.querySelectorAll('[data-print-site]:checked')].map(input=>Number(input.dataset.printSite)),target=$('#site-print-results');
-    const clearResults=()=>{target.replaceChildren();};content.querySelectorAll('[data-print-site]').forEach(input=>{input.onchange=clearResults;});$('#site-print-date').onchange=clearResults;
-    $('#site-print-all').onclick=()=>{content.querySelectorAll('[data-print-site]').forEach(input=>{input.checked=true;});clearResults();};
-    $('#site-print-search').onclick=async event=>{const button=event.currentTarget,ids=chosen(),day=$('#site-print-date').value,requested=sites.filter(site=>ids.includes(site.id));try{button.disabled=true;target.textContent='문서를 조회하는 중입니다.';const docs=await siteDocumentsForDay(requested,day,api);if(!target.isConnected||state.page!=='site-print'||detailEpoch!==epoch||$('#site-print-date').value!==day||chosen().join(',')!==ids.join(','))return;state.sitePrintSites=ids;state.sitePrintDate=day;target.innerHTML=docs.length?`<p>선택한 가상 문서 ${docs.length}건</p><button type="button" id="site-print-select-all">문서 전체 선택</button> <button type="button" id="site-print-preview">선택 문서 미리보기</button><div class="table-wrap"><table><thead><tr><th>선택</th><th>현장</th><th>유형</th><th>제목</th><th>상태</th></tr></thead><tbody>${docs.map(doc=>`<tr><td><input type="checkbox" data-print-document="${doc.id}" aria-label="${esc(doc.title)} 선택"></td><td>${esc(doc.site_name)}</td><td>${esc(state.types[doc.type]||doc.type)}</td><td>${esc(doc.title)}</td><td>${esc(statusLabels[doc.status]||doc.status)}</td></tr>`).join('')}</tbody></table></div>`:'<p>해당 날짜에 작성된 시험 문서가 없습니다.</p>';if(docs.length){$('#site-print-select-all').onclick=()=>target.querySelectorAll('[data-print-document]').forEach(input=>{input.checked=true;});$('#site-print-preview').onclick=async()=>{try{const picked=selectBatchDocuments(docs,[...target.querySelectorAll('[data-print-document]:checked')].map(input=>input.dataset.printDocument));await showBatchPreview(picked,[],state.siteId,false,docs);}catch(error){showError(error);}};}}catch(error){if(target.isConnected)target.textContent=error.message;}finally{if(button.isConnected)button.disabled=false;}};return;
+    mountSiteBatchResults({content,target:$('#site-print-results'),sites,state,api,current,esc,onError:showError,preview:(ids,docs,reports)=>showBatchPreview(ids,[],state.siteId,false,docs,false,reports)});return;
   }
   if(state.page==='admins'){
     if(state.admin?.scope!=='global'){content.textContent='관리자 계정 관리는 전역 관리자만 사용할 수 있습니다.';return;}

@@ -59,6 +59,34 @@ function screen(fetcher=async()=>({ok:true,status:200,json:async()=>[]})){
 }
 const response=data=>({ok:true,status:200,json:async()=>data});
 
+test('제한 공지 수정은 기존 값과 버전을 보내고 거절되면 입력을 보존한다',async()=>{
+  const doc={id:5,type:'notice',title:'가상 <공지>',date:'2026-11-01',body:'가상 </textarea> 본문',status:'draft',edit_version:8,details:'{"retained":"가상 값"}'};
+  for(const status of [200,400,401,403,409]){
+    const ui=screen(async(path,options)=>options.method==='PUT'?{ok:status===200,status,json:async()=>status===200?doc:{error:'가상 저장 거절'}}:response(path==='/api/sites'?sites:doc));
+    ui.state.page='documents';ui.state.detail=5;ui.state.admin={scope:'restricted',id:4};
+    await ui.context.renderRestrictedDocuments();ui.get('#restricted-notice-edit').onclick();
+    assert.match(ui.get('#dialog-body').innerHTML,/가상 &lt;공지&gt;/);assert.match(ui.get('#dialog-body').innerHTML,/&lt;\/textarea&gt;/);
+    const values={title:'가상 수정',date:'2026-11-02',body:'보존할 입력'};await ui.submit(values);
+    const writes=ui.requests.filter(r=>r.options.method==='PUT');assert.equal(writes.length,1);assert.equal(writes[0].path,'/api/documents/5');
+    assert.deepEqual(JSON.parse(writes[0].options.body),{siteId:1,type:'notice',...values,expectedEditVersion:8,details:{retained:'가상 값'}});
+    assert.equal(ui.dialog.open,status!==200);
+    if(status!==200){assert.deepEqual(ui.get('#dialog-form').values,values);assert.ok(ui.get('#dialog-error').textContent);assert.equal(ui.get('#dialog-form button[type=submit]').disabled,false);}
+  }
+});
+
+test('제한 공지 수정은 상태·현장·계정과 오래된 응답을 검사한다',async()=>{
+  const doc={id:5,type:'notice',title:'가상',date:'2026-11-01',body:'가상',status:'draft',edit_version:8,details:'{}'};
+  for(const status of ['pending','approved','rejected']){
+    const ui=screen(async()=>response({...doc,status}));ui.state.page='documents';ui.state.detail=5;await ui.context.renderRestrictedDocuments();assert.equal(ui.content.innerHTML.includes('id="restricted-notice-edit"'),status==='rejected');
+  }
+  for(const transition of ['site','account','epoch']){
+    const change=ui=>{if(transition==='site')ui.state.siteId=2;else if(transition==='account')ui.state.admin={scope:'restricted',id:99};else ui.context.detailEpoch++;};
+    const wait=delayed(),loading=screen(async()=>wait.promise);loading.state.page='documents';loading.state.detail=5;const pending=loading.context.renderRestrictedDocuments();change(loading);loading.content.innerHTML='새 화면';wait.resolve(response(doc));await pending;assert.equal(loading.content.innerHTML,'새 화면');
+    const ui=screen(async()=>response(doc));ui.state.page='documents';ui.state.detail=5;await ui.context.renderRestrictedDocuments();ui.get('#restricted-notice-edit').onclick();change(ui);await ui.submit({title:'이전 입력'});assert.equal(ui.requests.filter(r=>r.options.method==='PUT').length,0);
+    const saving=delayed(),late=screen(async(path,options)=>options.method==='PUT'?saving.promise:response(doc));late.state.page='documents';late.state.detail=5;await late.context.renderRestrictedDocuments();late.get('#restricted-notice-edit').onclick();const save=late.submit({title:'가상 수정'});change(late);late.content.innerHTML='새 화면';saving.resolve(response(doc));await save;assert.equal(late.content.innerHTML,'새 화면');assert.deepEqual(late.flashes,[]);
+  }
+});
+
 test('제한 관리자 월별 안내는 조회 월 변경과 5일·6일 새로고침에 맞춰 갱신된다',async()=>{
   const ui=screen(async()=>response([]));let date='2026-12-05';ui.context.today=()=>date;
   ui.get('#restricted-month').value='2026-11';await ui.context.showRestrictedMonth(()=>true);
@@ -322,6 +350,9 @@ test('실제 HTTP 로그인→배정 현장 선택→공지·근로자·출역·
     assert.equal((await send('/api/equipment-attendance?siteId='+created[2].id+'&month=2026-11','GET',null,cookie)).status,403);ui.state.page='documents';await ui.context.render();
     const documents=await(await send('/api/documents?siteId='+created[1].id,'GET',null,cookie)).json();assert.equal(documents.length,1);assert.equal(documents[0].status,'draft');assert.equal(documents[0].site_id,created[1].id);
     ui.content.querySelectorAll('[data-restricted-doc]')[0].onclick();await ui.context.renderPending;assert.equal(ui.state.detail,documents[0].id);assert.match(ui.content.innerHTML,/가상 본문/);assert.doesNotMatch(ui.content.innerHTML,/결재 요청|암호 초기화/);
+    const noticePath='/api/documents/'+documents[0].id,noticeInput={siteId:created[1].id,type:'notice',title:'가상 동시 수정',date:'2026-11-02',body:'다른 변경',expectedEditVersion:documents[0].edit_version};
+    ui.get('#restricted-notice-edit').onclick();assert.equal((await send(noticePath,'PUT',noticeInput,globalCookie)).status,200);await ui.submit({title:'가상 충돌 입력',date:'2026-11-02',body:'보존할 본문'});assert.equal(ui.dialog.open,true);assert.equal(ui.get('#dialog-form').values.body,'보존할 본문');assert.match(ui.get('#dialog-error').textContent,/변경/);assert.equal((await(await send(noticePath,'GET',null,cookie)).json()).title,'가상 동시 수정');
+    ui.dialog.close();await ui.context.render();ui.get('#restricted-notice-edit').onclick();await ui.submit({title:'가상 공지 수정 완료',date:'2026-11-03',body:'가상 수정 본문'});assert.equal(ui.dialog.open,false);const updatedNotice=await(await send(noticePath,'GET',null,cookie)).json();assert.equal(updatedNotice.title,'가상 공지 수정 완료');assert.equal(updatedNotice.body,'가상 수정 본문');assert.equal(updatedNotice.date,'2026-11-03');assert.equal(updatedNotice.status,'draft');
     assert.equal((await send('/api/documents?siteId='+created[2].id,'GET',null,cookie)).status,403);assert.equal((await send('/api/admin-accounts','GET',null,cookie)).status,403);
     ui.state.page='workers';ui.state.detail=null;await ui.context.render();assert.match(ui.content.innerHTML,/등록된 근로자가 없습니다/);
     ui.get('#restricted-worker-add').onclick();addLicense(ui);licenseRows(ui)[0].name.value='가상 면허';licenseRows(ui)[0].number.value='가상-001';await ui.submit({name:'가상 UI 근로자',category:'직영',company:'',occupation:'가상 직종',memo:'가상 메모'});assert.equal(ui.dialog.open,false);assert.match(ui.content.innerHTML,/가상 UI 근로자/);
@@ -356,7 +387,9 @@ test('실제 HTTP 로그인→배정 현장 선택→공지·근로자·출역·
     ui.get('[data-restricted-presence="'+worker.id+'"]').onclick();await ui.submit({present:'0'});assert.equal(ui.dialog.open,false);assert.match(ui.content.innerHTML,/미출역/);assert.doesNotMatch(ui.content.innerHTML,/data-restricted-units/);
     ui.state.page='workers';ui.get('#site-select').value=String(created[0].id);ui.get('#site-select').onchange();await ui.context.renderPending;assert.doesNotMatch(ui.content.innerHTML,/가상 UI 수정/);assert.match(ui.content.innerHTML,/등록된 근로자가 없습니다/);
     for(const path of ['/api/workers?siteId=','/api/attendance?siteId='])assert.equal((await send(path+created[2].id,'GET',null,cookie)).status,403);
+    const noticeUi=screen((path,options)=>fetch(base+path,{...options,headers:{...options.headers,cookie,'x-admin-context':session.context}}));noticeUi.context.applyAdminScope(session.admin);noticeUi.state.siteId=created[1].id;noticeUi.state.page='documents';noticeUi.state.detail=documents[0].id;await noticeUi.context.renderRestrictedDocuments();noticeUi.get('#restricted-notice-edit').onclick();
     ui.get('#restricted-worker-add').onclick();addLicense(ui);licenseRows(ui)[0].name.value='가상 회수 보존';const updated=await send('/api/admin-accounts/'+limited.id,'PUT',{version:limited.version,scope:'restricted',siteIds:[]},globalCookie);assert.equal(updated.status,200);await ui.submit({name:'회수 후 가상',category:'직영',company:'',occupation:'가상'});assert.equal(ui.dialog.open,true);assert.match(ui.get('#dialog-error').textContent,/로그인/);assert.equal(ui.get('#dialog-form').values.name,'회수 후 가상');assert.equal(licenseRows(ui)[0].name.value,'가상 회수 보존');assert.equal((await(await send('/api/workers?siteId='+created[0].id,'GET',null,globalCookie)).json()).length,0);ui.dialog.close();await assert.rejects(ui.context.render(),/로그인/);assert.deepEqual(ui.redirects,['/login']);
+    await noticeUi.submit({title:'회수 후 공지',date:'2026-11-03',body:'보존할 공지 입력'});assert.equal(noticeUi.dialog.open,true);assert.equal(noticeUi.get('#dialog-form').values.body,'보존할 공지 입력');assert.match(noticeUi.get('#dialog-error').textContent,/로그인/);assert.equal((await(await send(noticePath,'GET',null,globalCookie)).json()).title,'가상 공지 수정 완료');
     const nextCookie=await login('scope_ui'),nextSession=await(await send('/api/session','GET',null,nextCookie)).json(),empty=screen((path,options)=>fetch(base+path,{...options,headers:{...options.headers,cookie:nextCookie,'x-admin-context':nextSession.context}}));empty.context.applyAdminScope(nextSession.admin);await empty.context.render();assert.match(empty.content.innerHTML,/배정 현장이 없습니다/);assert.deepEqual(empty.requests.map(r=>r.path),['/api/sites']);
   }finally{
     if(child.exitCode===null){const exited=once(child,'exit');child.kill();await exited;}
