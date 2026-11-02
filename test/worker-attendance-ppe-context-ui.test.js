@@ -9,7 +9,7 @@ const start=source.indexOf('    const loadPpe=async()=>'),end=source.indexOf("  
 assert.ok(monthLine&&start>=0&&end>start);
 
 test('출역과 보호구 조회는 원래 계정으로 보내며 전환 시 입력과 이전 응답을 보존한다',async()=>{
-  const requests=[],dayStatus={textContent:''},output={textContent:'이전 출역'},ppeStatus={textContent:''},ppeList={textContent:'작성 중 서명',replaceChildren(){this.textContent='';},append(){}},context={dayStatus,output,ppeStatus,ppeList,ppeGeneration:0,month:{value:'2026-11'},reportContext:{workerId:1,siteId:2,generation:'old'},active:true,workerPanelActive(){return context.active;},stopWorkerDay(){context.active=false;},fetch:(url,options)=>new Promise(resolve=>requests.push({url,options,resolve}))};
+  const requests=[],dayStatus={textContent:''},output={textContent:'이전 출역'},ppeStatus={textContent:''},ppeList={textContent:'작성 중 서명',replaceChildren(){this.textContent='';},append(){}},context={dayStatus,output,ppeStatus,ppeList,ppeRows:new Map(),ppeGeneration:0,month:{value:'2026-11'},reportContext:{workerId:1,siteId:2,generation:'old'},active:true,workerPanelActive(){return context.active;},stopWorkerDay(){context.active=false;},fetch:(url,options)=>new Promise(resolve=>requests.push({url,options,resolve}))};
   runInNewContext(monthLine+'\n'+source.slice(start,end)+'\nglobalThis.actions={load,loadPpe};',context);
   const attendance=context.actions.load(),ppe=context.actions.loadPpe();
   for(const request of requests)assert.equal(JSON.parse(request.options.headers['X-Worker-Report-Context']).generation,'old');

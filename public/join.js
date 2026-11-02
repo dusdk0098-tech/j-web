@@ -98,21 +98,23 @@ async function showWorker(worker,reportContext){
       }
     }catch(error){if(panel.isConnected){const status=document.createElement('p');status.textContent=error.message;panel.append(status);}}});
     const ppe=document.createElement('section');ppe.innerHTML='<h2>나의 가상 보호구 지급 내역</h2><p>시험 기록이며 실제 지급이나 수령을 증명하지 않습니다.</p><button type="button">목록 새로고침</button><ul></ul><p role="status"></p>';panel.append(ppe);
-    const ppeList=ppe.querySelector('ul'),ppeStatus=ppe.querySelector('[role=status]');let ppeGeneration=0;
+    const ppeList=ppe.querySelector('ul'),ppeStatus=ppe.querySelector('[role=status]'),ppeRows=new Map();let ppeGeneration=0;
     const loadPpe=async()=>{if(!workerPanelActive())return;const generation=++ppeGeneration;try{
       const response=await fetch('/api/worker/ppe-issues',{headers:{'X-Worker-Report-Context':JSON.stringify(reportContext)}}),rows=await response.json();if(!workerPanelActive()||generation!==ppeGeneration)return;if(response.status===409&&rows.sessionChanged){stopWorkerDay();dayStatus.textContent=rows.error||'로그인 세션이 변경되었습니다. 입력 내용을 복사한 뒤 다시 로그인해 주세요.';return;}if(!response.ok)throw Error(rows.error);
-      ppeList.replaceChildren();ppeStatus.textContent=rows.length?'':'기록이 없습니다.';
+      const nextRows=new Map(),nodes=[];ppeStatus.textContent=rows.length?'':'기록이 없습니다.';
       for(const row of rows){
+        const snapshot=JSON.stringify(row),existing=ppeRows.get(row.id);if(existing?.snapshot===snapshot){nextRows.set(row.id,existing);nodes.push(existing.li);continue;}
         const li=document.createElement('li'),summary=document.createElement('p');summary.textContent=`${row.date} · ${row.item} · ${row.quantity}개 · ${row.receipt_at?'시험 수령 확인됨':'미확인'}`;li.append(summary);
         if(row.receipt_at){const link=document.createElement('a');link.href=`/api/worker/ppe-issues/${row.id}/receipt`;link.textContent='시험 서명 다운로드';li.append(link);}
         else{
           const receipt=document.createElement('form');receipt.innerHTML='<p>가상 수령 서명</p><canvas width="320" height="120" class="signature-pad" aria-label="보호구 수령 시험 서명 입력 영역"></canvas><button type="button">서명 지우기</button> <button type="submit">시험 수령 확인</button>';
           const pad=signaturePad(receipt.querySelector('canvas')),submit=receipt.querySelector('[type=submit]');receipt.querySelector('[type=button]').onclick=()=>pad.clear();
-          receipt.onsubmit=async event=>{event.preventDefault();if(!workerPanelActive()||submit.disabled)return;submit.disabled=true;try{const result=await fetch(`/api/worker/ppe-issues/${row.id}/receipt`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({reportContext,version:row.version,signature:pad.value()})}),data=await result.json();if(!result.ok)throw Error(data.error);if(workerPanelActive())await loadPpe();}catch(error){if(workerPanelActive())ppeStatus.textContent=error.message;}finally{submit.disabled=false;}};
+          receipt.onsubmit=async event=>{event.preventDefault();if(!workerPanelActive()||!li.isConnected||ppeRows.get(row.id)?.li!==li||submit.disabled)return;submit.disabled=true;try{const result=await fetch(`/api/worker/ppe-issues/${row.id}/receipt`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({reportContext,version:row.version,signature:pad.value()})}),data=await result.json();if(!result.ok)throw Error(data.error);if(workerPanelActive())await loadPpe();}catch(error){if(workerPanelActive())ppeStatus.textContent=error.message;}finally{submit.disabled=false;}};
           li.append(receipt);
         }
-        ppeList.append(li);
+        nextRows.set(row.id,{snapshot,li});nodes.push(li);
       }
+      ppeRows.clear();for(const [id,entry] of nextRows)ppeRows.set(id,entry);if(nodes.length!==ppeList.children.length||nodes.some((node,index)=>node!==ppeList.children[index]))ppeList.replaceChildren(...nodes);
     }catch(error){if(workerPanelActive()&&generation===ppeGeneration)ppeStatus.textContent=error.message;}};
     ppe.querySelector('button').onclick=loadPpe;ppeStatus.textContent='불러오는 중입니다.';initialLoads.push(loadPpe);
     const daily=document.createElement('section');daily.innerHTML='<h2>오늘의 교육·회의 시험 참가 확인</h2><p>참석한 가상 교육만 선택하세요. 실제 교육 또는 본인 확인 기록이 아닙니다.</p><form><label><input type="checkbox" name="kind" value="tbm"> 일일안전교육 및 TBM</label><label><input type="checkbox" name="kind" value="education"> 안전·보건 교육</label><label><input type="checkbox" name="kind" value="meeting"> 위험성평가 이행상황 점검 회의</label><label><input type="checkbox" name="rights"> 안전이 확보되지 않은 작업을 거부할 권리와 의무를 확인했습니다.</label><button type="submit">시험 참가 확인</button></form><p role="status"></p>';panel.prepend(daily);
