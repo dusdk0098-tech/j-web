@@ -18,6 +18,15 @@ export function attendanceEditDeadline(month){
   const [year,number]=month.split('-').map(Number),nextYear=number===12?year+1:year,nextMonth=number===12?1:number+1;return nextYear>9999?null:`${nextYear}-${String(nextMonth).padStart(2,'0')}-05`;
 }
 
+export function attendanceNoticesMarkup(month,referenceDate){
+  const deadline=attendanceEditDeadline(month);
+  if(typeof referenceDate!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(referenceDate)||Number(referenceDate.slice(0,4))<1000)throw Error('기준 날짜를 확인해 주세요.');
+  const date=new Date(`${referenceDate}T00:00:00Z`);
+  if(Number.isNaN(date.getTime())||date.toISOString().slice(0,10)!==referenceDate)throw Error('기준 날짜를 확인해 주세요.');
+  if(!deadline||referenceDate>deadline)return '';
+  return `<p class="muted">수정 기한 참고: ${deadline}. J웹은 기한 이후에도 시험 변경을 허용합니다.</p><p class="muted">출역 소속·직종을 변경하면 해당 날짜의 교육·TBM 명부에 표시되는 소속·직종 정보에 반영됩니다. 교육 대상자는 자동으로 변경되지 않습니다.</p>`;
+}
+
 export function attendanceMatrix(workers,dates,field){
   if(!['company','occupation'].includes(field))throw Error('출역 집계 기준을 확인해 주세요.');
   const index=new Map(dates.map((date,i)=>[date,i])),groups=new Map();

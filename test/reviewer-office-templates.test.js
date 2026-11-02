@@ -51,6 +51,18 @@ const recommendation=(id=2)=>({document:{id:8,title:'가상 이전 문서',date:
 const signDraft=ui=>ui.setupFields['[data-draft-pad]'].emit('pointerdown');
 const saveDraft=async ui=>{ui.form.onsubmit({preventDefault(){}});await flush();};
 
+test('기존 직원 문서 수정은 새 서명을 선택한 경우에만 같은 요청으로 보낸다',async()=>{
+  for(const state of ['draft','rejected']){
+    const ui=await screen({state,prepare:true});ui.fields['[data-edit-sign-enabled]'].checked=true;ui.fields['[data-edit-pad]'].emit('pointerdown');await saveDraft(ui);assert.equal(ui.writes.length,1);assert.equal(ui.writes[0].method,'PUT');assert.equal(ui.writes[0].input.officeEditSignature.signature,'가상 서명:1');assert.equal(ui.writes[0].input.officeSetup,undefined);
+    const plain=await screen({state,prepare:true});await saveDraft(plain);assert.equal(plain.writes.length,1);assert.equal(plain.writes[0].input.officeEditSignature,undefined);
+  }
+});
+
+test('기존 직원 수정 서명 뒤 내용·참조가 바뀌면 다시 서명해야 하며 별도 결재 변경을 함께 보내지 않는다',async()=>{
+  const ui=await screen({state:'draft',prepare:true});ui.fields['[data-edit-sign-enabled]'].checked=true;ui.fields['[data-edit-pad]'].emit('pointerdown');ui.form.elements.title.value='수정한 가상 제목';ui.form.emit('input');await saveDraft(ui);assert.equal(ui.writes.length,0);assert.match(ui.status.textContent,/다시 입력/);assert.deepEqual(ui.fields['[data-edit-pad]'].ink,[]);
+  ui.fields['[data-edit-pad]'].emit('pointerdown');ui.line.value='3';ui.line.onchange();await saveDraft(ui);assert.equal(ui.writes.length,0);assert.match(ui.status.textContent,/다른 항목/);
+});
+
 test('새 문서의 전체 해제는 선택만 비우고 서명 그림과 진행 중 획을 취소한다',async()=>{
   for(const key of ['[data-clear-line]','[data-clear-references]']){
     const ui=await screen({prepare:true,title:'선택 해제 시험'});await flush();ui.draftLines[0].value='2';ui.draftLines[1].value='3';ui.draftReferences[0].checked=true;ui.draftReferences[1].checked=true;

@@ -1831,7 +1831,7 @@ export class Store {
   reviewerOfficeDetail(reviewerId,id){
     this.db.exec('SAVEPOINT reviewer_office_detail');try{
       const document=this.reviewerOfficeDocument(reviewerId,id),line=this.approvalLine(id),references=this.officeReferences(id),attachments=this.attachments(id),events=this.events(id),signature=this.meetingSignature(id),details=JSON.parse(document.details||'{}'),refId=details.referenceDocId||details.referenceId||0,own=!refId||this.reviewerOfficeDocuments(reviewerId).some(item=>item.id===refId),valid=!refId||(details.referenceDocId?this.officeLinkedDocument(document.site_id,refId):this.officeReference(document.site_id,refId)),linked=own&&valid?this.officeSignatureContext(document):null,referenceUnavailable=!!refId&&(!own||!valid),savedVersion=this.db.prepare('SELECT version FROM office_reference_signature_versions WHERE document_id=?').get(document.id)?.version;
-      const version=createHash('sha256').update(JSON.stringify({document,line,references,attachments,events,referenceVersion:linked?.version||null,referenceUnavailable})).update(signature?.signature||'').digest('hex'),result={document,line,references,attachments,events,hasSignature:!!signature,reference:linked?.reference||null,referenceVersion:linked?.version||null,referenceUnavailable,signatureStale:!!signature&&['draft','rejected'].includes(document.status)&&!!refId&&(referenceUnavailable||savedVersion!==linked?.version),version};this.db.exec('RELEASE reviewer_office_detail');return result;
+      const version=createHash('sha256').update(JSON.stringify({document,line,references,attachments,events,referenceVersion:linked?.version||null,referenceUnavailable})).update(signature?.signature||'').digest('hex'),result={document,line,references,attachments,events,hasSignature:!!signature,reference:linked?.reference||null,referenceVersion:linked?.version||null,referenceUnavailable,signatureStale:!!signature&&['draft','rejected'].includes(document.status)&&!!refId&&(referenceUnavailable||savedVersion!==linked?.version),version,editSignatureVersion:this.officeEditSignatureVersion(document)};this.db.exec('RELEASE reviewer_office_detail');return result;
     }catch(error){this.db.exec('ROLLBACK TO reviewer_office_detail');this.db.exec('RELEASE reviewer_office_detail');throw error;}
   }
   reviewerOfficeAuthorize(reviewerId,id,version){const detail=this.reviewerOfficeDetail(reviewerId,id);if(typeof version!=='string'||version!==detail.version)throw Object.assign(new Error('문서가 변경되었습니다. 다시 조회해 주세요.'),{sessionStatus:409});return detail.document;}
@@ -1988,6 +1988,10 @@ export class Store {
     }catch(error){this.db.exec('ROLLBACK TO office_reference_info');this.db.exec('RELEASE office_reference_info');throw error;}
   }
   officeLinkedReferenceInfo(doc){const details=JSON.parse(doc.details||'{}'),id=details.referenceDocId||details.referenceId||0;return id?this.officeReferenceInfo(doc.site_id,id,!details.referenceDocId):null;}
+  officeEditSignatureVersion(doc){
+    const hash=createHash('sha256').update(JSON.stringify({document:this.document(doc.id),line:this.approvalLine(doc.id),references:this.officeReferences(doc.id),attachments:this.attachments(doc.id),author:this.db.prepare('SELECT reviewer_id FROM office_document_authors WHERE document_id=?').get(doc.id)||null}));
+    for(const file of this.attachments(doc.id))hash.update(this.attachment(file.id).data);hash.update(this.meetingSignature(doc.id)?.signature||'');return hash.digest('hex');
+  }
   officeSignatureContext(doc){
     const linked=this.officeLinkedReferenceInfo(doc);if(!linked)return null;
     const document={id:doc.id,site_id:doc.site_id,title:doc.title,date:doc.date,body:doc.body,details:doc.details},line=this.approvalLine(doc.id).map(({position,reviewer_id,name,active})=>({position,reviewer_id,name,active})),references=this.officeReferences(doc.id),attachments=this.attachments(doc.id),review={document,line,references,attachments},hash=createHash('sha256').update(JSON.stringify({review,referenceVersion:linked.version}));
@@ -1997,7 +2001,7 @@ export class Store {
     this.db.exec('SAVEPOINT office_signature_info');try{const current=this.document(doc.id),saved=this.meetingSignature(doc.id);let result;
       if(!['draft','rejected'].includes(current.status))result={hasSignature:!!saved,createdAt:saved?.created_at||null,stale:false,version:null,reference:null};
       else{const details=JSON.parse(current.details||'{}'),id=details.referenceDocId||details.referenceId||0,valid=!id||(details.referenceDocId?this.officeLinkedDocument(current.site_id,id):this.officeReference(current.site_id,id));if(!valid)result={hasSignature:!!saved,createdAt:saved?.created_at||null,stale:!!saved,version:null,reference:null,invalidReference:true};else{const linked=this.officeSignatureContext(current),previous=this.db.prepare('SELECT version FROM office_reference_signature_versions WHERE document_id=?').get(current.id)?.version;result={hasSignature:!!saved,createdAt:saved?.created_at||null,stale:!!saved&&!!linked&&previous!==linked.version,version:linked?.version||null,reference:linked?.reference||null,review:linked?.review||null};}}
-      this.db.exec('RELEASE office_signature_info');return result;
+      result.editSignatureVersion=this.officeEditSignatureVersion(current);result.line=this.approvalLine(current.id);result.references=this.officeReferences(current.id);this.db.exec('RELEASE office_signature_info');return result;
     }catch(error){this.db.exec('ROLLBACK TO office_signature_info');this.db.exec('RELEASE office_signature_info');throw error;}
   }
   validateOfficeReference(doc,currentId=0){if(doc.type!=='office')return;if(doc.details.referenceId&&!this.officeReference(doc.siteId,doc.details.referenceId))throw new Error('같은 현장의 품의서를 선택해 주세요.');if(doc.details.referenceDocId&&(doc.details.referenceDocId===Number(currentId)||!this.officeLinkedDocument(doc.siteId,doc.details.referenceDocId)))throw new Error('같은 현장의 다른 업무 문서를 선택해 주세요.');}
@@ -2205,6 +2209,14 @@ export class Store {
     this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();
     const current = this.document(id);
     if (!current) throw new Error('문서를 찾을 수 없습니다.');
+    const editSignature=input.officeEditSignature;
+    if(editSignature!==undefined){
+      if(current.type!=='office'||!editSignature||typeof editSignature!=='object'||Array.isArray(editSignature))throw new Error('업무 문서 수정 서명을 확인해 주세요.');
+      if(!Number.isSafeInteger(input.expectedEditVersion)||editSignature.version!==this.officeEditSignatureVersion(current))throw Object.assign(new Error('문서나 결재 준비가 변경되었습니다. 다시 확인하고 서명해 주세요.'),{sessionStatus:409});
+      const line=this.approvalLine(id),references=this.officeReferences(id),author=this.db.prepare('SELECT reviewer_id FROM office_document_authors WHERE document_id=?').get(Number(id)),exists=this.db.prepare('SELECT 1 FROM reviewers WHERE id=? AND site_id=? AND active=1');
+      if(!line.length||line.some(row=>!exists.get(row.reviewer_id,current.site_id)||row.reviewer_id===author?.reviewer_id)||references.some(row=>!exists.get(row.id,current.site_id))||author&&!exists.get(author.reviewer_id,current.site_id))throw new Error('현재 현장의 활성 작성자·결재자·참조자를 확인해 주세요.');
+      signatureBytes(editSignature.signature);
+    }
     if(current.type==='basic'&&(typeof input.expectedBasicVersion!=='string'||input.expectedBasicVersion!==current.basic_version))throw Object.assign(new Error('기본 서류가 변경되었습니다. 입력 내용은 유지됩니다. 필요한 내용을 복사한 뒤 문서를 다시 열어 주세요.'),{sessionStatus:409});
     if(input.expectedEditVersion!==undefined&&(!Number.isSafeInteger(input.expectedEditVersion)||input.expectedEditVersion!==current.edit_version))throw Object.assign(new Error('문서가 변경되었습니다. 입력 내용은 유지됩니다. 필요한 내용을 복사한 뒤 문서를 다시 열어 주세요.'),{sessionStatus:409});
     if(current.type==='cost' && Array.isArray(JSON.parse(current.details).rows))throw new Error('월간 사용내역서는 보존된 내역을 변경할 수 없습니다. 새 문서를 작성해 주세요.');
@@ -2237,7 +2249,16 @@ export class Store {
       if(current.date===d.date){if(previous)d.details.attendanceSnapshot=previous;}
       else d.details.attendanceSnapshot={present:this.attendance(d.siteId,d.date).filter(row=>row.present).length,capturedAt:new Date().toISOString()};
     }
-    this.db.prepare('UPDATE documents SET title=?,date=?,body=?,details=?,updated_at=CURRENT_TIMESTAMP WHERE id=?').run(d.title,d.date,d.body,JSON.stringify(d.details),Number(id));if(d.type==='checklist')this.db.prepare('DELETE FROM checklist_signatures WHERE document_id=?').run(Number(id));if(d.type==='tbm')this.db.prepare('DELETE FROM tbm_signatures WHERE document_id=?').run(Number(id));if(d.type==='joint_inspection')this.db.prepare('DELETE FROM joint_inspection_signatures WHERE document_id=?').run(Number(id));if(['work_council','safety_meeting','office','inspection','safety_log','patrol','cost','work_plan'].includes(d.type))this.db.prepare('DELETE FROM meeting_signatures WHERE document_id=?').run(Number(id));if(d.type==='work_plan')this.db.prepare('DELETE FROM plan_signature_versions WHERE document_id=?').run(Number(id));const result=this.document(id);this.db.exec('COMMIT');return result;}catch(error){this.db.exec('ROLLBACK');throw error;}
+    this.db.prepare('UPDATE documents SET title=?,date=?,body=?,details=?,updated_at=CURRENT_TIMESTAMP WHERE id=?').run(d.title,d.date,d.body,JSON.stringify(d.details),Number(id));if(d.type==='checklist')this.db.prepare('DELETE FROM checklist_signatures WHERE document_id=?').run(Number(id));if(d.type==='tbm')this.db.prepare('DELETE FROM tbm_signatures WHERE document_id=?').run(Number(id));if(d.type==='joint_inspection')this.db.prepare('DELETE FROM joint_inspection_signatures WHERE document_id=?').run(Number(id));if(['work_council','safety_meeting','office','inspection','safety_log','patrol','cost','work_plan'].includes(d.type))this.db.prepare('DELETE FROM meeting_signatures WHERE document_id=?').run(Number(id));if(d.type==='work_plan')this.db.prepare('DELETE FROM plan_signature_versions WHERE document_id=?').run(Number(id));
+    const result=this.document(id);
+    if(editSignature!==undefined){
+      const linked=this.officeLinkedReferenceInfo(result);
+      if(linked&&editSignature.referenceVersion!==linked.version)throw Object.assign(new Error('참조 문서가 변경되었습니다. 다시 확인하고 서명해 주세요.'),{sessionStatus:409});
+      this.db.prepare('INSERT INTO meeting_signatures(document_id,signature) VALUES(?,?)').run(Number(id),signatureBytes(editSignature.signature));
+      this.db.prepare('DELETE FROM office_reference_signature_versions WHERE document_id=?').run(Number(id));
+      if(linked)this.db.prepare('INSERT INTO office_reference_signature_versions(document_id,version) VALUES(?,?)').run(Number(id),this.officeSignatureContext(result).version);
+    }
+    const saved=editSignature===undefined?result:this.document(id);this.db.exec('COMMIT');return saved;}catch(error){this.db.exec('ROLLBACK');throw error;}
   }
   updateRiskImprovement(documentId,input,onAuthorize=()=>{}){
     this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();

@@ -237,7 +237,7 @@ const server = http.createServer((req,res)=>adminRequests.run(req,async()=>{
       if(reviewerOffice){
         const [,id,part,fileId]=reviewerOffice,doc=store.reviewerOfficeDocument(reviewer.id,id),authorize=version=>{checkRequestSession(req);return store.reviewerOfficeAuthorize(reviewer.id,id,version);},detail=()=>store.reviewerOfficeDetail(reviewer.id,id);
         if(!part&&req.method==='GET')return json(res,200,detail());
-        if(!part&&req.method==='PUT'){const input=await body(req,120000);store.updateReviewerOfficeDocument(reviewer.id,id,input,input.version,()=>checkRequestSession(req));return json(res,200,detail());}
+        if(!part&&req.method==='PUT'){const input=await body(req,220000);store.updateReviewerOfficeDocument(reviewer.id,id,input,input.version,()=>checkRequestSession(req));return json(res,200,detail());}
         if(['line','references','signature','transition'].includes(part)&&!fileId&&req.method==='POST'){
           const input=await body(req,120000),check=()=>authorize(input.version);
           if(part==='line')store.setApprovalLine(id,input.ids,check);
@@ -1148,7 +1148,7 @@ const server = http.createServer((req,res)=>adminRequests.run(req,async()=>{
       if (req.method === 'GET' && part === 'training-targets') return json(res,200,store.trainingTargets(id));
       if (req.method === 'PUT' && part === 'training-targets') {const input=await body(req);store.setTrainingTargets(id,input.workerIds,()=>{checkRequestSession(req);if((input.managerIds!==undefined||input.expectedEditVersion!==undefined)&&(!Number.isSafeInteger(input.expectedEditVersion)||store.document(id)?.edit_version!==input.expectedEditVersion))throw Object.assign(new Error('교육 문서 또는 대상이 변경되었습니다. 다시 확인해 주세요.'),{sessionStatus:409});},input.managerIds);return json(res,200,{ok:true});}
       if (req.method === 'GET' && !part) { const d=store.document(id); return d ? json(res,200,d) : json(res,404,{error:'문서를 찾을 수 없습니다.'}); }
-      if (req.method === 'PUT' && !part) {const input=await body(req,150000);if(!Number.isSafeInteger(input.expectedEditVersion))throw Object.assign(new Error('문서 버전이 없습니다. 입력 내용을 복사한 뒤 화면을 새로고침해 주세요.'),{sessionStatus:409});return json(res,200,store.updateDocument(id,input,()=>checkRequestSession(req)));}
+      if (req.method === 'PUT' && !part) {const input=await body(req,220000);if(!Number.isSafeInteger(input.expectedEditVersion))throw Object.assign(new Error('문서 버전이 없습니다. 입력 내용을 복사한 뒤 화면을 새로고침해 주세요.'),{sessionStatus:409});return json(res,200,store.updateDocument(id,input,()=>checkRequestSession(req)));}
       if (req.method === 'DELETE' && !part) {const input=await body(req);store.deleteBasicDocument(input.siteId,id,input.expectedVersion);return json(res,200,{ok:true});}
       if (req.method === 'POST' && part === 'transition') {const input=await body(req);return json(res,200,store.managedTransition(id,{...input,expectedEditVersion:input.expectedEditVersion??null},()=>checkRequestSession(req),input.expectedCycleId??null));}
     }

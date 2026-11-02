@@ -10,6 +10,7 @@ import { runInNewContext } from 'node:vm';
 import { siteQrSession, printSiteQr, siteQrPrintAction } from '../public/site-qr.js';
 import { hasManagerEducationTargets } from '../public/education-kinds.js';
 import { changedTrainingWorkers } from '../public/training-groups.js';
+import { attendanceNoticesMarkup } from '../public/attendance-matrix.js';
 
 const source=readFileSync(new URL('../public/app.js',import.meta.url),'utf8');
 const part=(from,to)=>{const start=source.indexOf(from),end=source.indexOf(to,start);assert.ok(start>=0&&end>start,from);return source.slice(start,end);};
@@ -32,6 +33,7 @@ function screen(fetcher=async()=>({ok:true,status:200,json:async()=>[]})){
   context.mountRestrictedMonthEditor=()=>({dirty:()=>false,busy:()=>false});
   context.hasManagerEducationTargets=hasManagerEducationTargets;
   context.changedTrainingWorkers=changedTrainingWorkers;
+  context.attendanceNoticesMarkup=attendanceNoticesMarkup;
   context.siteSelect.selectedOptions=[{textContent:'가상 첫 현장'}];
   const oldQueryAll=context.document.querySelectorAll;
   context.document.querySelectorAll=selector=>{
@@ -56,6 +58,28 @@ function screen(fetcher=async()=>({ok:true,status:200,json:async()=>[]})){
   return {context,state,content,dialog,nodes,get,pages,requests,errors,redirects,flashes,submit:async values=>{const form=get('#dialog-form');form.values=values;await form.onsubmit({preventDefault(){},currentTarget:form});}};
 }
 const response=data=>({ok:true,status:200,json:async()=>data});
+
+test('제한 관리자 월별 안내는 조회 월 변경과 5일·6일 새로고침에 맞춰 갱신된다',async()=>{
+  const ui=screen(async()=>response([]));let date='2026-12-05';ui.context.today=()=>date;
+  ui.get('#restricted-month').value='2026-11';await ui.context.showRestrictedMonth(()=>true);
+  const notice=ui.get('#restricted-month-notices');assert.match(notice.innerHTML,/2026-12-05/);assert.match(notice.innerHTML,/교육·TBM 명부/);
+  date='2026-12-06';await ui.get('#restricted-month-load').onclick();assert.equal(notice.innerHTML,'');
+  ui.get('#restricted-month').value='2026-12';await ui.get('#restricted-month').onchange();assert.match(notice.innerHTML,/2027-01-05/);assert.match(notice.innerHTML,/교육·TBM 명부/);
+  date='2027-01-05';await ui.get('#restricted-month-load').onclick();assert.match(notice.innerHTML,/2027-01-05/);
+  date='2027-01-06';await ui.get('#restricted-month-load').onclick();assert.equal(notice.innerHTML,'');
+  assert.equal(ui.errors.length,0);assert.equal(ui.get('#dialog-error').textContent,'');
+});
+
+test('전체 관리자 월별 안내는 실제 월 변경 핸들러의 재렌더에서 기한 전후를 반영한다',()=>{
+  const markup=source.split('\n').find(line=>line.includes('<h2>월별 출역</h2>')),change=source.split('\n').find(line=>line.includes("$('#attendance-month').onchange="));assert.ok(markup&&change);
+  let date='2026-12-05',rendered='',renders=0;const input={},state={attendanceMonth:'2026-11'},context={state,$:()=>input,content:{insertAdjacentHTML:(_position,html)=>{rendered=html;}},monthly:[],esc,attendanceNoticesMarkup,today:()=>date,showError:error=>{throw error;}};
+  context.render=()=>{renders++;runInNewContext(markup,{...context,month:state.attendanceMonth});return Promise.resolve();};
+  runInNewContext(change,context);context.render();assert.match(rendered,/2026-12-05/);assert.match(rendered,/교육·TBM 명부/);
+  date='2026-12-06';context.render();assert.doesNotMatch(rendered,/수정 기한 참고|교육·TBM 명부/);
+  input.onchange({target:{value:'2026-12'}});assert.equal(state.attendanceMonth,'2026-12');assert.match(rendered,/2027-01-05/);assert.match(rendered,/교육·TBM 명부/);assert.equal(renders,3);
+  date='2027-01-05';context.render();assert.match(rendered,/2027-01-05/);
+  date='2027-01-06';context.render();assert.doesNotMatch(rendered,/수정 기한 참고|교육·TBM 명부/);
+});
 
 test('배정 현장 교육 상세 진입점에서 관리자·근로자 대상을 각각 선택하고 버전과 함께 저장한다',async()=>{
   const doc={id:5,type:'education',title:'가상 교육',date:'2026-11-01',body:'',status:'draft',edit_version:8,details:'{"kind":"supervisor_new"}'},targets={configured:true,workers:[{id:20,name:'가상 출역자',present:1,selected:0},{id:21,name:'가상 미출역자',present:0,selected:1}],managers:[{id:10,name:'가상 직원',active:1,selected:0}]};
