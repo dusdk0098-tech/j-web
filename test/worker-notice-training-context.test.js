@@ -8,7 +8,7 @@ import {spawn} from 'node:child_process';
 import {once} from 'node:events';
 import {Store} from '../store.js';
 
-test('근로자의 다섯 일일 조회는 화면을 연 계정과 로그인 세대를 확인한다',{timeout:30000},async()=>{
+test('근로자 일일 조회와 신고 조회는 화면을 연 계정과 로그인 세대를 확인한다',{timeout:30000},async()=>{
   const dir=mkdtempSync(join(tmpdir(),'jweb-notice-training-context-')),store=new Store(join(dir,'jweb.sqlite')),now=new Date(),date=new Date(now.getTime()-now.getTimezoneOffset()*60000).toISOString().slice(0,10),people=[];
   for(const suffix of ['a','b']){
     const site=store.createSite({name:'가상 현장 '+suffix}),token=store.createInvitation(site.id).token,loginId='virtual_context_'+suffix,password='virtual-password-123';
@@ -28,7 +28,7 @@ test('근로자의 다섯 일일 조회는 화면을 연 계정과 로그인 세
       const legacy=await get(path,b);assert.equal(legacy.status,200);assert.deepEqual((await legacy.json()).map(item=>item.title),['가상 '+type+' b']);
       const next=await login(people[0]),stale=await get(path,next,a.reportContext);assert.equal(stale.status,409);assert.equal((await stale.json()).sessionChanged,true);
     }
-    const next=await login(people[0]);for(const path of ['/api/worker/self-check','/api/worker/daily-training','/api/worker/meetings']){
+    const next=await login(people[0]);for(const path of ['/api/worker/self-check','/api/worker/daily-training','/api/worker/meetings','/api/worker/hazard-reports']){
       assert.equal((await get(path,a,a.reportContext)).status,200);assert.equal((await get(path,b,b.reportContext)).status,200);assert.equal((await get(path,b)).status,200);
       for(const [session,context] of [[b,a.reportContext],[b,'invalid'],[next,a.reportContext]]){const response=await get(path,session,context);assert.equal(response.status,409,path);assert.equal((await response.json()).sessionChanged,true);}
     }

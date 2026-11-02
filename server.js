@@ -580,7 +580,7 @@ const server = http.createServer((req,res)=>passwordRequests.run(true,()=>adminR
     }
     if(url.pathname==='/api/worker/hazard-reports' && ['GET','POST'].includes(req.method)){
       const key=workerKey(workerToken),session=workerSessions.get(key);if(!session||session.expires<=Date.now()){workerSessions.delete(key);return json(res,401,{error:'근로자 로그인이 필요합니다.'});}
-      if(req.method==='GET')return json(res,200,store.workerHazardReports(session.worker.id));
+      if(req.method==='GET'){if(req.headers['x-worker-report-context']!==undefined)checkWorkerReport(req,key,session);return json(res,200,store.workerHazardReports(session.worker.id));}
       const input=await body(req,2805000);return json(res,201,{id:store.createWorkerHazardReport(session.worker.id,input,()=>checkWorkerReport(req,key,session,input))});
     }
     const workerHazardPhoto=url.pathname.match(/^\/api\/worker\/hazard-reports\/(\d+)\/photo$/);
