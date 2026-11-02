@@ -476,10 +476,12 @@ const server = http.createServer((req,res)=>passwordRequests.run(true,()=>adminR
     if(url.pathname==='/api/worker/attendance' && req.method==='GET'){
       const key=workerKey(workerToken),session=workerSessions.get(key);
       if(!session || session.expires<=Date.now()){workerSessions.delete(key);return json(res,401,{error:'근로자 로그인이 필요합니다.'});}
+      if(req.headers['x-worker-report-context']!==undefined)checkWorkerReport(req,key,session);
       return json(res,200,{days:store.workerAttendance(session.worker.id,url.searchParams.get('month')),units:store.workerAttendanceUnits(session.worker.id,url.searchParams.get('month'))});
     }
     if(url.pathname==='/api/worker/ppe-issues'&&req.method==='GET'){
       const key=workerKey(workerToken),session=workerSessions.get(key);if(!session||session.expires<=Date.now()){workerSessions.delete(key);return json(res,401,{error:'근로자 로그인이 필요합니다.'});}
+      if(req.headers['x-worker-report-context']!==undefined)checkWorkerReport(req,key,session);
       return json(res,200,store.workerPpeIssues(session.worker.site_id,session.worker.id));
     }
     const workerPpeReceipt=url.pathname.match(/^\/api\/worker\/ppe-issues\/(\d+)\/receipt$/);

@@ -28,7 +28,7 @@ test('근로자 일일 조회와 신고 조회는 화면을 연 계정과 로그
       const legacy=await get(path,b);assert.equal(legacy.status,200);assert.deepEqual((await legacy.json()).map(item=>item.title),['가상 '+type+' b']);
       const next=await login(people[0]),stale=await get(path,next,a.reportContext);assert.equal(stale.status,409);assert.equal((await stale.json()).sessionChanged,true);
     }
-    const next=await login(people[0]);for(const path of ['/api/worker/self-check','/api/worker/daily-training','/api/worker/meetings','/api/worker/hazard-reports']){
+    const next=await login(people[0]);for(const path of ['/api/worker/self-check','/api/worker/daily-training','/api/worker/meetings','/api/worker/hazard-reports','/api/worker/attendance?month=2026-11','/api/worker/ppe-issues']){
       assert.equal((await get(path,a,a.reportContext)).status,200);assert.equal((await get(path,b,b.reportContext)).status,200);assert.equal((await get(path,b)).status,200);
       for(const [session,context] of [[b,a.reportContext],[b,'invalid'],[next,a.reportContext]]){const response=await get(path,session,context);assert.equal(response.status,409,path);assert.equal((await response.json()).sessionChanged,true);}
     }
