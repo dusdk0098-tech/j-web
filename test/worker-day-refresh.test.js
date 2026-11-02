@@ -32,6 +32,7 @@ function screen(){
   let clock=Date.parse('2032-05-03T04:00:00Z'),timerId=0;
   class Clock extends Date {static now(){return clock;}}
   const context={reportContext:{workerId:1,siteId:7,generation:'original'},siteKey:'virtual-site',panel,logout:{disabled:false},worker:{id:1,site_id:7},button:{disabled:true},message,flow:{open(){context.opened=true;}},document,window,checkForm,checkStatus,check:new Node(),pad:signaturePad({}),dailyForm,dailyStatus,dailyPad:signaturePad({}),training,meetings,notices,initialLoads,educationKinds:{},signaturePad,startWorkerLoads,Date:Clock,performance:{now:()=>clock},AbortController,
+    mountWorkerPassword:parent=>parent.append(new Node()),
     setTimeout:(fn,delay)=>{const id=++timerId;timers.set(id,{fn,delay});return id;},clearTimeout:id=>timers.delete(id),
     fetch:(url,options)=>new Promise((resolve,reject)=>{requests.push({url,options,resolve,reject});options?.signal?.addEventListener('abort',()=>reject(Object.assign(Error('timeout'),{name:'AbortError'})));})
   };

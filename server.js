@@ -12,6 +12,7 @@ import { CommonWork } from './common-work.js';
 import { Messages } from './messages.js';
 import { EmploymentCertificates } from './employment-certificates.js';
 import { ReviewerProfile } from './reviewer-profile.js';
+import { WorkerPassword } from './worker-password.js';
 import { ReviewerRecovery, ClientRecovery, recoveryDelivery } from './reviewer-recovery.js';
 import { AdminAccounts } from './admin-accounts.js';
 import { ClientAccounts } from './client-accounts.js';
@@ -61,6 +62,7 @@ const commonWork = new CommonWork(store.db);
 const messages = new Messages(store.db);
 const employment = new EmploymentCertificates(store.db);
 const reviewerProfile = new ReviewerProfile(store.db);
+const workerPasswordService = new WorkerPassword(store.db);
 const clients = new ClientAccounts(store.db);
 const recoverySender=recoveryDelivery();
 if(recoverySender&&!recoverySender.local&&!publicOrigin)throw new Error('계정 찾기에는 HTTPS 공개 주소가 필요합니다.');
@@ -114,6 +116,7 @@ assets.add('/checklist-copy.js');
 assets.add('/permit-sources.js');
 assets.add('/permit-measures.js');
 assets.add('/worker-invitation.js');
+assets.add('/worker-password.js');
 assets.add('/safety-cost.js');
 assets.add('/weekly-ppe.js');
 assets.add('/reviewer-manager-check.js');
@@ -380,6 +383,12 @@ const server = http.createServer((req,res)=>passwordRequests.run(true,()=>adminR
       const session=workerSessions.get(workerKey(workerToken)),now=new Date(),date=new Date(now.getTime()-now.getTimezoneOffset()*60000).toISOString().slice(0,10);
       if(session&&session.expires>now.getTime()&&store.workerAccessBlocked(session.worker.site_id,date))return json(res,403,{error:'해당 현장은 오늘 근로자 접속이 차단되었습니다.'});
       if(session&&session.expires>now.getTime())req.checkSession=()=>workerSessionError(workerToken,session);
+    }
+    if(url.pathname==='/api/worker/password'&&req.method==='PUT'){
+      const key=workerKey(workerToken),session=workerSessions.get(key);if(!session||session.expires<=Date.now())return json(res,401,{error:'근로자 로그인이 필요합니다.'});
+      const input=await body(req),result=await workerPasswordService.changeAsync(session.worker.id,input,()=>checkWorkerReport(req,key,session,input),workerPeer(req));
+      for(const [entry,current] of workerSessions)if(current.worker.id===session.worker.id)Map.prototype.delete.call(workerSessions,entry);
+      workerAccountFailures.delete(`${result.siteId}:${result.loginId}`);return json(res,200,{ok:true});
     }
     if(url.pathname==='/api/worker/departure'&&['GET','POST'].includes(req.method)){
       const key=workerKey(workerToken),session=workerSessions.get(key);if(!session||session.expires<=Date.now())return json(res,401,{error:'근로자 로그인이 필요합니다.'});const check=()=>{const current=workerSessions.get(key);if(!current||current!==session||current.expires<=Date.now())throw Object.assign(new Error('근로자 로그인이 필요합니다.'),{sessionStatus:401});};if(req.method==='GET'){const policy=store.siteLocationPolicy(session.worker.site_id);check();return json(res,200,{locationRequired:policy.enabled});}const input=await body(req);return json(res,200,store.recordWorkerDeparture(session.worker.site_id,session.worker.id,key,input.location,()=>{check();checkWorkerReport(req,key,session,input);}));

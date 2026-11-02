@@ -3,6 +3,7 @@ import { mountWorkerDocuments } from './worker-documents.js';
 import { mountJoinChoices } from './join-choices.js';
 import { workerFieldRequirements } from './worker-fields.js';
 import { setWorkerInvitationMode } from './worker-invitation.js';
+import { mountWorkerPassword } from './worker-password.js';
 import { createJoinFlow } from './join-flow.js';
 import { rememberWorker } from './remember-worker.js';
 import { mountWorkerIdentityRemember } from './worker-identity-remember.js';
@@ -78,6 +79,7 @@ async function showWorker(worker,reportContext){
     const departure=panel.querySelector('#worker-departure'),departureStatus=panel.querySelector('#worker-departure-status');departure.onclick=async()=>{if(departure.disabled)return;departure.disabled=true;try{const policyResponse=await fetch('/api/worker/departure'),policy=await policyResponse.json();if(!policyResponse.ok)throw Error(policy.error);if(!panel.isConnected)return;const location=policy.locationRequired?await captureWorkerLocation():undefined;if(!panel.isConnected)return;const response=await fetch('/api/worker/departure',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({reportContext,...(location?{location}:{})})}),result=await response.json();if(!response.ok)throw Error(result.error);if(panel.isConnected)departureStatus.textContent=`시험 퇴근 기록: ${new Date(result.checkedAt).toLocaleString('ko-KR')}`;}catch(error){if(panel.isConnected)departureStatus.textContent=error.message;}finally{if(panel.isConnected)departure.disabled=false;}};
     const logout=panel.querySelector('#worker-logout');logout.onclick=async()=>{logout.disabled=true;try{const response=await fetch('/api/worker/logout',{method:'POST'});if(!response.ok)throw Error('로그아웃에 실패했습니다.');stopWorkerDay();panel.remove();button.disabled=true;message.textContent='로그아웃했습니다.';flow.open(false);if(siteKey){const infoResponse=await fetch(`/api/worker/site?key=${encodeURIComponent(siteKey)}`),info=await infoResponse.json();if(!infoResponse.ok)throw Error(info.error);switchWorkerJoinToSite(params,siteKey,worker.site_id,info);inviteInfo=info;showLocationRequirement(info);setJoinChoices(info);flow.open(info.canSignup);await restoreRemembered(siteKey);}}catch(error){message.textContent=error.message;}finally{button.disabled=false;logout.disabled=false;if(panel.isConnected)void refreshWorkerDay();}};
     const workerSiteKey=siteKey;let workerDay=null,dayGeneration=0,dayReady=false,dayStopped=false,dayTimer,dayRequest=null,dayDeadline=Infinity,dayBoundaryRetry=false,dayController=null,dayTimeout;
+    mountWorkerPassword(panel,reportContext,()=>endWorkerDay('시험 암호를 변경했습니다. 새 암호로 다시 로그인해 주세요.'));
     const dayActive=(generation=dayGeneration)=>panel.isConnected&&!logout.disabled&&!dayStopped&&siteKey===workerSiteKey&&dayReady&&performance.now()<dayDeadline&&document.visibilityState!=='hidden'&&generation===dayGeneration;
     const month=panel.querySelector('#worker-month'),output=panel.querySelector('#worker-attendance'),initialLoads=[];
     const now=new Date();month.value=`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;

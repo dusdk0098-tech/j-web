@@ -152,6 +152,8 @@ export class Store {
       CREATE TABLE IF NOT EXISTS equipment_checks (id INTEGER PRIMARY KEY,document_id INTEGER NOT NULL REFERENCES documents(id),equipment_id INTEGER NOT NULL REFERENCES equipment(id),date TEXT NOT NULL,items TEXT NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,UNIQUE(document_id,equipment_id,date));
       CREATE TABLE IF NOT EXISTS workers (id INTEGER PRIMARY KEY, site_id INTEGER NOT NULL REFERENCES sites(id), name TEXT NOT NULL, category TEXT NOT NULL, company TEXT NOT NULL, occupation TEXT NOT NULL, memo TEXT NOT NULL DEFAULT '');
       CREATE TABLE IF NOT EXISTS worker_accounts (worker_id INTEGER PRIMARY KEY REFERENCES workers(id),site_id INTEGER NOT NULL REFERENCES sites(id),login_id TEXT NOT NULL,salt BLOB NOT NULL,password_hash BLOB NOT NULL,UNIQUE(site_id,login_id));
+      CREATE TABLE IF NOT EXISTS worker_password_failures (worker_id INTEGER NOT NULL REFERENCES workers(id),attempted_at INTEGER NOT NULL);
+      CREATE INDEX IF NOT EXISTS worker_password_failures_account ON worker_password_failures(worker_id,attempted_at);
       CREATE TABLE IF NOT EXISTS worker_account_blocks (worker_id INTEGER PRIMARY KEY REFERENCES workers(id),site_id INTEGER NOT NULL REFERENCES sites(id),blocked INTEGER NOT NULL CHECK(blocked IN (0,1)),version TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS worker_sessions (token_hash TEXT PRIMARY KEY,worker_id INTEGER NOT NULL REFERENCES workers(id),expires INTEGER NOT NULL,credential_hash BLOB NOT NULL);
       CREATE TABLE IF NOT EXISTS worker_permissions (worker_id INTEGER NOT NULL REFERENCES workers(id),permission TEXT NOT NULL,PRIMARY KEY(worker_id,permission));
@@ -1740,7 +1742,7 @@ export class Store {
     const salt=passwordSalt(password),hash=scryptSync(password,salt,32);
     this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();
     const account=this.db.prepare('SELECT login_id FROM worker_accounts WHERE site_id=? AND worker_id=?').get(Number(siteId),Number(workerId));if(!account)throw new Error('선택한 현장의 시험 계정을 확인해 주세요.');
-    this.db.prepare('UPDATE worker_accounts SET salt=?,password_hash=? WHERE site_id=? AND worker_id=?').run(salt,hash,Number(siteId),Number(workerId));this.db.prepare('DELETE FROM worker_sessions WHERE worker_id=?').run(Number(workerId));this.db.exec('COMMIT');return account.login_id;}catch(error){this.db.exec('ROLLBACK');throw error;}
+    this.db.prepare('UPDATE worker_accounts SET salt=?,password_hash=? WHERE site_id=? AND worker_id=?').run(salt,hash,Number(siteId),Number(workerId));this.db.prepare('DELETE FROM worker_sessions WHERE worker_id=?').run(Number(workerId));this.db.prepare('DELETE FROM worker_password_failures WHERE worker_id=?').run(Number(workerId));this.db.exec('COMMIT');return account.login_id;}catch(error){this.db.exec('ROLLBACK');throw error;}
   }
   workerLoginIdentity(siteId,name,birthDigits){
     if(typeof name!=='string'||!name.trim()||name.length>200||/[\x00-\x1f\x7f]/.test(name)||typeof birthDigits!=='string'||!/^\d{6}$/.test(birthDigits))return null;
