@@ -11,6 +11,8 @@ import { siteQrSession, printSiteQr, siteQrPrintAction } from '../public/site-qr
 import { hasManagerEducationTargets } from '../public/education-kinds.js';
 import { changedTrainingWorkers } from '../public/training-groups.js';
 import { attendanceNoticesMarkup } from '../public/attendance-matrix.js';
+import { trainingDetailMarkup } from '../public/training-detail.js';
+import { educationAttachmentLabels } from '../public/education-kinds.js';
 
 const source=readFileSync(new URL('../public/app.js',import.meta.url),'utf8');
 const part=(from,to)=>{const start=source.indexOf(from),end=source.indexOf(to,start);assert.ok(start>=0&&end>start,from);return source.slice(start,end);};
@@ -34,6 +36,7 @@ function screen(fetcher=async()=>({ok:true,status:200,json:async()=>[]})){
   context.hasManagerEducationTargets=hasManagerEducationTargets;
   context.changedTrainingWorkers=changedTrainingWorkers;
   context.attendanceNoticesMarkup=attendanceNoticesMarkup;
+  context.trainingDetailMarkup=trainingDetailMarkup;context.educationAttachmentLabels=educationAttachmentLabels;
   context.siteSelect.selectedOptions=[{textContent:'가상 첫 현장'}];
   const oldQueryAll=context.document.querySelectorAll;
   context.document.querySelectorAll=selector=>{
@@ -59,8 +62,41 @@ function screen(fetcher=async()=>({ok:true,status:200,json:async()=>[]})){
 }
 const response=data=>({ok:true,status:200,json:async()=>data});
 
+test('제한 교육·TBM 상세는 저장된 필드와 첨부만 표시하고 오래된 화면의 링크를 막는다',async()=>{
+  for(const type of ['education','tbm']){
+    const details=type==='education'?{kind:'supervisor',timeFrom:'04:13',educationMethod:'이전 <방식>',instructor:'가상 강사',textbook:'가상 교재'}:{weather:'가상 날씨',work:'가상 <작업>',hazards:'가상 위험'};
+    const doc={id:5,site_id:1,type,title:'가상 교육',body:'가상 본문',status:'approved',details:JSON.stringify(details)};
+    const files=[{id:7,document_id:5,name:'가상 <교육>.txt',size:10,category:'education_material'}];
+    const ui=screen(async path=>response(path.endsWith('/attachments')?files:doc));ui.state.page='documents';ui.state.detail=5;ui.state.admin={scope:'restricted',id:4};
+    const link={};ui.content.querySelectorAll=selector=>selector==='[data-training-file]'?[link]:[];
+    await ui.context.renderRestrictedDocuments();
+    assert.match(ui.content.innerHTML,/href="\/api\/documents\/5\/attachments\/7"/);assert.match(ui.content.innerHTML,/가상 &lt;교육&gt;\.txt/);
+    for(const value of Object.values(details).filter(v=>v!=='supervisor'))assert.ok(ui.content.innerHTML.includes(esc(value)),value);
+    assert.doesNotMatch(ui.content.innerHTML,/id="edit"|data-action=|data-delete-attachment|id="attachment-add"/);
+    assert.equal(ui.requests.every(r=>!r.options.method),true);
+    let prevented=false;link.onclick({preventDefault(){prevented=true;}});assert.equal(prevented,false);
+    ui.state.admin={scope:'restricted',id:8};link.onclick({preventDefault(){prevented=true;}});assert.equal(prevented,true);
+  }
+});
+
+test('제한 교육 첨부 지연·철회·현장 불일치는 상세와 다운로드를 노출하지 않는다',async()=>{
+  const doc={id:5,site_id:1,type:'education',title:'가상 이전 교육',body:'이전 본문',status:'approved',details:'{}'};
+  for(const change of ['site','account','detail','epoch']){
+    const wait=delayed(),ui=screen(async path=>path.endsWith('/attachments')?wait.promise:response(doc));ui.state.page='documents';ui.state.detail=5;
+    const pending=ui.context.renderRestrictedDocuments();while(!ui.requests.some(r=>r.path.endsWith('/attachments')))await new Promise(r=>setImmediate(r));
+    if(change==='site')ui.state.siteId=2;else if(change==='account')ui.state.admin={id:8};else if(change==='detail')ui.state.detail=6;else ui.context.detailEpoch++;
+    ui.content.innerHTML='새 화면';wait.resolve(response([{id:7,name:'이전 파일'}]));await pending;assert.equal(ui.content.innerHTML,'새 화면');
+  }
+  const wrong=screen(async()=>response({...doc,site_id:2}));wrong.state.page='documents';wrong.state.detail=5;await assert.rejects(wrong.context.renderRestrictedDocuments(),/현장/);assert.equal(wrong.requests.length,1);
+  for(const status of [401,403]){
+    const ui=screen(async path=>path.endsWith('/attachments')?{ok:false,status,json:async()=>({error:'조회 권한 없음'})}:response(doc));ui.state.page='documents';ui.state.detail=5;
+    await assert.rejects(ui.context.renderRestrictedDocuments());assert.doesNotMatch(ui.content.innerHTML,/이전 교육|이전 본문|href=/);
+  }
+  const old=screen(async path=>response(path.endsWith('/attachments')?[]:{...doc,details:null}));old.state.page='documents';old.state.detail=5;await old.context.renderRestrictedDocuments();assert.match(old.content.innerHTML,/저장된 세부 항목이 없습니다/);assert.match(old.content.innerHTML,/첨부파일이 없습니다/);
+});
+
 test('제한 공지 수정은 기존 값과 버전을 보내고 거절되면 입력을 보존한다',async()=>{
-  const doc={id:5,type:'notice',title:'가상 <공지>',date:'2026-11-01',body:'가상 </textarea> 본문',status:'draft',edit_version:8,details:'{"retained":"가상 값"}'};
+  const doc={id:5,site_id:1,type:'notice',title:'가상 <공지>',date:'2026-11-01',body:'가상 </textarea> 본문',status:'draft',edit_version:8,details:'{"retained":"가상 값"}'};
   for(const status of [200,400,401,403,409]){
     const ui=screen(async(path,options)=>options.method==='PUT'?{ok:status===200,status,json:async()=>status===200?doc:{error:'가상 저장 거절'}}:response(path==='/api/sites'?sites:doc));
     ui.state.page='documents';ui.state.detail=5;ui.state.admin={scope:'restricted',id:4};
@@ -75,7 +111,7 @@ test('제한 공지 수정은 기존 값과 버전을 보내고 거절되면 입
 });
 
 test('제한 공지 수정은 상태·현장·계정과 오래된 응답을 검사한다',async()=>{
-  const doc={id:5,type:'notice',title:'가상',date:'2026-11-01',body:'가상',status:'draft',edit_version:8,details:'{}'};
+  const doc={id:5,site_id:1,type:'notice',title:'가상',date:'2026-11-01',body:'가상',status:'draft',edit_version:8,details:'{}'};
   for(const status of ['pending','approved','rejected']){
     const ui=screen(async()=>response({...doc,status}));ui.state.page='documents';ui.state.detail=5;await ui.context.renderRestrictedDocuments();assert.equal(ui.content.innerHTML.includes('id="restricted-notice-edit"'),status==='rejected');
   }
@@ -110,9 +146,9 @@ test('전체 관리자 월별 안내는 실제 월 변경 핸들러의 재렌더
 });
 
 test('배정 현장 교육 상세 진입점에서 관리자·근로자 대상을 각각 선택하고 버전과 함께 저장한다',async()=>{
-  const doc={id:5,type:'education',title:'가상 교육',date:'2026-11-01',body:'',status:'draft',edit_version:8,details:'{"kind":"supervisor_new"}'},targets={configured:true,workers:[{id:20,name:'가상 출역자',present:1,selected:0},{id:21,name:'가상 미출역자',present:0,selected:1}],managers:[{id:10,name:'가상 직원',active:1,selected:0}]};
+  const doc={id:5,site_id:1,type:'education',title:'가상 교육',date:'2026-11-01',body:'',status:'draft',edit_version:8,details:'{"kind":"supervisor_new"}'},targets={configured:true,workers:[{id:20,name:'가상 출역자',present:1,selected:0},{id:21,name:'가상 미출역자',present:0,selected:1}],managers:[{id:10,name:'가상 직원',active:1,selected:0}]};
   for(const conflict of [false,true]){
-    const ui=screen(async(path,options)=>options.method==='PUT'?(conflict?{ok:false,status:409,json:async()=>({error:'버전 충돌'})}:response({ok:true})):response(path==='/api/sites'?sites:path.endsWith('/training-targets')?targets:doc));
+    const ui=screen(async(path,options)=>options.method==='PUT'?(conflict?{ok:false,status:409,json:async()=>({error:'버전 충돌'})}:response({ok:true})):response(path==='/api/sites'?sites:path.endsWith('/attachments')?[]:path.endsWith('/training-targets')?targets:doc));
     ui.state.page='documents';ui.state.detail=5;ui.state.admin={scope:'restricted',id:4};const formNodes=new Map();
     ui.get('#dialog-body').querySelectorAll=selector=>{
       const markup=ui.get('#dialog-body').innerHTML,all=selector==='[data-restricted-training-all]',kind=selector.match(/="(worker|manager)"/)?.[1],matches=[...markup.matchAll(all?/data-restricted-training-all="([^"]+)"/g:/data-restricted-training="([^"]+)" value="(\d+)" data-present="(\d+)" data-active="(\d+)" ([^>]*)/g)];
@@ -126,9 +162,9 @@ test('배정 현장 교육 상세 진입점에서 관리자·근로자 대상을
 });
 
 test('교육 대상 조회·저장 콜백은 현장·계정 전환 뒤 새 창을 열거나 이전 대상을 저장하지 않는다',async()=>{
-  const doc={id:5,type:'education',title:'가상 교육',date:'2026-11-01',status:'draft',edit_version:8,details:'{"kind":"supervisor_new"}'};
+  const doc={id:5,site_id:1,type:'education',title:'가상 교육',date:'2026-11-01',status:'draft',edit_version:8,details:'{"kind":"supervisor_new"}'};
   for(const transition of ['site','account']){
-    const wait=delayed(),ui=screen(async path=>path.endsWith('/training-targets')?wait.promise:response(doc));ui.state.page='documents';ui.state.detail=5;ui.state.admin={scope:'restricted',id:4};
+    const wait=delayed(),ui=screen(async path=>path.endsWith('/training-targets')?wait.promise:response(path.endsWith('/attachments')?[]:doc));ui.state.page='documents';ui.state.detail=5;ui.state.admin={scope:'restricted',id:4};
     await ui.context.renderRestrictedDocuments();const opening=ui.get('#restricted-education-targets').onclick();if(transition==='site')ui.state.siteId=2;else ui.state.admin={scope:'restricted',id:99};wait.resolve(response({configured:true,workers:[],managers:[]}));await opening;assert.equal(ui.dialog.open,false);assert.equal(ui.requests.filter(request=>request.options.method==='PUT').length,0);
   }
 });

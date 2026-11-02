@@ -35,6 +35,19 @@ test('현장 관리자 HTTP 경계: 위조·미분류·관계 검증·지연 본
   for(const path of [`/api/documents/${doc.id}/copy-work-plan`,'/api/documents/batch-approve',`/api/documents/${doc.id}/attachments`,'/api/sites','/api/admin-accounts'])assert.equal((await send(path,'POST',input,cookie)).status,403,path);
   assert.equal((await send(`/api/documents/${doc.id}`,'GET',null,cookie,{'X-Admin-Context':'stale'})).status,409);
   assert.equal((await send(`/api/documents/${doc.id}/attachments`,'GET',null,cookie)).status,200);assert.equal(await (await send(`/api/attachments/${file}`,'GET',null,cookie)).text(),'virtual');
+  const trainingDocs=['education','tbm'].map(type=>store.createDocument({...input,type,details:type==='tbm'?{work:'가상 작업',hazards:'가상 위험'}:{kind:'other',otherTitle:'가상 교육'}}));
+  trainingDocs[0].details=JSON.stringify({...JSON.parse(trainingDocs[0].details),timeFrom:'04:13',educationMethod:'이전 방식'});store.db.prepare('UPDATE documents SET details=? WHERE id=?').run(trainingDocs[0].details,trainingDocs[0].id);
+  for(const training of trainingDocs){
+   const trainingFile=store.addAttachment(training.id,'교육.txt',Buffer.from('virtual training'));
+   const endpoint=`/api/documents/${training.id}/attachments/${trainingFile}`;
+   assert.equal((await (await send(`/api/documents/${training.id}`,'GET',null,cookie)).json()).details,training.details);
+   assert.equal((await (await send(`/api/documents/${training.id}/attachments`,'GET',null,cookie)).json())[0].id,trainingFile);
+   for(const actor of [cookie,global]){const r=await send(endpoint,'GET',null,actor);assert.equal(r.status,200);assert.equal(r.headers.get('cache-control'),'no-store');assert.equal(await r.text(),'virtual training');}
+   for(const other of [file,foreignFile])assert.equal((await send(`/api/documents/${training.id}/attachments/${other}`,'GET',null,cookie)).status,403);
+   for(const method of ['POST','PUT','DELETE'])assert.equal((await send(endpoint,method,input,cookie)).status,403);
+   assert.equal((await send(`/api/documents/${training.id}/transition`,'POST',{action:'submit'},cookie)).status,403);
+  }
+  assert.equal((await send('/training-detail.js','GET',null,cookie)).status,200);
   assert.equal((await send('/api/documents','POST',{...input,siteId:b.id},cookie)).status,403);
   assert.equal((await send('/api/documents','POST',{...input,officeSetup:{}},cookie)).status,403);
   for(const type of ['notice','checklist','tbm','education','daily_report']){const created=await send('/api/documents','POST',{...input,type},cookie);assert.equal(created.status,201,`${type}: ${await created.clone().text()}`);const row=await created.json();assert.equal((await send(`/api/documents/${row.id}`,'PUT',{...input,type,title:'가상 수정',expectedEditVersion:row.edit_version},cookie)).status,200);}
@@ -53,6 +66,7 @@ test('현장 관리자 HTTP 경계: 위조·미분류·관계 검증·지연 본
   store.db.exec('BEGIN IMMEDIATE');locked=true;const started=once(child.stdout,'data'),pending=send(`/api/documents/${doc.id}`,'PUT',{...input,title:'차단 대상',expectedEditVersion:store.document(doc.id).edit_version},cookie);assert.match(String((await started)[0]),/WRITE_START/);store.db.prepare('UPDATE documents SET site_id=? WHERE id=?').run(b.id,doc.id);store.db.exec('COMMIT');locked=false;assert.equal((await pending).status,403);assert.equal(store.document(doc.id).title,input.title);
   store.db.exec('BEGIN IMMEDIATE');locked=true;const revokedStart=once(child.stdout,'data'),revoked=send('/api/documents','POST',input,cookie);assert.match(String((await revokedStart)[0]),/WRITE_START/);store.db.prepare('DELETE FROM admin_sessions WHERE admin_id=?').run(account.id);store.db.exec('COMMIT');locked=false;assert.equal((await revoked).status,401);
   assert.equal((await send('/api/sites','GET',null,global)).status,200);assert.equal((await send('/api/not-registered','GET',null,global)).status,404);assert.equal((await send('/api/admin-accounts','GET',null,global)).status,200);
+  cookie=await login('limited');const trainingRevoke=store.addAttachment(trainingDocs[0].id,'revoke.txt',Buffer.from('blocked'));const revokedRead=await send(`/api/documents/${trainingDocs[0].id}/attachments/${trainingRevoke}`,'GET',null,cookie);assert.equal(revokedRead.status,401);assert.doesNotMatch(await revokedRead.text(),/blocked/);
   cookie=await login('limited');const revokeFile=store.addAttachment(foreign.id,'revoke.txt',Buffer.from('blocked'));store.db.prepare('UPDATE documents SET site_id=? WHERE id=?').run(a.id,foreign.id);assert.equal((await send(`/api/attachments/${revokeFile}`,'GET',null,cookie)).status,401);
  }finally{if(locked)store.db.exec('ROLLBACK');store.close();if(child.exitCode===null){const done=once(child,'exit');child.kill();await done;}assert.ok(resolve(dir).startsWith(resolve(tmpdir())+sep));rmSync(dir,{recursive:true,force:true});}
 });

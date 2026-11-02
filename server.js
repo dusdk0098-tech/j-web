@@ -98,6 +98,7 @@ assets.add('/worker-list.js');
 assets.add('/attendance-matrix.js');
 assets.add('/restricted-month-editor.js');
 assets.add('/education-kinds.js');
+assets.add('/training-detail.js');
 assets.add('/reviewer-education.js');
 assets.add('/education-reference.js');
 assets.add('/checklist-copy.js');
@@ -1096,11 +1097,13 @@ const server = http.createServer((req,res)=>adminRequests.run(req,async()=>{
       const mime=Buffer.from(file.data).subarray(0,3).equals(Buffer.from('ffd8ff','hex'))?'image/jpeg':'image/png';
       res.writeHead(200,{'Content-Type':mime,'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(file.data);
     }
-    const attach=url.pathname.match(/^\/api\/attachments\/(\d+)$/);
+    const documentAttach=url.pathname.match(/^\/api\/documents\/(\d+)\/attachments\/(\d+)$/);
+    const attach=url.pathname.match(/^\/api\/attachments\/(\d+)$/)|| (documentAttach&&req.method==='GET'?[documentAttach[0],documentAttach[2]]:null);
     if(attach){
       if(req.method==='DELETE'){store.deleteAttachment(attach[1],()=>checkRequestSession(req));return json(res,200,{ok:true});}
       if(req.method==='GET'){
         const file=store.attachment(attach[1]);if(!file)return json(res,404,{error:'첨부파일을 찾을 수 없습니다.'});
+        if(documentAttach&&file.document_id!==Number(documentAttach[1]))return json(res,404,{error:'이 문서의 첨부파일을 찾을 수 없습니다.'});
         const name=encodeURIComponent(file.name).replace(/[!'()*]/g,c=>`%${c.charCodeAt(0).toString(16).toUpperCase()}`);
         res.writeHead(200,{'Content-Type':'application/octet-stream','Content-Disposition':`attachment; filename="attachment"; filename*=UTF-8''${name}`,'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(file.data);
       }

@@ -90,6 +90,11 @@ export function adminSitePolicy(db,req,url,session){
     if(method==='GET')return null;
     if(method==='PUT'&&!document[2])return input===undefined?null:input.type===row.type&&input.officeSetup===undefined&&Number(input.siteId)===row.site_id?null:denied();
   }
+  const documentAttachment=path.match(/^\/api\/documents\/(\d+)\/attachments\/(\d+)$/);
+  if(documentAttachment&&method==='GET'){
+    const row=doc(documentAttachment[1]),file=db.prepare('SELECT document_id FROM attachments WHERE id=?').get(Number(documentAttachment[2]));
+    return owned(row)||!['tbm','education'].includes(row.type)||file?.document_id!==row.id?denied():null;
+  }
   const attachment=path.match(/^\/api\/attachments\/(\d+)$/);
   if(method==='GET'&&attachment)return owned(db.prepare('SELECT d.site_id FROM attachments a JOIN documents d ON d.id=a.document_id WHERE a.id=?').get(Number(attachment[1])));
   return denied();

@@ -1,4 +1,5 @@
 import { adminSession } from './admin-session.js';
+import { trainingFields, trainingDetailMarkup } from './training-detail.js';
 import { faqPage,faqPager } from './faq-pages.js';
 import { mountManualPlanPrint } from './plan-manual-print.js';
 import { boardCreateMarkup,boardCreation } from './board-create.js';
@@ -298,7 +299,7 @@ function configureRiskDisplay(panel){
 }
 const riskKinds={initial:'최초평가',regular:'정기평가',occasional:'수시평가',continuous:'상시평가'};
 const riskScales={'three-level':'3등급(상·중·하) 판단법','3x3':'3×3 위험성 추정','5x4':'5×4 위험성 추정'};
-const tbmFields={weather:'날씨',instructor:'교육 실시자',work:'작업 내용',hazards:'위험요인 및 대책'};
+const tbmFields=trainingFields.tbm;
 const planFields={consultedAt:'협의일',periodFrom:'작업기간 시작일',periodTo:'작업기간 종료일',company:'작업업체',personnel:'작업인원',place:'작업장소',equipment:'기계·장비',hazards:'위험요인',measures:'안전대책'};
 const incidentFields={recipient:'수신',sender:'발신',contractor:'원청',contractorRepresentative:'원청 대표',subcontractor:'하청',subcontractorRepresentative:'하청 대표',siteName:'현장명',siteAddress:'현장 주소',client:'발주처',constructionType:'공사종류',constructionAmount:'공사금액 (백만원)',periodFrom:'공사 시작일',periodTo:'공사 종료일',workerCount:'근로자수',progress:'공정률 (%)',occurredAt:'발생 일시',location:'발생 장소',incidentType:'발생 형태',causeObject:'기인물',circumstances:'사고경위',measures:'조치',other:'기타 중요한 사항',prevention:'재발 방지 대책'};
 const victimFields={name:'가상 이름',company:'가상 소속',occupation:'직종',career:'경력',joinedAt:'입사일',treatment:'치료 내용'};
@@ -717,7 +718,7 @@ async function renderDetail(){
   const pdfSnapshot=doc.type==='work_plan'?await planPdfSnapshot(api,doc,attachments,currentDetail):null;
   if(!currentDetail())return;
   const actions=({draft:[['submit','결재 요청']],pending:[['approve','승인'],['reject','반려'],['withdraw','요청 취소']],rejected:[['revise','다시 작성']],approved:[]}[doc.status]).filter(([action])=>!line.length||!['approve','reject'].includes(action));
-  const fields=doc.type==='daily_report'?dailyFields:doc.type==='tbm'?tbmFields:doc.type==='education'?{otherTitle:'기타 교육명',audience:'출력용 교육대상',timeFrom:'교육 시작',timeTo:'교육 종료',instructor:'교육 강사',educationPlace:'교육 장소',educationMethod:'교육 방법',textbook:'사용교재'}:doc.type==='work_plan'?planFields:doc.type==='permit'?permitFields:doc.type==='incident'?{severity:'사고유형',...incidentFields,technicalGuidance:'기술지도관계',preventionPlan:'방지계획서관계'}:{};
+  const fields=doc.type==='daily_report'?dailyFields:doc.type==='tbm'?tbmFields:doc.type==='education'?trainingFields.education:doc.type==='work_plan'?planFields:doc.type==='permit'?permitFields:doc.type==='incident'?{severity:'사고유형',...incidentFields,technicalGuidance:'기술지도관계',preventionPlan:'방지계획서관계'}:{};
   const details=JSON.parse(doc.details||'{}');
   const meetingChecks=['safety_meeting','work_council'].includes(doc.type)?await api(`/api/documents/${doc.id}/meeting-checks`):[];
   const currentEquipment=doc.type==='work_plan' && details.equipmentIds?.length?(await api(`/api/equipment?siteId=${doc.site_id}`)).filter(item=>details.equipmentIds.includes(item.id)):[];
@@ -1096,8 +1097,15 @@ async function renderRestrictedDocuments(){
   content.textContent='배정 현장의 문서를 불러오는 중입니다.';
   if(detailId){
     const doc=await api('/api/documents/'+detailId,{},current);if(!current())return;
-    content.innerHTML=`<section class="panel"><button type="button" id="restricted-back">목록으로</button><h2>${esc(doc.title)}</h2><p>${esc(state.types[doc.type]||doc.type)} · ${esc(doc.date)} · ${esc(statusLabels[doc.status]||doc.status)}</p><p class="detail-body">${esc(doc.body)}</p><p>문서 제목·본문 요약입니다. 임시저장·반려된 일반 공지는 수정할 수 있습니다. 세부 서식, 첨부·서명, 결재와 다른 유형의 수정은 이 화면에서 지원하지 않습니다.</p></section>`;
-    $('#restricted-back').onclick=()=>{state.detail=null;render().catch(showError);};
+    if(doc.id!==detailId||doc.site_id!==siteId)throw Error('선택한 현장의 문서를 다시 확인해 주세요.');
+    const training=['tbm','education'].includes(doc.type),attachments=training?await api(`/api/documents/${doc.id}/attachments`,{},current):[];
+    if(!current())return;
+    content.innerHTML=`<section class="panel"><button type="button" id="restricted-back">목록으로</button><h2>${esc(doc.title)}</h2><p>${esc(state.types[doc.type]||doc.type)} · ${esc(doc.date)} · ${esc(statusLabels[doc.status]||doc.status)}</p><p class="detail-body">${esc(doc.body)}</p><p>${training?'교육·TBM의 저장된 세부 항목과 첨부를 조회합니다.':'문서 제목·본문 요약입니다. 임시저장·반려된 일반 공지는 수정할 수 있습니다.'} 서명·결재와 다른 유형의 수정은 이 화면에서 지원하지 않습니다.</p></section>`;
+    $('#restricted-back').onclick=()=>{if(!current())return;state.detail=null;render().catch(showError);};
+    if(training){
+      content.insertAdjacentHTML('beforeend',`<section class="panel"><h2>교육 상세</h2>${trainingDetailMarkup(doc,esc)||'<p>저장된 세부 항목이 없습니다.</p>'}<h3>첨부파일</h3>${attachments.length?'<ul>'+attachments.map(file=>`<li>${esc(educationAttachmentLabels[file.category]||'일반 첨부')} · <a data-training-file href="/api/documents/${doc.id}/attachments/${file.id}">${esc(file.name)}</a> (${esc(file.size)}바이트)</li>`).join('')+'</ul>':'<p>첨부파일이 없습니다.</p>'}<p>저장된 교육 항목과 첨부를 조회합니다. 실제 교육 이수나 참석을 증명하지 않습니다.</p></section>`);
+      content.querySelectorAll('[data-training-file]').forEach(link=>link.onclick=event=>{if(!current())event.preventDefault();});
+    }
     if(doc.type==='notice'&&['draft','rejected'].includes(doc.status)){
       content.insertAdjacentHTML('beforeend','<button type="button" id="restricted-notice-edit">일반 공지 수정</button>');
       $('#restricted-notice-edit').onclick=()=>editNotice(doc);
