@@ -65,6 +65,7 @@ const workerSessions=new WorkerSessions(store.db);
 const reviewerSessions=new ReviewerSessions(store.db),reviewerLoginFailures=new LoginFailures(),reviewerAccountFailures=reviewerLoginFailures.accounts;
 const workerLoginFailures=new LoginFailures(),workerAccountFailures=workerLoginFailures.accounts;
 const workerKey=raw=>typeof raw==='string' && /^[\w-]{43}$/.test(raw)?createHash('sha256').update(raw).digest('hex'):'';
+const reviewerContext=key=>createHash('sha256').update('reviewer-context:'+key).digest('hex');
 const workerReportContext=(key,worker)=>({workerId:worker.id,siteId:worker.site_id,generation:createHash('sha256').update('worker-report:'+key).digest('hex')});
 function checkWorkerReport(req,key,session,input){checkRequestSession(req);if(input===undefined){try{input={reportContext:JSON.parse(req.headers['x-worker-report-context']||'null')};}catch{input={};}}const expected=workerReportContext(key,session.worker),actual=input.reportContext;if(!actual||actual.workerId!==expected.workerId||actual.siteId!==expected.siteId||actual.generation!==expected.generation)throw Object.assign(new Error('로그인 계정 또는 현장 세션이 변경되었습니다. 입력 내용을 복사한 뒤 다시 로그인해 주세요.'),{sessionStatus:409,sessionChanged:true});}
 function workerSessionError(raw,expected){const now=new Date(),session=workerSessions.get(workerKey(raw));if(session!==expected||!session||session.expires<=now.getTime())return {status:401,error:'근로자 로그인이 필요합니다.'};const date=new Date(now.getTime()-now.getTimezoneOffset()*60000).toISOString().slice(0,10);return store.workerAccessBlocked(session.worker.site_id,date)?{status:403,error:'해당 현장은 오늘 근로자 접속이 차단되었습니다.'}:null;}
@@ -89,6 +90,7 @@ assets.add('/board-create.js');
 assets.add('/board-inline-image.js');
 assets.add('/worker-preview.js');
 assets.add('/reviewer-login.js');
+assets.add('/reviewer-session.js');
 assets.add('/worker-identity-remember.js');
 assets.add('/worker-list.js');
 assets.add('/attendance-matrix.js');
@@ -196,15 +198,17 @@ const server = http.createServer((req,res)=>passwordRequests.run(true,()=>adminR
       try{authenticated=await store.authenticateReviewerAsync(input.loginId,input.password,true,peer);}finally{release();}
       if(!authenticated){reviewerLoginFailures.record(peer,accountKey,Date.now());return json(res,401,{error:'아이디 또는 암호가 올바르지 않습니다.'});}
       const raw=randomBytes(32).toString('base64url'),session={id:authenticated.reviewer.id,expires:now+8*60*60*1000};if(!reviewerSessions.issue(workerKey(raw),session,authenticated.credentialHash,authenticated.authVersion,workerKey(reviewerToken)))return json(res,401,{error:'아이디 또는 암호가 올바르지 않습니다.'});
-      reviewerAccountFailures.delete(accountKey);for(const [key,item] of reviewerSessions)if(item.expires<=now)reviewerSessions.delete(key);res.setHeader('Set-Cookie',`jweb_reviewer=${raw}; HttpOnly; SameSite=Strict; Path=/${input.keepLogin===false?'':'; Max-Age=28800'}${secureCookie}`);return json(res,200,{ok:true});
+      reviewerAccountFailures.delete(accountKey);for(const [key,item] of reviewerSessions)if(item.expires<=now)reviewerSessions.delete(key);res.setHeader('Set-Cookie',`jweb_reviewer=${raw}; HttpOnly; SameSite=Strict; Path=/${input.keepLogin===false?'':'; Max-Age=28800'}${secureCookie}`);return json(res,200,{ok:true,context:reviewerContext(workerKey(raw))});
     }
     if(url.pathname.startsWith('/api/reviewer/')){
       const key=workerKey(reviewerToken),session=reviewerSessions.get(key),reviewer=session&&session.expires>Date.now()?store.reviewer(session.id):null;
       if(!reviewer){reviewerSessions.delete(key);return json(res,401,{error:'결재자 로그인이 필요합니다.'});}
+      const context=reviewerContext(key);
+      req.checkSession=()=>{if(reviewerSessions.get(key)!==session||session.expires<=Date.now()||store.reviewer(session.id)?.site_id!==reviewer.site_id)return {status:401,error:'결재자 로그인이 필요합니다.'};const supplied=req.headers['x-reviewer-context'];if((supplied!==undefined||!['GET','HEAD'].includes(req.method)&&(req.headers.origin||req.headers['sec-fetch-site']))&&supplied!==context)return {status:409,error:'직원 로그인 세션이 변경되었습니다. 입력 내용을 복사한 뒤 새로고침해 주세요.'};return null;};
+      checkRequestSession(req);
       if(url.pathname==='/api/reviewer/logout'&&req.method==='POST'){reviewerSessions.delete(key);res.setHeader('Set-Cookie',`jweb_reviewer=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0${secureCookie}`);return json(res,200,{ok:true});}
-      req.checkSession=()=>reviewerSessions.get(key)===session&&session.expires>Date.now()&&store.reviewer(session.id)?.site_id===reviewer.site_id?null:{status:401,error:'결재자 로그인이 필요합니다.'};
       if(await handleCommonWork(req,res,url,'/api/reviewer/common-work',reviewer))return;
-      if(url.pathname==='/api/reviewer/session'&&req.method==='GET')return json(res,200,{reviewer});
+      if(url.pathname==='/api/reviewer/session'&&req.method==='GET')return json(res,200,{reviewer,context});
       const reviewerEducation=url.pathname.match(/^\/api\/reviewer\/education(?:\/(\d+)(?:\/attachments\/(\d+))?)?$/);
       if(reviewerEducation&&req.method==='GET'){
         const [,id,fileId]=reviewerEducation,result=fileId?store.reviewerEducationAttachment(reviewer.id,id,fileId):store.reviewerEducation(reviewer.id,id);checkRequestSession(req);

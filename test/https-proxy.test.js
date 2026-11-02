@@ -67,9 +67,9 @@ test('로컬 HTTPS 중계로 가상 QR 가입과 로그인이 이어진다', asy
     await Promise.race([once(child.stdout,'data'),once(child,'exit').then(()=>{throw new Error('시험 서버가 종료됐습니다.');})]);
     proxy=spawn(process.execPath,['https-proxy.js'],{cwd:process.cwd(),env:{...process.env,JWEB_PROXY_SECRET:'virtual-proxy-secret-for-tests-123456',PORT:String(backendPort),JWEB_PUBLIC_ORIGIN:origin,JWEB_PROXY_BIND:'127.0.0.1',JWEB_TLS_CERT:certPath,JWEB_TLS_KEY:keyPath},stdio:['ignore','pipe','pipe']});
     await Promise.race([once(proxy.stdout,'data'),once(proxy,'exit').then(()=>{throw new Error('시험 중계가 종료됐습니다.');})]);
-    let adminContext='';
+    let adminContext='',reviewerContext='';
     const send=(path,method='GET',data=null,cookie='',host=`localhost:${proxyPort}`)=>new Promise((resolve,reject)=>{
-      const body=data===null?null:JSON.stringify(data),headers={host,origin,...(adminContext?{'x-admin-context':adminContext}:{}),...(cookie?{cookie}:{}),...(body?{'content-type':'application/json'}:{})};
+      const body=data===null?null:JSON.stringify(data),headers={host,origin,...(adminContext?{'x-admin-context':adminContext}:{}),...(reviewerContext?{'x-reviewer-context':reviewerContext}:{}),...(cookie?{cookie}:{}),...(body?{'content-type':'application/json'}:{})};
       const req=httpsRequest({hostname:'127.0.0.1',port:proxyPort,servername:'localhost',ca:cert,path,method,headers},res=>{const chunks=[];res.on('data',chunk=>chunks.push(chunk));res.on('end',()=>resolve({status:res.statusCode,headers:res.headers,body:Buffer.concat(chunks).toString()}));});
       req.on('error',reject);if(body)req.write(body);req.end();
     });
@@ -82,6 +82,9 @@ test('로컬 HTTPS 중계로 가상 QR 가입과 로그인이 이어진다', asy
     const registration={token,name:'가상 근로자',category:'직영',company:'가상 업체',occupation:'가상 직종',loginId:'virtual_worker',password:'virtual-password-123',acknowledged:true,profile:{birthDate:'2000-01-01',phone:'010-0000-0000'}};assert.equal((await send('/api/join','POST',registration)).status,201);
     const login=await send('/api/worker/login','POST',{token,loginId:registration.loginId,password:registration.password});assert.equal(login.status,200);assert.match(login.headers['set-cookie'][0],/; Secure/);const workerCookie=login.headers['set-cookie'][0].split(';')[0];
     assert.equal((await send('/api/worker/session','GET',null,workerCookie)).status,200);assert.equal((await send('/api/sites','GET',null,workerCookie)).status,401);
+    assert.equal((await send('/api/reviewers','POST',{siteId:site.id,loginId:'tls_reviewer',name:'가상 직원',password:'virtual-password-123'},cookie)).status,201);
+    const staff=await send('/api/reviewer/login','POST',{loginId:'tls_reviewer',password:'virtual-password-123'});assert.equal(staff.status,200);assert.match(staff.headers['set-cookie'][0],/; Secure/);const staffCookie=staff.headers['set-cookie'][0].split(';')[0];reviewerContext=JSON.parse(staff.body).context;assert.match(reviewerContext,/^[0-9a-f]{64}$/);assert.equal(JSON.parse((await send('/api/reviewer/session','GET',null,staffCookie)).body).context,reviewerContext);
+    const post={kind:'community_info',title:'가상 글',body:'본문',secret:false};assert.equal((await send('/api/reviewer/board-posts','POST',post,staffCookie)).status,201);reviewerContext='0'.repeat(64);assert.equal((await send('/api/reviewer/board-posts','POST',post,staffCookie)).status,409);
   } finally {
     if(child&&child.exitCode===null&&child.signalCode===null){const exited=once(child,'exit');child.kill();await exited;}
     if(proxy&&proxy.exitCode===null&&proxy.signalCode===null){const exited=once(proxy,'exit');proxy.kill();await exited;}
