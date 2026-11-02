@@ -86,6 +86,7 @@ const pdfAssets=new Map(['pdf.mjs','pdf.worker.mjs'].map(name=>[`/pdfjs/${name}`
 for(const folder of ['cmaps','standard_fonts','wasm'])for(const name of readdirSync(join(root,'node_modules/pdfjs-dist',folder)))if(/\.(bcmap|pfb|ttf|wasm)$/.test(name))pdfAssets.set(`/pdfjs/${folder}/${name}`,join(root,'node_modules/pdfjs-dist',folder,name));
 assets.add('/site-photo-viewer.js');
 assets.add('/board-comments.js');
+assets.add('/community-navigation.js');
 assets.add('/board-create.js');
 assets.add('/board-inline-image.js');
 assets.add('/worker-preview.js');

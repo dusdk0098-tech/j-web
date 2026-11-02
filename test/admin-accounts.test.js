@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
 import { AdminAccounts } from '../admin-accounts.js';
 import { adminWriteGuard } from '../admin-write-guard.js';
+import { readCommunityHash } from '../public/community-navigation.js';
 import { Store } from '../store.js';
 import { mkdtempSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -107,7 +108,7 @@ test('최초 미인증 화면은 다른 탭 로그인 후에도 요청을 보내
     for(const options of [{method:'POST',body:'{}'},{method:'POST',body:new Uint8Array([1])},{method:'DELETE'},{}])await assert.rejects(fetch('/api/sites',options),/다시 로그인하고 새로고침/);
     assert.equal(calls.length,1);
     const app=readFileSync(new URL('../public/app.js',import.meta.url),'utf8'),bootstrap=app.slice(app.lastIndexOf('try {const session=await adminSession;')),redirects=[],errors=[];
-    await runInNewContext('(async()=>{'+bootstrap+'})()',{adminSession:module.adminSession,location:{assign:path=>redirects.push(path)},showError:error=>errors.push(error.message)});
+    await runInNewContext('(async()=>{'+bootstrap+'})()',{adminSession:module.adminSession,readCommunityHash,location:{hash:'',assign:path=>redirects.push(path)},showError:error=>errors.push(error.message)});
     assert.deepEqual(redirects,['/login']);assert.equal(errors.length,1);
   }finally{globalThis.fetch=oldFetch;if(oldLocation===undefined)delete globalThis.location;else globalThis.location=oldLocation;}
 });
