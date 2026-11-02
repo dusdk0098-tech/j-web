@@ -10,7 +10,7 @@ import {runInNewContext} from 'node:vm';
 import {PNG} from 'pngjs';
 import {Store} from '../store.js';
 import {freezeBatchImages} from '../public/batch-images.js';
-import {siteReportsForDay,reloadDailyBatchRows,dailyBatchReport,hazardReportBody,selectBatchItems} from '../public/batch-print.js';
+import {siteReportsForDay,reloadDailyBatchRows,dailyBatchReport,hazardReportBody,selectBatchDocuments,selectBatchItems} from '../public/batch-print.js';
 
 const date='2026-11-01',password='virtual-password-123';
 const png=new PNG({width:1,height:1});png.data[3]=255;
@@ -60,6 +60,18 @@ test('여러 신고는 현장별로 한 번 재조회하고 내용·사진 변�
   latest[1].replies.push({id:1,body:'새 답변'});await nodes['#batch-print'].onclick();assert.equal(prints,1);assert.match(errors.at(-1),/변경/);assert.equal(reads,4);
   latest=structuredClone(original);picture='changed';await nodes['#batch-print'].onclick();assert.equal(prints,1);assert.match(errors.at(-1),/이미지가 변경/);
   picture='first';latest=latest.filter(item=>item.id!==2);await nodes['#batch-print'].onclick();assert.equal(prints,1);assert.match(errors.at(-1),/변경/);
+});
+
+test('선택 신고와 문서·신고 함께 인쇄는 선택 자료와 인쇄 요청을 전달한다',async()=>{
+  const source=readFileSync(new URL('../public/app.js',import.meta.url),'utf8'),start=source.indexOf('    const preview=(ids,autoPrint=false)=>'),end=source.indexOf('\n  }\n}\ntry {const session=',start);assert.ok(start>=0&&end>start);
+  const reports=[{id:2,title:'가상 신고'}],filtered=[{id:7,title:'가상 문서'}],calls=[],errors=[],mixed=[],selected={reports:[{dataset:{hazardDocument:'2'}}],documents:[{dataset:{batchDocument:'7'}}]};let reportPrint;
+  const controls={append:button=>mixed.push(button)},nodes={'#hazard-select-all':{},'#hazard-preview':{after:button=>{reportPrint=button;}}},section={querySelector:()=>controls,querySelectorAll:selector=>selector==='[data-hazard-document]:checked'?selected.reports:[]},content={querySelectorAll:()=>selected.documents};
+  runInNewContext(source.slice(start,end),{reports,filtered,siteId:1,section,content,document:{createElement:()=>({})},$:id=>nodes[id],selectBatchDocuments,selectBatchItems,showBatchPreview:async(...args)=>{calls.push(args);},showError:error=>errors.push(error.message)});
+  assert.equal(reportPrint.textContent,'선택 신고 인쇄');assert.deepEqual(mixed.map(button=>button.textContent),['선택 문서와 신고 함께 미리보기','선택 문서와 신고 함께 인쇄']);
+  await reportPrint.onclick();assert.deepEqual(Array.from(calls[0][0]),[]);assert.deepEqual(Array.from(calls[0][1],report=>report.id),[2]);assert.equal(calls[0][5],true);
+  await mixed[0].onclick();await mixed[1].onclick();assert.deepEqual(Array.from(calls[2][0]),[7]);assert.deepEqual(Array.from(calls[2][1],report=>report.id),[2]);assert.equal(calls[1][5],false);assert.equal(calls[2][5],true);
+  selected.reports=[];selected.documents=[];await mixed[1].onclick();assert.equal(calls.length,3);assert.match(errors.at(-1),/선택/);
+  selected.reports=[{dataset:{hazardDocument:'999'}}];await reportPrint.onclick();assert.equal(calls.length,3);assert.match(errors.at(-1),/다시 확인/);
 });
 
 test('실제 임시 서버에서 신고 출력은 현장·날짜·권한과 사진을 구분한다',{timeout:30000},async()=>{

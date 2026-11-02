@@ -39,6 +39,18 @@ test('조회 실패 재시도·중복 클릭·A→B→A 화면 이동을 보호�
 test('준비 중 첫 문서가 바뀌면 미리보기를 게시하지 않는다',async()=>{
   const h=harness(),original=h.context.renderDetail;h.context.renderDetail=async read=>{const doc=await original(read);h.values.get('/api/documents/1').edit_version++;return doc;};await assert.rejects(h.prepare,/출력 자료가 변경/);assert.equal(h.nodes['#batch-print'],undefined);assert.equal(h.context.document.body.inert,false);
 });
+test('자동 인쇄도 직전 문서 변경을 확인한 뒤 인쇄한다',async()=>{
+  const good=harness();await good.context.showBatchPreview([1],[],1,false,null,true);assert.equal(good.prints(),1);
+  const stale=harness();stale.context.freezeBatchImages=async()=>({dispose(){},check:async()=>{stale.values.get('/api/documents/1').edit_version++;}});await stale.context.showBatchPreview([1],[],1,false,null,true);assert.equal(stale.prints(),0);assert.match(stale.errors.at(-1),/출력 자료가 변경/);
+});
+test('신고 단독과 문서·신고 자동 인쇄는 신고가 바뀌면 중단한다',async()=>{
+  for(const ids of [[],[1]])for(const change of [false,true]){
+    const h=harness(),reports=[{id:3,title:'가상 신고',body:'가상 내용',reporter:'가상 신고자',status:'received',replies:[]}];h.values.set('/api/sites/1/hazard-reports',reports);
+    if(change)h.context.freezeBatchImages=async()=>({dispose(){},check:async()=>{reports[0].replies.push({id:4,body:'새 가상 답변'});}});
+    await h.context.showBatchPreview(ids,structuredClone(reports),1,false,null,true);
+    assert.equal(h.prints(),change?0:1);if(change)assert.match(h.errors.at(-1),/위험신고가 변경/);
+  }
+});
 test('이미지는 조회 바이트로 고정하고 같은 초 교체도 차단하며 URL을 해제한다',async()=>{
   let bytes='first',active=true;const revoked=[],options=[],image={getAttribute:()=>'/api/documents/1/tbm-signature/image',decode:async()=>{}};
   const dependencies={fetchImage:async(path,init)=>{options.push(init);return new Response(new Blob([bytes],{type:'image/png'}));},urls:{createObjectURL:()=> 'blob:virtual',revokeObjectURL:url=>revoked.push(url)}};
