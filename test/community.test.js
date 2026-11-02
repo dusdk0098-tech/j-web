@@ -36,6 +36,16 @@ test('커뮤니티의 상단 안내는 분류·공개 권한을 지키며 검색
   }finally{store.close();}
 });
 
+test('커뮤니티 한 건 조회는 게시판 구분과 공개 권한을 지킨다',()=>{
+  const store=new Store(':memory:');try{
+    const site=store.createSite({name:'가상 현장'}),make=id=>store.createReviewer({siteId:site.id,loginId:id,name:id,password:'virtual-password-123'}),author=make('detail_author'),reader=make('detail_reader');
+    const published=store.saveReviewerBoardPost(author,{kind:'community_info',title:'공개 글',body:'가상 내용',secret:false}),hidden=store.saveBoardPost({kind:'community_info',title:'비공개 글',body:'가상 내용',secret:false,shared:false}),other=store.saveBoardPost({kind:'community_general',title:'다른 게시판',body:'가상 내용',secret:false,shared:true});
+    assert.deepEqual(store.boardPosts('community_all','','',published.id).map(row=>row.id),[published.id]);assert.deepEqual(store.boardPosts('community_info','','',other.id),[]);assert.deepEqual(store.boardPosts('community_info','','',hidden.id).map(row=>row.id),[hidden.id]);
+    assert.deepEqual(store.reviewerBoardPosts(reader,'community_all','','',published.id).map(row=>row.id),[published.id]);assert.deepEqual(store.reviewerBoardPosts(reader,'community_all','','',hidden.id),[]);assert.deepEqual(store.reviewerBoardPosts(reader,'community_info','','',other.id),[]);assert.deepEqual(store.reviewerBoardPosts(reader,'community_all','','',999999),[]);
+    for(const invalid of ['',0,'-1','1e2','1.2','1 OR 1=1',Number.MAX_SAFE_INTEGER+1]){assert.throws(()=>store.boardPosts('community_all','','',invalid),/번호/);assert.throws(()=>store.reviewerBoardPosts(reader,'community_all','','',invalid),/번호/);}
+  }finally{store.close();}
+});
+
 test('새 커뮤니티 분류는 전체 목록·검색·상단 표시와 작성 권한을 지킨다',()=>{
   const store=new Store(':memory:');try{
     const site=store.createSite({name:'가상 현장'}),make=id=>store.createReviewer({siteId:site.id,loginId:id,name:id,password:'virtual-password-123'}),author=make('extra_author'),reader=make('extra_reader'),base={title:'가상 제목',body:'가상 내용',secret:false};

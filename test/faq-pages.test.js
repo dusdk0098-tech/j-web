@@ -80,6 +80,14 @@ for(const role of ['admin','staff'])test(`${role} 커뮤니티: 글 주소·새 
   await h.history.go(1);if(role==='admin')await h.load();assert.equal(readCommunityHash(h.location.hash).id,20);assert.equal(h.options.at(-1).row.id,20);if(role==='staff')assert.equal(h.context.form.elements.title.value,'보존할 입력');
 });
 
+for(const role of ['admin','staff'])test(`${role} 커뮤니티: 상세는 선택한 한 건만 요청하고 검색 페이지를 보존한다`,async()=>{
+  const h=harness(role),rows=Array.from({length:32},(_,i)=>({id:i+1,kind:'community_info',title:`가상 글 ${i+1}`,body:`본문 ${i+1}`})),calls=[];
+  if(role==='admin'){h.context.state.boardKind='community_info';h.context.state.query='가상';}else{h.context.kind.value='community_info';h.context.query.value='가상';}
+  h.context.api=async path=>{const params=new URL(path,'http://example.test').searchParams,id=params.get('id');calls.push({id,q:params.get('q')});return id===null?rows:rows.filter(row=>row.id===Number(id));};
+  h.setPage(2);await h.load();assert.equal(calls.at(-1).id,null);await openCommunity(h,role,20);assert.deepEqual(calls.at(-1),{id:'20',q:''});assert.equal(h.surface.articles.length,1);assert.match(h.surface.innerHTML,/본문 20/);assert.equal(h.page(),2);assert.equal(readCommunityHash(h.location.hash).page,2);
+  await backCommunity(h,role);assert.deepEqual(calls.at(-1),{id:null,q:'가상'});assert.equal(h.page(),2);assert.equal(h.surface.articles.length,15);
+});
+
 for(const role of ['admin','staff'])test(`${role} 커뮤니티: 검색 후 글이 수정돼도 주소로 상세를 열고 검색 목록에 돌아간다`,async()=>{
   const h=harness(role),row={id:1,kind:'community_info',title:'이전 제목',body:'이전 내용'};if(role==='admin'){h.context.state.boardKind='community_info';h.context.state.query='이전';}else{h.context.kind.value='community_info';h.context.query.value='이전';}h.context.api=async url=>new URL(url,'http://example.test').searchParams.get('q')&&row.title==='새 제목'?[]:[{...row}];await h.load();row.title='새 제목';row.body='변경된 내용';await openCommunity(h,role,1);assert.match(h.surface.innerHTML,/새 제목/);assert.match(h.surface.innerHTML,/변경된 내용/);await backCommunity(h,role);assert.equal(h.surface.articles.length,0);assert.equal(role==='admin'?h.context.state.query:h.context.query.value,'이전');
 });
