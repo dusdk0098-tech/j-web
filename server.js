@@ -88,6 +88,7 @@ assets.add('/board-comments.js');
 assets.add('/board-create.js');
 assets.add('/board-inline-image.js');
 assets.add('/worker-preview.js');
+assets.add('/reviewer-login.js');
 assets.add('/worker-list.js');
 assets.add('/attendance-matrix.js');
 assets.add('/restricted-month-editor.js');
@@ -187,12 +188,13 @@ const server = http.createServer((req,res)=>passwordRequests.run(true,()=>adminR
     const reviewerToken=(req.headers.cookie||'').split(';').map(x=>x.trim()).find(x=>x.startsWith('jweb_reviewer='))?.slice(14)||'';
     if(url.pathname==='/api/reviewer/login'&&req.method==='POST'){
       const input=await body(req),now=Date.now(),accountKey=typeof input.loginId==='string'&&/^[A-Za-z0-9_]{3,40}$/.test(input.loginId)?input.loginId:'invalid',peer=workerPeer(req);
+      if(input.keepLogin!==undefined&&typeof input.keepLogin!=='boolean')return json(res,400,{error:'로그인 유지 선택을 확인해 주세요.'});
       if(peer===null)return json(res,503,{error:'로그인 중계 설정을 확인해 주세요.'});
       const release=reviewerLoginFailures.reserve(peer,accountKey,now);let authenticated;
       try{authenticated=await store.authenticateReviewerAsync(input.loginId,input.password,true,peer);}finally{release();}
       if(!authenticated){reviewerLoginFailures.record(peer,accountKey,Date.now());return json(res,401,{error:'아이디 또는 암호가 올바르지 않습니다.'});}
       const raw=randomBytes(32).toString('base64url'),session={id:authenticated.reviewer.id,expires:now+8*60*60*1000};if(!reviewerSessions.issue(workerKey(raw),session,authenticated.credentialHash,authenticated.authVersion,workerKey(reviewerToken)))return json(res,401,{error:'아이디 또는 암호가 올바르지 않습니다.'});
-      reviewerAccountFailures.delete(accountKey);for(const [key,item] of reviewerSessions)if(item.expires<=now)reviewerSessions.delete(key);res.setHeader('Set-Cookie',`jweb_reviewer=${raw}; HttpOnly; SameSite=Strict; Path=/; Max-Age=28800${secureCookie}`);return json(res,200,{ok:true});
+      reviewerAccountFailures.delete(accountKey);for(const [key,item] of reviewerSessions)if(item.expires<=now)reviewerSessions.delete(key);res.setHeader('Set-Cookie',`jweb_reviewer=${raw}; HttpOnly; SameSite=Strict; Path=/${input.keepLogin===false?'':'; Max-Age=28800'}${secureCookie}`);return json(res,200,{ok:true});
     }
     if(url.pathname.startsWith('/api/reviewer/')){
       const key=workerKey(reviewerToken),session=reviewerSessions.get(key),reviewer=session&&session.expires>Date.now()?store.reviewer(session.id):null;
