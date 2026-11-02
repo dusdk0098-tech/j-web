@@ -6,18 +6,18 @@ import {faqPage,faqPager} from '../public/faq-pages.js';
 const generated=Array.from({length:23},(_,i)=>({id:i+1,title:`가상 ${i+1}`,body:`본문 ${i+1}`,category:i<12?'서비스이용':'결제',shared:true,version:`v${i+1}`}));
 class Surface{
   constructor(){this.nodes={};this.articles=[];this.isConnected=true;}
-  set innerHTML(value){this.html=value;this.articles=[...value.matchAll(/<article>(.*?)<\/article>/gs)].map(match=>({html:match[0],querySelector:()=>({replaceWith(body){this.body=body;}})}));this.nodes={};}
+  set innerHTML(value){this.html=value;this.articles=[...value.matchAll(/<article>(.*?)<\/article>/gs)].map(match=>({html:match[0],querySelector:()=>({replaceWith(body){this.body=body;},prepend(){}})}));this.nodes={};}
   get innerHTML(){return this.html||'';}
   set textContent(value){this.innerHTML=value;}
   insertAdjacentHTML(_position,value){this.html+=value;}
   querySelector(selector){return this.nodes[selector]??={};}
-  querySelectorAll(selector){if(selector==='article')return this.articles;if(selector==='[data-board-delete]')return this.nodes[selector]??=[...this.innerHTML.matchAll(/data-board-delete="(\d+)"/g)].map(match=>({dataset:{boardDelete:match[1]}}));return [];}
+  querySelectorAll(selector){if(selector==='article')return this.articles;if(selector==='[data-board-delete]')return this.nodes[selector]??=[...this.innerHTML.matchAll(/data-board-delete="(\d+)"/g)].map(match=>({dataset:{boardDelete:match[1]}}));if(selector==='[data-delete]')return this.nodes[selector]??=[...this.innerHTML.matchAll(/data-delete="(\d+)"/g)].map(match=>({dataset:{delete:match[1]}}));return [];}
 }
 function harness(role){
   const source=readFileSync(new URL(role==='admin'?'../public/app.js':'../public/board-view.js',import.meta.url),'utf8');
-  const surface=new Surface(),options=[],bodies=[],nodes={},context=createContext({faqPage,faqPager,URLSearchParams,Promise,esc:String,JSON,Number,confirm:()=>true,document:{createElement:()=>({})},richBody:(_rich,body)=>{bodies.push(body);return body;},boardImageLimits:()=>({}),mountBoardComments:(_node,value)=>options.push(value),mountBoardAttachments:(_node,value)=>options.push(value),showError:error=>{throw error;}});
+  const surface=new Surface(),options=[],bodies=[],nodes={},context=createContext({faqPage,faqPager,URLSearchParams,Promise,esc:String,JSON,Number,confirm:()=>true,document:{createElement:()=>({}),createTextNode:value=>value},richBody:(_rich,body)=>{bodies.push(body);return body;},boardImageLimits:()=>({}),mountBoardComments:(_node,value)=>options.push(value),mountBoardAttachments:(_node,value)=>options.push(value),showError:error=>{throw error;}});
   let rows=generated,active=true,renders=0;
-  Object.assign(context,{api:async()=>rows,content:surface,list:surface,$:selector=>nodes[selector]??={},render:async()=>{renders++;},detailEpoch:1,renderEpoch:1,state:{page:'board',boardKind:'faq',boardCategory:'',query:'',siteId:1},live:()=>active,actorId:77,kind:{value:'faq'},query:{value:''},category:{value:''},form:{elements:{title:{value:''}},querySelector:()=>({files:[]})},editor:{plain:()=>''},cancel:{},reset(){},sync(){},target:{querySelector:selector=>nodes[selector]??={}}});
+  Object.assign(context,{api:async()=>rows,content:surface,list:surface,$:selector=>nodes[selector]??={},render:async()=>{renders++;},detailEpoch:1,renderEpoch:1,state:{page:'board',boardKind:'faq',boardCategory:'',query:'',siteId:1},live:()=>active,actorId:77,kind:{value:'faq'},query:{value:''},category:{value:''},form:{elements:{title:{value:''}},querySelector:()=>({files:[]})},editor:{plain:()=>''},cancel:{},fieldset:{},status:{textContent:''},busy:false,editing:null,reset(){},sync(){},target:{querySelector:selector=>nodes[selector]??={}}});
   let code;
   if(role==='admin'){
     const a=source.indexOf("  if(state.page==='board'){");code='(async()=>{'+source.slice(a,source.indexOf("  if(state.page==='schedules'){",a))+'})();';
@@ -39,6 +39,23 @@ for(const role of ['admin','staff'])test(`${role} FAQ 가상 UI: 23건 페이지
   h.setPage(3);if(role==='admin'){h.context.$('#board-query').value='검색';h.nodes['#board-search'].onclick();}else{h.context.query.value='검색';await h.nodes['[data-search]'].onclick();}assert.equal(h.page(),1);
   h.setPage(3);if(role==='admin'){h.nodes['#board-kind'].onchange({target:{value:'notice'}});}else{h.context.kind.value='notice';h.context.kind.onchange();}assert.equal(h.page(),1);
   h.setRows(generated);await h.load();assert.equal(h.surface.articles.length,23);assert.doesNotMatch(h.surface.innerHTML,/FAQ 페이지 이동/);
+});
+
+for(const role of ['admin','staff'])test(`${role} 커뮤니티: 상단 안내 유지·15건 페이지 이동·오래된 화면 차단`,async()=>{
+  const h=harness(role),top=[{id:91,kind:'community_info',title:'상단 하나',body:'안내',highlighted:1},{id:92,kind:'community_general',title:'상단 둘',body:'안내',highlighted:1}],normal=Array.from({length:32},(_,i)=>({id:i+1,kind:'community_info',title:`가상 글 ${i+1}`,body:'내용',highlighted:0}));
+  if(role==='admin')h.context.state.boardKind='community_all';else h.context.kind.value='community_all';h.setRows([...normal,...top]);await h.load();assert.equal(h.surface.articles.length,17);assert.match(h.surface.innerHTML,/커뮤니티 페이지 이동/);assert.match(h.surface.innerHTML,/현재 1 \/ 총 3 페이지/);assert.equal(h.options[0].row.id,91);
+  const previous=h.options[0];await h.surface.querySelector('[data-faq-next]').onclick();if(role==='admin')await h.load();assert.equal(previous.active(),false);assert.equal(h.page(),2);assert.equal(h.surface.articles.length,17);assert.equal(h.options.at(-1).row.id,30);
+  await h.surface.querySelector('[data-faq-next]').onclick();if(role==='admin')await h.load();assert.equal(h.page(),3);assert.equal(h.surface.articles.length,4);assert.equal(h.options.at(-1).row.id,32);
+  h.setRows(top);if(role==='admin')h.context.state.query='무일치';else h.context.query.value='무일치';await h.load();assert.equal(h.page(),1);assert.equal(h.surface.articles.length,2);assert.match(h.surface.innerHTML,/상단 하나/);
+});
+
+for(const role of ['admin','staff'])test(`${role} 커뮤니티: 페이지를 바꾸면 이전 삭제 버튼과 응답은 새 화면에 영향을 주지 않는다`,async()=>{
+  const h=harness(role),rows=Array.from({length:20},(_,i)=>({id:i+1,author_id:77,kind:'community_info',title:`가상 글 ${i+1}`,body:'본문',version:`v${i+1}`}));
+  if(role==='admin')h.context.state.boardKind='community_info';else h.context.kind.value='community_info';
+  h.setRows(rows);let deletes=0,resolveDelete;h.context.api=(_url,options)=>options?.method==='DELETE'?(deletes++,new Promise(resolve=>{resolveDelete=resolve;})):Promise.resolve(rows);
+  await h.load();const selector=role==='admin'?'[data-board-delete]':'[data-delete]',old=h.surface.querySelectorAll(selector)[0];h.setPage(2);await old.onclick();assert.equal(deletes,0);
+  h.setPage(1);await h.load();const pending=h.surface.querySelectorAll(selector)[0].onclick();assert.equal(deletes,1);h.setPage(2);await h.load();const before=h.surface.innerHTML;resolveDelete();await pending;
+  assert.equal(h.page(),2);assert.equal(h.surface.innerHTML,before);assert.equal(h.renders,0);assert.equal(h.context.status.textContent,'');
 });
 for(const role of ['admin','staff'])test(`${role} FAQ 가상 UI: 역순 응답·분류·현장 또는 화면 이탈 후 무효화`,async()=>{
   const h=harness(role);await h.load();const original=h.options[0];let resolves=[];h.context.api=()=>new Promise(resolve=>resolves.push(resolve));
