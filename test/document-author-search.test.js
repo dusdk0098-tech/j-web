@@ -4,7 +4,7 @@ import {readFileSync} from 'node:fs';
 import {runInNewContext} from 'node:vm';
 import {Store} from '../store.js';
 
-test('문서 목록은 연결된 가상 작성자의 현재 이름만 제공한다',()=>{
+test('근로자 문서 목록은 연결된 작성자의 현재 이름을 제공한다',()=>{
   const s=new Store(':memory:');try{
     const a=s.createSite({name:'가상 A'}),b=s.createSite({name:'가상 B'}),make=(site,name,loginId)=>s.join(s.createInvitation(site.id).token,{name,category:'직영',company:'가상 업체',occupation:'목공',loginId,password:'virtual-password-123',acknowledged:true,profile:{birthDate:'2000-01-01',phone:'010-0000-0000'}}),worker=make(a,'가상 작성자','author_one'),foreign=make(b,'다른 작성자','author_two'),input={type:'tbm',title:'가상 문서',date:'2026-11-01',details:{weather:'맑음'}};
     s.setWorkerPermissions(a.id,worker.id,['training']);s.setWorkerPermissions(b.id,foreign.id,['training']);const authored=s.createWorkerDocument(a.id,worker.id,input),unknown=s.createDocument({...input,siteId:a.id}),other=s.createWorkerDocument(b.id,foreign.id,input);
