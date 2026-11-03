@@ -88,7 +88,7 @@ async function showWorker(worker,reportContext){
     month.onchange=load;output.textContent='불러오는 중입니다.';initialLoads.push(load);
     initialLoads.push(async()=>{try{
       if(!workerPanelActive())return;const response=await fetch('/api/worker/permissions',{headers:{'X-Worker-Report-Context':JSON.stringify(reportContext)}}),permissions=await response.json();if(!workerPanelActive())return;if(response.status===409&&permissions.sessionChanged){stopWorkerDay();dayStatus.textContent=permissions.error||'로그인 세션이 변경되었습니다. 입력 내용을 복사한 뒤 다시 로그인해 주세요.';return;}if(!response.ok)throw Error(permissions.error);
-      if(permissions.some(permission=>['risk','work_plan','training'].includes(permission)))await mountWorkerDocuments(panel,permissions,signaturePad,reportContext);if(!workerPanelActive())return;
+      if(permissions.some(permission=>['risk','work_plan','training'].includes(permission)))await mountWorkerDocuments(panel,permissions,signaturePad,reportContext,workerPanelActive,text=>{stopWorkerDay();dayStatus.textContent=text;});if(!workerPanelActive())return;
       if(permissions.includes('attendance')){
         const section=document.createElement('section');section.innerHTML='<h2>현장 출역 관리 시험 권한</h2><p>가상 출역만 변경하세요. 변경한 담당자는 기록됩니다.</p><label>날짜 <input type="date" required></label><button type="button">조회</button><div aria-live="polite"></div>';panel.append(section);
         const date=section.querySelector('input'),list=section.querySelector('[aria-live]');date.value=new Date(Date.now()-new Date().getTimezoneOffset()*60000).toISOString().slice(0,10);

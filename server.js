@@ -385,6 +385,7 @@ const server = http.createServer((req,res)=>passwordRequests.run(true,()=>adminR
       const session=workerSessions.get(workerKey(workerToken)),now=new Date(),date=new Date(now.getTime()-now.getTimezoneOffset()*60000).toISOString().slice(0,10);
       if(session&&session.expires>now.getTime()&&store.workerAccessBlocked(session.worker.site_id,date))return json(res,403,{error:'해당 현장은 오늘 근로자 접속이 차단되었습니다.'});
       if(session&&session.expires>now.getTime())req.checkSession=()=>workerSessionError(workerToken,session);
+      if(req.method==='GET'&&req.headers['x-worker-report-context']!==undefined){if(!session||session.expires<=now.getTime())return json(res,401,{error:'근로자 로그인이 필요합니다.'});checkWorkerReport(req,workerKey(workerToken),session);}
     }
     if(url.pathname==='/api/worker/password'&&req.method==='PUT'){
       const key=workerKey(workerToken),session=workerSessions.get(key);if(!session||session.expires<=Date.now())return json(res,401,{error:'근로자 로그인이 필요합니다.'});
