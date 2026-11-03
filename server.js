@@ -596,7 +596,7 @@ const server = http.createServer((req,res)=>passwordRequests.run(true,()=>adminR
     const workerHazardPhoto=url.pathname.match(/^\/api\/worker\/hazard-reports\/(\d+)\/photo$/);
     if(workerHazardPhoto&&req.method==='GET'){
       const key=workerKey(workerToken),session=workerSessions.get(key);if(!session||session.expires<=Date.now()){workerSessions.delete(key);return json(res,401,{error:'근로자 로그인이 필요합니다.'});}
-      const photo=store.workerHazardPhoto(session.worker.id,workerHazardPhoto[1]);if(!photo)return json(res,404,{error:'사진을 찾을 수 없습니다.'});const bytes=Buffer.from(photo),type=bytes.subarray(0,8).equals(Buffer.from('89504e470d0a1a0a','hex'))?'image/png':'image/jpeg';
+      if(req.headers['x-worker-report-context']!==undefined)checkWorkerReport(req,key,session);const photo=store.workerHazardPhoto(session.worker.id,workerHazardPhoto[1]);if(req.headers['x-worker-report-context']!==undefined)checkWorkerReport(req,key,session);if(!photo)return json(res,404,{error:'사진을 찾을 수 없습니다.'});const bytes=Buffer.from(photo),type=bytes.subarray(0,8).equals(Buffer.from('89504e470d0a1a0a','hex'))?'image/png':'image/jpeg';
       res.writeHead(200,{'Content-Type':type,'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(bytes);
     }
     if(url.pathname==='/api/worker/work-stops' && req.method==='POST'){
