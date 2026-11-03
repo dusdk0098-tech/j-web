@@ -13,6 +13,7 @@ for(const [file,name,next] of [['app.js','signaturePad','function showDialog'],[
   assert.throws(()=>read(),/서명/);canvas.onpointerdown(e(1));canvas.onpointerdown(e(2));canvas.onpointermove(e(2,30,30));canvas.onpointerup(e(2));canvas.onpointermove(e(1,20,20));
   assert.deepEqual(lines,[['move',20,20],['line',20.1,20.1],['line',40,40]]);
   canvas.onlostpointercapture(e(1));canvas.onpointermove(e(1,25,25));assert.equal(lines.length,3);
+  canvas.onpointerdown(e(6));canvas.onpointercancel();const count=lines.length;canvas.onpointermove(e(6,30,30));assert.equal(lines.length,count);
   canvas.onpointerdown(e(3));clear.onclick();canvas.onpointermove(e(3,40,40));assert.equal(lines.at(-1)[0],'clear');assert.throws(()=>read(),/서명/);
   canvas.onpointerdown({...e(4),pointerType:'mouse',button:2});assert.throws(()=>read(),/서명/);canvas.onpointerdown(e(5));canvas.onpointercancel(e(5));assert.equal(read(),'data:image/png;base64,virtual');
 });
