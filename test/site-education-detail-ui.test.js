@@ -26,7 +26,7 @@ function screen(request=async()=>[row(),row(2,'협력업체 근로자')],manager
    set textContent(v){this.replaceChildren();this.text=String(v);},get textContent(){return this.text+this.children.map(x=>x.textContent||'').join('');},
    set innerHTML(v){this.replaceChildren();this.html=v;this.inputs=[];this.buttons=[];
     for(const [,id,attrs] of v.matchAll(/<\w+\b[^>]*\bid="([^"]+)"([^>]*)>/g)){const el=node();el.value=attrs.match(/value="([^"]*)"/)?.[1]||'';nodes.set('#'+id,el);}
-    for(const [,attrs] of v.matchAll(/<input\b([^>]*)>/g)){if(!attrs.includes('checkbox'))continue;this.inputs.push({checked:attrs.includes('checked'),value:attrs.match(/value="([^"]*)"/)?.[1]||''});}
+    for(const [,attrs] of v.matchAll(/<input\b([^>]*)>/g)){if(!attrs.includes('checkbox'))continue;this.inputs.push({checked:attrs.includes('checked'),value:attrs.match(/value="([^"]*)"/)?.[1]||'',matches:selector=>selector==='input[type=checkbox]'});}
     for(const [,id] of v.matchAll(/data-site-education-person="(\d+)"/g))this.buttons.push({dataset:{siteEducationPerson:id}});
    },get innerHTML(){return this.html;},querySelector(sel){return nodes.get(sel);},querySelectorAll(sel){if(sel==='input:checked')return this.inputs.filter(x=>x.checked);if(sel==='[data-site-education-person]')return this.buttons;return [];}
   };
@@ -36,11 +36,11 @@ function screen(request=async()=>[row(),row(2,'협력업체 근로자')],manager
  runInNewContext([source.match(/^const esc = .*$/m)[0],fragment('async function api(', 'function flash('),fragment('async function showWorkerActivities(', 'async function showWorkerFiles('),fragment('function showSiteEducationDetail(', 'async function renderAllSiteStatistics(')].join('\n'),context);
  return {context,state,nodes,boxes,calls,dialog,open:(id=8)=>context.showSiteEducationDetail({id,name:'가상 현장 '+id},'2026-10'),get:sel=>nodes.get(sel),month:()=>nodes.get('#site-education-month'),results:()=>nodes.get('#site-education-results'),categories:()=>nodes.get('#site-education-categories')};
 }
-test('독립 상세: 현장·날짜·상위 필터 유지, 종류별 횟수, 전체 해제, 월·빈 결과·오류 및 활동 복귀',async()=>{
+test('독립 상세: 현장·날짜·상위 필터 유지, 종류별 횟수, 마지막 구분 유지, 월·빈 결과·오류 및 활동 복귀',async()=>{
  const ui=screen(async path=>path.includes('/activities?')?{items:[{date:'2026-01-01',kind:'education',title:'가상 교육',detail:'시험 확인',document_id:3}],nextOffset:null}:path.includes('2026-12')?[]:[row(),row(2,'협력업체 근로자')]),before=JSON.stringify(ui.state);
  await ui.open();assert.equal(JSON.stringify(ui.state),before);assert.match(ui.calls[0],/siteId=8&from=2026-10-01&to=2026-10-31/);assert.match(ui.results().innerHTML,/정기교육/);assert.match(ui.results().innerHTML,/<td>2<\/td>/);
- ui.categories().inputs.forEach(x=>x.checked=false);ui.categories().onchange();assert.match(ui.results().innerHTML,/없습니다/);
- ui.categories().inputs[0].checked=true;ui.categories().onchange();assert.doesNotMatch(ui.results().innerHTML,/가상 사람 2/);
+ ui.categories().inputs[1].checked=false;ui.categories().onchange({target:ui.categories().inputs[1]});assert.doesNotMatch(ui.results().innerHTML,/가상 사람 2/);
+ ui.categories().inputs[0].checked=false;ui.categories().onchange({target:ui.categories().inputs[0]});assert.equal(ui.categories().inputs[0].checked,true);assert.match(ui.results().innerHTML,/가상 사람 1/);
  await ui.results().buttons[0].onclick();assert.match(ui.calls.at(-1),/workers\/1\/activities\?siteId=8&offset=0/);assert.deepEqual(new URLSearchParams(ui.calls.at(-1).split('?')[1]).getAll('kind'),['education']);assert.doesNotMatch(ui.calls.at(-1),/from=|to=/);assert.match(ui.get('#activity-results').textContent,/2026-01-01.*가상 교육.*시험 확인/);assert.equal(ui.get('#activity-results').children[0].children.some(x=>x.tag==='button'),false);
  ui.get('#dialog-form').onsubmit({preventDefault(){}});assert.equal(ui.dialog.open,false);assert.equal(ui.boxes[0].open,true);assert.equal(ui.categories().inputs[1].checked,false);
  ui.month().value='2026-11';await ui.month().onchange();assert.match(ui.calls.at(-1),/to=2026-11-30/);assert.equal(ui.categories().inputs[1].checked,false);assert.equal(JSON.stringify(ui.state),before);
@@ -90,8 +90,8 @@ test('현장 상세의 직원 교육은 직원·종류별 지정과 확인을 �
  const wait=deferred(),late=screen(async()=>[],()=>wait.promise),pending=late.open(),old=late.get('#site-education-staff');late.boxes[0].close();wait.resolve(assignments);await pending;assert.doesNotMatch(old.innerHTML,/가상 직원/);
 });
 
-test('빈 월에서 시작해도 다음 월의 첫 자료를 기본 선택하고 명시적 전체 해제는 유지한다',async()=>{
- const ui=screen(async path=>path.includes('2026-10')?[]:[row()]);await ui.open();assert.match(ui.results().innerHTML,/없습니다/);ui.month().value='2026-11';await ui.month().onchange();assert.match(ui.results().innerHTML,/가상 사람 1/);assert.equal(ui.categories().inputs[0].checked,true);ui.categories().inputs[0].checked=false;ui.categories().onchange();ui.month().value='2026-12';await ui.month().onchange();assert.match(ui.results().innerHTML,/없습니다/);assert.equal(ui.categories().inputs[0].checked,false);
+test('빈 월에서 시작해도 다음 월의 첫 자료를 기본 선택하고 마지막 선택을 유지한다',async()=>{
+ const ui=screen(async path=>path.includes('2026-10')?[]:[row()]);await ui.open();assert.match(ui.results().innerHTML,/없습니다/);ui.month().value='2026-11';await ui.month().onchange();assert.match(ui.results().innerHTML,/가상 사람 1/);assert.equal(ui.categories().inputs[0].checked,true);ui.categories().inputs[0].checked=false;ui.categories().onchange({target:ui.categories().inputs[0]});assert.equal(ui.categories().inputs[0].checked,true);ui.month().value='2026-12';await ui.month().onchange();assert.match(ui.results().innerHTML,/가상 사람 1/);assert.equal(ui.categories().inputs[0].checked,true);
 });
 test('전체 현장 행 버튼은 선택 현장과 날짜를 보존하여 상세를 열고 오래된 행은 무시한다',()=>{
  const button={dataset:{siteEducation:'8'}},state={siteId:7,page:'statistics',statisticsMonth:'2026-10',statisticsDay:'12'},section={isConnected:true,querySelectorAll:selector=>selector==='[data-site-education]'?[button]:[]},opened=[],context={section,state,siteId:7,month:'2026-10',day:'12',sites:[{id:8,name:'가상 상세'}],current:()=>state.siteId===7,today:()=>'',showSiteEducationDetail:(site,month)=>opened.push([site.id,month])};runInNewContext(fragment("  section.querySelectorAll('[data-site-education]')",'\n}'),context);const before=JSON.stringify(state);button.onclick();assert.deepEqual(opened,[[8,'2026-10']]);assert.equal(JSON.stringify(state),before);state.siteId=9;button.onclick();assert.equal(opened.length,1);

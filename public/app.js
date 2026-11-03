@@ -1031,7 +1031,7 @@ function showSiteEducationDetail(site,initialMonth){
     results.innerHTML=visible.length?`<div class="table-wrap"><table><thead><tr><th>구분</th><th>이름</th><th>소속</th><th>가상 생년월일</th><th>교육 종류</th><th>확인 문서 수</th><th>상세</th></tr></thead><tbody>${visible.map((row,i)=>`<tr><td>${esc(row.category)}</td><td>${esc(row.name)}</td><td>${esc(row.company)}</td><td>${esc(row.birth_date||'미기록')}</td><td>${esc(row.type==='tbm'?'TBM':educationKinds[row.kind]||'종류 미기록')}</td><td>${row.count}</td><td><button type="button" data-site-education-person="${i}">안전활동 보기</button></td></tr>`).join('')}</tbody></table></div>`:'<p>선택한 조건의 시험 참가 확인이 없습니다.</p>';
     results.querySelectorAll('[data-site-education-person]').forEach(button=>button.onclick=()=>{if(!active())return;const worker=visible[Number(button.dataset.siteEducationPerson)],pending=showWorkerActivities(worker,site.id,active,true,[worker.type==='tbm'?'tbm':'education']);activityAnchor=$('#activity-results');return pending.catch(error=>{if(active())results.textContent=error.message;});});
   };
-  categories.onchange=()=>{selected=[...categories.querySelectorAll('input:checked')].map(input=>input.value);paint();};
+  categories.onchange=event=>{const checked=[...categories.querySelectorAll('input:checked')];if(!checked.length&&event.target.matches('input[type=checkbox]')){event.target.checked=true;checked.push(event.target);}selected=checked.map(input=>input.value);paint();};
   const load=async()=>{
     const request=++sequence,value=month.value;rows=[];results.textContent='불러오는 중입니다.';staff.textContent='불러오는 중입니다.';
     if(!/^\d{4}-(0[1-9]|1[0-2])$/.test(value)){results.textContent='조회할 월을 확인해 주세요.';staff.textContent='조회할 월을 확인해 주세요.';return;}
