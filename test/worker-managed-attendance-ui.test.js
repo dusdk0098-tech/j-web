@@ -10,7 +10,7 @@ function setup() {
   const date={value:'2026-11-01'},list={textContent:'',children:[],replaceChildren(){this.children=[];this.textContent='';},append(item){this.children.push(item);}},panel={isConnected:true},pending=[];
   const document={createElement(){return {children:[],append(...items){this.children.push(...items);}};}};
   const fetch=(url,options)=>new Promise(resolve=>pending.push({url,options,resolve}));
-  const load=runInNewContext(`${source.slice(start,end)};loadManaged`,{date,list,panel,document,fetch,reportContext:{workerId:1,siteId:1,generation:'screen'},encodeURIComponent,Error,JSON});
+  const load=runInNewContext(`${source.slice(start,end)};loadManaged`,{date,list,panel,document,fetch,workerPanelActive:()=>panel.isConnected,reportContext:{workerId:1,siteId:1,generation:'screen'},encodeURIComponent,Error,JSON});
   const reply=(request,rows,ok=true)=>request.resolve({ok,json:async()=>rows});
   return {date,list,panel,pending,load,reply};
 }
