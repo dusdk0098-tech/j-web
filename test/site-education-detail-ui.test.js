@@ -90,6 +90,14 @@ test('현장 상세의 직원 교육은 직원·종류별 지정과 확인을 �
  const wait=deferred(),late=screen(async()=>[],()=>wait.promise),pending=late.open(),old=late.get('#site-education-staff');late.boxes[0].close();wait.resolve(assignments);await pending;assert.doesNotMatch(old.innerHTML,/가상 직원/);
 });
 
+test('현장 교육 통계는 직원과 출입자를 선택 표시하고 마지막 선택은 유지한다',async()=>{
+ const ui=screen();await ui.open();const workers=ui.get('#site-education-show-workers'),staff=ui.get('#site-education-show-staff'),workerSection=ui.get('#site-education-worker-section'),staffSection=ui.get('#site-education-staff-section');workers.checked=staff.checked=true;
+ workers.checked=false;workers.onchange({target:workers});assert.equal(workerSection.hidden,true);assert.equal(staffSection.hidden,false);
+ staff.checked=false;staff.onchange({target:staff});assert.equal(staff.checked,true);assert.equal(staffSection.hidden,false);
+ workers.checked=true;workers.onchange({target:workers});staff.checked=false;staff.onchange({target:staff});assert.equal(workerSection.hidden,false);assert.equal(staffSection.hidden,true);
+ ui.month().value='2026-11';await ui.month().onchange();assert.equal(staffSection.hidden,true);
+});
+
 test('빈 월에서 시작해도 다음 월의 첫 자료를 기본 선택하고 마지막 선택을 유지한다',async()=>{
  const ui=screen(async path=>path.includes('2026-10')?[]:[row()]);await ui.open();assert.match(ui.results().innerHTML,/없습니다/);ui.month().value='2026-11';await ui.month().onchange();assert.match(ui.results().innerHTML,/가상 사람 1/);assert.equal(ui.categories().inputs[0].checked,true);ui.categories().inputs[0].checked=false;ui.categories().onchange({target:ui.categories().inputs[0]});assert.equal(ui.categories().inputs[0].checked,true);ui.month().value='2026-12';await ui.month().onchange();assert.match(ui.results().innerHTML,/가상 사람 1/);assert.equal(ui.categories().inputs[0].checked,true);
 });
