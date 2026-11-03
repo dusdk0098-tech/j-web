@@ -962,8 +962,8 @@ const server = http.createServer((req,res)=>passwordRequests.run(true,()=>adminR
     if(restaurant&&req.method==='PUT')return json(res,200,store.saveRestaurant(await body(req),restaurant[1]));
     if(url.pathname==='/api/site-occupations'){
       if(req.method==='GET')return json(res,200,store.siteOccupations(url.searchParams.get('siteId')));
-      if(req.method==='POST'){const input=await body(req);return json(res,201,{id:store.addSiteOccupation(input.siteId,input.name)});}
-      if(req.method==='DELETE'){store.deleteSiteOccupation(url.searchParams.get('siteId'),url.searchParams.get('id'));return json(res,200,{ok:true});}
+      if(req.method==='POST'){const input=await body(req);return json(res,201,{id:store.addSiteOccupation(input.siteId,input.name,()=>checkRequestSession(req))});}
+      if(req.method==='DELETE'){store.deleteSiteOccupation(url.searchParams.get('siteId'),url.searchParams.get('id'),()=>checkRequestSession(req));return json(res,200,{ok:true});}
     }
     if(url.pathname==='/api/basic-categories'){
       const siteId=url.searchParams.get('siteId');
@@ -986,7 +986,7 @@ const server = http.createServer((req,res)=>passwordRequests.run(true,()=>adminR
     }
     if (url.pathname === '/api/companies') {
       if(req.method==='GET'){const siteId=url.searchParams.get('siteId'),companies=store.companies(siteId);if(url.searchParams.get('withUsage')!=='1')return json(res,200,companies);const usage=store.companyUsage(siteId);return json(res,200,companies.map(company=>({...company,in_use:usage.ids.has(company.id)||usage.names.has(company.name)})));}
-      if(req.method==='POST')return json(res,201,store.createCompany(await body(req)));
+      if(req.method==='POST')return json(res,201,store.createCompany(await body(req),()=>checkRequestSession(req)));
     }
     if(url.pathname==='/api/safety-costs'){
       if(req.method==='GET')return json(res,200,store.safetyCosts(url.searchParams.get('siteId'),url.searchParams.get('month')));

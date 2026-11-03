@@ -706,11 +706,11 @@ export class Store {
       this.db.exec('COMMIT');
     }catch(error){this.db.exec('ROLLBACK');throw error;}
   }
-  addSiteOccupation(siteId,name){
-    siteId=Number(siteId);if(!this.db.prepare('SELECT 1 FROM sites WHERE id=?').get(siteId))throw new Error('현장을 선택해 주세요.');
-    name=text(name,'직종');const result=this.db.prepare('INSERT INTO site_occupations(site_id,name) VALUES(?,?) ON CONFLICT(site_id,name) DO NOTHING').run(siteId,name);if(!result.changes)throw new Error('이미 등록된 직종입니다.');return result.lastInsertRowid;
+  addSiteOccupation(siteId,name,onAuthorize=()=>{}){
+    siteId=Number(siteId);name=text(name,'직종');this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();if(!this.db.prepare('SELECT 1 FROM sites WHERE id=?').get(siteId))throw new Error('현장을 선택해 주세요.');
+    const result=this.db.prepare('INSERT INTO site_occupations(site_id,name) VALUES(?,?) ON CONFLICT(site_id,name) DO NOTHING').run(siteId,name);if(!result.changes)throw new Error('이미 등록된 직종입니다.');this.db.exec('COMMIT');return result.lastInsertRowid;}catch(error){this.db.exec('ROLLBACK');throw error;}
   }
-  deleteSiteOccupation(siteId,id){if(!this.db.prepare('DELETE FROM site_occupations WHERE site_id=? AND id=?').run(Number(siteId),Number(id)).changes)throw new Error('직종을 찾을 수 없습니다.');}
+  deleteSiteOccupation(siteId,id,onAuthorize=()=>{}){this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();if(!this.db.prepare('DELETE FROM site_occupations WHERE site_id=? AND id=?').run(Number(siteId),Number(id)).changes)throw new Error('직종을 찾을 수 없습니다.');this.db.exec('COMMIT');}catch(error){this.db.exec('ROLLBACK');throw error;}}
   restaurants(siteId) {
     return this.db.prepare('SELECT * FROM restaurants WHERE site_id=? ORDER BY name,id').all(Number(siteId));
   }
@@ -1094,11 +1094,12 @@ export class Store {
     this.db.prepare('UPDATE equipment SET kind=?,model=?,capacity=?,manufacturer=?,registration=?,details=? WHERE id=? AND site_id=?').run(kind,model,input.capacity.trim(),input.manufacturer.trim(),input.registration.trim(),JSON.stringify(equipmentDetails(input)),Number(id),siteId);
     return this.db.prepare('SELECT * FROM equipment WHERE id=? AND site_id=?').get(Number(id),siteId);
   }
-  createCompany(input) {
+  createCompany(input,onAuthorize=()=>{}) {
     const siteId=Number(input.siteId);
+    this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();
     if(!this.db.prepare('SELECT id FROM sites WHERE id=?').get(siteId))throw new Error('현장을 선택해 주세요.');
     const id=this.db.prepare('INSERT INTO companies(site_id,name,trade) VALUES(?,?,?)').run(siteId,text(input.name,'회사명'),text(input.trade,'공종')).lastInsertRowid;
-    return this.db.prepare('SELECT * FROM companies WHERE id=?').get(id);
+    const result=this.db.prepare('SELECT * FROM companies WHERE id=?').get(id);this.db.exec('COMMIT');return result;}catch(error){this.db.exec('ROLLBACK');throw error;}
   }
   updateCompany(id,input,onAuthorize=()=>{}) {
     const siteId=Number(input.siteId);
