@@ -19,5 +19,7 @@ test('본인 신고 사진은 최초 계정 세션과 신고 소유자를 확인
     assert.equal((await send(path)).status,401);const valid=await send(path,'GET',null,a.cookie,a.reportContext);assert.equal(valid.status,200);assert.deepEqual(Buffer.from(await valid.arrayBuffer()),bytes);
     assert.equal((await send(path,'GET',null,b.cookie,b.reportContext)).status,404);const mismatch=await send(path,'GET',null,b.cookie,a.reportContext);assert.equal(mismatch.status,409);assert.equal((await mismatch.json()).sessionChanged,true);
     const newer=await login('photo_a');assert.equal((await send(path,'GET',null,newer.cookie,a.reportContext)).status,409);assert.equal((await send(path,'GET',null,newer.cookie,newer.reportContext)).status,200);
+    const staleLogout=await send('/api/worker/logout','POST',null,b.cookie,a.reportContext);assert.equal(staleLogout.status,409);assert.equal((await staleLogout.json()).sessionChanged,true);assert.equal((await send('/api/worker/hazard-reports','GET',null,b.cookie,b.reportContext)).status,200);
+    assert.equal((await send('/api/worker/logout','POST',null,b.cookie,b.reportContext)).status,200);assert.equal((await send('/api/worker/hazard-reports','GET',null,b.cookie,b.reportContext)).status,401);
   }finally{if(child.exitCode===null){const exited=once(child,'exit');child.kill();await exited;}rmSync(dir,{recursive:true,force:true});}
 });

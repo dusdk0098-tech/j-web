@@ -611,6 +611,7 @@ const server = http.createServer((req,res)=>passwordRequests.run(true,()=>adminR
       const input=await body(req),now=new Date(),date=new Date(now.getTime()-now.getTimezoneOffset()*60000).toISOString().slice(0,10);store.confirmWorkerNotice(session.worker.id,workerNotice[1],input.signature,date,input.version,()=>{checkWorkerReport(req,key,session,input);const current=new Date();if(new Date(current.getTime()-current.getTimezoneOffset()*60000).toISOString().slice(0,10)!==date)throw Object.assign(new Error('날짜가 변경되었습니다. 공지를 다시 확인해 주세요.'),{sessionStatus:409});});return json(res,200,{ok:true});
     }
     if(url.pathname==='/api/worker/logout' && req.method==='POST'){
+      if(req.headers['x-worker-report-context']!==undefined){const key=workerKey(workerToken),session=workerSessions.get(key);if(!session||session.expires<=Date.now())return json(res,401,{error:'근로자 로그인이 필요합니다.'});checkWorkerReport(req,key,session);}
       workerSessions.delete(workerKey(workerToken));res.setHeader('Set-Cookie',`jweb_worker=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0${secureCookie}`);return json(res,200,{ok:true});
     }
     if(url.pathname.startsWith('/api/') && url.pathname!=='/api/join' && !auth.valid(token))return json(res,401,{error:'관리자 로그인이 필요합니다.'});
