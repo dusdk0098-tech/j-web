@@ -13,8 +13,9 @@ test('근로자 일일 조회와 신고 조회는 화면을 연 계정과 로그
   for(const suffix of ['a','b']){
     const site=store.createSite({name:'가상 현장 '+suffix}),token=store.createInvitation(site.id).token,loginId='virtual_context_'+suffix,password='virtual-password-123';
     const worker=store.join(token,{name:'가상 근로자 '+suffix,category:'직영',occupation:'가상 직종',loginId,password,acknowledged:true,profile:{birthDate:'2000-01-01',phone:'010-0000-0000'}});store.setWorkerPermissions(site.id,worker.id,['attendance','risk']);
+    const owned=store.createWorkerDocument(site.id,worker.id,{type:'risk',title:'가상 평가',date,details:{}}),fileId=store.addAttachment(owned.id,'가상.txt',Buffer.from('가상 첨부 '+suffix));
     for(const type of ['notice','education']){const doc=store.createDocument({siteId:site.id,type,title:'가상 '+type+' '+suffix,date,body:'가상 내용'});store.db.prepare("UPDATE documents SET status='approved' WHERE id=?").run(doc.id);}
-    people.push({token,loginId,password});
+    people.push({token,loginId,password,docId:owned.id,fileId});
   }
   store.close();const reservation=createServer();await new Promise(resolve=>reservation.listen(0,'127.0.0.1',resolve));const port=reservation.address().port;await new Promise(resolve=>reservation.close(resolve));
   const child=spawn(process.execPath,['server.js'],{cwd:process.cwd(),env:{...process.env,PORT:String(port),JWEB_DATA_DIR:dir,JWEB_ADMIN_PASSWORD:'virtual-admin-password'},stdio:['ignore','pipe','pipe']});
@@ -33,5 +34,6 @@ test('근로자 일일 조회와 신고 조회는 화면을 연 계정과 로그
       for(const [session,context] of [[b,a.reportContext],[b,'invalid'],[next,a.reportContext]]){const response=await get(path,session,context);assert.equal(response.status,409,path);assert.equal((await response.json()).sessionChanged,true);}
     }
     for(const path of ['/api/worker/documents/999999','/api/worker/documents/999999/attachments/1']){assert.equal((await get(path,b,a.reportContext)).status,409);assert.equal((await get(path,b,b.reportContext)).status,400);}
+    const filePath=`/api/worker/documents/${people[1].docId}/attachments/${people[1].fileId}`;assert.equal((await get(filePath,b,a.reportContext)).status,409);assert.equal(await (await get(filePath,b,b.reportContext)).text(),'가상 첨부 b');assert.equal(await (await get(filePath,b)).text(),'가상 첨부 b');assert.equal((await get(filePath,a,a.reportContext)).status,400);
   }finally{if(child.exitCode===null){const done=once(child,'exit');child.kill();await done;}if(dirname(resolve(dir))===resolve(tmpdir()))rmSync(dir,{recursive:true,force:true});}
 });
