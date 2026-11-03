@@ -25,6 +25,13 @@ test('교육 대상 인원은 실제 선택된 근로자와 표시 가능한 직
   targets.configured=false;runInNewContext(line,{doc,targets,roster:trainingRoster(targets),content,managerTargets:true});assert.match(html,/근로자 2명 · 직원 1명/);
 });
 
+test('직원 교육 확인 명단은 서명을 표시하고 이전 화면 응답은 버린다',async()=>{
+  const source=readFileSync(new URL('../public/app.js',import.meta.url),'utf8'),line=source.split(/\r?\n/).find(line=>line.includes("if(managerTargets&&doc.status==='approved')"));assert.ok(line);
+  let html='',active=true;const context={managerTargets:true,doc:{status:'approved'},targets:{},api:async()=>{},currentDetail:()=>active,content:{lastElementChild:{insertAdjacentHTML(_where,value){html=value;}}},esc:value=>String(value).replaceAll('<','&lt;').replaceAll('>','&gt;'),managerTrainingRoster:async()=>[{name:'<가상>',active:1,signature:'YWJj'},{name:'미확인',active:0,signature:null}]};
+  await runInNewContext(`(async()=>{${line}})()`,context);assert.match(html,/data:image\/png;base64,YWJj/);assert.match(html,/&lt;가상&gt;/);assert.match(html,/미확인/);assert.doesNotMatch(html,/<가상>/);
+  html='';context.managerTrainingRoster=async()=>{active=false;return null;};await runInNewContext(`(async()=>{${line}})()`,context);assert.equal(html,'');
+});
+
 test('교육 사진 미리보기는 로그인과 문서·첨부 일치를 확인한다',{timeout:30000},async()=>{
   const dir=mkdtempSync(join(tmpdir(),'jweb-education-photo-')),store=new Store(join(dir,'jweb.sqlite'));
   const site=store.createSite({name:'가상'}),foreign=store.createSite({name:'다른 현장'}),auth=new AdminAccounts(store.db);auth.bootstrap('virtual-password-123');auth.create({loginId:'site_admin',name:'가상 관리자',password:'virtual-password-123',scope:'restricted',siteIds:[site.id]});auth.create({loginId:'other_site_admin',name:'다른 관리자',password:'virtual-password-123',scope:'restricted',siteIds:[foreign.id]});

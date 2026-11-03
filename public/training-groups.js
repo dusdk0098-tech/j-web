@@ -20,6 +20,18 @@ export function trainingRoster(targets){
   }));
 }
 
+export async function managerTrainingRoster(doc,targets,api,current){
+  const people=(targets.managers||[]).filter(person=>person.selected).map(person=>({...person,signature:null}));
+  if(doc.status!=='approved'||!people.length)return people;
+  const query=new URLSearchParams({siteId:String(doc.site_id),from:doc.date,to:doc.date}),assignments=await api(`/api/education/manager-assignments?${query}`,{},current);if(!current())return null;
+  const confirmed=new Set(assignments.filter(row=>row.document_id===doc.id&&row.confirmed_at).map(row=>row.id));
+  for(let start=0;start<people.length;start+=10){
+    await Promise.all(people.slice(start,start+10).filter(person=>confirmed.has(person.id)).map(async person=>{const params=new URLSearchParams({siteId:String(doc.site_id),reviewerId:String(person.id),documentId:String(doc.id)}),data=await api(`/api/education/manager-signature?${params}`,{},current);if(typeof data.signature!=='string'||data.signature.length>7*1024*1024||!/^[A-Za-z0-9+/]+={0,2}$/.test(data.signature))throw Error('직원 시험 서명을 읽을 수 없습니다.');person.signature=data.signature;}));
+    if(!current())return null;
+  }
+  return people;
+}
+
 export function filterEducationReport(rows,categories){
   const selected=new Set(categories);
   return rows.filter(row=>selected.has(row.category));
