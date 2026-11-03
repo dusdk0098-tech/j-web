@@ -1191,7 +1191,7 @@ const server = http.createServer((req,res)=>passwordRequests.run(true,()=>adminR
       if(req.method==='GET'){
         const file=store.attachment(attach[1]);if(!file)return json(res,404,{error:'첨부파일을 찾을 수 없습니다.'});
         if(documentAttach&&file.document_id!==Number(documentAttach[1]))return json(res,404,{error:'이 문서의 첨부파일을 찾을 수 없습니다.'});
-        if(documentAttach&&file.category==='education_photo'&&url.searchParams.get('preview')==='1'){checkRequestSession(req);const mime=Buffer.from(file.data).subarray(0,3).equals(Buffer.from('ffd8ff','hex'))?'image/jpeg':'image/png';res.writeHead(200,{'Content-Type':mime,'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(file.data);}
+        if(documentAttach&&['education_photo','inspection_photo'].includes(file.category)&&url.searchParams.get('preview')==='1'){checkRequestSession(req);const mime=Buffer.from(file.data).subarray(0,3).equals(Buffer.from('ffd8ff','hex'))?'image/jpeg':'image/png';res.writeHead(200,{'Content-Type':mime,'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(file.data);}
         const name=encodeURIComponent(file.name).replace(/[!'()*]/g,c=>`%${c.charCodeAt(0).toString(16).toUpperCase()}`);
         res.writeHead(200,{'Content-Type':'application/octet-stream','Content-Disposition':`attachment; filename="attachment"; filename*=UTF-8''${name}`,'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(file.data);
       }
