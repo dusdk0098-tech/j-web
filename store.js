@@ -1618,7 +1618,10 @@ export class Store {
   }
   attendanceSitesReport(from,to) {
     from=dateValue(from);to=dateValue(to);if(from>to)throw new Error('조회 시작일은 종료일보다 늦을 수 없습니다.');
-    return this.sites().map(site=>({id:site.id,name:site.name,categories:this.attendanceReport(site.id,from,to,'category').map(({label,days})=>({label,days}))}));
+    this.db.exec('BEGIN');try{
+      const first=this.db.prepare("WITH first_day AS (SELECT worker_id,MIN(date) AS date FROM attendance WHERE present=1 GROUP BY worker_id) SELECT workers.site_id,COALESCE(attendance.category_snapshot,'기록 없음') AS label,COUNT(*) AS days FROM attendance JOIN first_day ON first_day.worker_id=attendance.worker_id AND first_day.date=attendance.date JOIN workers ON workers.id=attendance.worker_id WHERE attendance.present=1 AND attendance.date BETWEEN ? AND ? GROUP BY workers.site_id,label ORDER BY label").all(from,to);
+      const rows=this.sites().map(site=>({id:site.id,name:site.name,categories:this.attendanceReport(site.id,from,to,'category').map(({label,days})=>({label,days})),firstCategories:first.filter(row=>row.site_id===site.id).map(({label,days})=>({label,days}))}));this.db.exec('COMMIT');return rows;
+    }catch(error){this.db.exec('ROLLBACK');throw error;}
   }
   createInvitation(siteId,pending=false) {
     if (!this.db.prepare('SELECT id FROM sites WHERE id=?').get(Number(siteId))) throw new Error('현장을 선택해 주세요.');
