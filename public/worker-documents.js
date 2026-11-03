@@ -21,6 +21,10 @@ export async function downloadWorkerAttachment(request,path,name,active){
   const url=URL.createObjectURL(blob);try{const link=document.createElement('a');link.href=url;link.download=name;document.body.append(link);try{link.click();}finally{link.remove();}}finally{setTimeout(()=>URL.revokeObjectURL(url),60000);}
 }
 
+export function bindWorkerDownload(button,request,path,name,active,onError){
+  button.type='button';button.onclick=async()=>{if(button.disabled||!active())return;button.disabled=true;try{await downloadWorkerAttachment(request,path,name,()=>active()&&button.isConnected);}catch(error){if(active())onError(error);}finally{button.disabled=false;}};
+}
+
 export async function mountWorkerDocuments(parent,permissions,signaturePad,reportContext,active,onSessionChanged){
   const allowed=Object.keys(labels).filter(type=>permissions.includes(['tbm','education'].includes(type)?'training':type));if(!allowed.length)return;
   const section=document.createElement('section');section.innerHTML=`<h2>내 시험 작성 문서</h2><p>같은 현장에서 직접 작성한 가상 문서만 관리합니다. 결재자 지정과 승인은 관리자 화면에서 처리합니다.</p><div data-actions></div><div data-list aria-live="polite"></div><div data-editor></div><p data-status role="status"></p>`;parent.append(section);
