@@ -40,7 +40,7 @@ test('독립 상세: 현장·날짜·상위 필터 유지, 종류별 횟수, 전
  await ui.open();assert.equal(JSON.stringify(ui.state),before);assert.match(ui.calls[0],/siteId=8&from=2026-10-01&to=2026-10-31/);assert.match(ui.results().innerHTML,/정기교육/);assert.match(ui.results().innerHTML,/<td>2<\/td>/);
  ui.categories().inputs.forEach(x=>x.checked=false);ui.categories().onchange();assert.match(ui.results().innerHTML,/없습니다/);
  ui.categories().inputs[0].checked=true;ui.categories().onchange();assert.doesNotMatch(ui.results().innerHTML,/가상 사람 2/);
- await ui.results().buttons[0].onclick();assert.match(ui.calls.at(-1),/workers\/1\/activities\?siteId=8&offset=0/);assert.doesNotMatch(ui.calls.at(-1),/from=|to=/);assert.match(ui.get('#activity-results').textContent,/2026-01-01.*가상 교육.*시험 확인/);assert.equal(ui.get('#activity-results').children[0].children.some(x=>x.tag==='button'),false);
+ await ui.results().buttons[0].onclick();assert.match(ui.calls.at(-1),/workers\/1\/activities\?siteId=8&offset=0/);assert.deepEqual(new URLSearchParams(ui.calls.at(-1).split('?')[1]).getAll('kind'),['education']);assert.doesNotMatch(ui.calls.at(-1),/from=|to=/);assert.match(ui.get('#activity-results').textContent,/2026-01-01.*가상 교육.*시험 확인/);assert.equal(ui.get('#activity-results').children[0].children.some(x=>x.tag==='button'),false);
  ui.get('#dialog-form').onsubmit({preventDefault(){}});assert.equal(ui.dialog.open,false);assert.equal(ui.boxes[0].open,true);assert.equal(ui.categories().inputs[1].checked,false);
  ui.month().value='2026-11';await ui.month().onchange();assert.match(ui.calls.at(-1),/to=2026-11-30/);assert.equal(ui.categories().inputs[1].checked,false);assert.equal(JSON.stringify(ui.state),before);
  ui.month().value='2026-12';await ui.month().onchange();assert.match(ui.results().innerHTML,/없습니다/);const count=ui.calls.length;ui.month().value='';await ui.month().onchange();assert.equal(ui.calls.length,count);assert.match(ui.results().textContent,/월을 확인/);ui.get('#site-education-close').onclick();assert.equal(ui.boxes[0].isConnected,false);
@@ -63,7 +63,11 @@ test('개인 활동의 늦은 성공·401·오류는 닫힘·다른 상세·현�
 });
 test('HTML 특수문자와 기존 개인 활동 호출의 기본 현장·링크 동작을 유지한다',async()=>{
  const ui=screen(async path=>path.includes('/activities?')?{items:[{date:'2026-10-01',kind:'education',title:'가상 문서',detail:'확인',document_id:3}],nextOffset:20}:[{...row(),name:'<img src=x onerror=alert(1)>'}]);await ui.open();assert.doesNotMatch(ui.results().innerHTML,/<img/);assert.match(ui.results().innerHTML,/&lt;img/);
- await ui.context.showWorkerActivities(row());assert.match(ui.calls.at(-1),/siteId=7/);assert.equal(ui.get('#activity-results').children[0].children.some(x=>x.tag==='button'),true);assert.equal(ui.get('#activity-more').hidden,false);await ui.get('#activity-more').onclick();assert.match(ui.calls.at(-1),/offset=20/);
+ await ui.context.showWorkerActivities(row());assert.match(ui.calls.at(-1),/siteId=7/);assert.equal(new URLSearchParams(ui.calls.at(-1).split('?')[1]).getAll('kind').length,8);assert.equal(ui.get('#activity-results').children[0].children.some(x=>x.tag==='button'),true);assert.equal(ui.get('#activity-more').hidden,false);await ui.get('#activity-more').onclick();assert.match(ui.calls.at(-1),/offset=20/);
+});
+test('교육 상세는 해당 교육만 먼저 조회하고 다른 활동을 추가 선택할 수 있다',async()=>{
+ const ui=screen(async path=>path.includes('/activities?')?{items:[],nextOffset:null}:[{...row(),type:'tbm'}]);await ui.open();await ui.results().buttons[0].onclick();let kinds=new URLSearchParams(ui.calls.at(-1).split('?')[1]).getAll('kind');assert.deepEqual(kinds,['tbm']);
+ const checks=ui.get('#dialog-body').inputs;checks.find(item=>item.value==='notice').checked=true;await ui.get('#activity-search').onclick();kinds=new URLSearchParams(ui.calls.at(-1).split('?')[1]).getAll('kind');assert.deepEqual(kinds,['tbm','notice']);
 });
 test('실제 가상 HTTP: 승인 문서 집계·같은 현장 개인 조회·빈 월·인증·제한 계정 경계',{timeout:30000},async()=>{
  const dir=mkdtempSync(join(tmpdir(),'jweb-site-education-')),store=new Store(join(dir,'jweb.sqlite')),auth=new AdminAccounts(store.db),password='virtual-education-password';auth.bootstrap(password);
