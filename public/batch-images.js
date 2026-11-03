@@ -12,7 +12,7 @@ export async function freezeBatchImages(images,active,{fetchImage=fetch,urls=URL
       if(!response.ok)throw Error('출력 이미지를 다시 확인하지 못했습니다.');
       blob=await response.blob();
     }
-    if(!['image/png','image/jpeg','image/webp','image/gif'].includes(blob.type)||!blob.size||blob.size>5*1024*1024)throw Error('출력 이미지 형식 또는 크기를 확인해 주세요.');
+    if(!['image/png','image/jpeg','image/webp','image/gif'].includes(blob.type)||!blob.size||blob.size>(source.startsWith('/api/safety-cost-reports/')?10:5)*1024*1024)throw Error('출력 이미지 형식 또는 크기를 확인해 주세요.');
     const hash=Array.from(new Uint8Array(await digest(await blob.arrayBuffer())),byte=>byte.toString(16).padStart(2,'0')).join('');
     return {blob,hash};
   };
