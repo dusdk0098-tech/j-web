@@ -11,6 +11,7 @@ import { salarySummary } from './public/salary-summary.js';
 import { normalizeRichText,richTextToPlain } from './public/rich-text.js';
 import { summarizeWorkerCounts } from './public/worker-list.js';
 import { matchesAttendanceQuery } from './public/attendance-matrix.js';
+import { belongsToInstructionCompany } from './public/instruction-recipients.js';
 import { safetyCostAmount } from './public/safety-cost.js';
 import { educationKinds, hasManagerEducationTargets } from './public/education-kinds.js';
 import { checklistCategories, checklistCategoryForKind } from './public/checklist-copy.js';
@@ -2470,10 +2471,10 @@ export class Store {
   validateInstructionRecipient(doc){
     if(doc.type!=='instruction')return;
     if(!doc.details.companyId){if(doc.details.recipientId)throw new Error('수신 협력사를 먼저 선택해 주세요.');return;}
-    const company=this.db.prepare('SELECT c.name,c.trade FROM companies c WHERE c.id=? AND c.site_id=? AND NOT EXISTS(SELECT 1 FROM archived_companies a WHERE a.company_id=c.id)').get(doc.details.companyId,doc.siteId);
+    const companies=this.companies(doc.siteId),company=companies.find(item=>item.id===doc.details.companyId);
     if(!company)throw new Error('같은 현장의 협력사를 선택해 주세요.');
     doc.details.companyName=company.name;doc.details.companyTrade=company.trade;
-    if(doc.details.recipientId){const worker=this.db.prepare('SELECT name FROM workers WHERE id=? AND site_id=? AND company=?').get(doc.details.recipientId,doc.siteId,company.name);if(!worker)throw new Error('선택한 현장과 협력사의 담당자를 확인해 주세요.');doc.details.recipient=worker.name;}
+    if(doc.details.recipientId){const worker=this.db.prepare('SELECT name,company,company_id FROM workers WHERE id=? AND site_id=?').get(doc.details.recipientId,doc.siteId);if(!belongsToInstructionCompany(worker,company,companies))throw new Error('선택한 현장과 협력사의 담당자를 확인해 주세요.');doc.details.recipient=worker.name;}
   }
   validatePermitCompany(doc,current=null){
     if(doc.type!=='permit'||!doc.details.companyId)return;

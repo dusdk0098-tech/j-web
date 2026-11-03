@@ -31,6 +31,7 @@ import { selectTbmSources, mergeTbmSource } from './tbm-sources.js';
 import { trainingGroups, trainingRoster, filterEducationReport, changedTrainingWorkers } from './training-groups.js';
 import { summarizeSiteAttendance } from './site-statistics.js';
 import { meetingHasCompany } from './meeting-company-search.js';
+import { belongsToInstructionCompany } from './instruction-recipients.js';
 import { dateRangePreset, mountStatisticsDates } from './date-range.js';
 import { dailyQuantities,displayTenths } from './daily-quantities.js';
 import { workerFieldRequirements } from './worker-fields.js';
@@ -574,8 +575,9 @@ async function editDocument(doc=null,initialDetails={},initialType=null) {
     if(select.value==='instruction'){
       $('#daily-fields').innerHTML=`<p class="muted">시험 지시서입니다. 수신자에게 전송하거나 확인을 요청하지 않습니다.</p><label>수신 협력사<select name="instructionCompany"><option value="0">선택하지 않음</option>${companies.map(company=>`<option value="${company.id}" ${details.companyId===company.id?'selected':''}>${esc(company.name)} · ${esc(company.trade)}</option>`).join('')}</select></label><label>가상 출입자 선택<select name="instructionWorker"></select></label>${field('instructionRecipient','직접 입력 또는 이전 기록',details.recipient||'','text',false)}`;
       const companySelect=$('#dialog-form [name=instructionCompany]'),workerSelect=$('#dialog-form [name=instructionWorker]');
-      const setWorkers=selected=>{const company=companies.find(item=>item.id===Number(companySelect.value)),available=company?workers.filter(worker=>worker.company===company.name):[];workerSelect.innerHTML=`<option value="0">${company?'선택하지 않음':'협력사를 먼저 선택하세요'}</option>${available.map(worker=>`<option value="${worker.id}" ${selected===worker.id?'selected':''}>${esc(worker.name)} · ${esc(worker.occupation)}</option>`).join('')}`;workerSelect.disabled=!company;};
-      setWorkers(details.recipientId||0);if(details.recipientId&&Number(workerSelect.value)!==details.recipientId)$('#dialog-error').textContent='이전 담당자가 현재 협력사 목록에 없어 직접 입력 기록으로 유지됩니다.';companySelect.onchange=()=>setWorkers(0);
+      const setWorkers=selected=>{const company=companies.find(item=>item.id===Number(companySelect.value)),available=workers.filter(worker=>belongsToInstructionCompany(worker,company,companies));workerSelect.innerHTML=`<option value="0">${company?'선택하지 않음':'협력사를 먼저 선택하세요'}</option>${available.map(worker=>`<option value="${worker.id}" ${selected===worker.id?'selected':''}>${esc(worker.name)} · ${esc(worker.occupation)}</option>`).join('')}`;workerSelect.disabled=!company;};
+      setWorkers(details.recipientId||0);if(details.recipientId&&Number(workerSelect.value)!==details.recipientId)$('#dialog-error').textContent='이전 담당자를 현재 업체와 확인할 수 없습니다. 저장하면 담당자 계정 연결이 해제됩니다. 다시 선택하거나 입력해 주세요.';companySelect.onchange=()=>setWorkers(0);
+      $('#daily-fields').insertAdjacentHTML('beforeend','<p class="muted">등록 업체 번호가 없는 출입자는 같은 이름의 업체가 여러 개면 담당자로 표시되지 않습니다. 출입자 정보에서 업체를 확인해 연결하세요.</p>');
       return;
     }
     if(select.value==='permit'){

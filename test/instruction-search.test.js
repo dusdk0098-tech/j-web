@@ -42,5 +42,8 @@ test('작업 지시서 협력사 검색 API는 관리자 인증과 현장 경계
     const response=await call(query,'GET',null,admin);assert.equal(response.status,200);assert.deepEqual((await response.json()).map(row=>row.id),[doc.id]);
     assert.equal((await call(query.replace('type=instruction','type=risk'),'GET',null,admin)).status,400);
     assert.equal((await call(query.replace(`instructionCompanyId=${company.id}`,'instructionCompanyId=999999'),'GET',null,admin)).status,400);
+    const duplicate=await (await call('/api/companies','POST',{siteId:site.id,name:company.name,trade:'다른 공종'},admin)).json(),baseWorker={siteId:site.id,category:'직영',company:company.name,occupation:'가상 직종'},first=await(await call('/api/workers','POST',{...baseWorker,name:'가상 첫 근로자',companyId:company.id},admin)).json(),second=await(await call('/api/workers','POST',{...baseWorker,name:'가상 둘째 근로자',companyId:duplicate.id},admin)).json(),legacy=await(await call('/api/workers','POST',{...baseWorker,name:'가상 이전 근로자'},admin)).json();
+    const instruction=recipientId=>({siteId:site.id,type:'instruction',title:'가상 수신',date:'2026-10-30',details:{companyId:company.id,recipientId}});
+    assert.equal((await call('/api/documents','POST',instruction(first.id),admin)).status,201);assert.equal((await call('/api/documents','POST',instruction(second.id),admin)).status,400);assert.equal((await call('/api/documents','POST',instruction(legacy.id),admin)).status,400);assert.equal((await call('/instruction-recipients.js')).status,200);
   }finally{if(child.exitCode===null){const exited=once(child,'exit');child.kill();await exited;}rmSync(dir,{recursive:true,force:true});}
 });

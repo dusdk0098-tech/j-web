@@ -121,6 +121,7 @@ assets.add('/worker-password.js');
 assets.add('/safety-cost.js');
 assets.add('/weekly-ppe.js');
 assets.add('/meeting-company-search.js');
+assets.add('/instruction-recipients.js');
 assets.add('/reviewer-manager-check.js');
 assets.add('/basic-samples.js');
 assets.add('/reviewer-basic-documents.js');
