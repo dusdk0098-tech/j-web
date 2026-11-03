@@ -17,6 +17,7 @@ export function adminSitePolicy(db,req,url,session){
   if(input?.siteId!==undefined&&url.searchParams.has('siteId')&&Number(input.siteId)!==Number(url.searchParams.get('siteId')))return denied();
   const worker=path.match(/^\/api\/workers\/([1-9]\d*)$/);
   const fields=keys=>input&&Object.keys(input).every(key=>keys.includes(key));
+  if(path==='/api/companies'&&method==='GET')return [...url.searchParams.keys()].every(key=>key==='siteId')?site(url.searchParams.get('siteId')):denied();
   if(path==='/api/equipment'&&method==='GET')return [...url.searchParams.keys()].every(key=>key==='siteId')?site(url.searchParams.get('siteId')):denied();
   const equipmentAttendance=path.match(/^\/api\/equipment-attendance(?:\/([1-9]\d*))?$/);
   if(equipmentAttendance){
@@ -75,7 +76,7 @@ export function adminSitePolicy(db,req,url,session){
   if(worker&&method==='GET')return workerSite(worker[1],url.searchParams.get('siteId'))?null:denied();
   if(path==='/api/workers'&&method==='POST'||worker&&method==='PUT'){
     if(input===undefined)return worker?owned(db.prepare('SELECT site_id FROM workers WHERE id=?').get(Number(worker[1]))):null;
-    if(!fields(['siteId','name','category','company','occupation','memo','licenses','version','companyId'])||!allowed(input.siteId)||input.companyId!==undefined&&(!worker||input.companyId!==0))return denied();
+    if(!fields(['siteId','name','category','company','occupation','memo','licenses','version','companyId'])||!allowed(input.siteId)||input.companyId!==undefined&&(!Number.isSafeInteger(input.companyId)||input.companyId<0))return denied();
     if(worker&&(!workerSite(worker[1],input.siteId)||typeof input.version!=='string'||!/^[a-f0-9]{64}$/.test(input.version)))return denied();
     return null;
   }

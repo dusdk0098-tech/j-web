@@ -985,7 +985,7 @@ const server = http.createServer((req,res)=>passwordRequests.run(true,()=>adminR
       if(req.method==='DELETE'){store.deleteBasicCategory(siteId,basicCategory[1],await body(req,2097152),()=>checkRequestSession(req));return json(res,200,{ok:true});}
     }
     if (url.pathname === '/api/companies') {
-      if(req.method==='GET'){const siteId=url.searchParams.get('siteId'),companies=store.companies(siteId);if(url.searchParams.get('withUsage')!=='1')return json(res,200,companies);const usage=store.companyUsage(siteId);return json(res,200,companies.map(company=>({...company,in_use:usage.ids.has(company.id)||usage.names.has(company.name)})));}
+      if(req.method==='GET'){const siteId=url.searchParams.get('siteId'),companies=store.companies(siteId);checkRequestSession(req);if(req.adminRestricted)return json(res,200,companies.map(({id,name,trade})=>({id,name,trade})));if(url.searchParams.get('withUsage')!=='1')return json(res,200,companies);const usage=store.companyUsage(siteId);return json(res,200,companies.map(company=>({...company,in_use:usage.ids.has(company.id)||usage.names.has(company.name)})));}
       if(req.method==='POST')return json(res,201,store.createCompany(await body(req),()=>checkRequestSession(req)));
     }
     if(url.pathname==='/api/safety-costs'){

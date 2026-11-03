@@ -295,6 +295,20 @@ const licenseSection=ui=>ui.get('#dialog-body').children.find(child=>child.tag==
 const licenseRows=ui=>licenseSection(ui).children[2].children.map(element=>({name:element.children[0].children[0],number:element.children[1].children[0],remove:element.children[2]}));
 const addLicense=ui=>licenseSection(ui).children[3].onclick();
 
+test('제한 관리자 업체 선택은 동명 업체를 번호로 구분하고 입력을 보존한다',async()=>{
+  const worker={id:3,name:'가상 근로자',company:'기존 소속',company_id:null,version:'v1',licenses:[]},companies=[{id:11,name:'가상 <업체>',trade:'공종 A'},{id:12,name:'가상 <업체>',trade:'공종 B'}];
+  const ui=screen(async(path,options)=>options.method?{ok:false,status:409,json:async()=>({error:'가상 충돌'})}:response(path.startsWith('/api/companies?')?companies:[worker]));ui.state.page='workers';await ui.context.renderRestrictedWorkforce();ui.get('[data-restricted-worker="3"]').onclick();
+  const input=ui.get('#dialog-form input[name=company]'),choice=ui.get('#restricted-company-choice');input.value='보존할 소속';await ui.get('#restricted-company-load').onclick();assert.equal(input.value,'보존할 소속');assert.match(choice.innerHTML,/가상 &lt;업체&gt; · 공종 A · #11/);assert.match(choice.innerHTML,/공종 B · #12/);
+  choice.value='12';choice.onchange();assert.equal(input.value,'가상 <업체>');await ui.submit({name:worker.name,company:input.value,companyId:choice.value});assert.equal(JSON.parse(ui.requests.at(-1).options.body).companyId,12);assert.equal(ui.dialog.open,true);
+  input.value='직접 입력';input.oninput();assert.equal(choice.value,'0');
+});
+test('업체 목록의 지연 응답은 바뀐 현장이나 닫힌 창에 적용되지 않는다',async()=>{
+  for(const change of ['site','close']){const wait=delayed(),worker={id:3,name:'가상',company:'기존',version:'v1',licenses:[]},ui=screen(async path=>path.startsWith('/api/companies?')?wait.promise:response([worker]));ui.state.page='workers';await ui.context.renderRestrictedWorkforce();ui.get('[data-restricted-worker="3"]').onclick();const pending=ui.get('#restricted-company-load').onclick();if(change==='site')ui.state.siteId=2;else ui.dialog.close();wait.resolve(response([{id:11,name:'오래된 업체',trade:'가상'}]));await pending;assert.doesNotMatch(ui.get('#restricted-company-choice').innerHTML,/오래된 업체/);}
+});
+test('업체 재조회는 선택 중 변경과 목록에서 빠진 이전 선택을 보존한다',async()=>{
+ const wait=delayed(),worker={id:3,name:'가상',company:'기존',version:'v1',licenses:[]};let call=0;const ui=screen(async path=>path.startsWith('/api/companies?')?(++call===1?response([{id:11,name:'가상 업체',trade:'A'}]):call===2?wait.promise:response([])):response([worker]));ui.state.page='workers';await ui.context.renderRestrictedWorkforce();ui.get('[data-restricted-worker="3"]').onclick();const choice=ui.get('#restricted-company-choice'),load=ui.get('#restricted-company-load');choice.value='';await load.onclick();choice.value='11';const pending=load.onclick();choice.value='0';wait.resolve(response([{id:11,name:'다른 내용',trade:'B'}]));await pending;assert.equal(choice.value,'0');assert.doesNotMatch(choice.innerHTML,/다른 내용/);choice.value='11';await load.onclick();assert.equal(choice.value,'11');assert.match(choice.innerHTML,/재선택 필요/);
+});
+
 test('제한 관리자가 등록 업체 소속을 직접 변경할 때만 연결 해제를 요청한다',async()=>{
   const worker={id:3,name:'가상 근로자',company:'가상 업체',company_id:12,version:'v1',licenses:[]};
   const ui=screen(async(path,options)=>options.method?{ok:false,status:409,json:async()=>({error:'가상 충돌'})}:response([worker]));ui.state.page='workers';await ui.context.renderRestrictedWorkforce();ui.get('[data-restricted-worker="3"]').onclick();
@@ -546,6 +560,7 @@ test('실제 HTTP 로그인→배정 현장 선택→공지·근로자·출역·
     assert.equal((await send('/api/attendance','POST',{siteId:created[1].id,workerId:worker.id,date:'2026-10-30',present:true},globalCookie)).status,200);
     await ui.context.render();ui.get('[data-restricted-worker="'+worker.id+'"]').onclick();await ui.submit({...basic,company:company.name,memo:'가상 이름 유지'});assert.equal(ui.dialog.open,false);assert.equal((await readWorker()).company_id,company.id);
     ui.get('[data-restricted-worker="'+worker.id+'"]').onclick();await ui.submit({...basic,company:'직접 변경한 소속'});assert.equal(ui.dialog.open,false);saved=await readWorker();assert.equal(saved.company_id,null);assert.equal(saved.company,'직접 변경한 소속');
+    ui.get('[data-restricted-worker="'+worker.id+'"]').onclick();await ui.get('#restricted-company-load').onclick();const selectedCompany=ui.get('#restricted-company-choice');assert.match(selectedCompany.innerHTML,/가상 등록 업체/);selectedCompany.value=String(company.id);selectedCompany.onchange();await ui.submit({...basic,company:ui.get('#dialog-form input[name=company]').value,companyId:selectedCompany.value});assert.equal(ui.dialog.open,false);assert.equal((await readWorker()).company_id,company.id);
     const oldAttendance=await(await send('/api/attendance?siteId='+created[1].id+'&date=2026-10-30','GET',null,globalCookie)).json();assert.equal(oldAttendance[0].attendance_company_id,company.id);assert.equal(oldAttendance[0].attendance_company,company.name);
     ui.state.page='attendance';await ui.context.render();ui.get('[data-restricted-presence="'+worker.id+'"]').onclick();await ui.submit({present:'1'});assert.equal(ui.dialog.open,false);
     ui.get('[data-restricted-units="'+worker.id+'"]').onclick();await ui.submit({units:'0.75'});assert.equal(ui.dialog.open,false);assert.match(ui.content.innerHTML,/공수 0.75/);
