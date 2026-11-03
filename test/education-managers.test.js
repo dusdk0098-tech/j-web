@@ -29,6 +29,16 @@ test('신규 교육과 관리자 대상은 함께 저장되고 유효하지 않�
   }finally{s.close();}
 });
 
+test('신규 교육의 근로자 명단은 관리자 명단과 함께 저장되고 오류 시 취소된다',()=>{
+  const {s,site,other,worker,manager}=setup();try{
+    const foreign=s.createWorker({siteId:other.id,name:'다른 현장',category:'직영',company:'가상',occupation:'목공'}),input={siteId:site.id,type:'education',title:'가상 교육',date:'2026-11-01',details,educationManagerIds:[manager.id]},before=s.documents(site.id).length;
+    for(const ids of [[foreign.id],[worker.id,worker.id],['1'],null]){assert.throws(()=>s.createAuthorizedDocument({...input,educationWorkerIds:ids}));assert.equal(s.documents(site.id).length,before);}
+    const selected=s.createAuthorizedDocument({...input,educationWorkerIds:[worker.id]}),targets=s.trainingTargets(selected.id);assert.equal(targets.configured,true);assert.deepEqual(targets.workers.filter(row=>row.selected).map(row=>row.id),[worker.id]);assert.equal(targets.managers.find(row=>row.id===manager.id).selected,1);assert.equal(selected.edit_version,s.document(selected.id).edit_version);
+    const empty=s.createAuthorizedDocument({...input,educationWorkerIds:[]});assert.equal(s.trainingTargets(empty.id).configured,true);assert.equal(s.trainingTargets(empty.id).workers.filter(row=>row.selected).length,0);
+    const all=s.createAuthorizedDocument(input);assert.equal(s.trainingTargets(all.id).configured,false);
+  }finally{s.close();}
+});
+
 test('관리자 명부는 교육 종류에 따라 표시되며 근로자 교육과 TBM에는 표시되지 않는다',()=>{
   for(const kind of ['supervisor','supervisor_new','supervisor_regular','supervisor_special','supervisor_changed','msds','other'])assert.equal(hasManagerEducationTargets({type:'education',details:JSON.stringify({kind})}),true);
   for(const kind of ['new','regular','risk','special','changed',''])assert.equal(hasManagerEducationTargets({type:'education',details:JSON.stringify({kind})}),false);

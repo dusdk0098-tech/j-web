@@ -14,6 +14,7 @@ import {PNG} from 'pngjs';
 test('관리자 대상 HTTP는 세션·현장·버전을 검사하고 직원에게 선정된 승인 문서의 첨부만 공개한다',{timeout:60000},async()=>{
   const dir=mkdtempSync(join(tmpdir(),'jweb-manager-http-')),s=new Store(join(dir,'jweb.sqlite')),password='virtual-password-123',auth=new AdminAccounts(s.db);auth.bootstrap(password);
   const a=s.createSite({name:'가상 A'}),b=s.createSite({name:'가상 B'});
+  const worker=s.createWorker({siteId:a.id,name:'가상 근로자',category:'직영',company:'가상',occupation:'목공'}),foreignWorker=s.createWorker({siteId:b.id,name:'다른 근로자',category:'직영',company:'가상',occupation:'목공'});
   for(const [loginId,siteId] of [['admin_a',a.id],['admin_b',b.id]])auth.create({loginId,name:'가상 관리자',password,scope:'restricted',siteIds:[siteId]});
   const manager=s.createReviewer({siteId:a.id,loginId:'review_a',name:'가상 직원',password}),foreign=s.createReviewer({siteId:b.id,loginId:'review_b',name:'다른 직원',password});
   const input={siteId:a.id,type:'education',title:'가상 교육',date:'2026-11-01',details:{kind:'supervisor_new',timeFrom:'09:00',timeTo:'10:00',educationPlace:'가상 교실',educationMethod:'강의식',instructor:'가상 강사'}},doc=s.createDocument(input),other=s.createDocument({...input,title:'다른 문서'}),file=s.addAttachment(doc.id,'가상.txt',Buffer.from('virtual')),otherFile=s.addAttachment(other.id,'다른.txt',Buffer.from('private'));
@@ -41,7 +42,8 @@ test('관리자 대상 HTTP는 세션·현장·버전을 검사하고 직원에�
     const draft={...input,title:'신규 대상 시험',educationManagerIds:[manager.id]},count=s.documents(a.id).length;
     assert.equal((await call('/api/documents','POST',draft)).status,401);assert.equal((await call('/api/documents','POST',draft,await login('admin_b'))).status,403);
     assert.equal((await call('/api/documents','POST',{...draft,educationManagerIds:[foreign.id]},globalAdmin)).status,400);assert.equal(s.documents(a.id).length,count);
-    const made=await call('/api/documents','POST',draft,globalAdmin);assert.equal(made.status,201);const created=await made.json();assert.equal(created.edit_version,s.document(created.id).edit_version);assert.deepEqual(s.trainingTargets(created.id).managers.filter(row=>row.selected).map(row=>row.id),[manager.id]);
+    assert.equal((await call('/api/documents','POST',{...draft,educationWorkerIds:[foreignWorker.id]},globalAdmin)).status,400);assert.equal(s.documents(a.id).length,count);
+    const made=await call('/api/documents','POST',{...draft,educationWorkerIds:[worker.id]},globalAdmin);assert.equal(made.status,201);const created=await made.json();assert.equal(created.edit_version,s.document(created.id).edit_version);assert.deepEqual(s.trainingTargets(created.id).managers.filter(row=>row.selected).map(row=>row.id),[manager.id]);assert.deepEqual(s.trainingTargets(created.id).workers.filter(row=>row.selected).map(row=>row.id),[worker.id]);assert.equal((await call('/education-draft-workers.js')).status,200);
     assert.equal((await call(stats)).status,401);assert.equal((await call(stats,'GET',null,await login('admin_a'))).status,403);
     const assignments=await (await call(stats,'GET',null,globalAdmin)).json();assert.deepEqual(assignments.map(row=>[row.id,row.document_id,row.kind]),[[manager.id,doc.id,'supervisor_new']]);
     assert.deepEqual(await (await call(`/api/education/manager-assignments?siteId=${b.id}&from=2026-11-01&to=2026-11-30`,'GET',null,globalAdmin)).json(),[]);

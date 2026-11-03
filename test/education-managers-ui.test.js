@@ -13,7 +13,7 @@ test('신규 교육에서 관리자 선택을 종류별로 표시하고 저장 �
   let resolve;const pending=new Promise(done=>resolve=done),context={doc:null,$,state,actor,siteId:1,page:'documents',dialog,api:()=>pending,esc:String,hasManagerEducationTargets,JSON};
   runInNewContext(line('if(!doc){const fields='),context);assert.equal(box.hidden,true);kind.value='supervisor_new';kind.change();assert.equal(box.hidden,false);
   resolve([{id:10,name:'가상 직원',active:1},{id:11,name:'비활성 직원',active:0}]);await new Promise(done=>setImmediate(done));assert.match(list.innerHTML,/가상 직원/);assert.doesNotMatch(list.innerHTML,/비활성 직원/);all.onchange({target:{checked:true}});assert.ok(managers.every(item=>item.checked));
-  const data={type:'education',educationKind:'supervisor_new'},saveContext={data,doc:null,$,state,actor,siteId:1,page:'documents',hasManagerEducationTargets,readEducationMethod:()=>'',JSON,Number,Error};runInNewContext(line("if(data.type==='education'){data.details="),saveContext);assert.deepEqual(Array.from(data.educationManagerIds),[10]);state.admin={};assert.throws(()=>runInNewContext(line("if(data.type==='education'){data.details="),saveContext),/목록/);
+  const data={type:'education',educationKind:'supervisor_new'},saveContext={data,doc:null,$,state,actor,siteId:1,page:'documents',educationDraftWorkers:()=>[20],hasManagerEducationTargets,readEducationMethod:()=>'',JSON,Number,Error};runInNewContext(line("if(data.type==='education'){data.details="),saveContext);assert.deepEqual(Array.from(data.educationManagerIds),[10]);assert.deepEqual(Array.from(data.educationWorkerIds),[20]);state.admin={};assert.throws(()=>runInNewContext(line("if(data.type==='education'){data.details="),saveContext),/목록/);
 });
 
 test('선택 비교는 미설정 전체와 명시적 빈 명단을 변경하지 않고 실제 변경만 전송한다',()=>{
