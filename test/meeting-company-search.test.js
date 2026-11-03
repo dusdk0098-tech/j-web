@@ -29,6 +29,12 @@ test('검색 버튼이 소속·기간을 적용하고 다른 문서 유형으로
   nodes['#type-filter'].value='education';nodes['#search'].onclick();assert.equal(state.meetingCompany,'');assert.equal(renders,2);
 });
 
+test('등록 협력사 선택은 소속 이름을 검색에 넣고 현장 변경은 조건을 지운다',()=>{
+  const source=readFileSync(new URL('../public/app.js',import.meta.url),'utf8'),lines=source.split(/\r?\n/),markup=lines.find(line=>line.includes("state.type==='safety_meeting')$('#search').insertAdjacentHTML")),wiring=lines.find(line=>line.includes("if($('#meeting-company-filter')){const input")),siteChange=lines.find(line=>line.startsWith('siteSelect.onchange='));assert.ok(markup&&wiring&&siteChange);
+  let html='',searched=0,selected='';const choice={get value(){return selected;},set value(value){selected=['','가상 <업체>','다른 업체'].includes(value)?value:'';}},nodes={'#search':{insertAdjacentHTML:(_pos,value)=>{html=value;},click:()=>searched++},'#meeting-company-filter':{value:''},'#meeting-company-choice':choice},state={page:'documents',type:'safety_meeting',siteId:1,meetingCompany:''},context={state,$:key=>nodes[key],riskCompanies:[{name:'가상 <업체>'},{name:'가상 <업체>'},{name:'다른 업체'}],esc:value=>String(value).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;'),wireSearch(){},wireDocLinks(){},siteSelect:{value:'2'},render:async()=>{},showError:error=>{throw error;}};
+  runInNewContext(markup+'\n'+wiring+'\n'+siteChange,context);assert.equal((html.match(/가상 &lt;업체&gt;<\/option>/g)||[]).length,1);assert.match(html,/이름이 같은 업체는 구분하지 않습니다/);choice.value='가상 <업체>';choice.onchange();assert.equal(nodes['#meeting-company-filter'].value,'가상 <업체>');nodes['#meeting-company-filter'].value='직접 입력';nodes['#meeting-company-filter'].oninput();assert.equal(choice.value,'');nodes['#meeting-company-filter'].onkeydown({key:'Enter'});assert.equal(searched,1);state.meetingCompany='이전 현장';context.siteSelect.onchange();assert.equal(state.meetingCompany,'');assert.equal(state.siteId,2);
+});
+
 test('저장된 참석자 소속과 현장·기간·내용 조건을 함께 적용한다',()=>{
   const store=new Store(':memory:');try{
     const site=store.createSite({name:'가상 현장'}),other=store.createSite({name:'다른 현장'});
