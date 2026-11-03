@@ -25,10 +25,16 @@ test('교육 대상 인원은 실제 선택된 근로자와 표시 가능한 직
   targets.configured=false;runInNewContext(line,{doc,targets,roster:trainingRoster(targets),content,managerTargets:true});assert.match(html,/근로자 2명 · 직원 1명/);
 });
 
+test('근로자 시험 서명 인원은 선택된 명단의 서명 유무로만 계산한다',()=>{
+  const source=readFileSync(new URL('../public/app.js',import.meta.url),'utf8'),line=source.split(/\r?\n/).find(line=>line.includes('대상 근로자의 당일 교육 공통 시험 서명'));assert.ok(line);
+  const targets={configured:true,workers:[{id:1,selected:1,daily_has_signature:1},{id:2,selected:1,daily_has_signature:0},{id:3,selected:0,daily_has_signature:1}]},roster=trainingRoster(targets),doc={type:'education'};let html='';const content={lastElementChild:{insertAdjacentHTML(_where,value){html=value;}}};
+  runInNewContext(line,{doc,roster,content});assert.match(html,/서명: 1명/);doc.type='tbm';html='';runInNewContext(line,{doc,roster,content});assert.equal(html,'');
+});
+
 test('직원 교육 확인 명단은 서명을 표시하고 이전 화면 응답은 버린다',async()=>{
   const source=readFileSync(new URL('../public/app.js',import.meta.url),'utf8'),line=source.split(/\r?\n/).find(line=>line.includes("if(managerTargets&&doc.status==='approved')"));assert.ok(line);
   let html='',active=true;const context={managerTargets:true,doc:{status:'approved'},targets:{},api:async()=>{},currentDetail:()=>active,content:{lastElementChild:{insertAdjacentHTML(_where,value){html=value;}}},esc:value=>String(value).replaceAll('<','&lt;').replaceAll('>','&gt;'),managerTrainingRoster:async()=>[{name:'<가상>',active:1,signature:'YWJj'},{name:'미확인',active:0,signature:null}]};
-  await runInNewContext(`(async()=>{${line}})()`,context);assert.match(html,/data:image\/png;base64,YWJj/);assert.match(html,/&lt;가상&gt;/);assert.match(html,/미확인/);assert.doesNotMatch(html,/<가상>/);
+  await runInNewContext(`(async()=>{${line}})()`,context);assert.match(html,/data:image\/png;base64,YWJj/);assert.match(html,/직원 시험 서명: 1명/);assert.match(html,/&lt;가상&gt;/);assert.match(html,/미확인/);assert.doesNotMatch(html,/<가상>/);
   html='';context.managerTrainingRoster=async()=>{active=false;return null;};await runInNewContext(`(async()=>{${line}})()`,context);assert.equal(html,'');
 });
 
