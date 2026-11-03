@@ -8,21 +8,22 @@ import {spawn} from 'node:child_process';
 import {once} from 'node:events';
 import {createServer} from 'node:net';
 import {mountEducationReference} from '../public/education-reference.js';
-import {educationKinds,educationTimeField,educationMethodFields} from '../public/education-kinds.js';
+import {educationKinds,educationTimeField,educationMethodFields,hasManagerEducationTargets} from '../public/education-kinds.js';
 const admin=readFileSync(new URL('../public/app.js',import.meta.url),'utf8'),worker=readFileSync(new URL('../public/worker-documents.js',import.meta.url),'utf8');
 class Control extends EventTarget {
-  value='';disabled=false;readOnly=false;isConnected=true;maxLength=-1;textContent='';onclick=null;nodes=new Map();
+  value='';disabled=false;readOnly=false;isConnected=true;maxLength=-1;textContent='';onclick=null;nodes=new Map();dataset={};
   set innerHTML(value){this.html=value;this.nodes.clear();}
   get innerHTML(){return this.html;}
   querySelector(selector){if(!this.nodes.has(selector))this.nodes.set(selector,new Control());return this.nodes.get(selector);}
+  querySelectorAll(){return [];}
   insertAdjacentHTML(where,html){this.html=(this.html||'')+html;}
 }
 async function adminSetup(){
-  const root=new Control(),fields=new Control(),kind=new Control(),body=new Control(),select=new Control(),submit=new Control(),dialog=new Control();
+  const root=new Control(),fields=new Control(),kind=new Control(),body=new Control(),select=new Control(),submit=new Control(),dialog=new Control(),date=new Control(),draftWorkers=new Control();
   kind.value='regular';body.value='가상 기존 입력';select.value='education';dialog.open=true;
   const state={siteId:1,page:'documents',type:'education',types:{education:'교육'}};
-  const nodes={'#dialog-form select[name=type]':select,'#daily-fields':fields,'#daily-fields [data-education-reference]':root,'#dialog-form [name=educationKind]':kind,'#dialog-form [name=body]':body,'#dialog-form button[type=submit]':submit};
-  const context={state,detailEpoch:1,dialog,$:selector=>{assert.ok(nodes[selector],selector);return nodes[selector];},api:async()=>[],showError:error=>{throw error;},showDialog(){},field:()=>'',today:()=>'',esc:String,educationKinds,educationTimeField,educationMethodFields,mountEducationReference};
+  const nodes={'#dialog-form select[name=type]':select,'#daily-fields':fields,'#daily-fields [data-education-reference]':root,'#daily-fields [data-education-draft-workers]':draftWorkers,'#dialog-form [name=date]':date,'#dialog-form [name=educationKind]':kind,'#dialog-form [name=body]':body,'#dialog-form button[type=submit]':submit};
+  const context={state,detailEpoch:1,dialog,$:selector=>{assert.ok(nodes[selector],selector);return nodes[selector];},api:async()=>[],showError:error=>{throw error;},showDialog(){},field:()=>'',today:()=>'',esc:String,educationKinds,educationTimeField,educationMethodFields,hasManagerEducationTargets,mountEducationReference,mountEducationDraftWorkers:()=>()=>undefined};
   const start=admin.indexOf('async function editDocument('),end=admin.indexOf('\nasync function loadDocuments',start);
   await runInNewContext(admin.slice(start,end)+';editDocument()',context);
   return {root,fields,kind,body,select,submit,dialog,state,context};

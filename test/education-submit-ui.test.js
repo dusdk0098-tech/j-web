@@ -65,8 +65,8 @@ test('관리자 교육 임시저장 콜백과 대화상자는 불완전 저장·
   const start=admin.indexOf('async data=>{',admin.indexOf('async function editDocument(')),end=admin.indexOf('\n  });',start),dialogStart=admin.indexOf('function showDialog('),dialogEnd=admin.indexOf("\n$('#dialog-close')",dialogStart);
   assert.ok(start>=0&&end>start&&dialogEnd>dialogStart);
   for(const failed of [false,true]){
-    const calls=[],nodes=Object.fromEntries(['#dialog-title','#dialog-body','#dialog-error','#dialog-form','#dialog-form button[type=submit]'].map(key=>[key,{querySelectorAll:()=>[{value:'시청각'},{value:'토의식'}]}])),data={type:'education',title:'가상 교육',date:'2026-11-02',body:'가상 입력',textbook:'가상 교재'},dialog={open:false,showModal(){this.open=true;},close(){this.open=false;}},state={siteId:1};
-    const context={readEducationMethod,doc:null,state,$:key=>nodes[key],dialog,FormData:class{constructor(){return Object.entries(data);}},api:async(path,options)=>{calls.push(JSON.parse(options.body));if(failed)throw Error('가상 전송 오류');return {id:7};},flash(){},render:async()=>{}};
+    const calls=[],nodes=Object.fromEntries(['#dialog-title','#dialog-body','#dialog-error','#dialog-form','#dialog-form button[type=submit]'].map(key=>[key,{querySelectorAll:()=>[{value:'시청각'},{value:'토의식'}]}])),data={type:'education',title:'가상 교육',date:'2026-11-02',body:'가상 입력',textbook:'가상 교재'},dialog={open:false,showModal(){this.open=true;},close(){this.open=false;}},state={siteId:1,page:'documents',admin:{id:1}};
+    const context={readEducationMethod,doc:null,state,siteId:1,page:'documents',actor:state.admin,educationDraftWorkers:()=>undefined,hasManagerEducationTargets:()=>false,$:key=>nodes[key],dialog,FormData:class{constructor(){return Object.entries(data);}},api:async(path,options)=>{calls.push(JSON.parse(options.body));if(failed)throw Error('가상 전송 오류');return {id:7};},flash(){},render:async()=>{}};
     const save=runInNewContext('('+admin.slice(start,end)+'\n})',context);
     const show=runInNewContext(admin.slice(dialogStart,dialogEnd)+';showDialog',context);
     show('가상 교육','가상 편집 화면',save);await nodes['#dialog-form'].onsubmit({preventDefault(){},currentTarget:{}});
