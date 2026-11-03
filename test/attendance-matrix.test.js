@@ -62,6 +62,12 @@ test('직종·소속 표는 출역 당시 기록을 날짜별로 집계한다',(
   }finally{s.close();}
 });
 
+test('월별 근로 구분 집계는 출역 당시 구분과 미기록을 날짜별로 표시한다',()=>{
+  const dates=['2024-02-28','2024-02-29'],workers=[{units:[{date:dates[0],category:'직영'},{date:dates[1],category:'외주'}]},{units:[{date:dates[1],category:null}]},{units:[]}],rows=attendanceMatrix(workers,dates,'category');
+  assert.deepEqual(rows.find(row=>row.label==='직영').days,[1,0]);assert.deepEqual(rows.find(row=>row.label==='외주').days,[0,1]);assert.deepEqual(rows.find(row=>row.label==='기록 없음').days,[0,1]);assert.equal(rows.reduce((sum,row)=>sum+row.total,0),3);
+  const html=attendanceMatrixMarkup(workers,dates);assert.match(html,/월별 구분 출역/);assert.match(html,/월별 표 검색과 관계없이 전체 기록/);assert.match(html,/기록 없음/);
+});
+
 test('출역 조회 도중 현장이 바뀌면 이전 화면을 그리지 않는다',async()=>{
   const source=readFileSync(new URL('../public/app.js',import.meta.url),'utf8'),from=source.indexOf('    const siteId=state.siteId,epoch=detailEpoch,date=state.attendanceDate'),to=source.indexOf('    content.innerHTML=',from);assert.ok(from>=0&&to>from);let release;const waiting=new Promise(resolve=>{release=resolve;}),state={page:'attendance',siteId:1,attendanceDate:'2026-11-01',attendanceMonth:'2026-11',reportFrom:'2026-11-01',reportTo:'2026-11-01',reportGroup:'worker'},context={state,detailEpoch:1,today:()=> '2026-11-01',encodeURIComponent,Promise,api:path=>path.startsWith('/api/attendance?')?waiting:Promise.resolve([])};
   const pending=runInNewContext(`(async()=>{${source.slice(from,to)}return true;})()`,context);state.siteId=2;release([]);assert.equal(await pending,undefined);
