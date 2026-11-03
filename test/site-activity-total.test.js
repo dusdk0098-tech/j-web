@@ -94,3 +94,8 @@ test('지난 화면의 조회 응답과 주간 버튼은 같은 화면으로 돌
   await runInNewContext(`${source.match(/^const esc = .*$/m)[0]}\n(async()=>{${source.slice(from,to)}})()`,context);assert.equal(context.current(),true);
   context.detailEpoch++;assert.equal(context.current(),false);await button.onclick();assert.equal(state.page,'site-activity');assert.equal(state.siteId,undefined);
 });
+
+test('주간 상세 화면이 열리는 중 새 화면으로 이동하면 이전 날짜를 적용하지 않는다',async()=>{
+  let resolve;const pending=new Promise(done=>{resolve=done;}),state={page:'site-activity',siteActivityMonth:'2024-02',admin:{id:1}},button={dataset:{siteWeek:'1',weekIndex:'0'}},target={innerHTML:'',querySelectorAll:()=>[button]},input={value:'새 날짜',scrollIntoView(){throw Error('이전 화면 스크롤');}},controls={'#site-activity-result':target,'#site-activity-search':{},'#weekly-start':input,'#weekly-load':{click(){throw Error('이전 화면 조회');}}},context={state,detailEpoch:1,content:{},$:key=>controls[key],URLSearchParams,today:()=>'',api:async()=>({weeks:[{start:'2024-02-04',end:'2024-02-10'}],sites:[{id:1,name:'가상',weeks:[{attendance:0,documents:0}]}]}),render:()=>{context.detailEpoch++;return pending;},showError:error=>{throw error;}};
+  await runInNewContext(`${source.match(/^const esc = .*$/m)[0]}\n(async()=>{${source.slice(from,to)}})()`,context);const old=button.onclick();context.detailEpoch++;resolve();await old;assert.equal(input.value,'새 날짜');
+});
