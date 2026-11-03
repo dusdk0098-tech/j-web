@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync,rmSync,writeFileSync,unlinkSync } from 'node:fs';
+import { mkdtempSync,rmSync,writeFileSync,unlinkSync,readFileSync } from 'node:fs';
+import { runInNewContext } from 'node:vm';
 import { tmpdir } from 'node:os';
 import { join,resolve,sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -15,6 +16,16 @@ test('기본 서류 분류 추가·수정·정렬은 권한 확인이 실패하�
   const s=new Store(':memory:');try{const site=s.createSite({name:'가상 현장'}),a=s.saveBasicCategory(site.id,{name:'가상 A'}),b=s.saveBasicCategory(site.id,{name:'가상 B'}),before=JSON.stringify(s.basicCategories(site.id)),deny=()=>{throw Error('세션 만료');};
     for(const action of [()=>s.saveBasicCategory(site.id,{name:'새 분류'},null,deny),()=>s.saveBasicCategory(site.id,{name:'변경'},a,deny),()=>s.orderBasicCategories(site.id,{parentId:0,expectedIds:[a,b],ids:[b,a]},deny)]){assert.throws(action,/세션 만료/);assert.equal(JSON.stringify(s.basicCategories(site.id)),before);}
   }finally{s.close();}
+});
+
+test('분류 수정은 조회 후 바뀐 다른 관리자의 내용을 덮어쓰지 않는다',()=>{
+  const s=new Store(':memory:');try{const site=s.createSite({name:'가상 현장'}),id=s.saveBasicCategory(site.id,{name:'이전 이름'}),version=s.basicCategories(site.id)[0].sampleTargetVersion;s.saveBasicCategory(site.id,{name:'다른 관리자 변경',expectedVersion:version},id);assert.throws(()=>s.saveBasicCategory(site.id,{name:'오래된 입력',expectedVersion:version},id),error=>error.sessionStatus===409);assert.equal(s.basicCategories(site.id)[0].name,'다른 관리자 변경');}finally{s.close();}
+});
+
+test('분류 수정 창은 확인값을 보내고 충돌 시 입력과 창을 유지한다',async()=>{
+  const source=readFileSync(new URL('../public/app.js',import.meta.url),'utf8'),start=source.indexOf('function showDialog('),end=source.indexOf("$('#dialog-close').onclick",start),line=source.split(/\r?\n/).find(value=>value.trimStart().startsWith('const form=(title,item,parentId)=>showDialog'));assert.ok(start>=0&&end>start&&line);
+  const fields={name:'입력한 이름',description:'입력한 설명'},form={},submit={},nodes={'#dialog-title':{},'#dialog-body':{},'#dialog-error':{},'#dialog-form':form,'#dialog-form button[type=submit]':submit},dialog={open:false,showModal(){this.open=true;},close(){this.open=false;}},requests=[],context={dialog,siteId:7,$:key=>nodes[key],field:()=>'',esc:String,FormData:class{constructor(){return Object.entries(fields);}},api:async(path,options)=>{requests.push({path,body:JSON.parse(options.body)});throw Error('분류가 변경되었습니다.');},flash:()=>{},render:async()=>{throw Error('충돌 후 다시 그리면 안 됩니다.');}};
+  runInNewContext(source.slice(start,end)+'\n'+line+'\nglobalThis.edit=form;',context);context.edit('수정',{id:3,name:'기존',description:'',sampleTargetVersion:'확인값'},0);await form.onsubmit({preventDefault(){},currentTarget:form});assert.equal(requests[0].body.expectedVersion,'확인값');assert.equal(requests[0].body.name,fields.name);assert.equal(dialog.open,true);assert.equal(submit.disabled,false);assert.match(nodes['#dialog-error'].textContent,/변경/);assert.equal(fields.description,'입력한 설명');
 });
 
 test('분류·문서·현장 설정 쓰기 대기 중 로그아웃하면 변경하지 않는다',{timeout:30000},async()=>{
@@ -78,7 +89,7 @@ test('샘플 API는 관리자만 접근하고 서버 재시작 뒤에도 파일�
     assert.equal((await send(`${base}/${file}?siteId=${other.id}`,'GET',undefined,admin)).status,404);assert.equal((await send(`${base}/${file}?siteId=${other.id}`,'DELETE',undefined,admin)).status,400);
     const selected=[await find()],deletion={expectedCategories:selected,expectedDocumentVersions:[],expectedSampleIds:[]},catPath=`/api/basic-categories/${category}?siteId=${site.id}`;
     assert.equal((await send(catPath,'DELETE',deletion,admin)).status,400);assert.equal((await send(path,'GET',undefined,admin)).status,200);
-    assert.equal((await send(catPath,'PUT',{name:'바뀐 분류'},admin)).status,200);assert.equal((await upload(admin,info.sampleTargetVersion)).status,409);
+    assert.equal((await send(catPath,'PUT',{name:'바뀐 분류',expectedVersion:info.sampleTargetVersion},admin)).status,200);assert.equal((await send(catPath,'PUT',{name:'오래된 입력',expectedVersion:info.sampleTargetVersion},admin)).status,409);assert.equal((await find()).name,'바뀐 분류');assert.equal((await upload(admin,info.sampleTargetVersion)).status,409);
     await stop();await start();admin=await login();assert.equal((await find()).samples[0].id,file);download=await send(path,'GET',undefined,admin);assert.equal(await download.text(),'가상 샘플');
     assert.equal((await send(path,'DELETE',undefined,admin)).status,200);assert.equal((await send(path,'GET',undefined,admin)).status,404);
   }finally{await stop();assert.ok(resolve(dir).startsWith(resolve(tmpdir())+sep));rmSync(dir,{recursive:true,force:true});}
