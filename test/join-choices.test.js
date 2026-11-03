@@ -37,11 +37,11 @@ test('가입 후보 선택은 현장 목록을 갱신하고 직접 입력을 보
 test('현장 후보가 없어도 기본 직종을 선택하고 등록 후보와 중복 없이 함께 표시한다',()=>{
   const company=new Node('input'),occupation=new Node('input');company.label=new Node('label');occupation.label=new Node('label');
   const form=new Node('form');form.ownerDocument={createElement:tag=>new Node(tag)};form.elements={company,occupation};const update=mountJoinChoices(form),select=occupation.label.beforeNode.children[0],quick=occupation.label.afterNode;
-  update({companies:[],occupations:[]});assert.equal(occupation.label.beforeNode.hidden,false);assert.equal(select.options.length,46);assert.equal(quick.hidden,false);assert.equal(quick.children[1].children.length,45);const first=quick.children[1].children[0];first.onclick();assert.equal(occupation.value,first.textContent);assert.equal(select.value,first.textContent);
+  update({companies:[],occupations:[]});assert.equal(occupation.label.beforeNode.hidden,false);assert.equal(select.options.length,46);assert.equal(quick.hidden,false);assert.deepEqual(quick.children[1].children.map(button=>button.textContent),['견출','기계설비-건축','기계설비-일반','기타','덕트','도장','목공-형틀','미장','반장','방수','배관-상하수도','보통인부','비계','석공','수장','유리','조경','조적','철근','코킹','콘크리트','토공','포장']);const first=quick.children[1].children[0];first.onclick();assert.equal(occupation.value,first.textContent);assert.equal(select.value,first.textContent);
   select.value='전기-내선';select.onchange();assert.equal(occupation.value,'전기-내선');
   update({occupations:['전기-내선','가상 현장 직종']});assert.equal(select.value,'전기-내선');assert.equal(select.options.filter(option=>option.value==='전기-내선').length,1);assert.deepEqual(quick.children[1].children.map(button=>button.textContent),['전기-내선','가상 현장 직종']);
   update({existingWorker:true});assert.equal(occupation.label.beforeNode.hidden,true);assert.equal(select.disabled,true);assert.equal(quick.hidden,true);
-  update({occupations:[]});assert.equal(occupation.label.beforeNode.hidden,false);assert.equal(select.disabled,false);assert.equal(select.value,'전기-내선');assert.equal(quick.hidden,false);assert.equal(quick.children[1].children.length,45);
+  update({occupations:[]});assert.equal(occupation.label.beforeNode.hidden,false);assert.equal(select.disabled,false);assert.equal(select.value,'전기-내선');assert.equal(quick.hidden,false);assert.equal(quick.children[1].children.length,23);
 });
 
 test('등록된 직종이 없는 가상 현장에서 기본 직종을 선택해 가입하고 로그인한다',{timeout:30000},async()=>{
