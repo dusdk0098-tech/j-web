@@ -11,7 +11,7 @@ export function mountEducationDraftWorkers(host,{dateInput,siteId,api,active,esc
       const rows=await api(`/api/attendance?siteId=${siteId}&date=${encodeURIComponent(date)}`,{},()=>current()&&generation===request&&dateInput.value===date);
       if(!current()||generation!==request||dateInput.value!==date||!enable.checked)return;
       const chosen=selected(),present=rows.filter(row=>row.present),visible=[...present,...previous.filter(row=>chosen.has(row.id)&&!present.some(item=>item.id===row.id)).map(row=>({...row,present:false}))];previous=visible;
-      list.innerHTML=visible.map(row=>`<label><input type="checkbox" data-worker value="${row.id}" ${chosen.has(row.id)?'checked':''}> ${esc(row.name)} · ${esc(row.company)}${row.present?'':' · 이전 날짜 선택'}</label>`).join('')||'<p>해당 날짜의 출역 근로자가 없습니다.</p>';
+      list.innerHTML=visible.map(row=>`<label><input type="checkbox" data-worker value="${row.id}" ${chosen.has(row.id)?'checked':''}> ${esc(row.name)} · ${esc(row.attendance_company||'기록 없음')}${row.present?'':' · 이전 날짜 선택'}</label>`).join('')||'<p>해당 날짜의 출역 근로자가 없습니다.</p>';
       loaded=date;status.textContent='선택한 근로자만 교육 대상으로 저장합니다.';
     }catch(error){if(current()&&generation===request)status.textContent=error.message;}
   };
