@@ -74,6 +74,7 @@ export function recordInput(input) {
   }
   if(type==='patrol'){
     const value=input.details??{};if(!value||typeof value!=='object'||Array.isArray(value))throw new Error('순회 점검 항목을 확인해 주세요.');
+    if(typeof (value.inspector??'')!=='string'||(value.inspector??'').length>200)throw new Error('순회 점검자를 확인해 주세요.');details.inspector=(value.inspector??'').trim();
     for(const key of ['other','notes','instruction']){const v=value[key]??'';if(typeof v!=='string'||v.length>2000)throw new Error('순회 점검 항목을 확인해 주세요.');details[key]=v.trim();}
     const items=value.items??[];if(!Array.isArray(items)||items.length>100)throw new Error('순회 점검 내용을 확인해 주세요.');details.items=items.map(item=>{if(!item||typeof item.name!=='string'||!item.name.trim()||item.name.length>500||!['O','X','해당없음'].includes(item.result)||typeof item.note!=='string'||item.note.length>2000)throw new Error('순회 점검 내용을 확인해 주세요.');return {name:item.name.trim(),result:item.result,note:item.note.trim()};});
   }
