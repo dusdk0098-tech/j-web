@@ -379,6 +379,7 @@ async function editDocument(doc=null,initialDetails={},initialType=null) {
   dialog.addEventListener('close',()=>educationReference?.destroy(),{once:true});
   const renderFields=()=>{
     educationReference?.destroy();educationReference=null;
+    $('#dialog-form [name=date]').onchange=null;
     const fields=select.value==='daily_report'?dailyFields:null;
     $('#daily-fields').innerHTML=fields?Object.entries(fields).map(([key,label])=>field(key,label,details[key]||'','text',false)).join(''):'';
     if(select.value==='office'){

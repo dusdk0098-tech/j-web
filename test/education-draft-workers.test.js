@@ -1,6 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
+import {runInNewContext} from 'node:vm';
 import {mountEducationDraftWorkers} from '../public/education-draft-workers.js';
+
+test('문서 유형 변경은 이전 날짜 처리기를 제거한다',()=>{
+  const source=readFileSync(new URL('../public/app.js',import.meta.url),'utf8'),start=source.indexOf('  const renderFields=()=>{'),end=source.indexOf("    if(select.value==='office'){",start);assert.ok(start>=0&&end>start);
+  let calls=0;const date={onchange:()=>calls++},fields={},select={value:'education'},$=key=>key==='#dialog-form [name=date]'?date:fields;
+  runInNewContext(source.slice(start,end)+'};renderFields();',{educationReference:null,select,$,dailyFields:{},details:{},Object});assert.equal(date.onchange,null);date.onchange?.();assert.equal(calls,0);
+});
 
 test('신규 교육은 출역 명단을 선택하고 날짜 변경 중 선택을 보존한다',async()=>{
   const enable={checked:false},panel={},load={},status={},list={items:[],querySelectorAll(){return this.items.filter(row=>row.checked);},set innerHTML(value){this.html=value;this.items=[...value.matchAll(/data-worker value="(\d+)" (checked)?/g)].map(match=>({value:match[1],checked:!!match[2]}));}},nodes={'[data-enable]':enable,'[data-panel]':panel,'[data-load]':load,'[data-status]':status,'[data-list]':list},host={isConnected:true,querySelector:key=>nodes[key]},dateInput={value:'2026-11-01',addEventListener(event,fn){this.change=fn;}},pending=[];
