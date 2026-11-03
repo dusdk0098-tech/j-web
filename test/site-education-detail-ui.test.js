@@ -66,6 +66,13 @@ test('HTML 특수문자와 기존 개인 활동 호출의 기본 현장·링크 
  const ui=screen(async path=>path.includes('/activities?')?{items:[{date:'2026-10-01',kind:'education',title:'가상 문서',detail:'확인',document_id:3}],nextOffset:20}:[{...row(),name:'<img src=x onerror=alert(1)>'}]);await ui.open();assert.doesNotMatch(ui.results().innerHTML,/<img/);assert.match(ui.results().innerHTML,/&lt;img/);
  await ui.context.showWorkerActivities(row());assert.match(ui.calls.at(-1),/siteId=7/);assert.equal(new URLSearchParams(ui.calls.at(-1).split('?')[1]).getAll('kind').length,8);assert.equal(ui.get('#activity-results').children[0].children.some(x=>x.tag==='button'),true);assert.equal(ui.get('#activity-more').hidden,false);await ui.get('#activity-more').onclick();assert.match(ui.calls.at(-1),/offset=20/);
 });
+test('개인 활동 문서 버튼은 창·현장·계정이 바뀌면 동작하지 않는다',async()=>{
+ for(const change of ['close','site','account','detached']){
+  const ui=screen(async()=>({items:[{date:'2026-10-01',kind:'education',title:'가상 문서',detail:'확인',document_id:3}],nextOffset:null}));let rendered=0;ui.context.render=async()=>{rendered++;};await ui.context.showWorkerActivities(row());const link=ui.get('#activity-results').children[0].children.find(x=>x.tag==='button');
+  if(change==='close')ui.dialog.close();if(change==='site')ui.state.siteId=8;if(change==='account')ui.state.admin={id:2};if(change==='detached')link.isConnected=false;link.onclick();assert.equal(rendered,0);assert.equal(ui.state.detail,undefined);
+ }
+ const ui=screen(async()=>({items:[{date:'2026-10-01',kind:'education',title:'가상 문서',detail:'확인',document_id:3}],nextOffset:null}));let rendered=0;ui.context.render=async()=>{rendered++;};await ui.context.showWorkerActivities(row());ui.get('#activity-results').children[0].children.find(x=>x.tag==='button').onclick();assert.equal(ui.state.detail,3);assert.equal(rendered,1);
+});
 test('교육 상세는 해당 교육만 먼저 조회하고 다른 활동을 추가 선택할 수 있다',async()=>{
  const ui=screen(async path=>path.includes('/activities?')?{items:[],nextOffset:null}:[{...row(),type:'tbm'}]);await ui.open();await ui.results().buttons[0].onclick();let kinds=new URLSearchParams(ui.calls.at(-1).split('?')[1]).getAll('kind');assert.deepEqual(kinds,['tbm']);
  const checks=ui.get('#dialog-body').inputs;checks.find(item=>item.value==='notice').checked=true;await ui.get('#activity-search').onclick();kinds=new URLSearchParams(ui.calls.at(-1).split('?')[1]).getAll('kind');assert.deepEqual(kinds,['tbm','notice']);
