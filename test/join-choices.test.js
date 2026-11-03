@@ -20,6 +20,11 @@ class Node {
   focus(){this.focused=true;}
   get options(){return this.children;}
 }
+test('가입 선택은 동명 업체의 번호를 구분하고 직접 입력 시 연결을 해제한다',()=>{
+  const company=new Node('input'),occupation=new Node('input');company.label=new Node('label');occupation.label=new Node('label');const form=new Node('form');form.ownerDocument={createElement:tag=>new Node(tag)};form.elements={company,occupation};
+  mountJoinChoices(form)({companies:['같은 업체'],companyOptions:[{id:1,name:'같은 업체',trade:'A'},{id:2,name:'같은 업체',trade:'B'}]});
+  const select=company.label.beforeNode.children[0];assert.equal(select.name,'companyId');assert.deepEqual(select.options.map(option=>option.value),['','1','2']);select.value='2';select.onchange();assert.equal(company.value,'같은 업체');company.value='직접 입력';company.oninput();assert.equal(select.value,'');
+});
 test('가입 후보 선택은 현장 목록을 갱신하고 직접 입력을 보존한다',()=>{
   const company=new Node('input'),occupation=new Node('input');company.label=new Node('label');occupation.label=new Node('label');
   const form=new Node('form');form.ownerDocument={createElement:tag=>new Node(tag)};form.elements={company,occupation};const update=mountJoinChoices(form);
@@ -45,18 +50,19 @@ test('현장 후보가 없어도 기본 직종을 선택하고 등록 후보와 
 });
 
 test('등록된 직종이 없는 가상 현장에서 기본 직종을 선택해 가입하고 로그인한다',{timeout:30000},async()=>{
-  const dir=mkdtempSync(join(tmpdir(),'jweb-default-occupation-')),store=new Store(join(dir,'jweb.sqlite')),site=store.createSite({name:'가상 현장'}),token=store.createInvitation(site.id).token;store.close();
+  const dir=mkdtempSync(join(tmpdir(),'jweb-default-occupation-')),store=new Store(join(dir,'jweb.sqlite')),site=store.createSite({name:'가상 현장'}),first=store.createCompany({siteId:site.id,name:'같은 업체',trade:'A'}),second=store.createCompany({siteId:site.id,name:'같은 업체',trade:'B'}),token=store.createInvitation(site.id).token;store.close();
   const reservation=createServer();await new Promise(resolve=>reservation.listen(0,'127.0.0.1',resolve));const port=reservation.address().port;await new Promise(resolve=>reservation.close(resolve));
   const child=spawn(process.execPath,['server.js'],{cwd:process.cwd(),env:{...process.env,PORT:String(port),JWEB_DATA_DIR:dir,JWEB_ADMIN_PASSWORD:'virtual-admin-password'},stdio:['ignore','pipe','pipe']});
   try{
     await Promise.race([once(child.stdout,'data'),once(child,'exit').then(()=>{throw Error('시험 서버 종료');})]);
     const base=`http://127.0.0.1:${port}`,send=(path,method='GET',data,cookie)=>fetch(base+path,{method,headers:{...(data?{'content-type':'application/json'}:{}),...(cookie?{cookie}:{})},...(data?{body:JSON.stringify(data)}:{})});
-    const infoResponse=await send(`/api/join?token=${token}`),info=await infoResponse.json();assert.equal(infoResponse.status,200);assert.deepEqual(info.occupations,[]);
+    const infoResponse=await send(`/api/join?token=${token}`),info=await infoResponse.json();assert.equal(infoResponse.status,200);assert.deepEqual(info.occupations,[]);assert.deepEqual(info.companyOptions.map(item=>item.id),[first.id,second.id]);
     const company=new Node('input'),occupation=new Node('input');company.label=new Node('label');occupation.label=new Node('label');const form=new Node('form');form.ownerDocument={createElement:tag=>new Node(tag)};form.elements={company,occupation};mountJoinChoices(form)(info);
     const select=occupation.label.beforeNode.children[0];assert.ok(select.options.some(option=>option.value==='배관-상하수도'));select.value='배관-상하수도';select.onchange();
-    const signup={token,name:'가상 근로자',category:'직영',occupation:occupation.value,loginId:'virtual_trade',password:'virtual-password-123',acknowledged:true,profile:{birthDate:'2000-01-01',phone:'010-0000-0000'}};
+    const companySelect=company.label.beforeNode.children[0];companySelect.value=String(second.id);companySelect.onchange();
+    const signup={token,name:'가상 근로자',category:'직영',company:company.value,companyId:Number(companySelect.value),occupation:occupation.value,loginId:'virtual_trade',password:'virtual-password-123',acknowledged:true,profile:{birthDate:'2000-01-01',phone:'010-0000-0000'}};
     assert.equal((await send('/api/join','POST',signup)).status,201);assert.equal((await send('/api/worker/login','POST',{siteKey:info.siteKey,loginId:signup.loginId,password:signup.password})).status,200);
-    const admin=(await send('/api/login','POST',{password:'virtual-admin-password'})).headers.get('set-cookie').split(';')[0],workers=await(await send(`/api/workers?siteId=${site.id}`,'GET',null,admin)).json();assert.equal(workers.find(worker=>worker.name===signup.name).occupation,'배관-상하수도');
+    const admin=(await send('/api/login','POST',{password:'virtual-admin-password'})).headers.get('set-cookie').split(';')[0],workers=await(await send(`/api/workers?siteId=${site.id}`,'GET',null,admin)).json(),joined=workers.find(worker=>worker.name===signup.name);assert.equal(joined.occupation,'배관-상하수도');assert.equal(joined.company_id,second.id);
     const asset=await send('/join-choices.js');assert.equal(asset.status,200);assert.match(await asset.text(),/배관-상하수도/);
   }finally{if(child.exitCode===null){const done=once(child,'exit');child.kill();await done;}if(dirname(resolve(dir))===resolve(tmpdir()))rmSync(dir,{recursive:true,force:true});}
 });

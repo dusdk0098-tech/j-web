@@ -7,7 +7,7 @@ export function mountJoinChoices(form){
     const input=form.elements[key],label=doc.createElement('label'),select=doc.createElement('select'),list=doc.createElement('datalist');
     label.textContent=title;select.setAttribute('aria-label',title);label.append(select);input.closest('label').before(label);
     list.id=`join-${key}-options`;form.append(list);input.setAttribute('list',list.id);
-    select.onchange=()=>{if(select.value)input.value=select.value;input.focus();};input.oninput=()=>{select.value=[...select.options].some(option=>option.value===input.value)?input.value:'';};
+    select.onchange=()=>{const registered=controls[key].registered;if(registered){const chosen=registered.find(item=>String(item.id)===select.value);if(chosen)input.value=chosen.name;}else if(select.value)input.value=select.value;input.focus();};input.oninput=()=>{const registered=controls[key].registered;if(registered){const chosen=registered.find(item=>String(item.id)===select.value);if(!chosen||chosen.name!==input.value)select.value='';}else select.value=[...select.options].some(option=>option.value===input.value)?input.value:'';};
     controls[key]={input,label,select,list};
   }
   const quick=doc.createElement('details'),summary=doc.createElement('summary'),buttons=doc.createElement('div');summary.textContent='직종 빠른 선택';quick.append(summary,buttons);controls.occupation.input.closest('label').after(quick);
@@ -15,6 +15,10 @@ export function mountJoinChoices(form){
     for(const [key,names] of [['company',data.companies||[]],['occupation',data.occupations||[]]]){
       const {input,label,select,list}=controls[key],unique=[...new Set(names.filter(name=>typeof name==='string'&&name.length))],choices=key==='occupation'?[...new Set([...unique,...commonOccupations])]:unique;
       const option=(value,text)=>{const item=doc.createElement('option');item.value=value;item.textContent=text;return item;};
+      if(key==='company'&&Array.isArray(data.companyOptions)){
+        const registered=data.companyOptions.filter(item=>Number.isSafeInteger(item?.id)&&item.id>0&&typeof item.name==='string');controls[key].registered=registered;select.name='companyId';list.replaceChildren(...unique.map(name=>option(name,name)));select.replaceChildren(option('','직접 입력'),...registered.map(item=>option(String(item.id),`${item.name} · ${item.trade||''} · #${item.id}`)));select.value='';label.hidden=data.existingWorker===true||!registered.length;select.disabled=data.existingWorker===true;continue;
+      }
+      controls[key].registered=null;if(key==='company')select.name='';
       list.replaceChildren(...choices.map(name=>option(name,name)));select.replaceChildren(option('','직접 입력'),...choices.map(name=>option(name,name)));select.value=choices.includes(input.value)?input.value:'';label.hidden=data.existingWorker===true||!choices.length;select.disabled=data.existingWorker===true;
       if(key==='occupation'){const quickNames=unique.length?unique:commonQuickOccupations;quick.hidden=data.existingWorker===true;buttons.replaceChildren(...quickNames.map(name=>{const button=doc.createElement('button');button.type='button';button.textContent=name;button.onclick=()=>{input.value=name;select.value=name;input.focus();};return button;}));}
     }
