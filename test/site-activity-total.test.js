@@ -66,7 +66,8 @@ test('활동 없는 복수 현장은 6주 모두 연결과 0 합계를 유지한
     const view=await screen(store.monthlySiteActivity('2025-03'));
     assert.match(view.target.html,/전체 표시 기간: 2025-02-23 ~ 2025-04-05/);totalRow(view.target.html,'가상 무활동 A',0,0);totalRow(view.target.html,'가상 무활동 B',0,0);
     assert.equal(view.buttons.length,12);assert.doesNotMatch(view.target.html,/NaN|undefined/);
-    view.controls['#site-activity-month'].value='2025-04';view.controls['#site-activity-search'].onclick();assert.equal(view.state.siteActivityMonth,'2025-04');assert.equal(view.calls.at(-1),'render');
+    view.controls['#site-activity-month'].value='2025-04';view.controls['#site-activity-month'].onchange();assert.equal(view.state.siteActivityMonth,'2025-04');assert.equal(view.calls.at(-1),'render');
+    view.controls['#site-activity-month'].value='';assert.throws(()=>view.controls['#site-activity-month'].onchange(),/조회할 월/);assert.equal(view.state.siteActivityMonth,'2025-04');
   }finally{store.close();}
 });
 
@@ -90,12 +91,12 @@ test('같은 월의 중복 조회가 역순으로 응답해도 최신 합계를 
 });
 
 test('지난 화면의 조회 응답과 주간 버튼은 같은 화면으로 돌아와도 무효다',async()=>{
-  const state={page:'site-activity',siteActivityMonth:'2024-02',admin:{id:1}},target={innerHTML:'',querySelectorAll:()=>[button]},button={dataset:{siteWeek:'1',weekIndex:'0'}},controls={'#site-activity-result':target,'#site-activity-search':{}},context={state,detailEpoch:1,content:{},$:key=>controls[key],URLSearchParams,today:()=>'',api:async(_path,_options,current)=>{context.current=current;return {weeks:[{start:'2024-02-04',end:'2024-02-10'}],sites:[{id:1,name:'가상',weeks:[{attendance:0,documents:0}]}]};},render:async()=>{throw Error('이전 버튼에서 이동하면 안 됩니다.');},showError:error=>{throw error;}};
+  const state={page:'site-activity',siteActivityMonth:'2024-02',admin:{id:1}},target={innerHTML:'',querySelectorAll:()=>[button]},button={dataset:{siteWeek:'1',weekIndex:'0'}},controls={'#site-activity-result':target,'#site-activity-search':{},'#site-activity-month':{value:'2024-02'}},context={state,detailEpoch:1,content:{},$:key=>controls[key],URLSearchParams,today:()=>'',api:async(_path,_options,current)=>{context.current=current;return {weeks:[{start:'2024-02-04',end:'2024-02-10'}],sites:[{id:1,name:'가상',weeks:[{attendance:0,documents:0}]}]};},render:async()=>{throw Error('이전 버튼에서 이동하면 안 됩니다.');},showError:error=>{throw error;}};
   await runInNewContext(`${source.match(/^const esc = .*$/m)[0]}\n(async()=>{${source.slice(from,to)}})()`,context);assert.equal(context.current(),true);
   context.detailEpoch++;assert.equal(context.current(),false);await button.onclick();assert.equal(state.page,'site-activity');assert.equal(state.siteId,undefined);
 });
 
 test('주간 상세 화면이 열리는 중 새 화면으로 이동하면 이전 날짜를 적용하지 않는다',async()=>{
-  let resolve;const pending=new Promise(done=>{resolve=done;}),state={page:'site-activity',siteActivityMonth:'2024-02',admin:{id:1}},button={dataset:{siteWeek:'1',weekIndex:'0'}},target={innerHTML:'',querySelectorAll:()=>[button]},input={value:'새 날짜',scrollIntoView(){throw Error('이전 화면 스크롤');}},controls={'#site-activity-result':target,'#site-activity-search':{},'#weekly-start':input,'#weekly-load':{click(){throw Error('이전 화면 조회');}}},context={state,detailEpoch:1,content:{},$:key=>controls[key],URLSearchParams,today:()=>'',api:async()=>({weeks:[{start:'2024-02-04',end:'2024-02-10'}],sites:[{id:1,name:'가상',weeks:[{attendance:0,documents:0}]}]}),render:()=>{context.detailEpoch++;return pending;},showError:error=>{throw error;}};
+  let resolve;const pending=new Promise(done=>{resolve=done;}),state={page:'site-activity',siteActivityMonth:'2024-02',admin:{id:1}},button={dataset:{siteWeek:'1',weekIndex:'0'}},target={innerHTML:'',querySelectorAll:()=>[button]},input={value:'새 날짜',scrollIntoView(){throw Error('이전 화면 스크롤');}},controls={'#site-activity-result':target,'#site-activity-search':{},'#site-activity-month':{value:'2024-02'},'#weekly-start':input,'#weekly-load':{click(){throw Error('이전 화면 조회');}}},context={state,detailEpoch:1,content:{},$:key=>controls[key],URLSearchParams,today:()=>'',api:async()=>({weeks:[{start:'2024-02-04',end:'2024-02-10'}],sites:[{id:1,name:'가상',weeks:[{attendance:0,documents:0}]}]}),render:()=>{context.detailEpoch++;return pending;},showError:error=>{throw error;}};
   await runInNewContext(`${source.match(/^const esc = .*$/m)[0]}\n(async()=>{${source.slice(from,to)}})()`,context);const old=button.onclick();context.detailEpoch++;resolve();await old;assert.equal(input.value,'새 날짜');
 });
