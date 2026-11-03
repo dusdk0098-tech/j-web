@@ -1026,11 +1026,12 @@ function showSiteEducationDetail(site,initialMonth){
   month.onchange=load;return load();
 }
 async function renderAllSiteStatistics(siteId,from,to,month,day){
-  const anchor=content.querySelector('#education-report'),rows=await api(`/api/attendance/sites-report?${new URLSearchParams({from,to})}`);
+  const anchor=content.querySelector('#education-report'),[rows,occupations]=await Promise.all([api(`/api/attendance/sites-report?${new URLSearchParams({from,to})}`),api(`/api/attendance/report?${new URLSearchParams({siteId:String(siteId),from,to,group:'occupation'})}`)]);
   if(!anchor?.isConnected||state.page!=='statistics'||state.siteId!==siteId||(state.statisticsMonth||today().slice(0,7))!==month||state.statisticsDay!==day)return;
   const {sites,totals}=summarizeSiteAttendance(rows);
   const describe=categories=>categories.map(item=>`${esc(item.label)} ${item.days}`).join(' · ')||'없음',section=document.createElement('section');section.className='panel';
   section.innerHTML=`<h2>전체 현장 가상 출역</h2><p class="muted">${esc(from)} ~ ${esc(to)}의 기록 당시 구분별 출역 인일입니다. 외주는 협력업체 근로자와 기존 외주 기록이며, 협력업체 관리자 등 다른 구분은 별도로 표시합니다.</p><div class="table-wrap"><table><thead><tr><th>현장</th><th>교육 통계</th><th>직영</th><th>외주</th><th>그 외 구분</th><th>합계</th></tr></thead><tbody>${sites.map(row=>`<tr><td>${esc(row.name)}</td><td><button type="button" data-site-education="${row.id}">상세보기</button></td><td>${row.direct}</td><td>${row.external}</td><td>${describe(row.other)}</td><td>${row.total}</td></tr>`).join('')}<tr><th>전체 합계</th><td></td><td>${totals.direct}</td><td>${totals.external}</td><td>${describe(totals.other)}</td><td>${totals.total}</td></tr></tbody></table></div>`;anchor.before(section);
+  section.insertAdjacentHTML('beforeend',`<h3>선택 현장 직종별 출역</h3><p class="muted">기록 당시 직종별 출역 인일입니다.</p><div class="table-wrap"><table><thead><tr><th>직종</th><th>출역 인일</th></tr></thead><tbody>${occupations.map(row=>`<tr><td>${esc(row.label)}</td><td>${row.days}</td></tr>`).join('')||'<tr><td colspan="2">출역 기록이 없습니다.</td></tr>'}</tbody></table></div>`);
   section.querySelectorAll('[data-site-education]').forEach(button=>button.onclick=()=>{if(section.isConnected&&state.page==='statistics'&&state.siteId===siteId&&(state.statisticsMonth||today().slice(0,7))===month&&state.statisticsDay===day)return showSiteEducationDetail(sites.find(row=>row.id===Number(button.dataset.siteEducation)),month);});
 }
 async function showRestrictedQr(){
