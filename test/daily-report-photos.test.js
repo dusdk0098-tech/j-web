@@ -7,7 +7,9 @@ import { createServer } from 'node:net';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { PNG } from 'pngjs';
+import { createHash,randomFillSync } from 'node:crypto';
 import { dailyReportPhotos } from '../public/daily-report-photos.js';
+import { freezeBatchImages } from '../public/batch-images.js';
 
 test('일보 사진 목록은 파일명과 설명을 안전하게 표시한다',()=>{
   const photo={kind:'site',id:8,name:'<가상 사진>.png',description:'<script>설명</script>',version:'a'.repeat(64)},html=dailyReportPhotos(2,3,[photo]);
@@ -35,6 +37,10 @@ test('일보 사진 포함 출력은 현장·날짜·내용 변경을 확인한�
     const webp=Buffer.from('UklGRiIAAABXRUJQVlA4IBYAAAAwAQCdASoBAAEADsD+JaQAA3AAAAAA','base64'),webpId=await upload(`/api/site-photos?siteId=${site.id}`,'가상.webp',webp);assert.equal((await editPhoto(webpId,site.id,input.date,'가상 WebP')).status,200);
     const list=await (await call(`/api/site-photos?siteId=${site.id}`,'GET',null,admin)).json(),siteWebp=list.find(item=>item.id===webpId),preview=await call(`/api/site-photos/${webpId}?siteId=${site.id}&version=${siteWebp.version}`,'GET',null,admin);assert.equal(preview.headers.get('content-type'),'image/webp');assert.deepEqual(Buffer.from(await preview.arrayBuffer()),webp);
     const items=await (await call(path,'GET',null,admin)).json(),dailyWebp=items.find(item=>item.kind==='site'&&item.id===webpId);assert.equal(dailyWebp.type,'image/webp');const dailyImage=await call(photoPath(dailyWebp),'GET',null,admin);assert.equal(dailyImage.headers.get('content-type'),'image/webp');assert.deepEqual(Buffer.from(await dailyImage.arrayBuffer()),webp);
+    const largePng=new PNG({width:1400,height:1100});randomFillSync(largePng.data);const large=PNG.sync.write(largePng);assert.ok(large.length>5*1024*1024&&large.length<10*1024*1024);const largeId=await upload(`/api/site-photos?siteId=${site.id}`,'큰 가상 사진.png',large);assert.equal((await editPhoto(largeId,site.id,input.date,'큰 사진')).status,200);
+    const largeItems=await (await call(path,'GET',null,admin)).json(),largePhoto=largeItems.find(item=>item.kind==='site'&&item.id===largeId),largePath=photoPath(largePhoto),largeResponse=await call(largePath,'GET',null,admin);assert.deepEqual(Buffer.from(await largeResponse.arrayBuffer()),large);
+    const img={src:largePath,getAttribute:()=>largePath,decode:async()=>{}},frozen=await freezeBatchImages([img],()=>true,{fetchImage:source=>call(source,'GET',null,admin),urls:{createObjectURL:()=> 'blob:virtual',revokeObjectURL(){}},digest:bytes=>createHash('sha256').update(Buffer.from(bytes)).digest()});assert.equal(img.src,'blob:virtual');await frozen.check();frozen.dispose();
+    const tooLarge=Buffer.alloc(10*1024*1024+1);large.copy(tooLarge,0,0,8);const rejected=await fetch(base+`/api/site-photos?siteId=${site.id}`,{method:'POST',headers:{cookie:admin,'x-file-name':'large.png'},body:tooLarge});assert.equal(rejected.status,400);
     const invalid=await fetch(base+`/api/site-photos?siteId=${site.id}`,{method:'POST',headers:{cookie:admin,'x-file-name':'bad.webp'},body:Buffer.from('RIFF0000WEBP')});assert.equal(invalid.status,400);
   }finally{if(child.exitCode===null){const exited=once(child,'exit');child.kill();await exited;}rmSync(dir,{recursive:true,force:true});}
 });
