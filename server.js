@@ -968,8 +968,8 @@ const server = http.createServer((req,res)=>passwordRequests.run(true,()=>adminR
     if(url.pathname==='/api/basic-categories'){
       const siteId=url.searchParams.get('siteId');
       if(req.method==='GET'){const rows=store.basicCategories(siteId);checkRequestSession(req);return json(res,200,rows);}
-      if(req.method==='POST')return json(res,201,{id:store.saveBasicCategory(siteId,await body(req))});
-      if(req.method==='PUT'){const input=await body(req);store.orderBasicCategories(siteId,input);return json(res,200,{ok:true});}
+      if(req.method==='POST')return json(res,201,{id:store.saveBasicCategory(siteId,await body(req),null,()=>checkRequestSession(req))});
+      if(req.method==='PUT'){const input=await body(req);store.orderBasicCategories(siteId,input,()=>checkRequestSession(req));return json(res,200,{ok:true});}
     }
     const basicSample=url.pathname.match(/^\/api\/basic-categories\/(\d+)\/samples(?:\/(\d+))?$/);
     if(basicSample){
@@ -981,7 +981,7 @@ const server = http.createServer((req,res)=>passwordRequests.run(true,()=>adminR
     const basicCategory=url.pathname.match(/^\/api\/basic-categories\/(\d+)$/);
     if(basicCategory){
       const siteId=url.searchParams.get('siteId');
-      if(req.method==='PUT')return json(res,200,{id:store.saveBasicCategory(siteId,await body(req),basicCategory[1])});
+      if(req.method==='PUT')return json(res,200,{id:store.saveBasicCategory(siteId,await body(req),basicCategory[1],()=>checkRequestSession(req))});
       if(req.method==='DELETE'){store.deleteBasicCategory(siteId,basicCategory[1],await body(req,2097152),()=>checkRequestSession(req));return json(res,200,{ok:true});}
     }
     if (url.pathname === '/api/companies') {

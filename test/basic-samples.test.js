@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync,rmSync } from 'node:fs';
+import { mkdtempSync,rmSync,writeFileSync,unlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join,resolve,sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -10,6 +10,20 @@ import { once } from 'node:events';
 import { DatabaseSync } from 'node:sqlite';
 import { Store } from '../store.js';
 import { basicSampleList } from '../public/basic-samples.js';
+
+test('기본 서류 분류 추가·수정·정렬은 권한 확인이 실패하면 원상 보존한다',()=>{
+  const s=new Store(':memory:');try{const site=s.createSite({name:'가상 현장'}),a=s.saveBasicCategory(site.id,{name:'가상 A'}),b=s.saveBasicCategory(site.id,{name:'가상 B'}),before=JSON.stringify(s.basicCategories(site.id)),deny=()=>{throw Error('세션 만료');};
+    for(const action of [()=>s.saveBasicCategory(site.id,{name:'새 분류'},null,deny),()=>s.saveBasicCategory(site.id,{name:'변경'},a,deny),()=>s.orderBasicCategories(site.id,{parentId:0,expectedIds:[a,b],ids:[b,a]},deny)]){assert.throws(action,/세션 만료/);assert.equal(JSON.stringify(s.basicCategories(site.id)),before);}
+  }finally{s.close();}
+});
+
+test('분류 쓰기가 DB를 기다리는 동안 로그아웃하면 추가·수정·정렬을 적용하지 않는다',{timeout:30000},async()=>{
+  const dir=mkdtempSync(join(tmpdir(),'jweb-category-session-')),watch=join(dir,'watch'),reservation=createServer();await new Promise(resolve=>reservation.listen(0,'127.0.0.1',resolve));const port=reservation.address().port;await new Promise(resolve=>reservation.close(resolve));
+  const module=pathToFileURL(join(process.cwd(),'store.js')).href,trace=`import {existsSync} from 'node:fs';import {Store} from ${JSON.stringify(module)};for(const name of ['saveBasicCategory','orderBasicCategories']){const original=Store.prototype[name];Store.prototype[name]=function(...args){const exec=this.db.exec;this.db.exec=function(sql){if(sql==='BEGIN IMMEDIATE'&&existsSync(${JSON.stringify(watch)}))process.stdout.write('CATEGORY_LOCK\\n');return exec.call(this,sql)};try{return original.apply(this,args)}finally{this.db.exec=exec}}}`,child=spawn(process.execPath,['--import',`data:text/javascript,${encodeURIComponent(trace)}`,'server.js'],{cwd:process.cwd(),env:{...process.env,PORT:String(port),JWEB_DATA_DIR:dir,JWEB_ADMIN_PASSWORD:'virtual-admin-password'},stdio:['ignore','pipe','pipe']});let db,locked=false;
+  try{await Promise.race([once(child.stdout,'data'),once(child,'exit').then(()=>{throw Error('시험 서버 종료');})]);const base=`http://127.0.0.1:${port}`,call=(path,method='GET',data,cookie)=>fetch(base+path,{method,headers:{...(data?{'content-type':'application/json'}:{}),...(cookie?{cookie}:{})},...(data?{body:JSON.stringify(data)}:{})}),login=async()=>(await call('/api/login','POST',{password:'virtual-admin-password'})).headers.get('set-cookie').split(';')[0];let cookie=await login();const site=await (await call('/api/sites','POST',{name:'가상 현장'},cookie)).json(),path=`/api/basic-categories?siteId=${site.id}`,a=(await (await call(path,'POST',{name:'가상 A'},cookie)).json()).id,b=(await (await call(path,'POST',{name:'가상 B'},cookie)).json()).id;db=new DatabaseSync(join(dir,'jweb.sqlite'));db.exec('PRAGMA busy_timeout=3000');const read=()=>JSON.stringify(db.prepare('SELECT id,name,position FROM basic_categories WHERE site_id=? ORDER BY id').all(site.id)),before=read();
+    for(const [target,method,input] of [[path,'POST',{name:'가상 C'}],[`/api/basic-categories/${a}?siteId=${site.id}`,'PUT',{name:'수정'}],[path,'PUT',{parentId:0,expectedIds:[a,b],ids:[b,a]}]]){cookie=await login();writeFileSync(watch,'watch');db.exec('BEGIN IMMEDIATE');locked=true;const started=once(child.stdout,'data'),pending=call(target,method,input,cookie);pending.catch(()=>{});const signal=await Promise.race([started.then(([data])=>String(data)),pending.then(response=>`조기 응답 ${response.status}`),new Promise(resolve=>setTimeout(()=>resolve('시간 초과'),5000))]);assert.match(signal,/CATEGORY_LOCK/);db.exec('DELETE FROM admin_sessions');db.exec('COMMIT');locked=false;assert.equal((await pending).status,401);assert.equal(read(),before);unlinkSync(watch);}
+  }finally{if(db){if(locked)db.exec('ROLLBACK');db.close();}if(child.exitCode===null&&!child.signalCode){const exited=once(child,'exit');child.kill();await exited;}rmSync(dir,{recursive:true,force:true});}
+});
 
 test('샘플 목록은 파일 이름을 안전한 텍스트와 다운로드 링크로 표시한다',()=>{
   const category={id:2,samples:[{id:3,name:'<img src=x onerror=alert(1)>.txt',size:5}]};

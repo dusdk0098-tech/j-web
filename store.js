@@ -582,20 +582,22 @@ export class Store {
   }
   basicCategorySample(siteId,categoryId,id){return this.db.prepare('SELECT s.id,s.name,s.data FROM basic_category_samples s JOIN basic_categories c ON c.id=s.category_id WHERE c.site_id=? AND c.id=? AND s.id=?').get(Number(siteId),Number(categoryId),Number(id))||null;}
   deleteBasicCategorySample(siteId,categoryId,id,onAuthorize=()=>{}){this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();const file=this.basicCategorySample(siteId,categoryId,id);if(!file)throw new Error('선택한 분류의 샘플을 찾을 수 없습니다.');this.db.prepare('DELETE FROM basic_category_samples WHERE id=?').run(file.id);this.db.exec('COMMIT');}catch(error){this.db.exec('ROLLBACK');throw error;}}
-  saveBasicCategory(siteId,input,id=null){
+  saveBasicCategory(siteId,input,id=null,onAuthorize=()=>{}){
     siteId=Number(siteId);const name=text(input.name,'분류 이름',80),description=input.description??'';
     if(typeof description!=='string'||description.length>2000)throw new Error('분류 설명을 확인해 주세요.');
+    this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();
     if(!this.db.prepare('SELECT 1 FROM sites WHERE id=?').get(siteId))throw new Error('현장을 선택해 주세요.');
-    if(id!==null){const result=this.db.prepare('UPDATE basic_categories SET name=?,description=? WHERE id=? AND site_id=?').run(name,description.trim(),Number(id),siteId);if(!result.changes)throw new Error('분류를 찾을 수 없습니다.');return Number(id);}
+    if(id!==null){const result=this.db.prepare('UPDATE basic_categories SET name=?,description=? WHERE id=? AND site_id=?').run(name,description.trim(),Number(id),siteId);if(!result.changes)throw new Error('분류를 찾을 수 없습니다.');this.db.exec('COMMIT');return Number(id);}
     const parentId=input.parentId??0;if(!Number.isSafeInteger(parentId)||parentId<0)throw new Error('상위 분류를 확인해 주세요.');
     if(parentId&&!this.db.prepare('SELECT 1 FROM basic_categories WHERE id=? AND site_id=? AND parent_id IS NULL').get(parentId,siteId))throw new Error('상위 분류를 확인해 주세요.');
-    return Number(this.db.prepare('INSERT INTO basic_categories(site_id,parent_id,name,description,position) VALUES(?,?,?,?,(SELECT COALESCE(MAX(position),0)+1 FROM basic_categories WHERE site_id=? AND parent_id IS ?))').run(siteId,parentId||null,name,description.trim(),siteId,parentId||null).lastInsertRowid);
+    const created=Number(this.db.prepare('INSERT INTO basic_categories(site_id,parent_id,name,description,position) VALUES(?,?,?,?,(SELECT COALESCE(MAX(position),0)+1 FROM basic_categories WHERE site_id=? AND parent_id IS ?))').run(siteId,parentId||null,name,description.trim(),siteId,parentId||null).lastInsertRowid);this.db.exec('COMMIT');return created;
+    }catch(error){this.db.exec('ROLLBACK');throw error;}
   }
-  orderBasicCategories(siteId,input){
+  orderBasicCategories(siteId,input,onAuthorize=()=>{}){
     siteId=Number(siteId);const parentId=input.parentId??0,ids=input.ids,expectedIds=input.expectedIds;
     const valid=values=>Array.isArray(values)&&values.every(id=>Number.isSafeInteger(id)&&id>0)&&new Set(values).size===values.length;
     if(!Number.isSafeInteger(parentId)||parentId<0||!valid(ids)||!valid(expectedIds))throw new Error('분류 순서를 확인해 주세요.');
-    this.db.exec('BEGIN IMMEDIATE');try{
+    this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();
       const current=this.basicCategories(siteId).filter(row=>(row.parent_id||0)===parentId).map(row=>row.id);
       if(JSON.stringify(current)!==JSON.stringify(expectedIds)||JSON.stringify([...current].sort((a,b)=>a-b))!==JSON.stringify([...ids].sort((a,b)=>a-b)))throw new Error('분류 목록이 변경되었습니다. 다시 조회해 주세요.');
       const update=this.db.prepare('UPDATE basic_categories SET position=? WHERE site_id=? AND id=?');ids.forEach((id,index)=>update.run(index+1,siteId,id));this.db.exec('COMMIT');
