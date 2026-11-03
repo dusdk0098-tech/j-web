@@ -65,7 +65,7 @@ test('직종·소속 표는 출역 당시 기록을 날짜별로 집계한다',(
 test('월별 근로 구분 집계는 출역 당시 구분과 미기록을 날짜별로 표시한다',()=>{
   const dates=['2024-02-28','2024-02-29'],workers=[{units:[{date:dates[0],category:'직영'},{date:dates[1],category:'외주'}]},{units:[{date:dates[1],category:null}]},{units:[]}],rows=attendanceMatrix(workers,dates,'category');
   assert.deepEqual(rows.find(row=>row.label==='직영').days,[1,0]);assert.deepEqual(rows.find(row=>row.label==='외주').days,[0,1]);assert.deepEqual(rows.find(row=>row.label==='기록 없음').days,[0,1]);assert.equal(rows.reduce((sum,row)=>sum+row.total,0),3);
-  const html=attendanceMatrixMarkup(workers,dates);assert.match(html,/월별 구분 출역/);assert.match(html,/월별 표 검색과 관계없이 전체 기록/);assert.match(html,/기록 없음/);
+  const html=attendanceMatrixMarkup(workers,dates);assert.match(html,/월별 구분 출역/);assert.match(html,/월별 표 검색과 관계없이 전체 기록/);assert.match(html,/기록 없음/);assert.equal((html.match(/<tfoot><tr><th scope="row">합계<\/th><td>1<\/td><td>2<\/td><td>3<\/td><\/tr><\/tfoot>/g)||[]).length,3);
 });
 
 test('출역 조회 도중 현장이 바뀌면 이전 화면을 그리지 않는다',async()=>{
