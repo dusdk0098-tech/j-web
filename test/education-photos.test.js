@@ -9,11 +9,20 @@ import {spawn} from 'node:child_process';
 import {once} from 'node:events';
 import {Store} from '../store.js';
 import {AdminAccounts} from '../admin-accounts.js';
+import {trainingRoster} from '../public/training-groups.js';
 
 test('교육 사진만 상세와 일괄 미리보기용 이미지로 표시한다',()=>{
   const source=readFileSync(new URL('../public/app.js',import.meta.url),'utf8'),line=source.split(/\r?\n/).find(line=>line.includes("file.category==='education_photo'")&&line.includes('insertAdjacentHTML'));assert.ok(line);
   let html='';const doc={id:7,type:'education'},attachments=[{id:3,category:'education_photo',name:'<가상>.png'},{id:4,category:'general',name:'일반.txt'}],content={querySelector:()=>({insertAdjacentHTML(_where,value){html=value;}})},esc=value=>String(value).replaceAll('<','&lt;').replaceAll('>','&gt;');
   runInNewContext(line,{doc,attachments,content,esc});assert.match(html,/attachments\/3\?preview=1/);assert.match(html,/&lt;가상&gt;/);assert.doesNotMatch(html,/일반\.txt|<가상>/);
+});
+
+test('교육 대상 인원은 실제 선택된 근로자와 표시 가능한 직원을 따로 센다',()=>{
+  const source=readFileSync(new URL('../public/app.js',import.meta.url),'utf8'),line=source.split(/\r?\n/).find(line=>line.includes('조회 시점 교육 대상'));assert.ok(line);
+  const targets={configured:true,workers:[{id:1,selected:1},{id:2,selected:0}],managers:[{selected:1},{selected:0}]},roster=trainingRoster(targets),doc={type:'education'};let html='';const content={lastElementChild:{insertAdjacentHTML(_where,value){html=value;}}};
+  runInNewContext(line,{doc,targets,roster,content,managerTargets:true});assert.match(html,/근로자 1명 · 직원 1명/);
+  runInNewContext(line,{doc,targets,roster,content,managerTargets:false});assert.match(html,/근로자 1명/);assert.doesNotMatch(html,/직원/);
+  targets.configured=false;runInNewContext(line,{doc,targets,roster:trainingRoster(targets),content,managerTargets:true});assert.match(html,/근로자 2명 · 직원 1명/);
 });
 
 test('교육 사진 미리보기는 로그인과 문서·첨부 일치를 확인한다',{timeout:30000},async()=>{
