@@ -9,18 +9,20 @@ import {once} from 'node:events';
 import {createServer} from 'node:net';
 import {Store} from '../store.js';
 import {AdminAccounts} from '../admin-accounts.js';
+import {matchesMonthlyAttendance} from '../public/attendance-matrix.js';
 
 const source=readFileSync(new URL('../public/app.js',import.meta.url),'utf8');
 const fragment=(a,b)=>source.slice(source.indexOf(a),source.indexOf(b,source.indexOf(a)));
 const deferred=()=>{let resolve;const promise=new Promise(done=>resolve=done);return {promise,resolve};};
 function screen(api){
-  const target={innerHTML:'',textContent:''},form={},submit={},dialog={open:false,close(){this.open=false;}},state={siteId:7,admin:{id:1}},nodes={'#site-attendance-detail':target,'#dialog-form':form,'#dialog-form button[type=submit]':submit},context={state,detailEpoch:2,dialog,URLSearchParams,api,$:key=>nodes[key],esc:value=>String(value).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;'),showDialog(){dialog.open=true;}};
-  runInNewContext(fragment('async function showSiteAttendanceDetail(', 'async function renderAllSiteStatistics('),context);return {context,target,dialog,state};
+  const target={innerHTML:'',textContent:''},form={},submit={},dialog={open:false,close(){this.open=false;}},state={siteId:7,admin:{id:1}},nodes={'#site-attendance-detail':target,'#site-attendance-filters':{},'#dialog-form':form,'#dialog-form button[type=submit]':submit};for(const key of ['category','occupation','company','query'])nodes[`#site-attendance-${key}`]={value:''};const context={state,detailEpoch:2,dialog,URLSearchParams,api,matchesMonthlyAttendance,$:key=>nodes[key],esc:value=>String(value).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;'),showDialog(){dialog.open=true;for(const key of ['category','occupation','company','query'])nodes[`#site-attendance-${key}`].value='';}};
+  runInNewContext(fragment('async function showSiteAttendanceDetail(', 'async function renderAllSiteStatistics('),context);return {context,target,dialog,state,nodes};
 }
 test('월별 상세는 선택 날짜에 출역한 사람과 월 출역일만 표시한다',async()=>{
-  let path;const rows=[{name:'<가상>',company:'가상 회사',days:['2026-10-02','2026-10-04']},{name:'다른 가상',company:'가상 회사',days:['2026-10-03']},{name:'미출역',company:'가상',days:[]}],ui=screen(async value=>(path=value,rows));
+  let path;const rows=[{name:'<가상>',company:'가상 회사',days:['2026-10-02','2026-10-04'],units:[{date:'2026-10-02',category:'직영',occupation:'목공',company:'가상 A'},{date:'2026-10-04',category:'외주',occupation:'전기',company:'가상 B'}]},{name:'다른 가상',company:'가상 회사',days:['2026-10-03'],units:[{date:'2026-10-03',category:'직영',occupation:'전기',company:'가상 A'}]},{name:'미출역',company:'가상',days:[],units:[]}],ui=screen(async value=>(path=value,rows));
   await ui.context.showSiteAttendanceDetail({id:8,name:'가상 현장'},'2026-10','02',()=>true);assert.match(path,/siteId=8&month=2026-10/);assert.match(ui.target.innerHTML,/&lt;가상&gt;/);assert.doesNotMatch(ui.target.innerHTML,/<가상>|다른 가상|미출역/);assert.match(ui.target.innerHTML,/<td>2<\/td>/);assert.match(ui.target.innerHTML,/31일/);
   await ui.context.showSiteAttendanceDetail({id:8,name:'가상 현장'},'2026-10','',()=>true);assert.match(ui.target.innerHTML,/다른 가상/);assert.doesNotMatch(ui.target.innerHTML,/미출역/);
+  const category=ui.nodes['#site-attendance-category'],occupation=ui.nodes['#site-attendance-occupation'],company=ui.nodes['#site-attendance-company'],query=ui.nodes['#site-attendance-query'];category.value='직영';occupation.value='전기';company.value='가상 B';company.onchange();assert.match(ui.target.innerHTML,/출역 기록이 없습니다/);company.value='가상 A';company.onchange();assert.match(ui.target.innerHTML,/다른 가상/);assert.doesNotMatch(ui.target.innerHTML,/&lt;가상&gt;/);query.value='없는 이름';query.oninput();assert.match(ui.target.innerHTML,/출역 기록이 없습니다/);
 });
 test('닫힘·현장 변경·다른 창 전환 뒤 늦은 조회 결과를 표시하지 않는다',async()=>{
   for(const change of ['close','site','epoch','scope']){const wait=deferred(),ui=screen(()=>wait.promise);let scope=true;const pending=ui.context.showSiteAttendanceDetail({id:8,name:'가상'},'2026-10','',()=>scope);if(change==='close')ui.dialog.close();if(change==='site')ui.state.siteId=9;if(change==='epoch')ui.context.detailEpoch++;if(change==='scope')scope=false;wait.resolve([{name:'오래된 자료',days:['2026-10-01']}]);await pending;assert.doesNotMatch(ui.target.innerHTML,/오래된 자료/);}
