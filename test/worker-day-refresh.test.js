@@ -23,20 +23,21 @@ function screen(){
   }
   const elements=Object.fromEntries(['equipment','sober','exercise','briefing','rights'].map(name=>[name,{checked:false}]));
   const form=()=>{const node=new Node(),submit=new Node();node.elements=structuredClone(elements);node.resets=0;node.querySelector=()=>submit;node.querySelectorAll=()=>[];node.reset=()=>{node.resets++;Object.values(node.elements).forEach(input=>input.checked=false);};return node;};
-  const documentEvents=new Map(),windowEvents=new Map(),timers=new Map(),requests=[],pads=[],panel=new Node(),checkForm=form(),dailyForm=form(),trainingList=new Node(),training=new Node(),meetings=new Node(),meetingList=new Node(),notices=new Node(),noticeList=new Node(),rights={checked:true},checkStatus=new Node(),dailyStatus=new Node(),message=new Node(),initialLoads=[];
+  const documentEvents=new Map(),windowEvents=new Map(),timers=new Map(),requests=[],downloads=[],pads=[],panel=new Node(),checkForm=form(),dailyForm=form(),trainingList=new Node(),training=new Node(),meetings=new Node(),meetingList=new Node(),notices=new Node(),noticeList=new Node(),rights={checked:true},checkStatus=new Node(),dailyStatus=new Node(),message=new Node(),initialLoads=[];
   notices.querySelector=()=>noticeList;meetings.querySelector=()=>meetingList;
   training.querySelector=key=>key==='#training-list'?trainingList:rights;
-  const document={visibilityState:'visible',createElement:()=>new Node(),addEventListener:(name,fn)=>documentEvents.set(name,fn),removeEventListener:name=>documentEvents.delete(name)};
+  const document={visibilityState:'visible',body:new Node(),createElement:()=>{const node=new Node();node.click=()=>downloads.push(node.download);return node;},addEventListener:(name,fn)=>documentEvents.set(name,fn),removeEventListener:name=>documentEvents.delete(name)};
   const window={addEventListener:(name,fn)=>windowEvents.set(name,fn),removeEventListener:name=>windowEvents.delete(name)};
   const signaturePad=canvas=>{const pad={clears:0,clear(){this.clears++;},value(){return canvas.signature||'virtual-signature';}};pads.push(pad);return pad;};
   let clock=Date.parse('2032-05-03T04:00:00Z'),timerId=0;
   class Clock extends Date {static now(){return clock;}}
   const context={reportContext:{workerId:1,siteId:7,generation:'original'},siteKey:'virtual-site',panel,logout:{disabled:false},worker:{id:1,site_id:7},button:{disabled:true},message,flow:{open(){context.opened=true;}},document,window,checkForm,checkStatus,check:new Node(),pad:signaturePad({}),dailyForm,dailyStatus,dailyPad:signaturePad({}),training,meetings,notices,initialLoads,educationKinds:{},signaturePad,startWorkerLoads,Date:Clock,performance:{now:()=>clock},AbortController,
-    mountWorkerPassword:parent=>parent.append(new Node()),
+    mountWorkerPassword:parent=>parent.append(new Node()),URL:{createObjectURL:()=> 'blob:virtual',revokeObjectURL(){}},
     setTimeout:(fn,delay)=>{const id=++timerId;timers.set(id,{fn,delay});return id;},clearTimeout:id=>timers.delete(id),
     fetch:(url,options)=>new Promise((resolve,reject)=>{requests.push({url,options,resolve,reject});options?.signal?.addEventListener('abort',()=>reject(Object.assign(Error('timeout'),{name:'AbortError'})));})
   };
-  const code=[
+  const helper=readFileSync(new URL('../public/worker-documents.js',import.meta.url),'utf8'),functions=helper.slice(helper.indexOf('export function workerDocumentRequest'),helper.indexOf('export async function mountWorkerDocuments')).replaceAll('export ','');
+  const code=[functions,
     part('    const workerSiteKey=','    const month='),
     part('    const dailyNames=','    const training=document'),
     part('    const trainingList=','    const meetings=document'),
@@ -56,8 +57,14 @@ function screen(){
   const start=async(check=null)=>{const work=context.actions.refreshWorkerDay();await reply(pending('/api/worker/session'),session());await work;await finishLoads(check);};
   const event=async(name,hidden=false)=>{document.visibilityState=hidden?'hidden':'visible';(documentEvents.get(name)||windowEvents.get(name))?.();await tick();};
   const fire=async()=>{const [id,timer]=timers.entries().next().value;timers.delete(id);clock+=timer.delay;timer.fn();await tick();};
-  return {context,requests,timers,panel,meetingList,checkForm,checkStatus,dailyForm,dailyStatus,trainingList,training,noticeList,noticeItems,rights,pads,message,documentEvents,windowEvents,reply,session,pending,items,finishLoads,start,event,fire,tick,advance(ms){clock+=ms;}};
+  return {context,requests,downloads,timers,panel,meetingList,checkForm,checkStatus,dailyForm,dailyStatus,trainingList,training,noticeList,noticeItems,rights,pads,message,documentEvents,windowEvents,reply,session,pending,items,finishLoads,start,event,fire,tick,advance(ms){clock+=ms;}};
 }
+
+test('공지 첨부는 원래 세션을 확인하고 공지 교체·날짜 전환·계정 변경 후 내려받지 않는다',async()=>{
+  for(const mode of ['success','replace','day','session']){const ui=screen();await ui.start();const load=ui.context.actions.loadNotices();await ui.reply(ui.pending('/api/worker/notices'),ui.noticeItems().map(item=>({...item,files:[{id:9,name:'가상.txt'}]})));await load;const row=ui.noticeList.children[0],button=row.children[2],pending=button.onclick(),request=ui.pending('/api/worker/notices/1/files/9');assert.equal(JSON.parse(request.options.headers['X-Worker-Report-Context']).generation,'original');
+    if(mode==='replace'){const next=ui.context.actions.loadNotices();await ui.reply(ui.pending('/api/worker/notices'),ui.noticeItems(2));await next;}if(mode==='day'){await ui.fire();await ui.reply(ui.pending('/api/worker/session'),ui.session('2026-11-01'));}if(mode==='session')request.resolve({ok:false,status:409,json:async()=>({sessionChanged:true,error:'세션 변경'})});else request.resolve({ok:true,status:200,blob:async()=>new Blob(['가상'])});await pending;assert.deepEqual(ui.downloads,mode==='success'?['가상.txt']:[]);if(mode==='session')assert.equal(ui.context.actions.dayStatus.textContent,'세션 변경');
+  }
+});
 
 test('서버 현장 자정에 완료 점검을 초기화하고 다음 날 점검과 교육을 표시한다',async()=>{
   const ui=screen();await ui.start({date:'2026-10-31',has_signature:true});
