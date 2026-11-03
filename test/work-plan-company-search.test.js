@@ -85,3 +85,14 @@ test('계획서 목록의 지연 응답은 A→B→A 전환과 업체 목록 조
   const a=run();context.detailEpoch++;state.workPlanCompany='B';const b=run();context.detailEpoch++;state.workPlanCompany='A';const fresh=run();resolvers[2]('최신 A');await fresh;resolvers[0]('이전 A');resolvers[1]('이전 B');await Promise.all([a,b]);assert.deepEqual(painted,['최신 A']);
   let resolve;const filter=lines.find(line=>line.startsWith('  const filterSite='));state.type='permit';context.docsRequest=context.detailEpoch;context.api=()=>new Promise(done=>{resolve=done});const pending=runInNewContext('(async()=>{'+filter+'\npainted.push("stale");})()',context);context.detailEpoch++;resolve([]);await pending;assert.deepEqual(painted,['최신 A']);
 });
+
+test('업체 목록의 늦은 성공·401·통신 오류는 이전 화면에 적용하지 않는다',async()=>{
+  const source=readFileSync(new URL('../public/app.js',import.meta.url),'utf8'),start=source.indexOf('async function api('),end=source.indexOf('function flash(',start),line=source.split(/\r?\n/).find(value=>value.startsWith('  const filterSite='));assert.ok(start>=0&&end>start&&line);
+  for(const mode of ['success','unauthorized','network','current-unauthorized']){
+    let resolve,reject;const waiting=new Promise((yes,no)=>{resolve=yes;reject=no;}),state={siteId:1,page:'documents',type:'work_plan'},painted=[],navigated=[],context={state,detailEpoch:1,docsRequest:1,fetch:()=>waiting,dialog:{open:false},document:{querySelector:()=>null},location:{hash:'',assign:path=>navigated.push(path)},readCommunityHash:()=>null,painted};
+    const pending=runInNewContext(source.slice(start,end)+'\n(async()=>{'+line+'\npainted.push(riskCompanies.length);})()',context);
+    if(mode!=='current-unauthorized')context.detailEpoch++;
+    if(mode==='network')reject(Error('가상 통신 오류'));else resolve({status:mode==='success'?200:401,ok:mode==='success',json:async()=>mode==='success'?[{name:'가상'}]:{}});
+    if(mode==='current-unauthorized'){await assert.rejects(pending,/관리자 로그인이 필요합니다/);assert.deepEqual(navigated,['/login']);}else{await pending;assert.deepEqual(navigated,[]);assert.deepEqual(painted,[]);}
+  }
+});
