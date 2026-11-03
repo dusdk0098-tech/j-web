@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {workerDocumentRequest,downloadWorkerAttachment} from '../public/worker-documents.js';
+import {workerDocumentRequest,downloadWorkerAttachment,showWorkerImage} from '../public/worker-documents.js';
 
 test('근로자 문서 요청은 화면 세션을 보내고 변경 감지 후 동시에 진행 중인 응답과 저장을 막는다',async()=>{
   const previous=globalThis.fetch,requests=[],changes=[];globalThis.fetch=(path,options)=>new Promise(resolve=>requests.push({path,options,resolve}));
@@ -11,6 +11,17 @@ test('근로자 문서 요청은 화면 세션을 보내고 변경 감지 후 �
     requests[1].resolve({ok:false,status:409,json:async()=>({sessionChanged:true,error:'계정 변경'})});await assert.rejects(changed,/계정 변경/);
     requests[0].resolve({ok:true,status:200,json:async()=>[{title:'다른 문서'}]});await assert.rejects(old,/로그인 세션/);await assert.rejects(json('/api/worker/documents',{method:'POST',body:'{}'}),/로그인 세션/);assert.deepEqual(changes,['계정 변경']);assert.equal(requests.length,2);
   }finally{globalThis.fetch=previous;}
+});
+
+test('사진 미리보기는 세션과 화면이 유효할 때만 표시한다',async()=>{
+  const previous=globalThis.FileReader,readers=[];let active=true,finish;
+  globalThis.FileReader=class{readAsDataURL(blob){this.blob=blob;readers.push(this);}};
+  try{
+    const image={},blob=new Blob(['photo']),request=async(path,options,format,valid)=>{assert.equal(path,'/photo');assert.equal(format,'blob');assert.equal(valid(),true);return blob;};
+    let pending=showWorkerImage(image,request,'/photo',()=>active);await Promise.resolve();readers[0].result='data:image/png;base64,AA==';readers[0].onload();await pending;assert.equal(image.src,'data:image/png;base64,AA==');
+    image.src='';pending=showWorkerImage(image,request,'/photo',()=>active);await Promise.resolve();active=false;readers[1].result='data:image/png;base64,AA==';readers[1].onload();await pending;assert.equal(image.src,'');
+    active=true;pending=showWorkerImage(image,()=>new Promise(resolve=>{finish=resolve;}),'/photo',()=>active);active=false;finish(blob);await pending;assert.equal(readers.length,2);assert.equal(image.src,'');
+  }finally{globalThis.FileReader=previous;}
 });
 
 test('일반 문서 충돌은 세션 변경으로 처리하지 않고 다른 요청을 허용한다',async()=>{

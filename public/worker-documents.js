@@ -21,6 +21,13 @@ export async function downloadWorkerAttachment(request,path,name,active){
   const url=URL.createObjectURL(blob);try{const link=document.createElement('a');link.href=url;link.download=name;document.body.append(link);try{link.click();}finally{link.remove();}}finally{setTimeout(()=>URL.revokeObjectURL(url),60000);}
 }
 
+export async function showWorkerImage(image,request,path,active){
+  const blob=await request(path,{},'blob',active);
+  if(!active())return;
+  const data=await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=()=>reject(Error('사진을 불러오지 못했습니다.'));reader.readAsDataURL(blob);});
+  if(active())image.src=data;
+}
+
 export function bindWorkerDownload(button,request,path,name,active,onError,generation=()=>null){
   button.type='button';button.onclick=async()=>{if(button.disabled||!active())return;button.disabled=true;const started=generation(),current=()=>active()&&generation()===started;try{await downloadWorkerAttachment(request,path,name,()=>current()&&button.isConnected);}catch(error){if(current())onError(error);}finally{button.disabled=false;}};
 }
