@@ -1021,7 +1021,7 @@ function showSiteEducationDetail(site,initialMonth){
   box.innerHTML=`<h2>${esc(site.name)} · 교육 통계 상세</h2><p>승인된 문서별 시험 확인 건수입니다. 실제 교육 이수를 증명하지 않으며 당일 종류별 별도 확인은 포함하지 않습니다.</p><label>조회 월 <input type="month" id="site-education-month" value="${esc(initialMonth)}"></label><fieldset id="site-education-categories"><legend>근로 구분</legend></fieldset><div id="site-education-results" aria-live="polite"></div><section><h3>직원 교육 지정과 시험 확인</h3><p>승인된 교육의 지정과 확인을 구분합니다.</p><div id="site-education-staff" aria-live="polite"></div></section><button type="button" id="site-education-close">닫기</button>`;
   document.body.append(box);box.showModal();
   const month=box.querySelector('#site-education-month'),categories=box.querySelector('#site-education-categories'),results=box.querySelector('#site-education-results'),staff=box.querySelector('#site-education-staff');
-  let sequence=0,rows=[],selected=null,activityAnchor=null,closed=false;
+  let sequence=0,rows=[],selected=null,knownCategories=[],activityAnchor=null,closed=false;
   const active=()=>box.open&&box.isConnected&&state.siteId===parentSite&&state.admin===admin&&detailEpoch===epoch;
   const cleanup=()=>{if(closed)return;closed=true;sequence++;if(dialog.open&&activityAnchor&&$('#activity-results')===activityAnchor)dialog.close();box.remove();if(siteEducationCleanup===cleanup)siteEducationCleanup=null;};
   siteEducationCleanup=cleanup;box.onclose=cleanup;box.querySelector('#site-education-close').onclick=()=>box.close();
@@ -1041,7 +1041,7 @@ function showSiteEducationDetail(site,initialMonth){
       if(!current())return;rows=data;
       const totals=new Map();for(const row of assignments){const key=JSON.stringify([row.id,row.kind]);if(!totals.has(key))totals.set(key,{name:row.name,kind:row.kind,assigned:0,confirmed:0});const total=totals.get(key);total.assigned++;if(row.confirmed_at)total.confirmed++;}
       staff.innerHTML=totals.size?`<div class="table-wrap"><table><thead><tr><th>직원</th><th>교육 종류</th><th>지정 문서 수</th><th>시험 확인 수</th></tr></thead><tbody>${[...totals.values()].map(row=>`<tr><td>${esc(row.name)}</td><td>${esc(educationKinds[row.kind]||'종류 미기록')}</td><td>${row.assigned}</td><td>${row.confirmed}</td></tr>`).join('')}</tbody></table></div>`:'<p>지정된 직원 교육이 없습니다.</p>';
-      const options=[...new Set(rows.map(row=>row.category))];if(selected===null&&options.length)selected=options;
+      const options=[...new Set([...knownCategories,...rows.map(row=>row.category)])];if(selected===null&&options.length)selected=options;else if(selected&&knownCategories.every(category=>selected.includes(category)))selected=[...selected,...options.filter(category=>!knownCategories.includes(category))];knownCategories=options;
       categories.innerHTML='<legend>근로 구분</legend>'+options.map(category=>`<label><input type="checkbox" value="${esc(category)}" ${selected?.includes(category)?'checked':''}> ${esc(category)}</label>`).join('');paint();
     }catch(error){if(current()){results.textContent=error.message;staff.textContent=error.message;}}
   };
