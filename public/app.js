@@ -1181,16 +1181,17 @@ async function renderRestrictedDocuments(){
   if(detailId){
     const doc=await api('/api/documents/'+detailId,{},current);if(!current())return;
     if(doc.id!==detailId||doc.site_id!==siteId)throw Error('선택한 현장의 문서를 다시 확인해 주세요.');
-    const training=['tbm','education'].includes(doc.type),attachments=training?await api(`/api/documents/${doc.id}/attachments`,{},current):[];
+    const training=['tbm','education'].includes(doc.type),plan=doc.type==='work_plan',attachments=training||plan?await api(`/api/documents/${doc.id}/attachments`,{},current):[];
     if(!current())return;
-    content.innerHTML=`<section class="panel"><button type="button" id="restricted-back">목록으로</button><h2>${esc(doc.title)}</h2><p>${esc(state.types[doc.type]||doc.type)} · ${esc(doc.date)} · ${esc(statusLabels[doc.status]||doc.status)}</p><p>작성자: ${esc(doc.author_name||'미기록')}</p><p class="detail-body">${esc(doc.body)}</p><p>${training?'교육·TBM의 저장된 세부 항목과 첨부를 조회합니다.':doc.type==='risk'?'저장된 위험성평가 세부 항목을 조회합니다.':doc.type==='work_plan'?'저장된 작업계획서 기본정보를 조회합니다.':'문서 제목·본문 요약입니다. 임시저장·반려된 일반 공지는 수정할 수 있습니다.'} 서명·결재와 다른 유형의 수정은 이 화면에서 지원하지 않습니다.</p></section>`;
+    content.innerHTML=`<section class="panel"><button type="button" id="restricted-back">목록으로</button><h2>${esc(doc.title)}</h2><p>${esc(state.types[doc.type]||doc.type)} · ${esc(doc.date)} · ${esc(statusLabels[doc.status]||doc.status)}</p><p>작성자: ${esc(doc.author_name||'미기록')}</p><p class="detail-body">${esc(doc.body)}</p><p>${training?'교육·TBM의 저장된 세부 항목과 첨부를 조회합니다.':doc.type==='risk'?'저장된 위험성평가 세부 항목을 조회합니다.':doc.type==='work_plan'?'저장된 작업계획서 기본정보와 첨부를 조회합니다.':'문서 제목·본문 요약입니다. 임시저장·반려된 일반 공지는 수정할 수 있습니다.'} 서명·결재와 다른 유형의 수정은 이 화면에서 지원하지 않습니다.</p></section>`;
     $('#restricted-back').onclick=()=>{if(!current())return;state.detail=null;render().catch(showError);};
     if(training){
       content.insertAdjacentHTML('beforeend',`<section class="panel"><h2>교육 상세</h2>${trainingDetailMarkup(doc,esc)||'<p>저장된 세부 항목이 없습니다.</p>'}<h3>첨부파일</h3>${attachments.length?'<ul>'+attachments.map(file=>`<li>${esc(educationAttachmentLabels[file.category]||'일반 첨부')} · <a data-training-file href="/api/documents/${doc.id}/attachments/${file.id}">${esc(file.name)}</a> (${esc(file.size)}바이트)</li>`).join('')+'</ul>':'<p>첨부파일이 없습니다.</p>'}<p>저장된 교육 항목과 첨부를 조회합니다. 실제 교육 이수나 참석을 증명하지 않습니다.</p></section>`);
       content.querySelectorAll('[data-training-file]').forEach(link=>link.onclick=event=>{if(!current())event.preventDefault();});
     }
     if(doc.type==='work_plan'){
-      content.insertAdjacentHTML('beforeend',`<section class="panel"><h2>작업계획서 기본정보</h2>${planDetailMarkup(JSON.parse(doc.details||'{}'),esc,planFields)}<p>저장된 기본정보를 조회합니다. 연결 장비·참여자·첨부·서명·결재는 이 화면에서 제공하지 않습니다.</p></section>`);
+      content.insertAdjacentHTML('beforeend',`<section class="panel"><h2>작업계획서 기본정보</h2>${planDetailMarkup(JSON.parse(doc.details||'{}'),esc,planFields)}<h3>첨부파일</h3>${attachments.length?'<ul>'+attachments.map(file=>`<li><a data-plan-file href="/api/documents/${doc.id}/attachments/${file.id}">${esc(file.name)}</a> (${esc(file.size)}바이트)</li>`).join('')+'</ul>':'<p>첨부파일이 없습니다.</p>'}<p>저장된 기본정보와 첨부를 조회합니다. 연결 장비·참여자·서명·결재는 이 화면에서 제공하지 않습니다.</p></section>`);
+      content.querySelectorAll('[data-plan-file]').forEach(link=>link.onclick=event=>{if(!current())event.preventDefault();});
     }
     if(doc.type==='risk'){
       const details=JSON.parse(doc.details||'{}')||{};

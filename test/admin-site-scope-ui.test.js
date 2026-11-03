@@ -128,18 +128,18 @@ test('제한 문서 목록 A→B→A 이동 뒤 첫 A 응답과 이전 검색 �
 test('제한 작업계획서 기본정보는 명시된 필드·기존 시간·작업구분만 읽고 HTML과 중첩 자료를 차단한다',async()=>{
   const ui=screen(),details=Object.fromEntries(Object.keys(ui.context.planFields).map(key=>[key,'가상 <'+key+'> & 설명']));
   Object.assign(details,{timeFrom:'04:13',timeTo:'23:57',workKinds:['이전 구분 <시험>','기타',{secret:'노출금지'}],equipmentIds:[999],equipmentSnapshot:[{owner:'노출금지'}],workerSnapshot:[{name:'노출금지'}],signature:'노출금지',files:['노출금지']});
-  const doc={id:5,site_id:1,type:'work_plan',title:'가상 계획',body:'가상 본문',status:'draft',details:JSON.stringify(details)},view=screen(async()=>response(doc));view.state.page='documents';view.state.detail=5;await view.context.renderRestrictedDocuments();
+  const doc={id:5,site_id:1,type:'work_plan',title:'가상 계획',body:'가상 본문',status:'draft',details:JSON.stringify(details)},files=[{id:7,name:'가상 <계획>.pdf',size:10}],view=screen(async path=>response(path.endsWith('/attachments')?files:doc));view.state.page='documents';view.state.detail=5;const link={};view.content.querySelectorAll=selector=>selector==='[data-plan-file]'?[link]:[];await view.context.renderRestrictedDocuments();
   for(const key of Object.keys(ui.context.planFields))assert.ok(view.content.innerHTML.includes(esc(details[key])),key);
   assert.match(view.content.innerHTML,/04:13 ~ 23:57/);assert.match(view.content.innerHTML,/이전 구분 &lt;시험&gt;, 기타/);
-  assert.doesNotMatch(view.content.innerHTML,/노출금지|999|\[object Object\]|<시험>|href=|data-action=|id="edit"|restricted-notice-edit/);
-  assert.deepEqual(view.requests.map(r=>r.path),['/api/documents/5']);assert.ok(view.requests.every(r=>!r.options.method));
+  assert.doesNotMatch(view.content.innerHTML,/노출금지|999|\[object Object\]|<시험>|data-action=|id="edit"|restricted-notice-edit/);assert.match(view.content.innerHTML,/가상 &lt;계획&gt;\.pdf/);assert.match(view.content.innerHTML,/href="\/api\/documents\/5\/attachments\/7"/);
+  assert.deepEqual(view.requests.map(r=>r.path),['/api/documents/5','/api/documents/5/attachments']);assert.ok(view.requests.every(r=>!r.options.method));let prevented=false;link.onclick({preventDefault(){prevented=true;}});assert.equal(prevented,false);view.state.siteId=2;link.onclick({preventDefault(){prevented=true;}});assert.equal(prevented,true);
   assert.doesNotMatch(planDetailMarkup({equipment:{secret:'노출금지'},personnel:0},esc,ui.context.planFields),/노출금지|object/);assert.match(planDetailMarkup({personnel:0},esc,ui.context.planFields),/> 0</);
 });
 
 test('제한 작업계획서 빈·구형 기록과 늦은 응답·다른 현장·문서·인증 실패 경계',async()=>{
   const doc={id:5,site_id:1,type:'work_plan',title:'이전 계획',body:'이전 본문',status:'approved'};
-  for(const details of [null,'null','{}','[]','"legacy"']){const ui=screen(async()=>response({...doc,details}));ui.state.page='documents';ui.state.detail=5;await ui.context.renderRestrictedDocuments();assert.match(ui.content.innerHTML,/저장된 기본정보가 없습니다/);}
-  for(const details of [{company:'이전 업체'},{timeTo:'23:57'}]){const ui=screen(async()=>response({...doc,details:JSON.stringify(details)}));ui.state.page='documents';ui.state.detail=5;await ui.context.renderRestrictedDocuments();assert.match(ui.content.innerHTML,details.company?/이전 업체/:/미입력 ~ 23:57/);}
+  for(const details of [null,'null','{}','[]','"legacy"']){const ui=screen(async path=>response(path.endsWith('/attachments')?[]:{...doc,details}));ui.state.page='documents';ui.state.detail=5;await ui.context.renderRestrictedDocuments();assert.match(ui.content.innerHTML,/저장된 기본정보가 없습니다/);}
+  for(const details of [{company:'이전 업체'},{timeTo:'23:57'}]){const ui=screen(async path=>response(path.endsWith('/attachments')?[]:{...doc,details:JSON.stringify(details)}));ui.state.page='documents';ui.state.detail=5;await ui.context.renderRestrictedDocuments();assert.match(ui.content.innerHTML,details.company?/이전 업체/:/미입력 ~ 23:57/);}
   for(const change of ['site','account','page','detail','epoch'])for(const status of [200,401,403]){
     const wait=delayed(),ui=screen(()=>wait.promise);ui.state.page='documents';ui.state.detail=5;const pending=ui.context.renderRestrictedDocuments();
     if(change==='site')ui.state.siteId=2;else if(change==='account')ui.state.admin={id:8};else if(change==='page')ui.state.page='workers';else if(change==='detail')ui.state.detail=6;else ui.context.detailEpoch++;
@@ -147,6 +147,16 @@ test('제한 작업계획서 빈·구형 기록과 늦은 응답·다른 현장�
   }
   for(const mismatch of [{site_id:2},{id:6}]){const ui=screen(async()=>response({...doc,...mismatch}));ui.state.page='documents';ui.state.detail=5;await assert.rejects(ui.context.renderRestrictedDocuments(),/현장/);assert.doesNotMatch(ui.content.innerHTML,/이전 계획/);}
   for(const status of [401,403]){const ui=screen(async()=>({ok:false,status,json:async()=>({error:'조회 권한 없음'})}));ui.state.page='documents';ui.state.detail=5;await assert.rejects(ui.context.renderRestrictedDocuments());assert.doesNotMatch(ui.content.innerHTML,/이전 계획/);}
+});
+
+test('제한 작업계획서 첨부의 늦은 응답과 권한 오류는 다른 화면을 바꾸지 않는다',async()=>{
+  const doc={id:5,site_id:1,type:'work_plan',title:'이전 계획',body:'이전 본문',status:'approved',details:'{}'};
+  for(const change of ['site','account','detail','epoch']){
+    const wait=delayed(),ui=screen(async path=>path.endsWith('/attachments')?wait.promise:response(doc));ui.state.page='documents';ui.state.detail=5;const pending=ui.context.renderRestrictedDocuments();while(!ui.requests.some(r=>r.path.endsWith('/attachments')))await new Promise(r=>setImmediate(r));
+    if(change==='site')ui.state.siteId=2;else if(change==='account')ui.state.admin={id:8};else if(change==='detail')ui.state.detail=6;else ui.context.detailEpoch++;
+    ui.content.innerHTML='새 화면';wait.resolve(response([{id:7,name:'이전 파일'}]));await pending;assert.equal(ui.content.innerHTML,'새 화면');
+  }
+  for(const status of [401,403]){const ui=screen(async path=>path.endsWith('/attachments')?{ok:false,status,json:async()=>({error:'조회 권한 없음'})}:response(doc));ui.state.page='documents';ui.state.detail=5;await assert.rejects(ui.context.renderRestrictedDocuments());assert.doesNotMatch(ui.content.innerHTML,/이전 계획|이전 본문|href=/);}
 });
 
 test('제한 위험성평가 상세는 기존 전역 표시와 같은 항목·점수만 읽고 위험 내용을 이스케이프한다',async()=>{
