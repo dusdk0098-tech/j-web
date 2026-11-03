@@ -12,7 +12,7 @@ async function screen(result){
   const state={page:'site-activity',siteActivityMonth:result.month},content={},buttons=[],calls=[];
   const target={set innerHTML(value){this.html=value;buttons.push(...[...value.matchAll(/data-site-week="(\d+)" data-week-index="(\d+)"/g)].map(match=>({dataset:{siteWeek:match[1],weekIndex:match[2]}})));},querySelectorAll:()=>buttons};
   const controls={'#site-activity-result':target,'#site-activity-search':{},'#site-activity-month':{value:result.month},'#weekly-start':{value:'',scrollIntoView:()=>calls.push('scroll')},'#weekly-load':{click:()=>calls.push('load')}};
-  const context={state,content,$:selector=>controls[selector],URLSearchParams,today:()=> '2026-11-02',api:async path=>{calls.push(path);return result;},render:async()=>calls.push('render'),showError:error=>{throw error;}};
+  const context={state,detailEpoch:1,content,$:selector=>controls[selector],URLSearchParams,today:()=> '2026-11-02',api:async path=>{calls.push(path);return result;},render:async()=>calls.push('render'),showError:error=>{throw error;}};
   await runInNewContext(`${source.match(/^const esc = .*$/m)[0]}\n(async()=>{${source.slice(from,to)}})()`,context);
   return {state,content,target,buttons,controls,calls};
 }
@@ -82,9 +82,15 @@ test('같은 월의 중복 조회가 역순으로 응답해도 최신 합계를 
     const site=store.createSite({name:'가상 최신 현장'}),previous=store.monthlySiteActivity('2024-02');
     addActivity(store,site.id,['2024-02-29']);const latest=store.monthlySiteActivity('2024-02');
     const pending=[],calls=[],state={page:'site-activity',siteActivityMonth:'2024-02'},target={innerHTML:'',querySelectorAll:()=>[]},controls={'#site-activity-result':target,'#site-activity-search':{},'#site-activity-month':{value:'2024-02'}};
-    const run=runInNewContext(`${source.match(/^const esc = .*$/m)[0]}\n(async()=>{${source.slice(from,to)}})`,{state,content:{},$:selector=>controls[selector],URLSearchParams,today:()=> '2026-11-02',api:path=>{calls.push(path);return new Promise(resolve=>pending.push(resolve));},render:async()=>{},showError:error=>{throw error;}});
+    const run=runInNewContext(`${source.match(/^const esc = .*$/m)[0]}\n(async()=>{${source.slice(from,to)}})`,{state,detailEpoch:1,content:{},$:selector=>controls[selector],URLSearchParams,today:()=> '2026-11-02',api:path=>{calls.push(path);return new Promise(resolve=>pending.push(resolve));},render:async()=>{},showError:error=>{throw error;}});
     const first=run(),second=run();assert.equal(pending.length,2);assert.deepEqual(calls,['/api/monthly-site-activity?month=2024-02','/api/monthly-site-activity?month=2024-02']);
     pending[1](latest);await second;totalRow(target.innerHTML,'가상 최신 현장',1,1);const newestMarkup=target.innerHTML;
     pending[0](previous);await first;assert.equal(target.innerHTML,newestMarkup);totalRow(target.innerHTML,'가상 최신 현장',1,1);
   }finally{store.close();}
+});
+
+test('지난 화면의 조회 응답과 주간 버튼은 같은 화면으로 돌아와도 무효다',async()=>{
+  const state={page:'site-activity',siteActivityMonth:'2024-02',admin:{id:1}},target={innerHTML:'',querySelectorAll:()=>[button]},button={dataset:{siteWeek:'1',weekIndex:'0'}},controls={'#site-activity-result':target,'#site-activity-search':{}},context={state,detailEpoch:1,content:{},$:key=>controls[key],URLSearchParams,today:()=>'',api:async(_path,_options,current)=>{context.current=current;return {weeks:[{start:'2024-02-04',end:'2024-02-10'}],sites:[{id:1,name:'가상',weeks:[{attendance:0,documents:0}]}]};},render:async()=>{throw Error('이전 버튼에서 이동하면 안 됩니다.');},showError:error=>{throw error;}};
+  await runInNewContext(`${source.match(/^const esc = .*$/m)[0]}\n(async()=>{${source.slice(from,to)}})()`,context);assert.equal(context.current(),true);
+  context.detailEpoch++;assert.equal(context.current(),false);await button.onclick();assert.equal(state.page,'site-activity');assert.equal(state.siteId,undefined);
 });
