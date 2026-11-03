@@ -15,6 +15,7 @@ test('관리자 대상 HTTP는 세션·현장·버전을 검사하고 직원에�
   const dir=mkdtempSync(join(tmpdir(),'jweb-manager-http-')),s=new Store(join(dir,'jweb.sqlite')),password='virtual-password-123',auth=new AdminAccounts(s.db);auth.bootstrap(password);
   const a=s.createSite({name:'가상 A'}),b=s.createSite({name:'가상 B'});
   const worker=s.createWorker({siteId:a.id,name:'가상 근로자',category:'직영',company:'가상',occupation:'목공'}),foreignWorker=s.createWorker({siteId:b.id,name:'다른 근로자',category:'직영',company:'가상',occupation:'목공'});
+  s.setAttendance({siteId:a.id,workerId:worker.id,date:'2026-11-01',present:true});s.db.prepare('UPDATE workers SET company=? WHERE id=?').run('변경된 가상 소속',worker.id);
   for(const [loginId,siteId] of [['admin_a',a.id],['admin_b',b.id]])auth.create({loginId,name:'가상 관리자',password,scope:'restricted',siteIds:[siteId]});
   const manager=s.createReviewer({siteId:a.id,loginId:'review_a',name:'가상 직원',password}),foreign=s.createReviewer({siteId:b.id,loginId:'review_b',name:'다른 직원',password});
   const input={siteId:a.id,type:'education',title:'가상 교육',date:'2026-11-01',details:{kind:'supervisor_new',timeFrom:'09:00',timeTo:'10:00',educationPlace:'가상 교실',educationMethod:'강의식',instructor:'가상 강사'}},doc=s.createDocument(input),other=s.createDocument({...input,title:'다른 문서'}),file=s.addAttachment(doc.id,'가상.txt',Buffer.from('virtual')),otherFile=s.addAttachment(other.id,'다른.txt',Buffer.from('private'));
@@ -40,6 +41,7 @@ test('관리자 대상 HTTP는 세션·현장·버전을 검사하고 직원에�
     s.transition(doc.id,'submit');s.transition(doc.id,'approve');
     const stats=`/api/education/manager-assignments?siteId=${a.id}&from=2026-11-01&to=2026-11-30`,globalAdmin=await login(undefined);
     const draft={...input,title:'신규 대상 시험',educationManagerIds:[manager.id]},count=s.documents(a.id).length;
+    const attendance=await (await call(`/api/attendance?siteId=${a.id}&date=2026-11-01`,'GET',null,globalAdmin)).json(),listed=attendance.find(row=>row.id===worker.id);assert.equal(listed.present,1);assert.equal(listed.attendance_company,'가상');assert.equal(listed.company,'변경된 가상 소속');
     assert.equal((await call('/api/documents','POST',draft)).status,401);assert.equal((await call('/api/documents','POST',draft,await login('admin_b'))).status,403);
     assert.equal((await call('/api/documents','POST',{...draft,educationManagerIds:[foreign.id]},globalAdmin)).status,400);assert.equal(s.documents(a.id).length,count);
     assert.equal((await call('/api/documents','POST',{...draft,educationWorkerIds:[foreignWorker.id]},globalAdmin)).status,400);assert.equal(s.documents(a.id).length,count);
