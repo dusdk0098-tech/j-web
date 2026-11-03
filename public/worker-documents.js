@@ -14,10 +14,10 @@ const field=(name,label,value='',type='text')=>`<label>${esc(label)}<input name=
 const checkbox=(attr,item,checked,label)=>`<label><input type="checkbox" ${attr} value="${esc(item.id)}" ${checked?'checked':''}> ${esc(label)}</label>`;
 export function workerDocumentRequest(reportContext,active,onSessionChanged){
   let stopped=false;const errorText='로그인 세션이 변경되었습니다. 입력 내용을 복사한 뒤 다시 로그인해 주세요.';
-  return async(path,options={},format='json')=>{if(stopped||!active())throw Error(errorText);const response=await fetch(path,{...options,headers:{...options.headers,'X-Worker-Report-Context':JSON.stringify(reportContext)}}),value=response.ok&&format==='blob'?await response.blob():await response.json();if(stopped||!active())throw Error(errorText);if(response.status===409&&value.sessionChanged){stopped=true;onSessionChanged(value.error||errorText);throw Error(value.error||errorText);}if(!response.ok)throw Error(value.error||'요청에 실패했습니다.');return value;};
+  return async(path,options={},format='json',requestActive=active)=>{if(stopped||!active()||!requestActive())throw Error(errorText);const response=await fetch(path,{...options,headers:{...options.headers,'X-Worker-Report-Context':JSON.stringify(reportContext)}}),value=response.ok&&format==='blob'?await response.blob():await response.json();if(stopped||!active()||!requestActive())throw Error(errorText);if(response.status===409&&value.sessionChanged){stopped=true;onSessionChanged(value.error||errorText);throw Error(value.error||errorText);}if(!response.ok)throw Error(value.error||'요청에 실패했습니다.');return value;};
 }
 export async function downloadWorkerAttachment(request,path,name,active){
-  const blob=await request(path,{},'blob');if(!active())return;
+  const blob=await request(path,{},'blob',active);if(!active())return;
   const url=URL.createObjectURL(blob);try{const link=document.createElement('a');link.href=url;link.download=name;document.body.append(link);try{link.click();}finally{link.remove();}}finally{setTimeout(()=>URL.revokeObjectURL(url),60000);}
 }
 
