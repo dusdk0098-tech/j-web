@@ -42,9 +42,16 @@ test('저장된 참석자 소속과 현장·기간·내용 조건을 함께 적�
   }finally{store.close();}
 });
 
-test('간담회 검색 모듈을 실제 서버가 제공한다',{timeout:30000},async()=>{
+test('실제 서버의 간담회 저장·조회와 소속 검색이 연결된다',{timeout:30000},async()=>{
   const dir=mkdtempSync(join(tmpdir(),'jweb-meeting-search-')),reservation=createServer();await new Promise(resolve=>reservation.listen(0,'127.0.0.1',resolve));const port=reservation.address().port;await new Promise(resolve=>reservation.close(resolve));
   const child=spawn(process.execPath,['server.js'],{cwd:process.cwd(),env:{...process.env,PORT:String(port),JWEB_DATA_DIR:dir,JWEB_ADMIN_PASSWORD:'virtual-admin-password'},stdio:['ignore','pipe','pipe']});
-  try{await Promise.race([once(child.stdout,'data'),once(child,'exit').then(()=>{throw Error('시험 서버 종료');})]);const response=await fetch(`http://127.0.0.1:${port}/meeting-company-search.js`);assert.equal(response.status,200);assert.match(await response.text(),/meetingHasCompany/);}
+  try{
+    await Promise.race([once(child.stdout,'data'),once(child,'exit').then(()=>{throw Error('시험 서버 종료');})]);const base=`http://127.0.0.1:${port}`,send=(path,method='GET',data,cookie)=>fetch(base+path,{method,headers:{...(data?{'content-type':'application/json'}:{}),...(cookie?{cookie}:{})},...(data?{body:JSON.stringify(data)}:{})});
+    const response=await send('/meeting-company-search.js');assert.equal(response.status,200);assert.match(await response.text(),/meetingHasCompany/);
+    const login=await send('/api/login','POST',{password:'virtual-admin-password'}),admin=login.headers.get('set-cookie').split(';')[0],site=await(await send('/api/sites','POST',{name:'가상 현장'},admin)).json(),worker=await(await send('/api/workers','POST',{siteId:site.id,name:'가상 근로자',category:'직영',company:'가상 소속',occupation:'가상 직종'},admin)).json(),date='2026-10-02';
+    assert.equal((await send('/api/attendance','POST',{siteId:site.id,workerId:worker.id,date,present:true},admin)).status,200);
+    const created=await send('/api/documents','POST',{siteId:site.id,type:'safety_meeting',title:'가상 회의',date,details:{workerIds:[worker.id]}},admin);assert.equal(created.status,201);const doc=await created.json();
+    const path=`/api/documents?siteId=${site.id}&type=safety_meeting&from=2026-10-01&to=2026-10-31`;assert.equal((await send(path)).status,401);const rows=await(await send(path,'GET',null,admin)).json();assert.deepEqual(rows.filter(row=>meetingHasCompany(row,'가상 소속')).map(row=>row.id),[doc.id]);assert.deepEqual(rows.filter(row=>meetingHasCompany(row,'다른 소속')),[]);
+  }
   finally{if(child.exitCode===null){const done=once(child,'exit');child.kill();await done;}rmSync(dir,{recursive:true,force:true});}
 });
