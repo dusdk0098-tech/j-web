@@ -1,0 +1,50 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {meetingHasCompany} from '../public/meeting-company-search.js';
+import {readFileSync} from 'node:fs';
+import {runInNewContext} from 'node:vm';
+import {Store} from '../store.js';
+import {mkdtempSync,rmSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import {createServer} from 'node:net';
+import {spawn} from 'node:child_process';
+import {once} from 'node:events';
+
+test('안전간담회에서 저장된 참석자 소속을 검색한다',()=>{
+  const doc={details:JSON.stringify({workerSnapshot:[{company:'가상 협력사 A'}],managerSnapshot:[{company:'가상 관리자 업체'}]})};
+  assert.equal(meetingHasCompany(doc,' 협력사 a '),true);
+  assert.equal(meetingHasCompany(doc,'관리자 업체'),true);
+  assert.equal(meetingHasCompany(doc,'다른 업체'),false);
+  assert.equal(meetingHasCompany({details:'{}'},'가상'),false);
+  assert.equal(meetingHasCompany({details:'{}'},''),true);
+  assert.equal(meetingHasCompany({details:'null'},'가상'),false);
+});
+
+test('검색 버튼이 소속·기간을 적용하고 다른 문서 유형으로 전환하면 소속을 초기화한다',()=>{
+  const source=readFileSync(new URL('../public/app.js',import.meta.url),'utf8'),line=source.split(/\r?\n/).find(item=>item.startsWith('function wireSearch()'));assert.ok(line);
+  const nodes={'#search':{},'#query':{value:'가상'},'#type-filter':{value:'safety_meeting'},'#document-from':{value:'2026-10-01'},'#document-to':{value:'2026-10-31'},'#meeting-company-filter':{value:' 가상 업체 '}},state={};let renders=0;
+  const context={state,$:selector=>nodes[selector],content:{querySelectorAll:()=>[]},render:async()=>{renders++;},showError:error=>{throw error;},flash:()=>{},dateRangePreset:()=>{},today:()=>''};
+  runInNewContext(line+'\nwireSearch();',context);nodes['#search'].onclick();assert.equal(state.meetingCompany,'가상 업체');assert.equal(state.documentFrom,'2026-10-01');assert.equal(state.query,'가상');assert.equal(renders,1);
+  nodes['#type-filter'].value='education';nodes['#search'].onclick();assert.equal(state.meetingCompany,'');assert.equal(renders,2);
+});
+
+test('저장된 참석자 소속과 현장·기간·내용 조건을 함께 적용한다',()=>{
+  const store=new Store(':memory:');try{
+    const site=store.createSite({name:'가상 현장'}),other=store.createSite({name:'다른 현장'});
+    const add=(siteId,date,company)=>{const worker=store.createWorker({siteId,name:'가상 근로자',category:'직영',company,occupation:'가상 직종'});store.setAttendance({siteId,workerId:worker.id,date,present:true});return {worker,doc:store.createDocument({siteId,type:'safety_meeting',title:'가상 회의',date,details:{workerIds:[worker.id]}})};};
+    const target=add(site.id,'2026-10-02','가상 소속'),different=add(site.id,'2026-10-03','다른 소속');add(site.id,'2026-09-01','가상 소속');add(other.id,'2026-10-02','가상 소속');
+    store.db.prepare('UPDATE workers SET company=? WHERE id=?').run('변경된 소속',target.worker.id);
+    const docs=store.documents(site.id,'safety_meeting','가상','2026-10-01','2026-10-31');assert.equal(docs.length,2);
+    const source=readFileSync(new URL('../public/app.js',import.meta.url),'utf8'),line=source.split(/\r?\n/).find(item=>item.includes('const author=state.page')&&item.includes('meetingHasCompany'));assert.ok(line);
+    const context={state:{page:'documents',type:'safety_meeting',meetingCompany:'가상 소속'},docs,meetingHasCompany};runInNewContext(line+'\nglobalThis.result=filtered;',context);
+    assert.deepEqual(Array.from(context.result,doc=>doc.id),[target.doc.id]);assert.ok(!context.result.some(doc=>doc.id===different.doc.id));
+  }finally{store.close();}
+});
+
+test('간담회 검색 모듈을 실제 서버가 제공한다',{timeout:30000},async()=>{
+  const dir=mkdtempSync(join(tmpdir(),'jweb-meeting-search-')),reservation=createServer();await new Promise(resolve=>reservation.listen(0,'127.0.0.1',resolve));const port=reservation.address().port;await new Promise(resolve=>reservation.close(resolve));
+  const child=spawn(process.execPath,['server.js'],{cwd:process.cwd(),env:{...process.env,PORT:String(port),JWEB_DATA_DIR:dir,JWEB_ADMIN_PASSWORD:'virtual-admin-password'},stdio:['ignore','pipe','pipe']});
+  try{await Promise.race([once(child.stdout,'data'),once(child,'exit').then(()=>{throw Error('시험 서버 종료');})]);const response=await fetch(`http://127.0.0.1:${port}/meeting-company-search.js`);assert.equal(response.status,200);assert.match(await response.text(),/meetingHasCompany/);}
+  finally{if(child.exitCode===null){const done=once(child,'exit');child.kill();await done;}rmSync(dir,{recursive:true,force:true});}
+});
