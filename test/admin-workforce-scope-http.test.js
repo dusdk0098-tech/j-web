@@ -28,6 +28,8 @@ test('제한 관리자 근로자·출역 HTTP: 소유 현장, 필드 경계, 지
   assert.equal((await send(`/api/workers/${wb.id}?siteId=${a.id}`,'GET',null,multi)).status,403);
   let r=await send('/api/workers','POST',{...fields,siteId:a.id},cookie);assert.equal(r.status,201);const created=await r.json();
   r=await send(`/api/workers/${created.id}`,'PUT',{...fields,name:'가상 수정',siteId:a.id,version:created.version},cookie);assert.equal(r.status,200);assert.equal((await r.json()).name,'가상 수정');
+  for(const companyId of [1,null,'0'])assert.equal((await send(`/api/workers/${created.id}`,'PUT',{...fields,siteId:a.id,version:created.version,companyId},cookie)).status,403);
+  assert.equal((await send('/api/workers','POST',{...fields,siteId:a.id,companyId:0},cookie)).status,403);
   assert.equal((await send(`/api/workers/${created.id}`,'PUT',{...fields,siteId:a.id,version:created.version},cookie)).status,409);
   for(const extra of [{siteId:b.id},{siteId:[a.id]},{siteId:{id:a.id}},{password:'forbidden'},{address:'forbidden'},{items:[wa.id,wb.id]},{workerIds:[wa.id,wb.id]}])assert.equal((await send('/api/workers','POST',{...fields,siteId:a.id,...extra},cookie)).status,403);
   for(const [siteId,id] of [[a.id,wb.id],[b.id,wa.id]])assert.equal((await send(`/api/workers/${id}`,'PUT',{...fields,siteId,version:wa.version},multi)).status,403);

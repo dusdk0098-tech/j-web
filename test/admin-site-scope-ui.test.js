@@ -295,6 +295,14 @@ const licenseSection=ui=>ui.get('#dialog-body').children.find(child=>child.tag==
 const licenseRows=ui=>licenseSection(ui).children[2].children.map(element=>({name:element.children[0].children[0],number:element.children[1].children[0],remove:element.children[2]}));
 const addLicense=ui=>licenseSection(ui).children[3].onclick();
 
+test('제한 관리자가 등록 업체 소속을 직접 변경할 때만 연결 해제를 요청한다',async()=>{
+  const worker={id:3,name:'가상 근로자',company:'가상 업체',company_id:12,version:'v1',licenses:[]};
+  const ui=screen(async(path,options)=>options.method?{ok:false,status:409,json:async()=>({error:'가상 충돌'})}:response([worker]));ui.state.page='workers';await ui.context.renderRestrictedWorkforce();ui.get('[data-restricted-worker="3"]').onclick();
+  assert.match(ui.get('#dialog-body').innerHTML,/연결은 해제/);
+  await ui.submit({name:worker.name,company:'  가상 업체  '});let data=JSON.parse(ui.requests.at(-1).options.body);assert.equal(Object.hasOwn(data,'companyId'),false);assert.equal(data.version,'v1');
+  await ui.submit({name:worker.name,company:'가상 다른 소속'});data=JSON.parse(ui.requests.at(-1).options.body);assert.equal(data.companyId,0);assert.equal(data.version,'v1');assert.equal(ui.dialog.open,true);assert.equal(ui.get('#dialog-form').values.company,'가상 다른 소속');
+});
+
 test('제한 면허 등록·수정은 기존 행·선택 입력·20행·100자·문자열 표시를 보존한다',async()=>{
   const worker={id:3,name:'가상 근로자',version:'v1',licenses:[{name:'<가상 면허>',number:'가상-001'}]};
   const ui=screen(async(path,options)=>options.method?{ok:false,status:409,json:async()=>({error:'가상 충돌'})}:response([worker]));ui.state.page='workers';
@@ -533,6 +541,12 @@ test('실제 HTTP 로그인→배정 현장 선택→공지·근로자·출역·
     ui.get('[data-restricted-worker="'+worker.id+'"]').onclick();licenseRows(ui)[0].number.value='0'.repeat(101);await ui.submit(basic);assert.equal(ui.dialog.open,true);assert.match(ui.get('#dialog-error').textContent,/면허/);assert.equal(licenseRows(ui)[0].number.value.length,101);assert.deepEqual((await readWorker()).licenses,saved.licenses);
     for(const row of licenseRows(ui))row.remove.onclick();await ui.submit(basic);assert.equal(ui.dialog.open,false);assert.deepEqual((await readWorker()).licenses,[]);
     ui.get('[data-restricted-worker="'+worker.id+'"]').onclick();assert.equal(licenseRows(ui).length,0);ui.dialog.close();
+    const companyResponse=await send('/api/companies','POST',{siteId:created[1].id,name:'가상 등록 업체',trade:'가상 공종'},globalCookie),company=await companyResponse.json();assert.equal(companyResponse.status,201);
+    saved=await readWorker();assert.equal((await send('/api/workers/'+worker.id,'PUT',{...basic,company:company.name,companyId:company.id,version:saved.version},globalCookie)).status,200);
+    assert.equal((await send('/api/attendance','POST',{siteId:created[1].id,workerId:worker.id,date:'2026-10-30',present:true},globalCookie)).status,200);
+    await ui.context.render();ui.get('[data-restricted-worker="'+worker.id+'"]').onclick();await ui.submit({...basic,company:company.name,memo:'가상 이름 유지'});assert.equal(ui.dialog.open,false);assert.equal((await readWorker()).company_id,company.id);
+    ui.get('[data-restricted-worker="'+worker.id+'"]').onclick();await ui.submit({...basic,company:'직접 변경한 소속'});assert.equal(ui.dialog.open,false);saved=await readWorker();assert.equal(saved.company_id,null);assert.equal(saved.company,'직접 변경한 소속');
+    const oldAttendance=await(await send('/api/attendance?siteId='+created[1].id+'&date=2026-10-30','GET',null,globalCookie)).json();assert.equal(oldAttendance[0].attendance_company_id,company.id);assert.equal(oldAttendance[0].attendance_company,company.name);
     ui.state.page='attendance';await ui.context.render();ui.get('[data-restricted-presence="'+worker.id+'"]').onclick();await ui.submit({present:'1'});assert.equal(ui.dialog.open,false);
     ui.get('[data-restricted-units="'+worker.id+'"]').onclick();await ui.submit({units:'0.75'});assert.equal(ui.dialog.open,false);assert.match(ui.content.innerHTML,/공수 0.75/);
     const day=await(await send('/api/attendance?siteId='+created[1].id+'&date=2026-11-02','GET',null,cookie)).json();assert.equal(day[0].present,1);assert.equal(day[0].units_hundredths,75);
