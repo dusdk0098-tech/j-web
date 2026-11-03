@@ -17,6 +17,8 @@ test('위험신고 처리 변경은 저장 잠금 뒤 권한을 확인하고 거
     store.updateHazardReport(site.id,id,change);assert.equal(store.hazardReports(site.id)[0].response,'가상 조치');
     const history=store.hazardReports(site.id)[0].history;assert.equal(history.length,1);assert.equal(history[0].previous_status,'received');assert.equal(history[0].previous_response,'');assert.equal(history[0].status,'resolved');assert.equal(history[0].response,'가상 조치');
     store.updateHazardReport(site.id,id,change);assert.equal(store.hazardReports(site.id)[0].history.length,1);
+    assert.throws(()=>store.updateHazardReport(site.id,id,{status:'reviewing',response:'이전 입력',expectedHistoryId:0}),error=>error.sessionStatus===409);assert.equal(store.hazardReports(site.id)[0].response,'가상 조치');
+    assert.throws(()=>store.updateHazardReport(site.id,id,{...change,expectedHistoryId:-1}),/이력/);
     assert.throws(()=>store.updateHazardReport(site.id,id,{status:'reviewing',response:'가상 변경'},()=>{throw Error('권한 거절');}),/권한 거절/);assert.equal(store.hazardReports(site.id)[0].history.length,1);
     assert.deepEqual(store.hazardReports(other.id),[]);
   }finally{store.close();}
@@ -32,4 +34,11 @@ test('관리자 화면은 처리 이력과 이력이 없는 기록을 텍스트�
   const node=()=>({children:[],textContent:'',append(...children){this.children.push(...children);}}),articles=[node(),node()],reports=[{history:[{created_at:'가상 날짜',previous_status:'received',status:'resolved',response:'<가상 조치>'}]},{history:[]}];
   runInNewContext(source,{content:{querySelectorAll:()=>articles},reports,document:{createElement:node},hazardStatuses:{received:'접수',resolved:'조치 완료'}});
   assert.match(articles[0].children[0].children[1].textContent,/접수 → 조치 완료.*<가상 조치>/);assert.match(articles[1].children[0].children[1].textContent,/이전 변경 내용은 확인할 수 없습니다/);
+});
+
+test('관리자 처리 화면은 조회한 마지막 이력 번호를 변경 요청에 보낸다',()=>{
+  const source=readFileSync(new URL('../public/app.js',import.meta.url),'utf8').split(/\r?\n/).find(line=>line.includes('const hazardStatuses='));assert.ok(source);
+  const article={children:[],heading:{},querySelector:()=>article.heading,append(node){this.children.push(node);}},report={id:9,title:'가상',status:'reviewing',response:'기존 조치',history:[{id:5},{id:8}]};let handler,request;
+  runInNewContext(source,{content:{querySelectorAll:()=>[article]},reports:[report],document:{createElement:()=>({})},esc:String,siteId:3,showDialog:(_title,_html,submit)=>{handler=submit;},api:(path,options)=>{request={path,options};}});
+  article.children.find(node=>node.type==='button').onclick();handler({status:'resolved',response:'새 조치'});assert.equal(request.path,'/api/sites/3/hazard-reports/9');assert.equal(JSON.parse(request.options.body).expectedHistoryId,8);
 });
