@@ -5,7 +5,7 @@ import {runInNewContext} from 'node:vm';
 
 function screen(){
   const source=readFileSync(new URL('../public/app.js',import.meta.url),'utf8'),start=source.indexOf('async function showWorkerSelfCheck('),end=source.indexOf('async function showWorkerActivities(',start);assert.ok(start>=0&&end>start);
-  let view={isConnected:true},opened=[],waits=[];const dialog={open:true,close(){this.open=false;view=null;}},controls={'#dialog-form button[type=submit]':{},'#self-check-print-button':{}},context={state:{siteId:7},dialog,workerSelfCheckEpoch:0,$:key=>key==='#activity-results'?view:controls[key],api:()=>new Promise((resolve,reject)=>waits.push({resolve,reject})),esc:String,showDialog:(_title,html)=>{opened.push(html);dialog.open=true;},showError:error=>{throw error;},flash(){},window:{print(){}}};
+  let view={isConnected:true},opened=[],waits=[];const dialog={open:true,close(){this.open=false;view=null;}},controls={'#dialog-form button[type=submit]':{},'#self-check-print-button':{}},context={state:{siteId:7,admin:{id:1}},detailEpoch:1,dialog,workerSelfCheckEpoch:0,$:key=>key==='#activity-results'?view:controls[key],api:(_path,_options,active)=>new Promise((resolve,reject)=>waits.push({resolve,reject,active})),esc:String,showDialog:(_title,html)=>{opened.push(html);dialog.open=true;},showError:error=>{throw error;},flash(){},window:{print(){}}};
   runInNewContext(source.slice(start,end)+'\nglobalThis.openCheck=showWorkerSelfCheck;',context);return {context,waits,opened,replaceView(){view.isConnected=false;view={isConnected:true};},getView:()=>view};
 }
 
@@ -20,4 +20,12 @@ test('여러 자가점검을 연속 선택하면 마지막 선택만 표시한�
 test('이전 창의 오류는 현재 창에 표시하지 않는다',async()=>{
   const ui=screen(),pending=ui.context.openCheck({id:1,name:'가상 A'},7,'2026-10-01');ui.replaceView();ui.waits[0].reject(Error('오래된 오류'));await pending;assert.equal(ui.opened.length,0);assert.ok(ui.getView());
   const current=ui.context.openCheck({id:2,name:'가상 B'},7,'2026-10-02');ui.waits[1].reject(Error('현재 오류'));await assert.rejects(current,/현재 오류/);
+});
+
+test('계정이나 화면이 바뀌면 이전 자가점검 응답과 인증 오류는 적용되지 않는다',async()=>{
+  for(const change of ['account','page'])for(const fail of [false,true]){
+    const ui=screen(),pending=ui.context.openCheck({id:1,name:'가상'},7,'2026-10-01');assert.equal(ui.waits[0].active(),true);
+    if(change==='account')ui.context.state.admin={id:2};else ui.context.detailEpoch++;
+    assert.equal(ui.waits[0].active(),false);fail?ui.waits[0].reject(Error('이전 인증 오류')):ui.waits[0].resolve([{id:1,created_at:'가상',answers:{}}]);await pending;assert.equal(ui.opened.length,0);
+  }
 });
