@@ -17,6 +17,18 @@ function setup(path=':memory:'){
   return {s,site,other,worker,manager,peer,foreign,doc};
 }
 
+test('신규 교육과 관리자 대상은 함께 저장되고 유효하지 않으면 함께 취소된다',()=>{
+  const {s,site,manager,peer,foreign}=setup();try{
+    const input={siteId:site.id,type:'education',title:'가상 신규 교육',date:'2026-11-01',details},before=s.documents(site.id).length;
+    s.updateReviewer(peer.site_id,peer.id,{active:false});
+    for(const ids of [[foreign.id],[peer.id],[manager.id,manager.id],['1'],null]){assert.throws(()=>s.createAuthorizedDocument({...input,educationManagerIds:ids}));assert.equal(s.documents(site.id).length,before);}
+    assert.throws(()=>s.createAuthorizedDocument({...input,details:{kind:'regular'},educationManagerIds:[manager.id]}),/종류/);assert.equal(s.documents(site.id).length,before);
+    assert.throws(()=>s.createAuthorizedDocument({...input,educationManagerIds:[manager.id]},()=>{throw Error('권한 회수');}),/권한 회수/);assert.equal(s.documents(site.id).length,before);
+    s.db.exec("CREATE TRIGGER fail_draft_target BEFORE INSERT ON training_manager_targets BEGIN SELECT RAISE(ABORT,'시험 저장 실패'); END");assert.throws(()=>s.createAuthorizedDocument({...input,educationManagerIds:[manager.id]}),/시험 저장 실패/);assert.equal(s.documents(site.id).length,before);s.db.exec('DROP TRIGGER fail_draft_target');
+    const doc=s.createAuthorizedDocument({...input,educationManagerIds:[manager.id]});assert.equal(s.document(doc.id).edit_version,doc.edit_version);assert.deepEqual(s.trainingTargets(doc.id).managers.filter(row=>row.selected).map(row=>row.id),[manager.id]);assert.equal(s.trainingTargets(doc.id).configured,false);
+  }finally{s.close();}
+});
+
 test('관리자 명부는 교육 종류에 따라 표시되며 근로자 교육과 TBM에는 표시되지 않는다',()=>{
   for(const kind of ['supervisor','supervisor_new','supervisor_regular','supervisor_special','supervisor_changed','msds','other'])assert.equal(hasManagerEducationTargets({type:'education',details:JSON.stringify({kind})}),true);
   for(const kind of ['new','regular','risk','special','changed',''])assert.equal(hasManagerEducationTargets({type:'education',details:JSON.stringify({kind})}),false);

@@ -38,6 +38,10 @@ test('관리자 대상 HTTP는 세션·현장·버전을 검사하고 직원에�
     assert.equal((await call('/api/reviewer/education')).status,401);assert.deepEqual(await (await call('/api/reviewer/education','GET',null,reviewer)).json(),[]);
     s.transition(doc.id,'submit');s.transition(doc.id,'approve');
     const stats=`/api/education/manager-assignments?siteId=${a.id}&from=2026-11-01&to=2026-11-30`,globalAdmin=await login(undefined);
+    const draft={...input,title:'신규 대상 시험',educationManagerIds:[manager.id]},count=s.documents(a.id).length;
+    assert.equal((await call('/api/documents','POST',draft)).status,401);assert.equal((await call('/api/documents','POST',draft,await login('admin_b'))).status,403);
+    assert.equal((await call('/api/documents','POST',{...draft,educationManagerIds:[foreign.id]},globalAdmin)).status,400);assert.equal(s.documents(a.id).length,count);
+    const made=await call('/api/documents','POST',draft,globalAdmin);assert.equal(made.status,201);const created=await made.json();assert.equal(created.edit_version,s.document(created.id).edit_version);assert.deepEqual(s.trainingTargets(created.id).managers.filter(row=>row.selected).map(row=>row.id),[manager.id]);
     assert.equal((await call(stats)).status,401);assert.equal((await call(stats,'GET',null,await login('admin_a'))).status,403);
     const assignments=await (await call(stats,'GET',null,globalAdmin)).json();assert.deepEqual(assignments.map(row=>[row.id,row.document_id,row.kind]),[[manager.id,doc.id,'supervisor_new']]);
     assert.deepEqual(await (await call(`/api/education/manager-assignments?siteId=${b.id}&from=2026-11-01&to=2026-11-30`,'GET',null,globalAdmin)).json(),[]);
