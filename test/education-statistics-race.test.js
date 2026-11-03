@@ -26,3 +26,12 @@ test('오래된 교육 통계의 안전활동 버튼은 다른 현장을 열지 
   const start=source.indexOf("panel.querySelectorAll('[data-education-activity]')"),end=source.indexOf('});}const weekStart',start);assert.ok(start>=0&&end>start);const button={dataset:{educationActivity:'0'}},panel={isConnected:true,querySelectorAll:()=>[button]},state={page:'statistics',siteId:7,statisticsMonth:'2026-10',statisticsDay:''},education=[{id:5}],opened=[];
   const context={panel,state,education,siteId:7,month:'2026-10',day:'',detailEpoch:2,statsEpoch:2,today:()=>'',showWorkerActivities:async worker=>opened.push(worker.id),showError:error=>{throw error;}};runInNewContext(source.slice(start,end+3),context);button.onclick();assert.deepEqual(opened,[5]);state.siteId=8;button.onclick();state.siteId=7;context.detailEpoch++;button.onclick();assert.deepEqual(opened,[5]);
 });
+
+test('교육 추가 통계의 이전 응답은 같은 조건으로 돌아와도 폐기한다',async()=>{
+  for(const [name,end] of [['renderManagerEducationAssignments','async function renderDailyTrainingStatistics('],['renderDailyTrainingStatistics','function showSiteEducationDetail(']]){
+    const wait=deferred(),state={page:'statistics',siteId:1,statisticsMonth:'2026-10',statisticsDay:''},anchor={isConnected:true},context={state,detailEpoch:1,content:{querySelector:()=>anchor},today:()=>'',URLSearchParams,api:(_path,_options,active)=>{context.active=active;return wait.promise;}};
+    runInNewContext(fragment(`async function ${name}(`,end)+`;globalThis.run=${name};`,context);
+    const pending=context.run(1,'2026-10-01','2026-10-31','2026-10','');assert.equal(context.active(),true);
+    context.detailEpoch++;assert.equal(context.active(),false);wait.resolve([]);await pending;
+  }
+});

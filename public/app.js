@@ -978,8 +978,9 @@ async function showBatchPreview(ids,reports=[],siteId=state.siteId,includeDailyP
   if(autoPrint){try{await Promise.all([...content.querySelectorAll('.batch-document img')].map(image=>typeof image.decode==='function'?image.decode():image.complete&&image.naturalWidth?Promise.resolve():Promise.reject()));if(autoPrint)await printButton.onclick();}catch{if(active()&&$('#batch-print')===printButton)flash('이미지를 불러오지 못했습니다. 다시 조회해 주세요.',true);}}
 }
 async function renderManagerEducationAssignments(siteId,from,to,month,day){
-  const anchor=content.querySelector('#education-report'),epoch=detailEpoch,rows=await api(`/api/education/manager-assignments?${new URLSearchParams({siteId:String(siteId),from,to})}`);
+  const anchor=content.querySelector('#education-report'),epoch=detailEpoch;
   const active=()=>anchor?.isConnected&&detailEpoch===epoch&&state.page==='statistics'&&state.siteId===siteId&&(state.statisticsMonth||today().slice(0,7))===month&&state.statisticsDay===day;
+  const rows=await api(`/api/education/manager-assignments?${new URLSearchParams({siteId:String(siteId),from,to})}`,{},active);
   if(!active())return;
   const section=document.createElement('section');section.className='panel';
   const totals=new Map();for(const row of rows){const key=`${row.id}:${row.kind}`;if(!totals.has(key))totals.set(key,{name:row.name,kind:row.kind,count:0});if(row.confirmed_at)totals.get(key).count++;}
@@ -988,12 +989,13 @@ async function renderManagerEducationAssignments(siteId,from,to,month,day){
   section.querySelectorAll('[data-assignment-signature]').forEach(button=>button.onclick=async()=>{if(!active()||!section.isConnected||button.disabled)return;button.disabled=true;try{const query=new URLSearchParams({siteId:String(siteId),reviewerId:button.dataset.assignmentSignature,documentId:button.dataset.document}),data=await api(`/api/education/manager-signature?${query}`,{},active);if(!active()||!section.isConnected||!button.isConnected)return;if(!/^[A-Za-z0-9+/]+={0,2}$/.test(data.signature))throw Error('시험 서명을 읽을 수 없습니다.');const image=document.createElement('img');image.className='signature-pad';image.alt='저장된 시험 서명';image.src=`data:image/png;base64,${data.signature}`;button.after(image);button.remove();}catch(error){if(active()&&section.isConnected)showError(error);}finally{button.disabled=false;}});
 }
 async function renderDailyTrainingStatistics(siteId,from,to,month,day){
-  const anchor=content.querySelector('#education-report'),rows=await api(`/api/education/daily-report?${new URLSearchParams({siteId:String(siteId),from,to})}`);
-  if(!anchor?.isConnected||state.page!=='statistics'||state.siteId!==siteId||(state.statisticsMonth||today().slice(0,7))!==month||state.statisticsDay!==day)return;
+  const anchor=content.querySelector('#education-report'),epoch=detailEpoch,active=()=>anchor?.isConnected&&detailEpoch===epoch&&state.page==='statistics'&&state.siteId===siteId&&(state.statisticsMonth||today().slice(0,7))===month&&state.statisticsDay===day;
+  const rows=await api(`/api/education/daily-report?${new URLSearchParams({siteId:String(siteId),from,to})}`,{},active);
+  if(!active())return;
   const kinds={tbm:'TBM',education:'안전·보건 교육',meeting:'위험성평가 이행상황 점검 회의'},categories=[...new Set(rows.map(row=>row.category))],section=document.createElement('section');section.className='panel';
   section.innerHTML=`<h2>가상 당일 종류별 확인 통계</h2><p class="muted">문서별 확인과 별도 기록이며 중복될 수 있습니다. 이름·소속·구분·생년월일은 현재 정보입니다.</p>${rows.length?`<label>근로 구분 <select><option value="">전체</option>${categories.map(category=>`<option value="${esc(category)}">${esc(category)}</option>`).join('')}</select></label><div class="table-wrap"><table><thead><tr><th>구분</th><th>이름</th><th>소속</th><th>가상 생년월일</th><th>종류</th><th>확인 일수</th><th>서명 수</th><th>날짜</th><th>상세</th></tr></thead><tbody>${rows.map((row,i)=>`<tr data-daily-row="${i}"><td>${esc(row.category)}</td><td>${esc(row.name)}</td><td>${esc(row.company)}</td><td>${esc(row.birth_date||'미기록')}</td><td>${esc(kinds[row.kind]||'종류 미기록')}</td><td>${row.count}</td><td>${row.signed_count}</td><td>${row.dates.map(esc).join(', ')}</td><td><button type="button" data-daily-activity="${i}">안전활동 보기</button></td></tr>`).join('')}</tbody></table></div>`:'<p>시험 확인 기록이 없습니다.</p>'}`;anchor.after(section);
   const select=section.querySelector('select');if(select)select.onchange=()=>section.querySelectorAll('[data-daily-row]').forEach(row=>{row.hidden=!!select.value&&rows[Number(row.dataset.dailyRow)].category!==select.value;});
-  section.querySelectorAll('[data-daily-activity]').forEach(button=>button.onclick=()=>{const worker=rows[Number(button.dataset.dailyActivity)];if(worker&&section.isConnected&&state.page==='statistics'&&state.siteId===siteId&&(state.statisticsMonth||today().slice(0,7))===month&&state.statisticsDay===day)showWorkerActivities(worker).catch(showError);});
+  section.querySelectorAll('[data-daily-activity]').forEach(button=>button.onclick=()=>{const worker=rows[Number(button.dataset.dailyActivity)];if(worker&&section.isConnected&&active())showWorkerActivities(worker).catch(showError);});
 }
 function showSiteEducationDetail(site,initialMonth){
   siteEducationCleanup?.();
