@@ -624,9 +624,9 @@ export class Store {
     for(const table of ['events','approval_steps','approval_cycles','attachments','basic_document_versions'])this.db.prepare(`DELETE FROM ${table} WHERE document_id=?`).run(id);
     this.db.prepare("DELETE FROM documents WHERE id=? AND site_id=? AND type='basic'").run(id,siteId);
   }
-  deleteBasicDocument(siteId,id,expectedVersion){
+  deleteBasicDocument(siteId,id,expectedVersion,onAuthorize=()=>{}){
     siteId=Number(siteId);id=Number(id);if(typeof expectedVersion!=='string'||!/^[a-f0-9]{32}$/.test(expectedVersion))throw new Error('문서를 다시 조회해 주세요.');
-    this.db.exec('BEGIN IMMEDIATE');try{
+    this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();
       const doc=this.document(id);if(!doc||doc.type!=='basic'||doc.site_id!==siteId)throw new Error('선택한 현장의 기본 서류를 확인해 주세요.');
       if(doc.basic_version!==expectedVersion)throw new Error('문서가 변경되었습니다. 다시 조회해 주세요.');
       this.removeBasicDocumentData(siteId,id);this.db.exec('COMMIT');

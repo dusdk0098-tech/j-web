@@ -1251,7 +1251,7 @@ const server = http.createServer((req,res)=>passwordRequests.run(true,()=>adminR
       if (req.method === 'PUT' && part === 'training-targets') {const input=await body(req);store.setTrainingTargets(id,input.workerIds,()=>{checkRequestSession(req);if((input.managerIds!==undefined||input.expectedEditVersion!==undefined)&&(!Number.isSafeInteger(input.expectedEditVersion)||store.document(id)?.edit_version!==input.expectedEditVersion))throw Object.assign(new Error('교육 문서 또는 대상이 변경되었습니다. 다시 확인해 주세요.'),{sessionStatus:409});},input.managerIds);return json(res,200,{ok:true});}
       if (req.method === 'GET' && !part) { const d=store.document(id); return d ? json(res,200,withDocumentAuthor(d)) : json(res,404,{error:'문서를 찾을 수 없습니다.'}); }
       if (req.method === 'PUT' && !part) {const input=await body(req,220000);if(!Number.isSafeInteger(input.expectedEditVersion))throw Object.assign(new Error('문서 버전이 없습니다. 입력 내용을 복사한 뒤 화면을 새로고침해 주세요.'),{sessionStatus:409});return json(res,200,withDocumentAuthor(store.updateDocument(id,input,()=>checkRequestSession(req))));}
-      if (req.method === 'DELETE' && !part) {const input=await body(req);store.deleteBasicDocument(input.siteId,id,input.expectedVersion);return json(res,200,{ok:true});}
+      if (req.method === 'DELETE' && !part) {const input=await body(req);store.deleteBasicDocument(input.siteId,id,input.expectedVersion,()=>checkRequestSession(req));return json(res,200,{ok:true});}
       if (req.method === 'POST' && part === 'transition') {const input=await body(req);return json(res,200,withDocumentAuthor(store.managedTransition(id,{...input,expectedEditVersion:input.expectedEditVersion??null},()=>checkRequestSession(req),input.expectedCycleId??null)));}
     }
     return json(res,404,{error:'요청한 경로가 없습니다.'});
