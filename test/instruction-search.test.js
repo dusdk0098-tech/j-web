@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { createServer } from 'node:net';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
+import { instructionRecipientAudit } from '../public/instruction-recipients.js';
 
 test('작업 지시서 검색은 현장, 협력사, 기간과 검색어를 함께 적용한다',()=>{
   const store=new Store(':memory:');
@@ -42,8 +43,15 @@ test('작업 지시서 협력사 검색 API는 관리자 인증과 현장 경계
     const response=await call(query,'GET',null,admin);assert.equal(response.status,200);assert.deepEqual((await response.json()).map(row=>row.id),[doc.id]);
     assert.equal((await call(query.replace('type=instruction','type=risk'),'GET',null,admin)).status,400);
     assert.equal((await call(query.replace(`instructionCompanyId=${company.id}`,'instructionCompanyId=999999'),'GET',null,admin)).status,400);
-    const duplicate=await (await call('/api/companies','POST',{siteId:site.id,name:company.name,trade:'다른 공종'},admin)).json(),baseWorker={siteId:site.id,category:'직영',company:company.name,occupation:'가상 직종'},first=await(await call('/api/workers','POST',{...baseWorker,name:'가상 첫 근로자',companyId:company.id},admin)).json(),second=await(await call('/api/workers','POST',{...baseWorker,name:'가상 둘째 근로자',companyId:duplicate.id},admin)).json(),legacy=await(await call('/api/workers','POST',{...baseWorker,name:'가상 이전 근로자'},admin)).json();
+    const baseWorker={siteId:site.id,category:'직영',company:company.name,occupation:'가상 직종'},legacy=await(await call('/api/workers','POST',{...baseWorker,name:'가상 이전 근로자'},admin)).json();
+    const old=await(await call('/api/documents','POST',{siteId:site.id,type:'instruction',title:'가상 이전 지시',date:'2026-10-30',details:{companyId:company.id,recipientId:legacy.id}},admin)).json();
+    const duplicate=await (await call('/api/companies','POST',{siteId:site.id,name:company.name,trade:'다른 공종'},admin)).json(),first=await(await call('/api/workers','POST',{...baseWorker,name:'가상 첫 근로자',companyId:company.id},admin)).json(),second=await(await call('/api/workers','POST',{...baseWorker,name:'가상 둘째 근로자',companyId:duplicate.id},admin)).json();
     const instruction=recipientId=>({siteId:site.id,type:'instruction',title:'가상 수신',date:'2026-10-30',details:{companyId:company.id,recipientId}});
     assert.equal((await call('/api/documents','POST',instruction(first.id),admin)).status,201);assert.equal((await call('/api/documents','POST',instruction(second.id),admin)).status,400);assert.equal((await call('/api/documents','POST',instruction(legacy.id),admin)).status,400);assert.equal((await call('/instruction-recipients.js')).status,200);
+    const paths=[`/api/documents?siteId=${site.id}&type=instruction`,`/api/workers?siteId=${site.id}`,`/api/companies?siteId=${site.id}`];
+    for(const path of paths)assert.equal((await call(path)).status,401);
+    const data=await Promise.all(paths.map(async path=>(await call(path,'GET',null,admin)).json()));
+    assert.ok(instructionRecipientAudit(...data).some(row=>row.id===old.id&&row.reason==='담당자의 등록 업체 미연결'));
+    assert.equal((await call('/instruction-recipient-audit.js')).status,200);
   }finally{if(child.exitCode===null){const exited=once(child,'exit');child.kill();await exited;}rmSync(dir,{recursive:true,force:true});}
 });
