@@ -1018,9 +1018,9 @@ function showSiteEducationDetail(site,initialMonth){
   siteEducationCleanup?.();
   const parentSite=state.siteId,admin=state.admin,epoch=detailEpoch,box=document.createElement('dialog');
   box.setAttribute('aria-label','현장 교육 통계 상세');
-  box.innerHTML=`<h2>${esc(site.name)} · 교육 통계 상세</h2><p>승인된 문서별 시험 확인 건수입니다. 실제 교육 이수를 증명하지 않으며 당일 종류별 별도 확인은 포함하지 않습니다.</p><label>조회 월 <input type="month" id="site-education-month" value="${esc(initialMonth)}"></label><fieldset id="site-education-categories"><legend>근로 구분</legend></fieldset><div id="site-education-results" aria-live="polite"></div><button type="button" id="site-education-close">닫기</button>`;
+  box.innerHTML=`<h2>${esc(site.name)} · 교육 통계 상세</h2><p>승인된 문서별 시험 확인 건수입니다. 실제 교육 이수를 증명하지 않으며 당일 종류별 별도 확인은 포함하지 않습니다.</p><label>조회 월 <input type="month" id="site-education-month" value="${esc(initialMonth)}"></label><fieldset id="site-education-categories"><legend>근로 구분</legend></fieldset><div id="site-education-results" aria-live="polite"></div><section><h3>직원 교육 지정과 시험 확인</h3><p>승인된 교육의 지정과 확인을 구분합니다.</p><div id="site-education-staff" aria-live="polite"></div></section><button type="button" id="site-education-close">닫기</button>`;
   document.body.append(box);box.showModal();
-  const month=box.querySelector('#site-education-month'),categories=box.querySelector('#site-education-categories'),results=box.querySelector('#site-education-results');
+  const month=box.querySelector('#site-education-month'),categories=box.querySelector('#site-education-categories'),results=box.querySelector('#site-education-results'),staff=box.querySelector('#site-education-staff');
   let sequence=0,rows=[],selected=null,activityAnchor=null,closed=false;
   const active=()=>box.open&&box.isConnected&&state.siteId===parentSite&&state.admin===admin&&detailEpoch===epoch;
   const cleanup=()=>{if(closed)return;closed=true;sequence++;if(dialog.open&&activityAnchor&&$('#activity-results')===activityAnchor)dialog.close();box.remove();if(siteEducationCleanup===cleanup)siteEducationCleanup=null;};
@@ -1033,15 +1033,17 @@ function showSiteEducationDetail(site,initialMonth){
   };
   categories.onchange=()=>{selected=[...categories.querySelectorAll('input:checked')].map(input=>input.value);paint();};
   const load=async()=>{
-    const request=++sequence,value=month.value;rows=[];results.textContent='불러오는 중입니다.';
-    if(!/^\d{4}-(0[1-9]|1[0-2])$/.test(value)){results.textContent='조회할 월을 확인해 주세요.';return;}
+    const request=++sequence,value=month.value;rows=[];results.textContent='불러오는 중입니다.';staff.textContent='불러오는 중입니다.';
+    if(!/^\d{4}-(0[1-9]|1[0-2])$/.test(value)){results.textContent='조회할 월을 확인해 주세요.';staff.textContent='조회할 월을 확인해 주세요.';return;}
     const current=()=>active()&&sequence===request&&month.value===value,days=new Date(Number(value.slice(0,4)),Number(value.slice(5)),0).getDate();
     try{
-      const data=await api(`/api/education/report?${new URLSearchParams({siteId:String(site.id),from:`${value}-01`,to:`${value}-${days}`})}`,{},current);
+      const query=new URLSearchParams({siteId:String(site.id),from:`${value}-01`,to:`${value}-${days}`}),[assignments,data]=await Promise.all([api(`/api/education/manager-assignments?${query}`,{},current),api(`/api/education/report?${query}`,{},current)]);
       if(!current())return;rows=data;
+      const totals=new Map();for(const row of assignments){const key=JSON.stringify([row.id,row.kind]);if(!totals.has(key))totals.set(key,{name:row.name,kind:row.kind,assigned:0,confirmed:0});const total=totals.get(key);total.assigned++;if(row.confirmed_at)total.confirmed++;}
+      staff.innerHTML=totals.size?`<div class="table-wrap"><table><thead><tr><th>직원</th><th>교육 종류</th><th>지정 문서 수</th><th>시험 확인 수</th></tr></thead><tbody>${[...totals.values()].map(row=>`<tr><td>${esc(row.name)}</td><td>${esc(educationKinds[row.kind]||'종류 미기록')}</td><td>${row.assigned}</td><td>${row.confirmed}</td></tr>`).join('')}</tbody></table></div>`:'<p>지정된 직원 교육이 없습니다.</p>';
       const options=[...new Set(rows.map(row=>row.category))];if(selected===null&&options.length)selected=options;
       categories.innerHTML='<legend>근로 구분</legend>'+options.map(category=>`<label><input type="checkbox" value="${esc(category)}" ${selected?.includes(category)?'checked':''}> ${esc(category)}</label>`).join('');paint();
-    }catch(error){if(current())results.textContent=error.message;}
+    }catch(error){if(current()){results.textContent=error.message;staff.textContent=error.message;}}
   };
   month.onchange=load;return load();
 }
