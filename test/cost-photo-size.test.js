@@ -12,10 +12,10 @@ import {PNG} from 'pngjs';
 import {Store} from '../store.js';
 import {freezeBatchImages} from '../public/batch-images.js';
 
-test('비용 증빙은 10MB 경계를 지키고 다른 사진의 2MB 제한은 유지한다',()=>{
+test('비용 증빙과 현장 사진은 10MB 제한을 지킨다',()=>{
   const dir=mkdtempSync(join(tmpdir(),'jweb-cost-limit-'));let store;
   try{store=new Store(join(dir,'test.sqlite'));const site=store.createSite({name:'가상'}),cost=store.createSafetyCost({siteId:site.id,category:'2',date:'2026-10-29',description:'가상',note:'',unitPrice:'1000',quantity:'1',unit:'개'}),tooLarge=Buffer.alloc(10*1024*1024+1);
-    assert.throws(()=>store.addSafetyCostPhoto(site.id,cost.id,'large.png',tooLarge),/10MB/);assert.throws(()=>store.addSafetyCostMonthFile(site.id,'2026-10-29','','large.png',tooLarge),/10MB/);assert.throws(()=>store.addSitePhoto(site.id,'large.png',Buffer.alloc(2*1024*1024+1)),/2MB/);
+    assert.throws(()=>store.addSafetyCostPhoto(site.id,cost.id,'large.png',tooLarge),/10MB/);assert.throws(()=>store.addSafetyCostMonthFile(site.id,'2026-10-29','','large.png',tooLarge),/10MB/);assert.throws(()=>store.addSitePhoto(site.id,'large.png',tooLarge),/10MB/);
   }finally{store?.close();rmSync(dir,{recursive:true,force:true});}
 });
 test('2MB를 넘는 가상 PNG 여섯 장이 첨부·문서·결재 사본과 출력 준비에 전달된다',{timeout:30000},async()=>{
