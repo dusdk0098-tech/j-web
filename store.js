@@ -1769,11 +1769,12 @@ export class Store {
     if(!timingSafeEqual(hash,account?.password_hash||Buffer.alloc(32))||!account)return null;
     const worker=this.db.prepare('SELECT workers.id,workers.name,workers.site_id,sites.name AS site_name FROM workers JOIN sites ON sites.id=workers.site_id WHERE workers.id=?').get(account.worker_id);return withCredential&&worker?{worker,credentialHash:Buffer.from(account.password_hash)}:worker;
   }
-  documents(siteId, type = '', query = '', from = '', to = '', riskKind = '', riskContractorId = '', instructionCompanyId = '', permitCompany = '', permitFrom = '', permitTo = '', educationKind = '', workPlanCompany = '', checklistCategory = '') {
+  documents(siteId, type = '', query = '', from = '', to = '', riskKind = '', riskContractorId = '', instructionCompanyId = '', permitCompany = '', permitFrom = '', permitTo = '', educationKind = '', workPlanCompany = '', checklistCategory = '', workPlanCompanyId = '') {
     if(typeof checklistCategory!=='string'||checklistCategory&&(type!=='checklist'||!Object.hasOwn(checklistCategories,checklistCategory)))throw new Error('체크리스트 분류 검색 조건을 확인해 주세요.');
     if(typeof workPlanCompany!=='string')throw new Error('작업업체명 검색 조건을 확인해 주세요.');
     workPlanCompany=workPlanCompany.trim();
     if(workPlanCompany&&type!=='work_plan')throw new Error('작업계획서 검색 조건을 확인해 주세요.');
+    if(workPlanCompanyId&&type!=='work_plan')throw new Error('작업계획서 검색 조건을 확인해 주세요.');
     if(from)from=dateValue(from);if(to)to=dateValue(to);
     if(from && to && from>to)throw new Error('조회 시작일은 종료일보다 늦을 수 없습니다.');
     siteId=Number(siteId);if(!this.db.prepare('SELECT 1 FROM sites WHERE id=?').get(siteId))throw new Error('현장을 선택해 주세요.');
@@ -1786,9 +1787,10 @@ export class Store {
     if(riskContractorId&&(!/^[1-9]\d*$/.test(String(riskContractorId))||!Number.isSafeInteger(Number(riskContractorId))||!this.companies(siteId).some(company=>company.id===Number(riskContractorId))))throw new Error('같은 현장의 협력사를 선택해 주세요.');
     if(instructionCompanyId&&(!/^[1-9]\d*$/.test(String(instructionCompanyId))||!Number.isSafeInteger(Number(instructionCompanyId))||!this.companies(siteId).some(company=>company.id===Number(instructionCompanyId))))throw new Error('같은 현장의 협력사를 선택해 주세요.');
     if(permitCompany&&permitCompany!=='direct'&&(!/^[1-9]\d*$/.test(String(permitCompany))||!Number.isSafeInteger(Number(permitCompany))||!this.companies(siteId).some(company=>company.id===Number(permitCompany))))throw new Error('같은 현장의 협력사를 선택해 주세요.');
+    if(workPlanCompanyId&&(!/^[1-9]\d*$/.test(String(workPlanCompanyId))||!Number.isSafeInteger(Number(workPlanCompanyId))||!this.companies(siteId).some(company=>company.id===Number(workPlanCompanyId))))throw new Error('같은 현장의 협력사를 선택해 주세요.');
     const rows=this.db.prepare(`SELECT documents.*,EXISTS(SELECT 1 FROM approval_steps WHERE document_id=documents.id) AS has_approval_line,EXISTS(SELECT 1 FROM instruction_results WHERE document_id=documents.id) AS has_instruction_result,COALESCE((SELECT source_document_id FROM work_plan_copies WHERE document_id=documents.id),(SELECT source_document_id FROM office_document_copies WHERE document_id=documents.id)) AS copied_from,${documentAuthorSql} AS author_name FROM documents WHERE (site_id=? OR (type='basic' AND status='approved' AND json_extract(details,'$.shared')=1)) AND (?='' OR type=?) AND (title LIKE ? OR body LIKE ? OR details LIKE ?) AND (?='' OR date>=?) AND (?='' OR date<=?) ORDER BY date DESC,id DESC`).all(siteId,type,type,...Array(3).fill(`%${query}%`),from,from,to,to);
     if(checklistCategory)return rows.filter(doc=>checklistCategoryForKind(JSON.parse(doc.details)?.kind)===checklistCategory);
-    if(workPlanCompany)return rows.filter(doc=>{const company=JSON.parse(doc.details)?.company;return typeof company==='string'&&company.includes(workPlanCompany);});
+    if(workPlanCompany||workPlanCompanyId)return rows.filter(doc=>{const details=JSON.parse(doc.details);return (!workPlanCompanyId||details.companyId===Number(workPlanCompanyId))&&(!workPlanCompany||typeof details.company==='string'&&details.company.includes(workPlanCompany));});
     if(educationKind)return rows.filter(doc=>{const kind=JSON.parse(doc.details).kind;return educationKind==='regular_and_risk'?['regular','risk'].includes(kind):kind===educationKind;});
     if(instructionCompanyId)return rows.filter(doc=>JSON.parse(doc.details).companyId===Number(instructionCompanyId));
     if(permitCompany||permitFrom||permitTo)return rows.filter(doc=>{const details=JSON.parse(doc.details);if(permitCompany&&(permitCompany==='direct'?details.directWork!==true:details.companyId!==Number(permitCompany)))return false;if(permitFrom||permitTo)return !!details.periodFrom&&!!details.periodTo&&(!permitFrom||details.periodTo>=permitFrom)&&(!permitTo||details.periodFrom<=permitTo);return true;});
@@ -2083,6 +2085,7 @@ export class Store {
     if (!this.db.prepare('SELECT id FROM sites WHERE id=?').get(d.siteId)) throw new Error('현장을 선택해 주세요.');
     this.validateBasicCategory(d);
     this.validatePlanEquipment(d);
+    this.validateWorkPlanCompany(d);
     this.validateSafetyMeeting(d);
     this.validateInstructionRecipient(d);
     this.validatePermitCompany(d);
@@ -2359,6 +2362,7 @@ export class Store {
     if(current.type==='risk'&&JSON.parse(current.details).musculoskeletalItems?.length&&input.details?.musculoskeletalItems===undefined)throw new Error('근골격계 항목을 보존하려면 화면을 새로고침해 주세요.');
     if(current.type==='risk'&&JSON.parse(current.details).musculoskeletalItems?.some(row=>row.improvedGrade)&&(!Array.isArray(input.details?.musculoskeletalItems)||input.details.musculoskeletalItems.some(row=>row?.improvedGrade===undefined)))throw new Error('근골격계 개선 후 등급을 보존하려면 화면을 새로고침해 주세요.');
     if(current.type==='checklist'&&input.details?.kind==='wind'&&input.details.photoNote===undefined){const previous=JSON.parse(current.details);if(previous.kind==='wind'&&previous.photoNote!==undefined)input={...input,details:{...input.details,photoNote:previous.photoNote}};}
+    if(current.type==='work_plan'&&JSON.parse(current.details).companyId>0&&input.details?.companyId===undefined)throw new Error('작업업체 연결을 보존하려면 화면을 새로고침해 주세요.');
     if(current.type==='work_plan'&&(input.details===undefined||input.details&&typeof input.details==='object'&&!Array.isArray(input.details))){const previous=JSON.parse(current.details),details={...input.details};for(const key of ['heavyLoads','equipmentAssignments','safetyMeasures'])if(details[key]===undefined&&previous[key]!==undefined)details[key]=previous[key];input={...input,details};}
     if(current.type==='education'&&(input.details==null||typeof input.details==='object'&&!Array.isArray(input.details))){const previous=JSON.parse(current.details),details={...input.details};for(const key of ['timeFrom','timeTo','instructor','educationPlace','educationMethod','textbook'])if(details[key]===undefined&&previous[key]!==undefined)details[key]=previous[key];input={...input,details};}
     if(current.type==='permit'&&(input.details==null||typeof input.details==='object'&&!Array.isArray(input.details))){const previous=JSON.parse(current.details),details={...input.details};if((previous.companyId>0&&details.companyId===undefined)||(previous.directWork&&details.directWork===undefined))throw new Error('작업업체 구분을 보존하려면 화면을 새로고침해 주세요.');for(const key of ['safetyMeasures','permitWorkerIds','permitEquipmentIds','permitRiggingIds'])if(details[key]===undefined&&previous[key]!==undefined)details[key]=previous[key];input={...input,details};}
@@ -2374,6 +2378,7 @@ export class Store {
     this.validateBasicCategory(d);
     if(d.type==='checklist'&&d.details.kind!=='morning'&&this.db.prepare("SELECT 1 FROM attachments WHERE document_id=? AND category='morning_hazard_photo' LIMIT 1").get(Number(id)))throw new Error('점검 항목 사진을 삭제한 뒤 점검 종류를 변경해 주세요.');
     this.validatePlanEquipment(d);
+    this.validateWorkPlanCompany(d,current);
     this.validateSafetyMeeting(d,current);
     this.validateInstructionRecipient(d);
     this.validateRiskContractors(d);
@@ -2417,6 +2422,13 @@ export class Store {
     if(doc.type!=='risk')return;
     const find=this.db.prepare('SELECT c.name FROM companies c WHERE c.id=? AND c.site_id=? AND NOT EXISTS(SELECT 1 FROM archived_companies a WHERE a.company_id=c.id)');
     for(const row of [...(Array.isArray(doc.details.items)?doc.details.items:[doc.details]),...(doc.details.musculoskeletalItems||[])])if(row.contractorId){const company=find.get(row.contractorId,doc.siteId);if(!company)throw new Error('같은 현장의 협력사를 선택해 주세요.');row.contractor=company.name;}
+  }
+  validateWorkPlanCompany(doc,current=null){
+    if(doc.type!=='work_plan'||!doc.details.companyId)return;
+    const company=this.db.prepare('SELECT c.name FROM companies c WHERE c.id=? AND c.site_id=? AND NOT EXISTS(SELECT 1 FROM archived_companies a WHERE a.company_id=c.id)').get(doc.details.companyId,doc.siteId);
+    if(!company)throw new Error('같은 현장의 협력사를 선택해 주세요.');
+    const previous=current?JSON.parse(current.details):null;
+    doc.details.company=previous?.companyId===doc.details.companyId&&previous.company?previous.company:company.name;
   }
   validatePlanEquipment(doc) {
     if(doc.type!=='work_plan')return;

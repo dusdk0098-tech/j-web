@@ -105,6 +105,7 @@ export function recordInput(input) {
   if(type==='work_plan'){
     const value=input.details ?? {};
     if(!value || typeof value!=='object' || Array.isArray(value))throw new Error('작업계획서 항목을 확인해 주세요.');
+    if(value.companyId!==undefined){if(!Number.isSafeInteger(value.companyId)||value.companyId<0)throw new Error('작업업체를 확인해 주세요.');details.companyId=value.companyId;}
     for(const key of ['company','personnel','place','equipment','hazards','measures']){
       if(value[key]!==undefined && (typeof value[key]!=='string' || value[key].length>2000))throw new Error('작업계획서 항목을 확인해 주세요.');
       details[key]=(value[key] ?? '').trim();
