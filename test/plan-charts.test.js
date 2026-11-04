@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Store } from '../store.js';
-import { planChartsMarkup } from '../public/plan-charts.js';
+import { planChartsMarkup, unassignedPlanImages } from '../public/plan-charts.js';
 
 test('추가 계획도는 현장과 내용을 확인하고 복사와 이전 화면 저장에서 보존한다',()=>{
   const s=new Store(':memory:');
@@ -17,6 +17,7 @@ test('추가 계획도는 현장과 내용을 확인하고 복사와 이전 화�
     assert.throws(()=>s.createWorkPlace({siteId:site.id,name:'수정',work:area,route:area,expected:{name:first.name,details:first.details}},first.id),/계획서/);
     s.updateDocument(doc.id,{...input,details:{additionalCharts:[]}});assert.deepEqual(JSON.parse(s.document(doc.id).details).additionalCharts,[]);
     const html=planChartsMarkup([{placeName:'<장소>',...chart(first.id)}],value=>String(value).replaceAll('<','&lt;'));assert.match(html,/&lt;장소>/);assert.match(html,/가상 경로/);
+    assert.deepEqual(unassignedPlanImages([{id:1,category:'plan_diagram'},{id:2,category:'plan_diagram'},{id:3,category:'plan_diagram'},{id:4,category:'general'}],{additionalCharts:[{imageIds:[1]}],heavyLoads:[{safetyImageIds:[2]}]}),[{id:3,category:'plan_diagram'}]);
     const preview=planChartsMarkup([{...chart(first.id),imageIds:[12]}],value=>String(value).replaceAll('&','&amp;'),[{id:12,name:'가상.png'}],1,file=>'/review/'+file.id+'?preview=1&cycle=2');assert.match(preview,/\/review\/12\?preview=1&amp;cycle=2/);
   } finally {s.close();}
 });

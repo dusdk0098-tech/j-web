@@ -1,5 +1,10 @@
 const chartFields = [['routeDescription','운행경로'],['workSequence','작업순서 및 방법'],['managementPoints','중점관리사항']];
 
+export function unassignedPlanImages(files, details) {
+  const linked=new Set([...(details.additionalCharts||[]).flatMap(chart=>chart.imageIds||[]),...(details.heavyLoads||[]).flatMap(load=>load.safetyImageIds||[])]);
+  return files.filter(file=>file.category==='plan_diagram'&&!linked.has(file.id));
+}
+
 export function mountPlanCharts(container, button, places, charts, esc, images=[]) {
   const add = chart => {
     const row = document.createElement('fieldset');
