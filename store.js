@@ -809,7 +809,7 @@ export class Store {
   workerMonthlyMealChecks(siteId,workerId,month) {
     month=monthValue(month);siteId=Number(siteId);workerId=Number(workerId);
     if(!this.db.prepare('SELECT 1 FROM workers WHERE id=? AND site_id=?').get(workerId,siteId))throw new Error('선택한 현장의 출입자를 확인해 주세요.');
-    return this.db.prepare('SELECT id,date,kind,restaurant_name,price,tax_snapshot FROM meal_checks WHERE site_id=? AND worker_id=? AND date BETWEEN ? AND ? ORDER BY date,kind').all(siteId,workerId,`${month}-01`,`${month}-31`);
+    return this.db.prepare('SELECT id,date,kind,restaurant_name,price,tax_snapshot,revision FROM meal_checks WHERE site_id=? AND worker_id=? AND date BETWEEN ? AND ? ORDER BY date,kind').all(siteId,workerId,`${month}-01`,`${month}-31`);
   }
   setWorkerMonthlyMeals(input) {
     const siteId=Number(input.siteId),workerId=Number(input.workerId),month=monthValue(input.month),kind=input.kind;
@@ -821,6 +821,11 @@ export class Store {
       return this.db.prepare('INSERT OR IGNORE INTO meal_checks(site_id,worker_id,date,kind,restaurant_id,restaurant_name,price,tax_snapshot) SELECT ?,a.worker_id,a.date,?,?,?,?,? FROM attendance a WHERE a.worker_id=? AND a.present=1 AND a.date BETWEEN ? AND ?').run(siteId,kind,restaurant.id,restaurant.name,kind==='snack'?restaurant.snack_price:restaurant.meal_price,kind==='snack'?null:restaurant.tax,workerId,`${month}-01`,`${month}-31`).changes;
     }
     return this.db.prepare('DELETE FROM meal_checks WHERE site_id=? AND worker_id=? AND kind=? AND date BETWEEN ? AND ? AND EXISTS (SELECT 1 FROM attendance a WHERE a.worker_id=meal_checks.worker_id AND a.date=meal_checks.date AND a.present=1)').run(siteId,workerId,kind,`${month}-01`,`${month}-31`).changes;
+  }
+  setWorkerMonthlyMealsVerified(input,authorize=()=>{}) {
+    const siteId=Number(input.siteId),workerId=Number(input.workerId),month=monthValue(input.month),expected=input.expectedChecks;
+    if(!Number.isSafeInteger(siteId)||siteId<1||!Number.isSafeInteger(workerId)||workerId<1||!['breakfast','lunch','dinner','snack'].includes(input.kind)||typeof input.present!=='boolean'||typeof input.attendanceVersion!=='string'||!/^[0-9a-f]{64}$/.test(input.attendanceVersion)||!Array.isArray(expected)||expected.length>31||expected.some(row=>!Array.isArray(row)||row.length!==2||typeof row[0]!=='string'||!row[0].startsWith(month+'-')||typeof row[1]!=='string'||!/^[0-9a-f]{32}$/.test(row[1])))throw new Error('월간 식대 확인 정보를 다시 조회해 주세요.');
+    this.db.exec('BEGIN IMMEDIATE');try{authorize();const attendance=this.monthlyAttendance(siteId,month).find(row=>row.id===workerId);if(!attendance)throw new Error('선택한 현장의 출입자를 확인해 주세요.');const checks=this.workerMonthlyMealChecks(siteId,workerId,month).filter(row=>row.kind===input.kind).map(row=>[row.date,row.revision]);if(attendance.version!==input.attendanceVersion||JSON.stringify(checks)!==JSON.stringify(expected))throw Object.assign(new Error('출역 또는 식대 기록이 변경되었습니다. 다시 조회해 주세요.'),{sessionStatus:409});const changed=this.setWorkerMonthlyMeals(input);authorize();this.db.exec('COMMIT');return changed;}catch(error){this.db.exec('ROLLBACK');throw error;}
   }
   saveMealCheck(input) {
     const siteId=Number(input.siteId),workerId=Number(input.workerId),date=dateValue(input.date),kind=input.kind;

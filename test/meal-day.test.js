@@ -2,12 +2,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {Store} from '../store.js';
 import {mountDailyMeals} from '../public/meal-day.js';
-import {mkdtempSync,rmSync} from 'node:fs';
+import {mkdtempSync,rmSync,readFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {createServer} from 'node:net';
 import {spawn} from 'node:child_process';
 import {once} from 'node:events';
+import {runInNewContext} from 'node:vm';
 
 test('날짜별 식대 변경은 같은 현장 출역자만 원자적으로 저장한다',()=>{
   const store=new Store(':memory:');try{
@@ -59,6 +60,24 @@ test('이전 식대 기록은 변경 번호 추가 후에도 단가와 부가세
   }finally{store.close();rmSync(dir,{recursive:true,force:true});}
 });
 
+test('월간 식대 일괄 변경은 출역과 식대의 이전 변경을 확인하고 전체 취소한다',()=>{
+  const store=new Store(':memory:');try{
+    const site=store.createSite({name:'가상 현장'}),other=store.createSite({name:'다른 현장'}),worker=store.createWorker({siteId:site.id,name:'가상 출역자',category:'직영',company:'가상 업체',occupation:'가상 직종'}),restaurant=store.saveRestaurant({siteId:site.id,name:'가상 식당',mealPrice:'5000',snackPrice:'1000',tax:'500'}),month='2026-10',date=month+'-01',base={siteId:site.id,workerId:worker.id,month,kind:'lunch',present:true,restaurantId:restaurant.id};
+    store.setAttendance({siteId:site.id,workerId:worker.id,date,present:true});store.setAttendance({siteId:site.id,workerId:worker.id,date:month+'-02',present:true});store.saveMealCheck({...base,date});
+    const request=()=>({...base,attendanceVersion:store.monthlyAttendance(site.id,month).find(row=>row.id===worker.id).version,expectedChecks:store.workerMonthlyMealChecks(site.id,worker.id,month).filter(row=>row.kind==='lunch').map(row=>[row.date,row.revision])});
+    let stale=request();store.saveMealCheck({...base,date});assert.throws(()=>store.setWorkerMonthlyMealsVerified(stale),/변경/);assert.equal(store.workerMonthlyMealChecks(site.id,worker.id,month).length,1);
+    stale=request();store.setAttendance({siteId:site.id,workerId:worker.id,date:month+'-02',present:false});assert.throws(()=>store.setWorkerMonthlyMealsVerified(stale),/변경/);assert.equal(store.workerMonthlyMealChecks(site.id,worker.id,month).length,1);
+    store.setAttendance({siteId:site.id,workerId:worker.id,date:month+'-02',present:true});assert.equal(store.setWorkerMonthlyMealsVerified(request()),1);assert.equal(store.workerMonthlyMealChecks(site.id,worker.id,month).length,2);
+    assert.throws(()=>store.setWorkerMonthlyMealsVerified({...request(),siteId:other.id}),/현장/);assert.throws(()=>store.setWorkerMonthlyMealsVerified({...request(),present:false},()=>{throw Error('세션 만료');}),/세션 만료/);assert.equal(store.workerMonthlyMealChecks(site.id,worker.id,month).length,2);
+    assert.equal(store.setWorkerMonthlyMealsVerified({...request(),present:false}),2);assert.equal(store.workerMonthlyMealChecks(site.id,worker.id,month).length,0);
+  }finally{store.close();}
+});
+
+test('월간 화면의 일괄 버튼은 표시된 출역 및 식대 버전을 전송한다',async()=>{
+  const app=readFileSync(new URL('../public/app.js',import.meta.url),'utf8'),start=app.indexOf("    const bulkMealButtons=[...content.querySelectorAll('[data-meal-bulk-kind]')]");assert.ok(start>=0);const end=app.indexOf("    $('#meal-month').onchange",start),buttons=[{dataset:{mealBulkKind:'lunch',mealBulkPresent:'false'},disabled:false}],requests=[],errors=[],state={page:'meal-checks',siteId:1,mealMonth:'2026-10',mealWorkerId:2},context={content:{querySelectorAll:()=>buttons},state,detailEpoch:3,renderEpoch:3,siteId:1,date:'2026-10-01',mealMonth:'2026-10',selectedWorker:{id:2,version:'a'.repeat(64)},monthChecks:[{date:'2026-10-01',kind:'lunch',revision:'b'.repeat(32)},{date:'2026-10-01',kind:'snack',revision:'c'.repeat(32)}],$:()=>({value:'9'}),api:async(path,options)=>{requests.push([path,JSON.parse(options.body)]);return {changed:1};},flash(){},render:async()=>{},showError:error=>errors.push(error)};
+  runInNewContext(app.slice(start,end),context);await buttons[0].onclick();assert.equal(requests[0][0],'/api/meal-checks/month/worker/verified');assert.equal(requests[0][1].attendanceVersion,'a'.repeat(64));assert.deepEqual(requests[0][1].expectedChecks,[['2026-10-01','b'.repeat(32)]]);assert.equal(requests[0][1].present,false);assert.equal(buttons[0].disabled,false);assert.equal(errors.length,0);
+});
+
 test('일괄 식대 API는 로그인과 권한을 확인하며 충돌을 반환한다',{timeout:30000},async()=>{
   const dir=mkdtempSync(join(tmpdir(),'jweb-meal-day-')),store=new Store(join(dir,'jweb.sqlite')),site=store.createSite({name:'가상 현장'}),worker=store.createWorker({siteId:site.id,name:'가상 근로자',category:'직영',company:'가상 업체',occupation:'가상 직종'}),restaurant=store.saveRestaurant({siteId:site.id,name:'가상 식당',mealPrice:'5000',snackPrice:'1000',tax:'500'}),date='2026-10-01';store.setAttendance({siteId:site.id,workerId:worker.id,date,present:true});store.close();
   const reservation=createServer();await new Promise(resolve=>reservation.listen(0,'127.0.0.1',resolve));const port=reservation.address().port;await new Promise(resolve=>reservation.close(resolve));
@@ -69,5 +88,7 @@ test('일괄 식대 API는 로그인과 권한을 확인하며 충돌을 반환�
     const login=await call('/api/login','POST',{password:'virtual-admin-password'}),admin=login.headers.get('set-cookie').split(';')[0];assert.equal((await call('/api/admin-accounts','POST',{loginId:'limited_meal',name:'가상 제한 관리자',password:'virtual-password-123',scope:'restricted',siteIds:[site.id]},admin)).status,201);
     const restricted=(await call('/api/login','POST',{loginId:'limited_meal',password:'virtual-password-123'})).headers.get('set-cookie').split(';')[0];assert.equal((await call('/api/meal-checks/day','POST',data,restricted)).status,403);
     const saved=await call('/api/meal-checks/day','POST',data,admin);assert.equal(saved.status,200);assert.equal((await saved.json()).changed,1);assert.equal((await call('/api/meal-checks/day','POST',data,admin)).status,409);
+    const attendance=await (await call(`/api/attendance/month?siteId=${site.id}&month=2026-10`,'GET',null,admin)).json(),checks=await (await call(`/api/meal-checks/month/worker?siteId=${site.id}&workerId=${worker.id}&month=2026-10`,'GET',null,admin)).json(),monthly={siteId:site.id,workerId:worker.id,month:'2026-10',kind:'lunch',present:false,restaurantId:restaurant.id,attendanceVersion:attendance[0].version,expectedChecks:checks.map(row=>[row.date,row.revision])};
+    assert.equal((await call('/api/meal-checks/month/worker/verified','POST',monthly)).status,401);assert.equal((await call('/api/meal-checks/month/worker/verified','POST',monthly,restricted)).status,403);const deleted=await call('/api/meal-checks/month/worker/verified','POST',monthly,admin);assert.equal(deleted.status,200);assert.equal((await deleted.json()).changed,1);assert.equal((await call('/api/meal-checks/month/worker/verified','POST',monthly,admin)).status,409);
   }finally{if(child.exitCode===null){const exited=once(child,'exit');child.kill();await exited;}rmSync(dir,{recursive:true,force:true});}
 });

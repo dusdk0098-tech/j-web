@@ -951,6 +951,7 @@ const server = http.createServer((req,res)=>passwordRequests.run(true,()=>adminR
     if(url.pathname==='/api/meal-checks/statement'&&req.method==='GET')return json(res,200,store.mealStatement(url.searchParams.get('siteId'),url.searchParams.get('month'),url.searchParams.get('category')||''));
     if(url.pathname==='/api/meal-checks/month/worker'&&req.method==='GET')return json(res,200,store.workerMonthlyMealChecks(url.searchParams.get('siteId'),url.searchParams.get('workerId'),url.searchParams.get('month')));
     if(url.pathname==='/api/meal-checks/month/worker'&&req.method==='POST')return json(res,200,{changed:store.setWorkerMonthlyMeals(await body(req))});
+    if(url.pathname==='/api/meal-checks/month/worker/verified'&&req.method==='POST')return json(res,200,{changed:store.setWorkerMonthlyMealsVerified(await body(req),()=>checkRequestSession(req))});
     if(url.pathname==='/api/meal-checks/day'&&req.method==='POST')return json(res,200,{changed:store.setDailyMealChecks(await body(req,120000),()=>checkRequestSession(req))});
     if(url.pathname==='/api/meal-checks'){
       if(req.method==='GET')return json(res,200,store.mealChecks(url.searchParams.get('siteId'),url.searchParams.get('date')));
