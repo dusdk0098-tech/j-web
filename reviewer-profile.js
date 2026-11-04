@@ -8,11 +8,13 @@ const conflict=()=>Object.assign(Error('직원 정보가 변경되었습니다. 
 export class ReviewerProfile {
   constructor(db,now=Date.now){
     this.db=db;this.now=now;this.pending=new Map();
+    db.exec('BEGIN IMMEDIATE');try{
     db.exec(`CREATE TABLE IF NOT EXISTS reviewer_profiles (reviewer_id INTEGER PRIMARY KEY REFERENCES reviewers(id),phone TEXT NOT NULL,mobile TEXT NOT NULL,email TEXT NOT NULL,postcode TEXT NOT NULL,address TEXT NOT NULL,address_detail TEXT NOT NULL,signature BLOB,revision TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS reviewer_profile_failures (reviewer_id INTEGER NOT NULL REFERENCES reviewers(id),attempted_at INTEGER NOT NULL);
       CREATE INDEX IF NOT EXISTS reviewer_profile_failures_account ON reviewer_profile_failures(reviewer_id,attempted_at);`);
     if(!db.prepare('PRAGMA table_info(reviewer_profiles)').all().some(column=>column.name==='phone_extension'))db.exec("ALTER TABLE reviewer_profiles ADD COLUMN phone_extension TEXT NOT NULL DEFAULT ''");
     if(!db.prepare('PRAGMA table_info(reviewer_profiles)').all().some(column=>column.name==='photo'))db.exec('ALTER TABLE reviewer_profiles ADD COLUMN photo BLOB');
+    db.exec('COMMIT');}catch(error){db.exec('ROLLBACK');throw error;}
   }
   transaction(fn,authorize=()=>{}){this.db.exec('BEGIN IMMEDIATE');try{authorize();const result=fn();this.db.exec('COMMIT');return result;}catch(error){this.db.exec('ROLLBACK');throw error;}}
   get(id){

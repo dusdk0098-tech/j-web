@@ -16,6 +16,18 @@ import { ReviewerSessions } from '../auth.js';
 const png=new PNG({width:1,height:1});png.data[3]=255;const bytes=PNG.sync.write(png),signature=`data:image/png;base64,${bytes.toString('base64')}`,password='virtual-password-123',newPassword='virtual-new-password-456';
 const details={phone:'02-000-0000',phoneExtension:'1234',mobile:'010-0000-0000',email:'virtual@example.test',postcode:'00000',address:'가상 주소',addressDetail:'가상 상세'};
 
+test('직원 정보 이관 중 오류가 나면 스키마와 기존 자료를 되돌린다',()=>{
+  const store=new Store(':memory:');try{
+    const site=store.createSite({name:'가상 현장'}),reviewer=store.createReviewer({siteId:site.id,loginId:'migration_test',name:'가상 직원',password}),db=store.db;
+    db.exec('CREATE TABLE reviewer_profiles (reviewer_id INTEGER PRIMARY KEY REFERENCES reviewers(id),phone TEXT NOT NULL,mobile TEXT NOT NULL,email TEXT NOT NULL,postcode TEXT NOT NULL,address TEXT NOT NULL,address_detail TEXT NOT NULL,signature BLOB,revision TEXT NOT NULL)');
+    db.prepare('INSERT INTO reviewer_profiles VALUES(?,?,?,?,?,?,?,?,?)').run(reviewer.id,'기존 전화','','','','기존 주소','',null,'old');
+    const execute=db.exec;db.exec=function(sql){if(sql==='ALTER TABLE reviewer_profiles ADD COLUMN photo BLOB')throw Error('가상 이관 실패');return execute.call(this,sql);};
+    try{assert.throws(()=>new ReviewerProfile(db),/가상 이관 실패/);}finally{db.exec=execute;}
+    const columns=db.prepare('PRAGMA table_info(reviewer_profiles)').all().map(column=>column.name);assert.equal(columns.includes('phone_extension'),false);assert.equal(columns.includes('photo'),false);assert.equal(db.prepare('SELECT phone FROM reviewer_profiles WHERE reviewer_id=?').get(reviewer.id).phone,'기존 전화');
+    const profiles=new ReviewerProfile(db);assert.equal(profiles.get(reviewer.id).profile.address,'기존 주소');
+  }finally{store.close();}
+});
+
 test('직원 사진은 버전과 암호를 확인하고 기존 요청·잘못된 입력에서도 보존한다',()=>{
   const store=new Store(':memory:');try{
     const site=store.createSite({name:'가상 현장'}),reviewer=store.createReviewer({siteId:site.id,loginId:'photo_test',name:'가상 직원',password}),profiles=new ReviewerProfile(store.db);let current=profiles.get(reviewer.id);
