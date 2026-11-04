@@ -1,3 +1,5 @@
+import { imageChoiceMarkup } from './plan-charts.js';
+
 export function heavyRiggingChoices(kind, saved='') {
   const choices=kind==='lines'?['1줄','2줄','3줄','4줄']:['일자형','올가미형','U자형'];
   return saved&&!choices.includes(saved)?[...choices,saved]:choices;
@@ -8,8 +10,8 @@ export function heavyRiggingOptions(kind, saved, esc) {
 }
 
 export function heavyImageChoices(images, selected, esc) {
-  const choices=images.filter(file=>file.category==='plan_diagram').map(file=>'<label><input type="checkbox" data-heavy-image value="'+file.id+'" '+(selected.includes(file.id)?'checked':'')+'> '+esc(file.name)+'</label>').join('');
-  return choices||'<p>문서 저장 후 계획도·중량물 사진을 첨부하고 다시 수정해 주세요.</p>';
+  return imageChoiceMarkup(images,selected,esc,'data-heavy-image');
+
 }
 
 export function heavyImageMarkup(loads, images, esc, url) {

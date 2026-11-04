@@ -48,5 +48,15 @@ test('근로자 작성 권한으로 두 역할을 HTTP에 저장하고 다시 �
     for(const [path,auth,headers] of [[`/api/documents/${doc.id}/attachments?category=plan_diagram`,admin,{}],[`/api/worker/documents/${doc.id}/attachments?category=plan_diagram`,cookie,{'X-Worker-Report-Context':JSON.stringify(session.reportContext)}]]){
       const response=await fetch(`http://127.0.0.1:${port}`+path,{method:'POST',headers:{cookie:auth,'Content-Type':'application/octet-stream','X-File-Name':'image.png',...headers},body:png});assert.equal(response.status,201);
     }
+const current=await (await send(`/api/worker/documents/${doc.id}`,'GET',undefined,cookie)).json(),version=current.edit_version,base=`http://127.0.0.1:${port}/api/worker/documents/${doc.id}/attachments`,small=Buffer.from('89504e470d0a1a0a00','hex');
+    const upload=()=>fetch(base+'?category=plan_diagram',{method:'POST',headers:{cookie,'Content-Type':'application/octet-stream','X-File-Name':'race.png','X-Worker-Report-Context':JSON.stringify(session.reportContext),'X-Expected-Edit-Version':String(version)},body:small});
+    const raced=await Promise.all([upload(),upload()]);assert.deepEqual(raced.map(response=>response.status).sort(),[201,409]);
+    const winner=await raced.find(response=>response.status===201).json();assert.ok(Number.isSafeInteger(winner.editVersion));assert.ok(winner.editVersion>version);
+    assert.equal((await send(`/api/worker/documents/${doc.id}/attachments/${winner.id}`,'DELETE',{reportContext:session.reportContext,expectedEditVersion:version},cookie)).status,409);
+    const details=JSON.parse(current.details);details.additionalCharts[0].imageIds=[winner.id];
+    const changed=await send(`/api/worker/documents/${doc.id}`,'PUT',{type:'work_plan',title:current.title,date:current.date,body:current.body,details,reportContext:session.reportContext,expectedEditVersion:winner.editVersion},cookie);assert.equal(changed.status,200);
+    const changedDoc=await changed.json();assert.deepEqual(JSON.parse(changedDoc.details).additionalCharts[0].imageIds,[winner.id]);
+    details.additionalCharts[0].imageIds=[];const unlink=await send(`/api/worker/documents/${doc.id}`,'PUT',{type:'work_plan',title:current.title,date:current.date,body:current.body,details,reportContext:session.reportContext,expectedEditVersion:changedDoc.edit_version},cookie);assert.equal(unlink.status,200);const unlinked=await unlink.json();
+    const removed=await send(`/api/worker/documents/${doc.id}/attachments/${winner.id}`,'DELETE',{reportContext:session.reportContext,expectedEditVersion:unlinked.edit_version},cookie);assert.equal(removed.status,200);const removedData=await removed.json();assert.ok(removedData.editVersion>unlinked.edit_version);
   }finally{if(child.exitCode===null){const exited=once(child,'exit');child.kill();await exited;}rmSync(dir,{recursive:true,force:true});}
 });

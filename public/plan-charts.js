@@ -5,13 +5,26 @@ export function unassignedPlanImages(files, details) {
   return files.filter(file=>file.category==='plan_diagram'&&!linked.has(file.id));
 }
 
+export function imageChoiceMarkup(images, selected, esc, attribute) {
+  const files=images.filter(file=>file.category==='plan_diagram'),ids=new Set(files.map(file=>file.id));
+  const choices=files.map(file=>'<label><input type="checkbox" '+attribute+' value="'+file.id+'" '+(selected.includes(file.id)?'checked':'')+'> '+esc(file.name)+'</label>');
+  for(const id of selected)if(!ids.has(id))choices.push('<label><input type="checkbox" '+attribute+' value="'+id+'" checked> 삭제된 사진 (선택 해제 필요)</label>');
+  return choices.join('')||'<p>계획도·중량물 사진을 첨부해 주세요.</p>';
+}
+
+export function refreshPlanImageChoices(fields, images, esc) {
+  for(const [listSelector,inputSelector,attribute] of [['[data-chart-image-list]','[data-chart-image]','data-chart-image'],['[data-heavy-image-list]','[data-heavy-image]','data-heavy-image']]){
+    fields.querySelectorAll(listSelector).forEach(list=>{const selected=[...list.querySelectorAll(inputSelector+':checked')].map(input=>Number(input.value));list.innerHTML=imageChoiceMarkup(images,selected,esc,attribute);});
+  }
+}
+
 export function mountPlanCharts(container, button, places, charts, esc, images=[]) {
   const add = chart => {
     const row = document.createElement('fieldset');
     const options=places.map(place=>'<option value="'+place.id+'" '+(chart.workPlaceId===place.id?'selected':'')+'>'+esc(place.name)+'</option>').join('');
     const fields=chartFields.map(([key,label])=>'<label>'+label+'<textarea data-chart-field="'+key+'" maxlength="4000">'+esc(chart[key]||'')+'</textarea></label>').join('');
-    const choices=images.map(file=>'<label><input type="checkbox" data-chart-image value="'+file.id+'" '+((chart.imageIds||[]).includes(file.id)?'checked':'')+'> '+esc(file.name)+'</label>').join('');
-    row.innerHTML='<label>작업장소<select data-chart-place required><option value="">선택</option>'+options+'</select></label>'+fields+'<fieldset><legend>계획도 이미지 (최대 5개)</legend>'+(choices||'<p>문서 저장 후 계획도 이미지를 첨부하고 다시 수정해 주세요.</p>')+'</fieldset><button type="button" data-remove-chart>삭제</button>';
+    const choices=imageChoiceMarkup(images,chart.imageIds||[],esc,'data-chart-image');
+    row.innerHTML='<label>작업장소<select data-chart-place required><option value="">선택</option>'+options+'</select></label>'+fields+'<fieldset><legend>계획도 이미지 (최대 5개)</legend>'+'<div data-chart-image-list>'+choices+'</div></fieldset><button type="button" data-remove-chart>삭제</button>';
     row.querySelector('[data-remove-chart]').onclick=()=>row.remove();
     container.append(row);
   };
