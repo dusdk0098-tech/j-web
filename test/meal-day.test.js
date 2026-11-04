@@ -27,9 +27,18 @@ test('날짜별 식대 변경은 같은 현장 출역자만 원자적으로 저�
 
 test('식대 전체 선택은 변경된 출역자만 저장하고 실패 시 입력을 보존한다',async()=>{
   const make=(dataset,checked=false)=>({dataset,checked,disabled:false}),cells=[make({worker:'1',kind:'lunch'}),make({worker:'2',kind:'lunch'},true)],all=[make({all:'lunch'})],restaurant={value:'9',disabled:false},save={disabled:false},row={id:3,worker_id:2,kind:'lunch',restaurant_id:8,restaurant_name:'기존 식당',price:5000,tax_snapshot:500,revision:'a'.repeat(32)};let sent,saved=0,error='';
-  const root={innerHTML:'',querySelectorAll:selector=>selector==='[data-worker]'?cells:all,querySelector:selector=>selector==='[data-save]'?save:restaurant};
+  const rows=[{dataset:{mealRow:'1'}},{dataset:{mealRow:'2'}}],search={value:''},summary={},root={innerHTML:'',querySelectorAll:selector=>selector==='[data-worker]'?cells:selector==='[data-all]'?all:rows,querySelector:selector=>selector==='[data-save]'?save:selector==='[data-search]'?search:selector==='[data-summary]'?summary:restaurant};
   mountDailyMeals(root,{siteId:4,date:'2026-10-01',workers:[{id:1,name:'가상 A',company:''},{id:2,name:'가상 B',company:''}],restaurants:[{id:9,name:'가상 식당'}],checks:[row],esc:String,active:()=>true,api:async(path,options)=>{sent=JSON.parse(options.body);throw Error('시험 실패');},onSaved:()=>saved++,onError:e=>{error=e.message;}});
   assert.equal(all[0].indeterminate,true);all[0].checked=true;all[0].onchange();assert.equal(cells.every(c=>c.checked),true);await save.onclick();assert.equal(sent.changes.length,1);assert.equal(sent.changes[0].workerId,1);assert.equal(sent.changes[0].expected,null);assert.equal(error,'시험 실패');assert.equal(cells[0].checked,true);assert.equal(save.disabled,false);assert.equal(saved,0);
+});
+
+test('이름 검색의 전체 선택은 보이는 출역자만 바꾸고 숨긴 변경도 표시한다',async()=>{
+  const cells=[{dataset:{worker:'1',kind:'lunch'},checked:false},{dataset:{worker:'2',kind:'lunch'},checked:false}],all=[{dataset:{all:'lunch'},checked:false}],rows=[{dataset:{mealRow:'1'}},{dataset:{mealRow:'2'}}],search={value:''},summary={},restaurant={value:'9'},save={};let submitted;
+  const root={innerHTML:'',querySelectorAll:selector=>selector==='[data-worker]'?cells:selector==='[data-all]'?all:rows,querySelector:selector=>selector==='[data-save]'?save:selector==='[data-search]'?search:selector==='[data-summary]'?summary:restaurant};
+  mountDailyMeals(root,{siteId:4,date:'2026-10-01',workers:[{id:1,name:'가상 하나',company:'',category:'직영'},{id:2,name:'가상 둘',company:'',category:'협력사'}],restaurants:[{id:9,name:'가상 식당'}],checks:[],esc:String,active:()=>true,api:async(path,options)=>{submitted=JSON.parse(options.body);},onSaved:async()=>{},onError:e=>{throw e;}});
+  search.value='하나';search.oninput();assert.equal(rows[0].hidden,false);assert.equal(rows[1].hidden,true);all[0].checked=true;all[0].onchange();assert.equal(cells[0].checked,true);assert.equal(cells[1].checked,false);assert.match(summary.textContent,/1명 · 저장할 변경 1개/);
+  search.value='둘';search.oninput();assert.equal(all[0].checked,false);assert.match(summary.textContent,/저장할 변경 1개/);all[0].checked=true;all[0].onchange();await save.onclick();assert.deepEqual(submitted.changes.map(change=>change.workerId),[1,2]);
+  search.value='없는 이름';search.oninput();assert.equal(all[0].disabled,true);assert.equal(all[0].checked,false);
 });
 
 test('같은 값 저장과 삭제 후 재등록도 이전 식대 화면의 저장을 거절한다',()=>{
