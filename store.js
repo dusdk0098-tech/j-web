@@ -2394,6 +2394,7 @@ export class Store {
     if(current.type==='checklist'&&input.details?.kind==='wind'&&input.details.photoNote===undefined){const previous=JSON.parse(current.details);if(previous.kind==='wind'&&previous.photoNote!==undefined)input={...input,details:{...input.details,photoNote:previous.photoNote}};}
     if(current.type==='work_plan'&&JSON.parse(current.details).additionalCharts?.some(row=>row.imageIds?.length)&&Array.isArray(input.details?.additionalCharts)&&input.details.additionalCharts.some(row=>row?.imageIds===undefined))throw new Error('계획도 이미지 연결을 보존하려면 화면을 새로고침해 주세요.');
     if(current.type==='work_plan'&&JSON.parse(current.details).heavyLoads?.some(row=>row.safetyReview)&&Array.isArray(input.details?.heavyLoads)&&input.details.heavyLoads.some(row=>row?.safetyReview===undefined))throw new Error('중량물 안전성 검토를 보존하려면 화면을 새로고침해 주세요.');
+    if(current.type==='work_plan'&&JSON.parse(current.details).heavyLoads?.some(row=>row.ropeStandard||row.fasteningId||row.fasteningStandard)&&Array.isArray(input.details?.heavyLoads)&&input.details.heavyLoads.some(row=>row?.liftMode==='rigging'&&['ropeStandard','fasteningId','fasteningStandard'].some(key=>row[key]===undefined)))throw new Error('중량물 장구 정보를 보존하려면 화면을 새로고침해 주세요.');
     if(current.type==='work_plan'&&JSON.parse(current.details).workers?.some(row=>row.trainingOther||row.signalOther)&&(!Array.isArray(input.details?.workers)||input.details.workers.some(row=>row?.trainingOther===undefined||row?.signalOther===undefined)))throw new Error('작업자 기타 설명을 보존하려면 화면을 새로고침해 주세요.');
     if(current.type==='work_plan'&&JSON.parse(current.details).workers?.some(row=>row.trainingTypes?.length)&&(!Array.isArray(input.details?.workers)||input.details.workers.some(row=>row?.trainingTypes===undefined)))throw new Error('작업자 교육 구분을 보존하려면 화면을 새로고침해 주세요.');
     if(current.type==='work_plan'&&JSON.parse(current.details).workers?.some(row=>row.signalMethods?.length)&&(!Array.isArray(input.details?.workers)||input.details.workers.some(row=>row?.signalMethods===undefined)))throw new Error('작업자 신호 방법을 보존하려면 화면을 새로고침해 주세요.');
@@ -2483,8 +2484,12 @@ export class Store {
     if(doc.details.additionalCharts){const place=this.db.prepare('SELECT name FROM work_places WHERE id=? AND site_id=?');doc.details.additionalCharts=doc.details.additionalCharts.map(row=>{const found=place.get(row.workPlaceId,doc.siteId);if(!found)throw new Error('같은 현장의 작업장소를 선택해 주세요.');return {...row,placeName:found.name};});}
     const rigging=this.db.prepare('SELECT 1 FROM rigging WHERE id=? AND site_id=?');
     if((doc.details.riggingIds||[]).some(id=>!rigging.get(id,doc.siteId)))throw new Error('같은 현장의 장구를 선택해 주세요.');
-    const riggingName=this.db.prepare('SELECT name FROM rigging WHERE id=? AND site_id=?');
+    const riggingName=this.db.prepare('SELECT name,category,details FROM rigging WHERE id=? AND site_id=?');
     for(const load of doc.details.heavyLoads||[])if(load.liftMode==='rigging'){const item=riggingName.get(load.riggingId,doc.siteId);if(!item||!(doc.details.riggingIds||[]).includes(load.riggingId))throw new Error('계획서에 선택된 같은 현장의 장구를 사용해 주세요.');load.riggingName=item.name;}
+    for(const load of doc.details.heavyLoads||[])if(load.liftMode==='rigging'){
+      const rope=riggingName.get(load.riggingId,doc.siteId);if(load.ropeStandard&&(!rope||rope.category!=='줄걸이'||!JSON.parse(rope.details).standards.includes(load.ropeStandard)))throw new Error('등록된 줄걸이 규격을 확인해 주세요.');
+      if(load.fasteningId){const fastening=riggingName.get(load.fasteningId,doc.siteId);if(!fastening||fastening.category!=='체결장구'||!(doc.details.riggingIds||[]).includes(load.fasteningId))throw new Error('계획서에 선택된 같은 현장의 체결장구를 확인해 주세요.');if(load.fasteningStandard&&!JSON.parse(fastening.details).standards.includes(load.fasteningStandard))throw new Error('등록된 체결장구 규격을 확인해 주세요.');load.fasteningName=fastening.name;}
+    }
   }
   validateSafetyMeeting(doc,current=null){
     if(!['safety_meeting','work_council','joint_inspection'].includes(doc.type))return;

@@ -26,7 +26,7 @@ labels.otherKind='기타 구분';
 Object.assign(labels,{educationPlace:'교육 장소',educationMethod:'교육 방법',textbook:'사용교재'});
 Object.assign(labels,{permitWorkerSnapshot:'연결된 작업자',permitEquipmentSnapshot:'연결된 장비',permitRiggingSnapshot:'연결된 장구'});
 labels.employeeSnapshot='가상 직원 참석자';
-Object.assign(labels,{heavyLoads:'가상 중량물',size:'크기',totalWeight:'총중량',liftWeight:'1회 양중 중량',liftMode:'양중 방식',riggingName:'장구',lines:'줄 수',method:'연결 방식',safetyReview:'안전성 검토'});
+Object.assign(labels,{heavyLoads:'가상 중량물',size:'크기',totalWeight:'총중량',liftWeight:'1회 양중 중량',liftMode:'양중 방식',riggingName:'장구',lines:'줄 수',method:'연결 방식',safetyReview:'안전성 검토',ropeStandard:'줄걸이 규격',fasteningName:'체결장구',fasteningStandard:'체결장구 규격'});
 labels.classification='자료 구분';
 Object.assign(labels,{equipmentAssignments:'시험 장비와 운전원',equipmentLabel:'장비',driverName:'운전원',driverCompany:'소속'});
 Object.assign(labels,{safetyMeasures:'시험 위험요인과 안전대책',accidentType:'재해 유형'});
