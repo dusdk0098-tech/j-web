@@ -41,7 +41,7 @@ test('암호 변경 응답이 유실되면 입력을 보존하고 로그인 확�
 
 test('직원 내 정보에서 저장된 이메일의 확인을 요청하고 미저장 변경은 보존한다',async()=>{
   const original=globalThis.document,listeners={},output={textContent:'',isConnected:true},canvas={addEventListener(){}},clear={addEventListener(){},click(){}},change={},passwordFields={},replace={},signatureFields={},reload={after(value){this.recovery=value;}};
-  const fields={'[data-password]':change,'[data-password-fields]':passwordFields,'[data-replace-signature]':replace,'[data-remove-signature]':null,'[data-signature-fields]':signatureFields,'[data-clear]':clear,'[data-signature]':canvas};
+  const fields={'[data-photo]':{files:[]},'[data-remove-photo]':null,'[data-password]':change,'[data-password-fields]':passwordFields,'[data-replace-signature]':replace,'[data-remove-signature]':null,'[data-signature-fields]':signatureFields,'[data-clear]':clear,'[data-signature]':canvas};
   const form={querySelector:selector=>fields[selector],addEventListener:(name,handler)=>{listeners[name]=handler;}},target={innerHTML:'',querySelector:selector=>({'[data-profile]':form,'[data-status]':output,'[data-reload]':reload}[selector])};let count=0,body;
   globalThis.document={createElement:()=>({isConnected:true,after(value){this.next=value;}})};
   try{

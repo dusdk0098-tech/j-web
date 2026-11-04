@@ -101,7 +101,7 @@ export function signatureBytes(signature) {
   if(!marked)throw new Error('시험 서명을 입력해 주세요.');
   return bytes;
 }
-function photoBytes(photo){
+export function photoBytes(photo){
   if(!photo)return null;if(typeof photo!=='string'||photo.length>2800000)throw new Error('사진은 2MB 이하여야 합니다.');
   const match=photo.match(/^data:image\/(png|jpeg);base64,([A-Za-z0-9+/]+={0,2})$/);if(!match)throw new Error('PNG 또는 JPEG 사진을 선택해 주세요.');
   const bytes=Buffer.from(match[2],'base64');if(bytes.length>2*1024*1024||bytes.toString('base64')!==match[2]||(match[1]==='png'&&!bytes.subarray(0,8).equals(Buffer.from('89504e470d0a1a0a','hex')))||(match[1]==='jpeg'&&!bytes.subarray(0,3).equals(Buffer.from('ffd8ff','hex'))))throw new Error('사진 형식 또는 크기를 확인해 주세요.');return bytes;

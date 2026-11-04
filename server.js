@@ -280,13 +280,14 @@ const server = http.createServer((req,res)=>passwordRequests.run(true,()=>adminR
       if(url.pathname==='/api/reviewer/board-permissions'&&req.method==='GET'){const canWriteNotice=store.reviewerCanWriteNotice(reviewer.id);checkRequestSession(req);return json(res,200,{canWriteNotice});}
       if(url.pathname==='/api/reviewer/profile'){
         if(req.method==='GET'){const result=reviewerProfile.get(reviewer.id);checkRequestSession(req);return json(res,200,result);}
-        if(req.method==='PUT'){const input=await body(req,120000),result=await reviewerProfile.updateAsync(reviewer.id,input,()=>checkRequestSession(req),workerPeer(req));if(result.passwordChanged)res.setHeader('Set-Cookie',`jweb_reviewer=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0${secureCookie}`);return json(res,200,result);}
+        if(req.method==='PUT'){const input=await body(req,3000000),result=await reviewerProfile.updateAsync(reviewer.id,input,()=>checkRequestSession(req),workerPeer(req));if(result.passwordChanged)res.setHeader('Set-Cookie',`jweb_reviewer=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0${secureCookie}`);return json(res,200,result);}
       }
       if(url.pathname==='/api/reviewer/profile/recovery'){
         if(req.method==='GET'){const result=reviewerRecovery.status(reviewer.id);checkRequestSession(req);return json(res,200,result);}
         if(req.method==='POST'){const input=await body(req);return json(res,200,await reviewerRecovery.startVerification(reviewer.id,input.version,workerPeer(req),requestOrigin,()=>checkRequestSession(req)));}
       }
       if(url.pathname==='/api/reviewer/profile/signature'&&req.method==='GET'){const signature=reviewerProfile.signature(reviewer.id);checkRequestSession(req);if(!signature)return json(res,404,{error:'시험 서명을 찾을 수 없습니다.'});res.writeHead(200,{'Content-Type':'image/png','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(signature);}
+      if(url.pathname==='/api/reviewer/profile/photo'&&req.method==='GET'){const photo=reviewerProfile.photo(reviewer.id,url.searchParams.get('version'));checkRequestSession(req);if(!photo)return json(res,404,{error:'사진을 찾을 수 없습니다.'});res.writeHead(200,{'Content-Type':photo[0]===0x89?'image/png':'image/jpeg','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(photo);}
       if(url.pathname==='/api/reviewer/employment'){
         if(req.method==='GET'){const status=employment.status(reviewer.id),certificates=employment.list(reviewer.id);checkRequestSession(req);return json(res,200,{...status,certificates});}
         if(req.method==='POST'){const input=await body(req);return json(res,201,employment.issue(reviewer.id,input,()=>checkRequestSession(req)));}
