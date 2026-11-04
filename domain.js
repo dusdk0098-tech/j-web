@@ -156,6 +156,7 @@ export function recordInput(input) {
         if(!row||typeof row!=='object'||Array.isArray(row)||!['other','rigging'].includes(row.liftMode))throw new Error('중량물 항목을 확인해 주세요.');
         const item={};for(const key of ['kind','size','totalWeight','liftWeight']){if(typeof row[key]!=='string'||!row[key].trim()||row[key].length>200)throw new Error('중량물 항목을 확인해 주세요.');item[key]=row[key].trim();}item.liftMode=row.liftMode;
         if(row.safetyReview!==undefined){if(typeof row.safetyReview!=='string'||row.safetyReview.length>4000)throw new Error('중량물 안전성 검토를 확인해 주세요.');item.safetyReview=row.safetyReview.trim();}
+        if(row.safetyImageIds!==undefined){if(!Array.isArray(row.safetyImageIds)||row.safetyImageIds.length>5||row.safetyImageIds.some(id=>!Number.isSafeInteger(id)||id<1)||new Set(row.safetyImageIds).size!==row.safetyImageIds.length)throw new Error('중량물 검토 사진을 확인해 주세요.');item.safetyImageIds=row.safetyImageIds;}
         if(row.liftMode==='rigging'){if(!Number.isSafeInteger(row.riggingId)||row.riggingId<1||typeof row.lines!=='string'||!row.lines.trim()||row.lines.length>200||typeof row.method!=='string'||!row.method.trim()||row.method.length>200)throw new Error('중량물 장구 정보를 확인해 주세요.');Object.assign(item,{riggingId:row.riggingId,lines:row.lines.trim(),method:row.method.trim()});}
         if(row.liftMode==='rigging'){
           for(const key of ['ropeStandard','fasteningStandard'])if(row[key]!==undefined){if(typeof row[key]!=='string'||row[key].length>200)throw new Error('중량물 장구 규격을 확인해 주세요.');item[key]=row[key].trim();}

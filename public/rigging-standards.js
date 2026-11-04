@@ -7,6 +7,15 @@ export function heavyRiggingOptions(kind, saved, esc) {
   return '<option value="">선택</option>'+heavyRiggingChoices(kind,saved).map(value=>'<option value="'+esc(value)+'" '+(value===saved?'selected':'')+'>'+esc(value)+'</option>').join('');
 }
 
+export function heavyImageChoices(images, selected, esc) {
+  const choices=images.filter(file=>file.category==='plan_diagram').map(file=>'<label><input type="checkbox" data-heavy-image value="'+file.id+'" '+(selected.includes(file.id)?'checked':'')+'> '+esc(file.name)+'</label>').join('');
+  return choices||'<p>문서 저장 후 계획도·중량물 사진을 첨부하고 다시 수정해 주세요.</p>';
+}
+
+export function heavyImageMarkup(loads, images, esc, url) {
+  return '<section><h3>중량물 안전성 검토 사진</h3>'+loads.filter(load=>load.safetyImageIds?.length).map(load=>'<article><h4>'+esc(load.kind)+'</h4>'+load.safetyImageIds.map(id=>images.find(file=>file.id===id)).filter(Boolean).map(file=>'<figure><img class="plan-diagram" src="'+esc(url(file))+'" alt="'+esc(file.name)+'"><figcaption>'+esc(file.name)+'</figcaption></figure>').join('')+'</article>').join('')+'</section>';
+}
+
 export function riggingStandardChoices(asset, saved='') {
   let standards=asset?.standards;
   if(!standards&&asset?.details){try{standards=JSON.parse(asset.details).standards;}catch{standards=[];}}
