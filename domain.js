@@ -111,8 +111,8 @@ export function recordInput(input) {
       if(value[key]!==undefined && (typeof value[key]!=='string' || value[key].length>2000))throw new Error('작업계획서 항목을 확인해 주세요.');
       details[key]=(value[key] ?? '').trim();
     }
-    for(const key of ['routeDescription','workSequence'])if(value[key]!==undefined){
-      if(typeof value[key]!=='string'||value[key].length>4000)throw new Error('운행경로와 작업순서를 확인해 주세요.');
+    for(const key of ['routeDescription','workSequence','managementPoints'])if(value[key]!==undefined){
+      if(typeof value[key]!=='string'||value[key].length>4000)throw new Error('운행경로와 작업순서, 중점관리사항을 확인해 주세요.');
       details[key]=value[key].trim();
     }
     for(const key of ['consultedAt','periodFrom','periodTo']){

@@ -1422,8 +1422,11 @@ test('작업계획서의 역할별 작업자는 현장을 검증하고 당시 �
     const worker=s.createWorker(workerInput),other=s.createWorker({...workerInput,siteId:b.id});
     const row={workerId:worker.id,role:'운전원',training:'가상 교육',qualification:'가상 자격',name:'위조'},input={siteId:a.id,type:'work_plan',title:'가상 계획',date:'2026-10-29',details:{workers:[row]}};
     const doc=s.createDocument(input),saved=JSON.parse(doc.details).workers[0];assert.equal(saved.name,'가상 작업자');assert.equal(saved.company,'가상 업체');assert.equal(saved.training,'가상 교육');
-    const route={...input,details:{...input.details,routeDescription:'가상 진입로\n가상 출구',workSequence:'1. 준비\n2. 작업'}};
+    const route={...input,details:{...input.details,routeDescription:'가상 진입로\n가상 출구',workSequence:'1. 준비\n2. 작업',managementPoints:'가상 중점관리'}};
     s.updateDocument(doc.id,route);assert.equal(JSON.parse(s.document(doc.id).details).workSequence,'1. 준비\n2. 작업');
+    assert.equal(JSON.parse(s.document(doc.id).details).managementPoints,'가상 중점관리');
+    s.updateDocument(doc.id,{...route,details:{...route.details,managementPoints:undefined}});assert.equal(JSON.parse(s.document(doc.id).details).managementPoints,'가상 중점관리');
+    assert.throws(()=>s.updateDocument(doc.id,{...route,details:{...route.details,managementPoints:'가'.repeat(4001)}}),/중점관리사항/);
     assert.throws(()=>s.updateDocument(doc.id,{...route,details:{...route.details,workSequence:'가'.repeat(4001)}}),/작업순서/);
     assert.equal(JSON.parse(s.document(doc.id).details).routeDescription,'가상 진입로\n가상 출구');
     assert.throws(()=>s.updateDocument(doc.id,{...input,details:{workers:[{...row,workerId:other.id}]}}),/현장/);
