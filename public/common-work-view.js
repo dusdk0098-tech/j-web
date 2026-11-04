@@ -29,7 +29,7 @@ export function newWorkWithFiles({create,upload,publish,active=()=>true,onProgre
     }
   };
 }
-export async function mountCommonWork({target,base,siteId,siteName='',actorId=null,api,active=()=>true}){
+export async function mountCommonWork({target,base,siteId,siteName='',actorId=null,api,active=()=>true,sessionCheck=async()=>{}}){
   let sequence=0,loadSequence=0,savePending=false,filters={from:'',to:'',category:'',process:'',author:'',q:''};
   const alive=()=>target.isConnected&&active(),owner=id=>actorId===null||actorId===id;
   const url=(path='',extra={})=>`${base}${path}?${new URLSearchParams({siteId:String(siteId),...extra})}`;
@@ -93,7 +93,7 @@ export async function mountCommonWork({target,base,siteId,siteName='',actorId=nu
     target.querySelector('[data-work-search]').onclick=()=>{const from=target.querySelector('[data-work-from]').value,to=target.querySelector('[data-work-to]').value;if(from&&to&&from>to){error(Error('조회 기간을 확인해 주세요.'));return;}filters={from,to,category:target.querySelector('[data-work-category]').value,process:target.querySelector('[data-work-process]').value,author:target.querySelector('[data-work-author]').value,q:target.querySelector('[data-work-query]').value};render().catch(error);};
     const selected=()=>[...target.querySelectorAll('[data-work-select]:checked')].map(input=>input.dataset.workSelect),previewButton=target.querySelector('[data-work-preview]'),printButton=target.querySelector('[data-work-print]');
     target.querySelector('[data-work-select-all]').onclick=()=>target.querySelectorAll('[data-work-select]').forEach(input=>{input.checked=true;});
-    const preview=async autoPrint=>{try{const ids=selectBatchDocuments(rows,selected()),items=ids.map(id=>({id,version:rows.find(row=>row.id===id).version}));previewButton.disabled=printButton.disabled=true;const result=await api(url('/preview'),{method:'POST',body:JSON.stringify({siteId,items})});if(!alive()||current!==sequence)return;if(JSON.stringify(ids)!==JSON.stringify(selected().map(Number)))throw Error('선택이 변경되었습니다. 다시 확인해 주세요.');showCommonWorkPreview(target.ownerDocument,result,{autoPrint,active:alive});}catch(e){error(e);}finally{previewButton.disabled=printButton.disabled=false;}};
+    const preview=async autoPrint=>{try{const ids=selectBatchDocuments(rows,selected()),items=ids.map(id=>({id,version:rows.find(row=>row.id===id).version})),body=JSON.stringify({siteId,items}),currentPreview=()=>alive()&&current===sequence;previewButton.disabled=printButton.disabled=true;await sessionCheck();const result=await api(url('/preview'),{method:'POST',body});await sessionCheck();if(!currentPreview())return;if(JSON.stringify(ids)!==JSON.stringify(selected().map(Number)))throw Error('선택이 변경되었습니다. 다시 확인해 주세요.');const snapshot=JSON.stringify(result),validate=async()=>{await sessionCheck();const latest=await api(url('/preview'),{method:'POST',body});if(JSON.stringify(latest)!==snapshot)throw Error('업무 내용이 변경되었습니다. 다시 조회해 주세요.');await sessionCheck();};showCommonWorkPreview(target.ownerDocument,result,{autoPrint,active:currentPreview,validate});}catch(e){error(e);}finally{previewButton.disabled=printButton.disabled=false;}};
     previewButton.onclick=()=>preview(false);printButton.onclick=()=>preview(true);
     for(const row of rows){
       const card=target.querySelector(`[data-work-id="${row.id}"]`),edit=card.querySelector('[data-work-edit]'),remove=card.querySelector('[data-work-delete]'),comments=card.querySelector('[data-comment-form]');
