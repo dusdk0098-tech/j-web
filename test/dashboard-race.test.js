@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {runInNewContext} from 'node:vm';
+import {Store} from '../store.js';
 
 function deferred(){let resolve,reject;const promise=new Promise((r,j)=>{resolve=r;reject=j;});return {promise,resolve,reject};}
 function screen(initialPage='dashboard'){
@@ -57,4 +58,14 @@ test('출역 당시 구분이 없는 기록을 현재 정보로 추정하지 않
   const ui=screen(),run=ui.render();ui.documents.resolve([]);await new Promise(setImmediate);
   ui.attendance.resolve([{present:true,category:'현재 구분',occupation:'현재 직종',attendance_category:null,attendance_occupation:null}]);await run;
   assert.match(ui.content.innerHTML,/기록 없음: 1명/);assert.doesNotMatch(ui.content.innerHTML,/현재 구분|현재 직종/);
+});
+test('저장 후 출입자 정보가 바뀌어도 대시보드는 출역 당시 분류를 표시한다',async()=>{
+  const store=new Store(':memory:');
+  try{
+    const site=store.createSite({name:'가상 현장'}),worker=store.createWorker({siteId:site.id,name:'가상 근로자',category:'직영',company:'가상 업체',occupation:'가상 배관'});
+    store.setAttendance({siteId:site.id,workerId:worker.id,date:'2026-11-04',present:true});
+    store.db.prepare('UPDATE workers SET category=?,occupation=? WHERE id=?').run('변경된 구분','변경된 직종',worker.id);
+    const ui=screen(),run=ui.render();ui.documents.resolve([]);await new Promise(setImmediate);ui.attendance.resolve(store.attendance(site.id,'2026-11-04'));await run;
+    assert.match(ui.content.innerHTML,/직영: 1명/);assert.match(ui.content.innerHTML,/가상 배관: 1명/);assert.doesNotMatch(ui.content.innerHTML,/변경된 구분|변경된 직종/);
+  }finally{store.close();}
 });
