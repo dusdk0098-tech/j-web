@@ -18,6 +18,6 @@ export function readPlanCharts(container) {
   return [...container.children].map(row=>({workPlaceId:Number(row.querySelector('[data-chart-place]').value),imageIds:[...row.querySelectorAll('[data-chart-image]:checked')].map(input=>Number(input.value)),...Object.fromEntries(chartFields.map(([key])=>[key,row.querySelector('[data-chart-field="'+key+'"]').value]))}));
 }
 
-export function planChartsMarkup(charts, esc, images=[], documentId=0) {
-  return '<section><h3>추가 작업계획도</h3>'+charts.map(chart=>'<article><h4>'+esc(chart.placeName||'작업장소')+'</h4>'+chartFields.map(([key,label])=>'<p><strong>'+label+'</strong></p><p class="detail-body">'+esc(chart[key]||'미입력')+'</p>').join('')+(chart.imageIds||[]).map(id=>images.find(file=>file.id===id)).filter(Boolean).map(file=>'<figure><img class="plan-diagram" src="/api/documents/'+documentId+'/plan-diagrams/'+file.id+'" alt="'+esc(file.name)+'"><figcaption>'+esc(file.name)+'</figcaption></figure>').join('')+'</article>').join('')+'</section>';
+export function planChartsMarkup(charts, esc, images=[], documentId=0, imageUrl=file=>"/api/documents/"+documentId+"/plan-diagrams/"+file.id) {
+  return '<section><h3>추가 작업계획도</h3>'+charts.map(chart=>'<article><h4>'+esc(chart.placeName||'작업장소')+'</h4>'+chartFields.map(([key,label])=>'<p><strong>'+label+'</strong></p><p class="detail-body">'+esc(chart[key]||'미입력')+'</p>').join('')+(chart.imageIds||[]).map(id=>images.find(file=>file.id===id)).filter(Boolean).map(file=>'<figure><img class="plan-diagram" src="'+esc(imageUrl(file))+'" alt="'+esc(file.name)+'"><figcaption>'+esc(file.name)+'</figcaption></figure>').join('')+'</article>').join('')+'</section>';
 }
