@@ -2,12 +2,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {runInNewContext} from 'node:vm';
+import {siteArticleImageLimits} from '../public/site-article-images.js';
 
 const source=readFileSync(new URL('../public/app.js',import.meta.url),'utf8'),from=source.indexOf("  if(state.page==='site-articles')"),to=source.indexOf("  if(state.page==='wages')",from);assert.ok(from>=0&&to>from);
 
 async function screen(){
   const state={page:'site-articles',siteId:1,query:'',admin:{}},input={files:[{name:'가상.txt'}]},button={dataset:{file:'3'}},section={innerHTML:'',querySelector:()=>input,querySelectorAll:()=>[button]},node={isConnected:true,append(){}},content={innerHTML:'',querySelectorAll:selector=>selector==='article'?[node]:[]},elements={'#article-query':{closest:()=>({insertAdjacentHTML(){}})},'#article-add':{},'#article-search':{}},calls=[];let release,renders=0;
-  const context={state,detailEpoch:1,content,document:{createElement:()=>section},URLSearchParams,encodeURIComponent,richBody:()=>'',api:async(path,options)=>{calls.push({path,options});if(!options?.method)return [{id:2,title:'가상',category:'기타',version:'article-v',files:[{id:3,name:'가상.txt',version:'file-v'}]}];return {};},fetch:(path,options)=>{calls.push({path,options});return new Promise(resolve=>{release=resolve;});},$:selector=>elements[selector],render:async()=>{renders++;},showError:error=>{throw error;}};
+  const context={state,detailEpoch:1,content,document:{createElement:()=>section},URLSearchParams,encodeURIComponent,siteArticleImageLimits,richBody:()=>'',api:async(path,options)=>{calls.push({path,options});if(!options?.method)return [{id:2,title:'가상',category:'기타',version:'article-v',files:[{id:3,name:'가상.txt',version:'file-v'}]}];return {};},fetch:(path,options)=>{calls.push({path,options});return new Promise(resolve=>{release=resolve;});},$:selector=>elements[selector],render:async()=>{renders++;},showError:error=>{throw error;}};
   await runInNewContext(`${source.match(/^const esc = .*$/m)[0]}\n(async(renderEpoch)=>{${source.slice(from,to)}})(1)`,context);return {state,input,button,section,calls,release:()=>release({ok:true}),renders:()=>renders};
 }
 
