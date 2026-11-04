@@ -265,6 +265,8 @@ export class Store {
       if(!this.db.prepare('PRAGMA table_info(board_posts)').all().some(c=>c.name==='shared'))this.db.exec('ALTER TABLE board_posts ADD COLUMN shared INTEGER NOT NULL DEFAULT 0 CHECK(shared IN (0,1))');
       if(!this.db.prepare('PRAGMA table_info(site_articles)').all().some(c=>c.name==='rich_body'))this.db.exec('ALTER TABLE site_articles ADD COLUMN rich_body TEXT');
       if(!this.db.prepare('PRAGMA table_info(site_articles)').all().some(c=>c.name==='version'))this.db.exec("ALTER TABLE site_articles ADD COLUMN version TEXT NOT NULL DEFAULT ''");
+      if(!this.db.prepare('PRAGMA table_info(site_article_files)').all().some(c=>c.name==='version'))this.db.exec("ALTER TABLE site_article_files ADD COLUMN version TEXT NOT NULL DEFAULT ''");
+      this.db.exec("UPDATE site_article_files SET version=lower(hex(randomblob(16))) WHERE version=''");
       if(!this.db.prepare('PRAGMA table_info(workers)').all().some(c=>c.name==='licenses_json'))this.db.exec("ALTER TABLE workers ADD COLUMN licenses_json TEXT NOT NULL DEFAULT '[]'");
       if(!this.db.prepare('PRAGMA table_info(workers)').all().some(c=>c.name==='memo'))this.db.exec("ALTER TABLE workers ADD COLUMN memo TEXT NOT NULL DEFAULT ''");
       if(!this.db.prepare('PRAGMA table_info(workers)').all().some(c=>c.name==='registration_type')){
@@ -537,18 +539,18 @@ export class Store {
   workerArticles(workerId) {
     return this.db.prepare('SELECT a.id,a.category,a.title,a.body,a.rich_body,a.created_at FROM site_articles a JOIN workers w ON w.site_id=a.site_id WHERE w.id=? AND a.visible=1 ORDER BY a.id DESC').all(Number(workerId)).map(a=>({...siteArticleRow(a),files:this.articleFiles(a.id)}));
   }
-  articleFiles(articleId){return this.db.prepare('SELECT id,name,length(data) AS size FROM site_article_files WHERE article_id=? ORDER BY id').all(Number(articleId));}
-  addArticleFile(siteId,articleId,name,data,onAuthorize=()=>{}){
+  articleFiles(articleId){return this.db.prepare('SELECT id,name,length(data) AS size,version FROM site_article_files WHERE article_id=? ORDER BY id').all(Number(articleId));}
+  addArticleFile(siteId,articleId,name,data,onAuthorize=()=>{},expectedVersion=undefined){
     if(typeof name!=='string'||!name.trim()||name.length>200||/[\\/\x00-\x1f\x7f]/.test(name))throw new Error('파일 이름을 확인해 주세요.');
     if(!(data instanceof Uint8Array)||!data.length||data.length>2*1024*1024)throw new Error('파일은 1바이트 이상 2MB 이하여야 합니다.');
-    this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();if(!this.db.prepare('SELECT 1 FROM site_articles WHERE id=? AND site_id=?').get(Number(articleId),Number(siteId)))throw new Error('선택한 현장의 게시글을 확인해 주세요.');
+    this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();const article=this.db.prepare('SELECT version FROM site_articles WHERE id=? AND site_id=?').get(Number(articleId),Number(siteId));if(!article)throw new Error('선택한 현장의 게시글을 확인해 주세요.');if(expectedVersion!==undefined&&expectedVersion!==article.version)throw Object.assign(new Error('게시글이 변경되었습니다. 다시 조회해 주세요.'),{sessionStatus:409});
       if(this.articleFiles(articleId).length>=20)throw new Error('첨부파일은 게시글당 20개까지 가능합니다.');
-      const id=this.db.prepare('INSERT INTO site_article_files(article_id,name,data) VALUES(?,?,?)').run(Number(articleId),name,data).lastInsertRowid;this.db.exec('COMMIT');return id;
+      const id=this.db.prepare('INSERT INTO site_article_files(article_id,name,data,version) VALUES(?,?,?,lower(hex(randomblob(16))))').run(Number(articleId),name,data).lastInsertRowid;this.db.exec('COMMIT');return id;
     }catch(error){this.db.exec('ROLLBACK');throw error;}
   }
   articleFile(siteId,articleId,fileId){return this.db.prepare('SELECT f.* FROM site_article_files f JOIN site_articles a ON a.id=f.article_id WHERE a.site_id=? AND a.id=? AND f.id=?').get(Number(siteId),Number(articleId),Number(fileId))||null;}
   workerArticleFile(workerId,articleId,fileId){return this.db.prepare('SELECT f.* FROM site_article_files f JOIN site_articles a ON a.id=f.article_id JOIN workers w ON w.site_id=a.site_id WHERE w.id=? AND a.visible=1 AND a.id=? AND f.id=?').get(Number(workerId),Number(articleId),Number(fileId))||null;}
-  deleteArticleFile(siteId,articleId,fileId,onAuthorize=()=>{}){this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();if(!this.articleFile(siteId,articleId,fileId))throw new Error('첨부파일을 찾을 수 없습니다.');this.db.prepare('DELETE FROM site_article_files WHERE id=?').run(Number(fileId));this.db.exec('COMMIT');}catch(error){this.db.exec('ROLLBACK');throw error;}}
+  deleteArticleFile(siteId,articleId,fileId,onAuthorize=()=>{},expectedVersion=undefined){this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();const file=this.articleFile(siteId,articleId,fileId);if(!file)throw new Error('첨부파일을 찾을 수 없습니다.');if(expectedVersion!==undefined&&expectedVersion!==file.version)throw Object.assign(new Error('첨부파일이 변경되었습니다. 다시 조회해 주세요.'),{sessionStatus:409});this.db.prepare('DELETE FROM site_article_files WHERE id=?').run(Number(fileId));this.db.exec('COMMIT');}catch(error){this.db.exec('ROLLBACK');throw error;}}
   saveSiteArticle(input,id=null,onAuthorize=()=>{}) {
     const siteId=Number(input.siteId);
     if(!['안전·보건','기타'].includes(input.category)||typeof input.visible!=='boolean')throw new Error('분류와 공개 설정을 확인해 주세요.');
