@@ -95,7 +95,7 @@ test('작업업체명 검색 HTTP는 인증·유형·현장을 유지하며 저�
 });
 
 test('작업업체 검색 입력은 인코딩·기간·검색어를 보존하고 현장·유형 전환에서 초기화한다',async()=>{
-  const source=readFileSync(new URL('../public/app.js',import.meta.url),'utf8'),lines=source.split(/\r?\n/),wire=lines.find(line=>line.startsWith('function wireSearch()')),load=lines.find(line=>line.startsWith('async function loadDocuments()'));
+  const source=readFileSync(new URL('../public/app.js',import.meta.url),'utf8'),lines=source.split(/\r?\n/),wire=lines.find(line=>line.startsWith('function wireSearch()')),load=lines.find(line=>line.startsWith('async function loadDocuments('));
   const nodes={'#search':{},'#query':{value:'가상 & 선택'},'#type-filter':{value:'work_plan'},'#work-plan-company-filter':{value:'  가상 %_\' &+ 업체  '},'#document-from':{value:'2026-11-01'},'#document-to':{value:'2026-11-02'}},state={page:'documents',siteId:1,type:'work_plan'},calls=[];
   const context={state,$:key=>nodes[key],content:{querySelectorAll:()=>[]},render:async()=>{},showError(){},flash(){},api:async path=>{calls.push(path);return [];},URLSearchParams};
   runInNewContext(wire+'\n'+load+'\nglobalThis.wireSearch=wireSearch;globalThis.loadDocuments=loadDocuments;',context);context.wireSearch();nodes['#search'].onclick();await context.loadDocuments();
@@ -106,9 +106,9 @@ test('작업업체 검색 입력은 인코딩·기간·검색어를 보존하고
 });
 
 test('계획서 목록의 지연 응답은 A→B→A 전환과 업체 목록 조회 중 전환에서 폐기한다',async()=>{
-  const lines=readFileSync(new URL('../public/app.js',import.meta.url),'utf8').split(/\r?\n/),start=lines.find(line=>line.startsWith('  const docsRequest=')),guard=lines.find(line=>line.startsWith("  if(docsPage==='documents'"));
+  const lines=readFileSync(new URL('../public/app.js',import.meta.url),'utf8').split(/\r?\n/),start=lines.findIndex(line=>line.startsWith('  const docsRequest=')),end=lines.findIndex(line=>line.startsWith("  if(docsPage==='documents'"));assert.ok(start>=0&&end>start);const lookup=lines.slice(start,end+1).join('\n');
   const state={page:'documents',siteId:1,workPlanCompany:'A'},resolvers=[],painted=[],context={state,detailEpoch:1,loadDocuments:()=>new Promise(resolve=>resolvers.push(resolve)),painted};
-  const run=()=>runInNewContext('(async()=>{'+start+'\n'+guard+'\npainted.push(allDocs);})()',context);
+  const run=()=>runInNewContext('(async()=>{'+lookup+'\npainted.push(allDocs);})()',context);
   const a=run();context.detailEpoch++;state.workPlanCompany='B';const b=run();context.detailEpoch++;state.workPlanCompany='A';const fresh=run();resolvers[2]('최신 A');await fresh;resolvers[0]('이전 A');resolvers[1]('이전 B');await Promise.all([a,b]);assert.deepEqual(painted,['최신 A']);
   let resolve;const filter=lines.find(line=>line.startsWith('  const filterSite='));state.type='permit';context.docsRequest=context.detailEpoch;context.api=()=>new Promise(done=>{resolve=done});const pending=runInNewContext('(async()=>{'+filter+'\npainted.push("stale");})()',context);context.detailEpoch++;resolve([]);await pending;assert.deepEqual(painted,['최신 A']);
 });

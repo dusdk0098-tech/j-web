@@ -71,7 +71,7 @@ test('분류 검색 HTTP는 인증과 배정 현장 권한을 유지한다',{tim
 });
 
 test('문서·결재 화면은 분류 조건을 전달하고 종류 전환 시 초기화한다',async()=>{
-  const source=readFileSync(new URL('../public/app.js',import.meta.url),'utf8'),lines=source.split(/\r?\n/),wire=lines.find(line=>line.startsWith('function wireSearch()')),load=lines.find(line=>line.startsWith('async function loadDocuments()'));
+  const source=readFileSync(new URL('../public/app.js',import.meta.url),'utf8'),lines=source.split(/\r?\n/),wire=lines.find(line=>line.startsWith('function wireSearch()')),load=lines.find(line=>line.startsWith('async function loadDocuments('));
   const nodes={'#search':{},'#query':{value:'가상 & 선택'},'#type-filter':{value:'checklist'},'#checklist-category-filter':{value:'weather'},'#document-from':{value:'2026-11-01'},'#document-to':{value:'2026-11-02'}},state={page:'documents',siteId:1,type:'checklist'},calls=[];
   const context={state,$:key=>nodes[key],content:{querySelectorAll:()=>[]},render:async()=>{},showError(){},flash(){},api:async path=>{calls.push(path);return [];},URLSearchParams};
   runInNewContext(wire+'\n'+load+'\nglobalThis.wireSearch=wireSearch;globalThis.loadDocuments=loadDocuments;',context);context.wireSearch();nodes['#search'].onclick();await context.loadDocuments();

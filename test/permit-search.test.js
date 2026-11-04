@@ -28,7 +28,7 @@ test('작업기간 검색은 양 끝을 포함해 겹치는 기간만 찾는다'
 });
 
 test('검색 입력은 업체를 요청에 담고 다른 유형에서는 제외한다',async()=>{
-  const source=readFileSync(new URL('../public/app.js',import.meta.url),'utf8'),wire=source.slice(source.indexOf('function wireSearch()'),source.indexOf('\n',source.indexOf('function wireSearch()'))),load=source.slice(source.indexOf('async function loadDocuments()'),source.indexOf('\n',source.indexOf('async function loadDocuments()')));
+  const source=readFileSync(new URL('../public/app.js',import.meta.url),'utf8'),wire=source.slice(source.indexOf('function wireSearch()'),source.indexOf('\n',source.indexOf('function wireSearch()'))),load=source.slice(source.indexOf('async function loadDocuments('),source.indexOf('\n',source.indexOf('async function loadDocuments(')));
   const nodes={'#search':{},'#query':{value:'가상'},'#type-filter':{value:'permit'},'#document-from':{value:''},'#document-to':{value:''},'#permit-company-filter':{value:'direct'},'#permit-from':{value:'2026-10-10'},'#permit-to':{value:'2026-10-12'}},state={page:'documents',siteId:2,type:'permit'},calls=[],context={state,$:key=>nodes[key],content:{querySelectorAll:()=>[]},render:async()=>{},showError(){},flash(){},api:async path=>{calls.push(path);return [];},URLSearchParams};
   runInNewContext(wire+'\n'+load+'\nglobalThis.wireSearch=wireSearch;globalThis.loadDocuments=loadDocuments;',context);context.wireSearch();nodes['#search'].onclick();await context.loadDocuments();assert.match(calls[0],/permitCompany=direct/);assert.match(calls[0],/permitFrom=2026-10-10/);assert.match(calls[0],/permitTo=2026-10-12/);
   nodes['#type-filter'].value='risk';nodes['#search'].onclick();await context.loadDocuments();assert.doesNotMatch(calls[1],/permitCompany|permitFrom|permitTo/);
