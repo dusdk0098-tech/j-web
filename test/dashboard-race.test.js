@@ -10,13 +10,13 @@ function screen(initialPage='dashboard'){
   const start=source.indexOf('  const docsRequest=detailEpoch,docsSite=state.siteId,docsPage=state.page');
   const end=source.indexOf("  if(state.page==='statistics'){",start);
   assert.ok(start>=0&&end>start);
-  const documents=deferred(),attendance=deferred(),requests=[],content={innerHTML:'현재 화면'};
+  const documents=deferred(),attendance=deferred(),requests=[],tables=[],content={innerHTML:'현재 화면'};
   const context={state:{page:initialPage,siteId:1,admin:{id:1}},detailEpoch:1,content,
     loadDocuments:current=>{context.documentsCurrent=current;return documents.promise;},api:(path,options,current)=>{requests.push(path);context.attendanceCurrent=current;return attendance.promise;},
-    today:()=> '2026-11-04',documentTable:()=>'',editDocument:()=>{},wireDocLinks:()=>{},esc:s=>String(s).replaceAll('<','&lt;').replaceAll('>','&gt;'),
+    today:()=> '2026-11-04',documentTable:rows=>{tables.push(rows);return '';},editDocument:()=>{},wireDocLinks:()=>{},esc:s=>String(s).replaceAll('<','&lt;').replaceAll('>','&gt;'),
     $:()=>({}),Number};
   const render=runInNewContext('(async()=>{'+source.slice(start,end)+'})',context);
-  return {context,documents,attendance,requests,content,render};
+  return {context,documents,attendance,requests,tables,content,render};
 }
 test('이전 현장의 문서나 출역 응답은 다른 화면을 덮지 않는다',async()=>{
   for(const stage of ['documents','attendance']){
@@ -58,6 +58,12 @@ test('출역 당시 구분이 없는 기록을 현재 정보로 추정하지 않
   const ui=screen(),run=ui.render();ui.documents.resolve([]);await new Promise(setImmediate);
   ui.attendance.resolve([{present:true,category:'현재 구분',occupation:'현재 직종',attendance_category:null,attendance_occupation:null}]);await run;
   assert.match(ui.content.innerHTML,/기록 없음: 1명/);assert.doesNotMatch(ui.content.innerHTML,/현재 구분|현재 직종/);
+});
+test('오늘 안전 활동은 선택 현장의 당일 안전 문서와 각 상태를 표시한다',async()=>{
+  const ui=screen(),run=ui.render();
+  ui.documents.resolve([{id:1,site_id:1,type:'tbm',date:'2026-11-04',status:'pending'},{id:2,site_id:1,type:'notice',date:'2026-11-04',status:'approved'},{id:3,site_id:1,type:'tbm',date:'2026-11-03',status:'draft'},{id:4,site_id:2,type:'tbm',date:'2026-11-04',status:'approved'},{id:5,site_id:1,type:'office',date:'2026-11-04',status:'approved'}]);
+  await new Promise(setImmediate);ui.attendance.resolve([]);await run;
+  assert.match(ui.content.innerHTML,/오늘 안전 활동/);assert.deepEqual(Array.from(ui.tables[0],d=>[d.id,d.status]),[[1,'pending'],[2,'approved']]);
 });
 test('저장 후 출입자 정보가 바뀌어도 대시보드는 출역 당시 분류를 표시한다',async()=>{
   const store=new Store(':memory:');
