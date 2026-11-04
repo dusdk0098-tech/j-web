@@ -4,3 +4,7 @@ export function safetyCostAmount(price,quantity){
   if(numerator%scale!==0n)throw new Error('금액은 원 단위로 계산되어야 합니다.');
   return (numerator/scale).toString();
 }
+export function bindSafetyCostAmount(price,quantity,output){
+  const update=()=>{if(!price.value||!quantity.value){output.textContent='단가와 수량을 입력해 주세요.';return;}try{output.textContent=BigInt(safetyCostAmount(price.value,quantity.value)).toLocaleString('ko-KR')+'원';}catch(error){output.textContent=error.message;}};
+  price.oninput=quantity.oninput=update;update();
+}

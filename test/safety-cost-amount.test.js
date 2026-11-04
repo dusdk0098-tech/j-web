@@ -7,7 +7,7 @@ import {createServer} from 'node:net';
 import {spawn} from 'node:child_process';
 import {once} from 'node:events';
 import {runInNewContext} from 'node:vm';
-import {safetyCostAmount} from '../public/safety-cost.js';
+import {safetyCostAmount,bindSafetyCostAmount} from '../public/safety-cost.js';
 
 test('사용금액은 정수 연산으로 계산하고 잘못된 입력을 거부한다',()=>{
   assert.equal(safetyCostAmount('1200','1.25'),'1500');assert.equal(safetyCostAmount('999999999999','99999999'),'99999998999900000001');assert.equal(safetyCostAmount('0','0.001'),'0');
@@ -17,7 +17,7 @@ test('사용금액은 정수 연산으로 계산하고 잘못된 입력을 거�
 
 test('입력 화면은 수정할 때마다 같은 금액 또는 오류를 표시한다',()=>{
   const source=readFileSync(new URL('../public/app.js',import.meta.url),'utf8'),start=source.indexOf("    $('#new-cost').onclick="),end=source.indexOf('\n',start);assert.ok(start>=0);
-  const nodes={'#new-cost':{},'#dialog-form [name=unitPrice]':{value:''},'#dialog-form [name=quantity]':{value:''},'#cost-amount':{textContent:''}},context={$:key=>nodes[key],showDialog(){},costCategories:[],esc:String,field:()=>'',today:()=>'',api(){},siteId:1,safetyCostAmount};
+  const nodes={'#new-cost':{},'#dialog-form [name=unitPrice]':{value:''},'#dialog-form [name=quantity]':{value:''},'#cost-amount':{textContent:''}},context={$:key=>nodes[key],showDialog(){},costCategories:[],esc:String,field:()=>'',today:()=>'',api(){},siteId:1,bindSafetyCostAmount};
   runInNewContext(source.slice(start,end),context);nodes['#new-cost'].onclick();const price=nodes['#dialog-form [name=unitPrice]'],quantity=nodes['#dialog-form [name=quantity]'],output=nodes['#cost-amount'];
   price.value='1200';quantity.value='1.25';quantity.oninput();assert.equal(output.textContent,'1,500원');price.value='1';price.oninput();assert.match(output.textContent,/원 단위/);quantity.value='';quantity.oninput();assert.match(output.textContent,/입력/);
 });

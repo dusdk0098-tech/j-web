@@ -8,6 +8,7 @@ import {spawn} from 'node:child_process';
 import {once} from 'node:events';
 import {runInNewContext} from 'node:vm';
 import {Store} from '../store.js';
+import {bindSafetyCostAmount} from '../public/safety-cost.js';
 import {PNG} from 'pngjs';
 
 const input=siteId=>({siteId,category:'2',date:'2026-10-29',description:'가상 장갑',note:'가상 비고',unitPrice:'1000',quantity:'2',unit:'개'});
@@ -17,7 +18,7 @@ test('사용내역 수정은 변경 충돌을 막고 기존 월간 문서와 사
 });
 
 test('사용내역 수정 화면은 표시한 내역을 함께 전송한다',async()=>{
-  const source=readFileSync(new URL('../public/app.js',import.meta.url),'utf8'),line=source.split(/\r?\n/).find(row=>row.includes("content.querySelectorAll('[data-cost-edit]')")),button={dataset:{costEdit:'7'}},row={id:7,category:2,date:'2026-10-29',description:'가상 장갑',note:'가상',unit_price:'1000',quantity:'2',unit:'개',amount:'2000'},calls=[];let save,markup;const state={siteId:1,page:'safety-costs',costMonth:'2026-10'},context={state,siteId:1,month:'2026-10',today:()=>'',data:{rows:[row]},costCategories:['가상 하나','가상 둘'],content:{querySelectorAll:()=>[button]},esc:String,field:(name,label,value)=>'<input name="'+name+'" value="'+value+'">',showDialog:(_title,html,handler)=>{markup=html;save=handler;},api:async(path,options)=>{calls.push({path,options});}};assert.ok(line);runInNewContext(line,context);button.onclick();assert.match(markup,/가상 장갑/);await save({unitPrice:'1200'});assert.equal(calls[0].path,'/api/safety-costs/7');assert.deepEqual(JSON.parse(calls[0].options.body).expected,row);state.siteId=2;assert.throws(()=>save({}),/변경/);assert.equal(calls.length,1);
+  const source=readFileSync(new URL('../public/app.js',import.meta.url),'utf8'),line=source.split(/\r?\n/).find(row=>row.includes("content.querySelectorAll('[data-cost-edit]')")),button={dataset:{costEdit:'7'}},row={id:7,category:2,date:'2026-10-29',description:'가상 장갑',note:'가상',unit_price:'1000',quantity:'2',unit:'개',amount:'2000'},calls=[];let save,markup;const state={siteId:1,page:'safety-costs',costMonth:'2026-10'},nodes={'#dialog-form [name=unitPrice]':{value:'1000'},'#dialog-form [name=quantity]':{value:'2'},'#cost-amount':{}},context={state,siteId:1,month:'2026-10',today:()=>'',data:{rows:[row]},costCategories:['가상 하나','가상 둘'],content:{querySelectorAll:()=>[button]},$:key=>nodes[key],bindSafetyCostAmount,esc:String,field:(name,label,value)=>'<input name="'+name+'" value="'+value+'">',showDialog:(_title,html,handler)=>{markup=html;save=handler;},api:async(path,options)=>{calls.push({path,options});}};assert.ok(line);runInNewContext(line,context);button.onclick();assert.match(markup,/가상 장갑/);assert.equal(nodes['#cost-amount'].textContent,'2,000원');nodes['#dialog-form [name=quantity]'].value='2.5';nodes['#dialog-form [name=quantity]'].oninput();assert.equal(nodes['#cost-amount'].textContent,'2,500원');await save({unitPrice:'1200'});assert.equal(calls[0].path,'/api/safety-costs/7');assert.deepEqual(JSON.parse(calls[0].options.body).expected,row);state.siteId=2;assert.throws(()=>save({}),/변경/);assert.equal(calls.length,1);
 });
 
 test('사용내역 수정 API는 관리자 인증과 오래된 내용을 확인한다',{timeout:30000},async()=>{
