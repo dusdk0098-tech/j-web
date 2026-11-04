@@ -66,7 +66,7 @@ function harness(){
     if(path.includes('joined-on'))return [worker];
     return changed?{...preview,workers:[{...preview.workers[0],...changed}]}:preview;
   };
-  const context={freezeBatchImages:async()=>({dispose(){},check:async()=>{}}),detailEpoch:0,state,content:{children:[],style:{},append(){},querySelectorAll:()=>images},document:{body:{inert:false},createDocumentFragment:()=>({querySelectorAll:()=>[],append:group=>groups.push(group)}),createElement:()=>({})},api,adminSession:Promise.resolve({context:'test-session'}),esc,dailyBatchReport,joinedBatchPreview,$:id=>nodes[id]??={},flash(){},showError:error=>errors.push(error.message),window:{print(){prints++;}},render:async()=>{}};
+  const context={prepareWorkerPdfs:async entries=>{assert.equal(entries.length,0);return ()=>{};},freezeBatchImages:async()=>({dispose(){},check:async()=>{}}),detailEpoch:0,state,content:{children:[],style:{},append(){},querySelectorAll:()=>images},document:{body:{inert:false},createDocumentFragment:()=>({querySelectorAll:()=>[],append:group=>groups.push(group)}),createElement:()=>({children:[],append(child){this.children.push(child);}})},api,adminSession:Promise.resolve({context:'test-session'}),esc,dailyBatchReport,joinedBatchPreview,$:id=>nodes[id]??={},flash(){},showError:error=>errors.push(error.message),window:{print(){prints++;}},render:async()=>{}};
   runInNewContext(source.slice(start,end),context);
   return {context,nodes,groups,errors,images,prints:()=>prints,deny(){allowed=false;},change(value={memo:'바뀜'}){changed=value;},block(promise){gate=promise;}};
 }
@@ -81,6 +81,11 @@ test('가입 서류 준비·인쇄 전 재조회와 이미지 실패·세션 폐
   const pending=late.context.showBatchPreview([],[],1,false,null,false,[report]);late.context.state.admin={id:2};release();await pending;
   assert.equal(late.groups.length,0);assert.equal(late.prints(),0);assert.equal(late.context.document.body.inert,false);
   const before=harness();before.deny();await assert.rejects(()=>before.context.showBatchPreview([],[],1,false,null,false,[report]),/로그인 만료/);assert.equal(before.groups.length,0);
+});
+
+test('가입 PDF 준비가 끝나야 미리보기가 열리고 준비 실패는 인쇄를 막는다',async()=>{
+  const pdf={id:8,name:'가상.pdf',isPdf:true,version:'b'.repeat(32)},h=harness();h.change({files:[pdf]});let release,entries;const gate=new Promise(resolve=>{release=resolve;});h.context.prepareWorkerPdfs=async input=>{entries=input;await gate;return ()=>{};};const pending=h.context.showBatchPreview([],[],1,false,null,false,[report]);await new Promise(resolve=>setImmediate(resolve));assert.equal(h.prints(),0);assert.equal(entries.length,1);assert.match(entries[0].url,/workers\/7\/files\/8\?siteId=1&version=b{32}$/);release();await pending;assert.equal(h.groups[0].children.length,1);await h.nodes['#batch-print'].onclick();assert.equal(h.prints(),1);
+  const bad=harness();bad.change({files:[pdf]});bad.context.prepareWorkerPdfs=async()=>{throw Error('PDF 실패');};await assert.rejects(bad.context.showBatchPreview([],[],1,false,null,false,[report]),/PDF 실패/);assert.equal(bad.prints(),0);
 });
 
 test('인쇄 전 개인정보·첨부·서명 변경 및 늦은 권한 응답과 자동 이미지 실패를 차단한다',async()=>{

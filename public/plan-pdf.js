@@ -44,11 +44,17 @@ async function pdfBytes(response) {
 
 // PDF의 스크립트·링크·양식은 실행하지 않고 페이지 캔버스만 만든다.
 export async function renderPlanPdfs({snapshot,base,area,pdfjs,worker,signal,fetchFile=fetch,check=()=>{}}) {
-  let totalBytes=0,totalPixels=0,pages=0;
   if(!Array.isArray(snapshot.files)||snapshot.files.length>20||!/^\/api\/documents\/\d+\/print-pdfs$/.test(base)||!/^\w{64}$/.test(snapshot.version))throw Error('계획서 첨부를 다시 조회해 주세요.');
-  for(const file of snapshot.files){
-    check();if(!Number.isSafeInteger(file.id)||file.id<1)throw Error('첨부 정보를 확인해 주세요.');
-    const bytes=await pdfBytes(await fetchFile(`${base}/${file.id}?version=${snapshot.version}`,{credentials:'same-origin',redirect:'error',cache:'no-store',signal}));
+  const files=snapshot.files.map(file=>({...file,url:`${base}/${file.id}?version=${snapshot.version}`,area}));
+  return renderPdfFiles({files,pdfjs,worker,signal,fetchFile,check});
+}
+
+export async function renderPdfFiles({files,pdfjs,worker,signal,fetchFile=fetch,check=()=>{}}) {
+  let totalBytes=0,totalPixels=0,pages=0;
+  if(!Array.isArray(files)||files.length>20)throw Error('PDF 첨부는 20개까지 출력할 수 있습니다.');
+  for(const file of files){
+    check();if(!Number.isSafeInteger(file.id)||file.id<1||!file.area||!(/^\/api\/documents\/\d+\/print-pdfs\/\d+\?version=\w{64}$/.test(file.url)||/^\/api\/workers\/\d+\/files\/\d+\?siteId=\d+&version=[a-f0-9]{32}$/.test(file.url)))throw Error('첨부 정보를 확인해 주세요.');
+    const area=file.area,bytes=await pdfBytes(await fetchFile(file.url,{credentials:'same-origin',redirect:'error',cache:'no-store',signal}));
     totalBytes+=bytes.length;if(totalBytes>pdfPrintLimits.totalBytes)throw Error('PDF 합계가 10MB를 초과합니다.');check();
     const task=pdfjs.getDocument({data:bytes,worker,enableXfa:false,stopAtErrors:true,disableFontFace:true,useSystemFonts:false,maxImageSize:pdfPrintLimits.pagePixels,canvasMaxAreaInBytes:8_000_000,cMapUrl:'/pdfjs/cmaps/',cMapPacked:true,standardFontDataUrl:'/pdfjs/standard_fonts/',wasmUrl:'/pdfjs/wasm/'});
     const abort=()=>{void task.destroy().catch(()=>{});};signal.addEventListener('abort',abort,{once:true});
@@ -72,6 +78,20 @@ export async function renderPlanPdfs({snapshot,base,area,pdfjs,worker,signal,fet
     }finally{signal.removeEventListener('abort',abort);await task.destroy();}
   }
   return pages;
+}
+
+export async function prepareWorkerPdfs(entries,view,active,{loadPdfjs=()=>import('/pdfjs/pdf.mjs')}={}) {
+  if(!entries.length)return ()=>{};
+  const controller=new AbortController();let nativeWorker,pdfWorker,warning=false;
+  const dispose=()=>{for(const entry of entries)entry.area.querySelectorAll('canvas').forEach(canvas=>{canvas.width=canvas.height=0;});};
+  const restore=capturePdfWarnings(()=>{warning=true;controller.abort();});
+  const aborted=new Promise((_,reject)=>controller.signal.addEventListener('abort',()=>{nativeWorker?.terminate();reject(Error(warning?'PDF 이미지 또는 글꼴을 읽지 못했습니다.':'PDF 준비가 취소되었거나 60초를 초과했습니다.'));},{once:true}));
+  const check=()=>{if(!active()||controller.signal.aborted)throw Error('화면이 변경되었거나 PDF 준비 시간이 초과되었습니다.');};
+  const interval=setInterval(()=>{if(!active())controller.abort();},100),timeout=setTimeout(()=>controller.abort(),pdfPrintLimits.timeout),wait=promise=>Promise.race([promise,aborted]);
+  try{
+    const pdfjs=await wait(loadPdfjs());check();nativeWorker=new view.Worker('/plan-pdf-worker.js',{type:'module'});nativeWorker.addEventListener('message',event=>{if(event.data?.jwebPdfWarning){warning=true;controller.abort();}});pdfWorker=new pdfjs.PDFWorker({port:nativeWorker});
+    await wait(renderPdfFiles({files:entries,pdfjs,worker:pdfWorker,signal:controller.signal,check}));check();for(const entry of entries)entry.area.setAttribute('data-ready','true');return dispose;
+  }catch(error){dispose();throw error;}finally{restore();clearInterval(interval);clearTimeout(timeout);controller.abort();pdfWorker?.destroy();nativeWorker?.terminate();}
 }
 
 export function mountPlanPdfPrint({content,button,snapshot,api,active,onError,loadPdfjs=()=>import('/pdfjs/pdf.mjs')}) {

@@ -6,7 +6,7 @@ import {join} from 'node:path';
 import {spawn} from 'node:child_process';
 import {once} from 'node:events';
 import {createServer} from 'node:net';
-import {renderPlanPdfs,pdfPageSize,pdfPrintLimits} from '../public/plan-pdf.js';
+import {renderPlanPdfs,renderPdfFiles,prepareWorkerPdfs,pdfPageSize,pdfPrintLimits} from '../public/plan-pdf.js';
 
 function syntheticPdf(annotation=false){
   const objects=['<< /Type /Catalog /Pages 2 0 R >>','<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>','<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 400] /Resources << >> >>','<< /Type /Page /Parent 2 0 R /MediaBox [0 0 400 300] /Resources << >> >>'];
@@ -21,6 +21,16 @@ function harness({pages=2,fail=false}={}){
   return {area,pdfjs,order,nodes,get destroyed(){return destroyed;}};
 }
 test('모의 화면: 모든 페이지 순서·렌더 완료·안전 옵션·정리',async()=>{const h=harness(),count=await renderPlanPdfs({...h,snapshot,base,signal:new AbortController().signal,fetchFile:async(url,options)=>{assert.match(url,/\/1\?version=a{64}$/);assert.equal(options.credentials,'same-origin');return new Response(syntheticPdf());}});assert.equal(count,2);assert.deepEqual(h.order,['page1','render1','page2','render2']);assert.equal(h.nodes[0].children[0].textContent,'<시험>.pdf · 1 / 2쪽');assert.equal(h.destroyed,1);});
+test('출입자 PDF는 같은 출처의 버전 주소만 사용하고 전체 페이지 한도를 공유한다',async()=>{
+  const h=harness({pages:16}),url='/api/workers/1/files/2?siteId=3&version='+('a'.repeat(32)),file={id:2,name:'가상.pdf',url,area:h.area},signal=new AbortController().signal,fetchFile=async(path)=>{assert.equal(path,url);return new Response(syntheticPdf());};
+  await assert.rejects(renderPdfFiles({files:[file,{...file}],pdfjs:h.pdfjs,signal,fetchFile}),/30쪽/);
+  await assert.rejects(renderPdfFiles({files:[{...file,url:'https://example.test/x'}],pdfjs:h.pdfjs,signal,fetchFile}),/첨부 정보/);
+  await assert.rejects(renderPdfFiles({files:[file],pdfjs:h.pdfjs,signal,fetchFile:async()=>new Response('',{status:409})}),/권한/);
+});
+test('출입자 PDF 준비는 완료한 뒤에만 표시하고 실패 시 캔버스를 정리한다',async()=>{
+  const original=globalThis.fetch,h=harness({pages:1});let ready=false,terminated=0;h.area.querySelectorAll=()=>h.nodes.flatMap(node=>node.children.filter(child=>child.tag==='canvas'));h.area.setAttribute=()=>{ready=true;};h.pdfjs.PDFWorker=class{destroy(){}};const view={Worker:class{addEventListener(){}terminate(){terminated++;}}},entry={id:2,name:'가상.pdf',url:'/api/workers/1/files/2?siteId=3&version='+('a'.repeat(32)),area:h.area};
+  try{globalThis.fetch=async()=>new Response(syntheticPdf());const dispose=await prepareWorkerPdfs([entry],view,()=>true,{loadPdfjs:async()=>h.pdfjs});assert.equal(ready,true);assert.equal(h.nodes.length,1);assert.ok(terminated);dispose();assert.equal(h.nodes[0].children[1].width,0);ready=false;globalThis.fetch=async()=>new Response('',{status:409});await assert.rejects(prepareWorkerPdfs([entry],view,()=>true,{loadPdfjs:async()=>h.pdfjs}),/권한/);assert.equal(ready,false);}finally{globalThis.fetch=original;}
+});
 test('모의 화면: 페이지·파일·누적 용량·캔버스 상한과 실패 차단',async()=>{
   const run=(h,fetchFile=async()=>new Response(syntheticPdf()),extra={})=>renderPlanPdfs({...h,snapshot,base,signal:new AbortController().signal,fetchFile,...extra});
   await assert.rejects(run(harness({pages:31})),/30쪽/);

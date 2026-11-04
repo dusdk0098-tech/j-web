@@ -687,7 +687,7 @@ export class Store {
   }
   workerFiles(siteId,workerId){
     siteId=Number(siteId);workerId=Number(workerId);if(!this.db.prepare('SELECT 1 FROM workers WHERE id=? AND site_id=?').get(workerId,siteId))throw new Error('선택한 현장의 출입자를 확인해 주세요.');
-    return this.db.prepare('SELECT id,category,name,length(data) AS size,substr(data,1,20) AS header,created_at,version FROM worker_files WHERE worker_id=? ORDER BY id').all(workerId).map(({header,...file})=>({...file,imageType:costImageType(header,file.size)}));
+    return this.db.prepare('SELECT id,category,name,length(data) AS size,substr(data,1,20) AS header,created_at,version FROM worker_files WHERE worker_id=? ORDER BY id').all(workerId).map(({header,...file})=>({...file,imageType:costImageType(header,file.size),isPdf:Buffer.from(header).subarray(0,5).toString()==='%PDF-'}));
   }
   addWorkerFile(siteId,workerId,category,name,data){
     const files=this.workerFiles(siteId,workerId);if(files.length>=20)throw new Error('첨부파일은 출입자당 20개까지 가능합니다.');
