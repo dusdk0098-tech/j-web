@@ -1,4 +1,5 @@
 import test from 'node:test';
+import {prepareWorkerPdfs} from '../public/plan-pdf.js';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {runInNewContext} from 'node:vm';
@@ -42,7 +43,7 @@ function previewContext(api){
   const source=readFileSync(new URL('../public/app.js',import.meta.url),'utf8'),start=source.indexOf('async function showBatchPreview('),end=source.indexOf('async function renderDailyTrainingStatistics(',start),nodes={},groups=[],errors=[],state={page:'site-print',siteId:1,detail:null,admin:{id:1}},images=[];
   let prints=0;
   const content={children:[],style:{},append(){},querySelectorAll:()=>images},document={body:{inert:false},createDocumentFragment:()=>({querySelectorAll:()=>[],append:group=>groups.push(group)}),createElement:()=>({})};
-  const context={freezeBatchImages:async()=>({dispose(){},check:async()=>{}}),detailEpoch:0,state,content,document,reloadDailyBatchRows,api:path=>path.startsWith('/api/ppe-issues')?Promise.resolve({rows:[]}):api(path),adminSession:Promise.resolve({context:'virtual-context'}),esc,dailyBatchReport,$:id=>nodes[id]??={},flash(){},showError:error=>errors.push(error.message),window:{print(){prints++;}},render:async()=>{}};
+  const context={prepareWorkerPdfs,freezeBatchImages:async()=>({dispose(){},check:async()=>{}}),detailEpoch:0,state,content,document,reloadDailyBatchRows,api:path=>path.startsWith('/api/ppe-issues')?Promise.resolve({rows:[]}):api(path),adminSession:Promise.resolve({context:'virtual-context'}),esc,dailyBatchReport,$:id=>nodes[id]??={},flash(){},showError:error=>errors.push(error.message),window:{print(){prints++;}},render:async()=>{}};
   runInNewContext(source.slice(start,end),context);return {context,nodes,groups,errors,images,prints:()=>prints};
 }
 const report={id:1,kind:'ppe-summary',title:'보호구 당일 요약',rows:[],site,date};

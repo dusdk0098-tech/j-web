@@ -1,4 +1,5 @@
 import test from 'node:test';
+import {prepareWorkerPdfs} from '../public/plan-pdf.js';
 import assert from 'node:assert/strict';
 import {mkdtempSync,readFileSync,rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
@@ -85,7 +86,7 @@ test('자가점검 미리보기의 변경과 서명 오류는 인쇄를 중단�
   const source=readFileSync(new URL('../public/app.js',import.meta.url),'utf8'),start=source.indexOf('async function showBatchPreview('),end=source.indexOf('async function renderDailyTrainingStatistics(',start);
   const row={role:'worker',id:3,name:'가상 근로자',category:'직영',company:'가상',answers:workerAnswers,created_at:'2024-02-29 01:00:00',has_signature:1},report={id:4,kind:'self-check',title:'자가점검',site:{id:1,name:'가상 현장'},date,rows:[row]};
   const nodes={},groups=[],errors=[],state={page:'site-print',siteId:1,detail:null,admin:{id:1}};let latest=[row],prints=0,imageChanged=false;
-  const context={freezeBatchImages:async()=>({dispose(){},check:async()=>{if(imageChanged)throw Error('서명 이미지가 변경되었습니다.');}}),detailEpoch:0,state,content:{children:[],style:{},append(){},querySelectorAll:()=>[]},document:{body:{inert:false},createDocumentFragment:()=>({querySelectorAll:()=>[],append:group=>groups.push(group)}),createElement:()=>({})},reloadDailyBatchRows,api:async path=>path==='/api/session'?{authenticated:true,admin:{scope:'global'},context:'virtual-session'}:latest,adminSession:Promise.resolve({context:'virtual-session'}),esc,dailyBatchReport,$:id=>nodes[id]??={},flash(){},showError:error=>errors.push(error.message),window:{print(){prints++;}},render:async()=>{}};
+  const context={prepareWorkerPdfs,freezeBatchImages:async()=>({dispose(){},check:async()=>{if(imageChanged)throw Error('서명 이미지가 변경되었습니다.');}}),detailEpoch:0,state,content:{children:[],style:{},append(){},querySelectorAll:()=>[]},document:{body:{inert:false},createDocumentFragment:()=>({querySelectorAll:()=>[],append:group=>groups.push(group)}),createElement:()=>({})},reloadDailyBatchRows,api:async path=>path==='/api/session'?{authenticated:true,admin:{scope:'global'},context:'virtual-session'}:latest,adminSession:Promise.resolve({context:'virtual-session'}),esc,dailyBatchReport,$:id=>nodes[id]??={},flash(){},showError:error=>errors.push(error.message),window:{print(){prints++;}},render:async()=>{}};
   assert.ok(start>=0&&end>start);runInNewContext(source.slice(start,end),context);
   await context.showBatchPreview([],[],1,false,null,false,[report]);assert.equal(groups.length,1);assert.match(groups[0].innerHTML,/self-checks\/3\/signature/);
   await nodes['#batch-print'].onclick();assert.equal(prints,1);

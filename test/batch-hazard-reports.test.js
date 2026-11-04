@@ -1,4 +1,5 @@
 import test from 'node:test';
+import {prepareWorkerPdfs} from '../public/plan-pdf.js';
 import assert from 'node:assert/strict';
 import {mkdtempSync,readFileSync,rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
@@ -53,7 +54,7 @@ test('여러 신고는 현장별로 한 번 재조회하고 내용·사진 변�
   const reports=original.map((item,i)=>({id:i+1,kind:'hazard-report',title:'가상 신고 '+item.id,site,date,rows:[structuredClone(item)]}));
   const nodes={},groups=[],images=[],errors=[],state={page:'site-print',siteId:1,detail:null,admin:{id:1}};let latest=structuredClone(original),picture='first',reads=0,prints=0;
   const fragment={append(group){groups.push(group);for(const match of group.innerHTML.matchAll(/<img[^>]+src="([^"]+)"/g))images.push({getAttribute:()=>match[1].replaceAll('&amp;','&'),decode:async()=>{},complete:true,naturalWidth:1});},querySelectorAll:()=>images};
-  const context={freezeBatchImages:(items,active)=>freezeBatchImages(items,active,{fetchImage:async()=>new Response(new Blob([picture],{type:'image/png'})),urls:{createObjectURL:()=> 'blob:virtual',revokeObjectURL(){}}}),detailEpoch:0,state,content:{children:[],style:{},append(){},querySelectorAll:()=>images},document:{body:{inert:false},createDocumentFragment:()=>fragment,createElement:()=>({})},reloadDailyBatchRows,api:async path=>{if(path==='/api/session')return {authenticated:true,admin:{scope:'global'},context:'virtual-session'};reads++;return structuredClone(latest);},adminSession:Promise.resolve({context:'virtual-session'}),esc,dailyBatchReport,hazardReportBody,$:id=>nodes[id]??={},flash(){},showError:error=>errors.push(error.message),window:{print(){prints++;}},render:async()=>{}};
+  const context={prepareWorkerPdfs,freezeBatchImages:(items,active)=>freezeBatchImages(items,active,{fetchImage:async()=>new Response(new Blob([picture],{type:'image/png'})),urls:{createObjectURL:()=> 'blob:virtual',revokeObjectURL(){}}}),detailEpoch:0,state,content:{children:[],style:{},append(){},querySelectorAll:()=>images},document:{body:{inert:false},createDocumentFragment:()=>fragment,createElement:()=>({})},reloadDailyBatchRows,api:async path=>{if(path==='/api/session')return {authenticated:true,admin:{scope:'global'},context:'virtual-session'};reads++;return structuredClone(latest);},adminSession:Promise.resolve({context:'virtual-session'}),esc,dailyBatchReport,hazardReportBody,$:id=>nodes[id]??={},flash(){},showError:error=>errors.push(error.message),window:{print(){prints++;}},render:async()=>{}};
   assert.ok(start>=0&&end>start);runInNewContext(source.slice(start,end),context);await context.showBatchPreview([],[],1,false,null,false,reports);
   assert.equal(groups.length,2);assert.equal(images.length,1);assert.equal(reads,2);
   await nodes['#batch-print'].onclick();assert.equal(prints,1);assert.equal(reads,3);
