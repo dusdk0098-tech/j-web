@@ -152,7 +152,7 @@ export function recordInput(input) {
     if(value.workers!==undefined){
       if(!Array.isArray(value.workers)||value.workers.length>100)throw new Error('작업자 항목을 확인해 주세요.');
       details.workers=value.workers.map(row=>{
-        if(!row||!Number.isSafeInteger(row.workerId)||row.workerId<1||!['운전원','유도자','작업지휘자'].includes(row.role)||typeof row.training!=='string'||row.training.length>500||typeof row.qualification!=='string'||row.qualification.length>500)throw new Error('작업자 항목을 확인해 주세요.');
+        if(!row||!Number.isSafeInteger(row.workerId)||row.workerId<1||!['운전원','유도자','신호수','작업지휘자','운전원(직영)'].includes(row.role)||typeof row.training!=='string'||row.training.length>500||typeof row.qualification!=='string'||row.qualification.length>500)throw new Error('작업자 항목을 확인해 주세요.');
         return {workerId:row.workerId,role:row.role,training:row.training.trim(),qualification:row.qualification.trim()};
       });
     }
