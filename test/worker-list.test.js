@@ -41,6 +41,18 @@ test('가상 출입자 목록은 20명씩 자르고 페이지 전체를 선택�
   assert.deepEqual(selectBatchDocuments(page,page.map(item=>String(item.id))),rows.slice(0,20));
 });
 
+test('최근 가입 정렬은 명부 등록일이 아닌 가입 시각을 사용한다',()=>{
+  const store=new Store(':memory:');try{
+    const site=store.createSite({name:'가상 현장'}),make=name=>store.createWorker({siteId:site.id,name,category:'직영',company:'가상 업체',occupation:'가상 직종'}),older=make('기존 명부'),newer=make('나중 명부'),noJoin=make('가입 기록 없음');
+    const date=store.db.prepare('UPDATE workers SET created_date=? WHERE id=?');date.run('2020-01-01',older.id);date.run('2025-01-01',newer.id);date.run('2026-01-01',noJoin.id);
+    const join=store.db.prepare('INSERT INTO join_acknowledgements(worker_id,notice_version,created_at) VALUES(?,?,?)');join.run(older.id,'demo','2026-11-05 10:00:00');join.run(newer.id,'demo','2026-11-04 10:00:00');
+    assert.deepEqual(store.workers(site.id,'',{order:'recent'}).map(w=>w.id),[older.id,newer.id,noJoin.id]);
+    assert.deepEqual(store.workers(site.id,'',{order:'recent',from:'2024-01-01'}).map(w=>w.id),[newer.id,noJoin.id]);
+    assert.deepEqual(store.workers(site.id).map(w=>w.id),[noJoin.id,newer.id,older.id]);
+    assert.throws(()=>store.workers(site.id,'',{order:'recent'},false),/전역 관리자/);
+  }finally{store.close();}
+});
+
 test('목록과 요약은 같은 현장·검색 조건을 사용하고 권한 실패를 되돌린다',()=>{
   const store=new Store(':memory:');
   try{
