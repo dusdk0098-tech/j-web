@@ -8,12 +8,12 @@ import {spawn} from 'node:child_process';
 import {once} from 'node:events';
 
 test('빈 시험 서식은 외부 파일 없이 열다섯 개의 인쇄 구역과 빈 기록란을 제공한다',()=>{
-  const html=readFileSync(new URL('../public/offline-forms.html',import.meta.url),'utf8');assert.equal((html.match(/<section>/g)||[]).length,15);assert.equal((html.match(/J웹 시험용 빈 서식/g)||[]).length,15);assert.match(html,/@media print/);assert.match(html,/@page\{size:A4;margin:15mm\}/);assert.match(html,/tr\{break-inside:avoid\}/);assert.match(html,/section:last-child\{break-after:auto\}/);assert.doesNotMatch(html,/<script\b|<link\b|<img\b|<iframe\b|\bsrc\s*=|url\s*\(/i);assert.match(html,/공식 서식이나 실제 안전 업무 기록으로 사용할 수 없습니다/);
+  const html=readFileSync(new URL('../public/offline-forms.html',import.meta.url),'utf8');assert.equal((html.match(/<section>/g)||[]).length,15);assert.equal((html.match(/J웹 시험용 빈 서식/g)||[]).length,15);assert.match(html,/@media print/);assert.match(html,/@page\{size:A4;margin:15mm\}/);assert.match(html,/tr\{break-inside:avoid\}/);assert.match(html,/section:last-child\{break-after:auto\}/);assert.doesNotMatch(html,/<script\b|<link\b|<img\b|<iframe\b|\bsrc\s*=|url\s*\(/i);assert.match(html,/공식 서식이나 실제 안전 업무 기록으로 사용할 수 없습니다/); assert.match(html,/<h2 id="contract">가상 건설 일용근로계약 기록/);assert.match(html,/body:has\(#contract:target\) section:not\(:has\(#contract:target\)\)\{display:none\}/);
   const cells=[...html.matchAll(/<td\b[^>]*>([\s\S]*?)<\/td>/g)];assert.ok(cells.length>0);for(const cell of cells)assert.equal(cell[1].trim(),'');
 });
 
 test('회의·교육 명단과 일일 기록은 독립된 빈 서식과 설명 가능한 표를 제공한다',()=>{
-  const html=readFileSync(new URL('../public/offline-forms.html',import.meta.url),'utf8'),sections=new Map([...html.matchAll(/<section><h2>([^<]+)<\/h2>([\s\S]*?)<\/section>/g)].map(([,title,body])=>[title,body]));
+  const html=readFileSync(new URL('../public/offline-forms.html',import.meta.url),'utf8'),sections=new Map([...html.matchAll(/<section><h2(?: id="[^"]+")?>([^<]+)<\/h2>([\s\S]*?)<\/section>/g)].map(([,title,body])=>[title,body]));
   const required={
     '가상 첨부 자료 확인':['가상 성명','가상 생년월일','가상 주소','가상 신원 자료','가상 건강 자료','가상 교육 이수 자료','가상 자격 자료','가상 금융기관','가상 계좌','가상 예금주'],
     '가상 보호구 수령과 안전 확인':['가상 현장','가상 성명','가상 생년월일','가상 국적','가상 주소','가상 혈액형','직종','연락처','비상 연락처','관계','보호구 품목','수량','시험 확인','가상 안전 확인 내용','가상 정보 활용 확인 내용','가상 증빙 부착란','시험 서명'],
