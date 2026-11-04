@@ -7,7 +7,7 @@ import {mountEducationDraftWorkers} from '../public/education-draft-workers.js';
 test('문서 유형 변경은 이전 날짜 처리기를 제거한다',()=>{
   const source=readFileSync(new URL('../public/app.js',import.meta.url),'utf8'),start=source.indexOf('  const renderFields=()=>{'),end=source.indexOf("    if(select.value==='office'){",start);assert.ok(start>=0&&end>start);
   let calls=0;const date={onchange:()=>calls++},fields={},select={value:'education'},$=key=>key==='#dialog-form [name=date]'?date:fields;
-  runInNewContext(source.slice(start,end)+'};renderFields();',{educationReference:null,select,$,dailyFields:{},details:{},Object});assert.equal(date.onchange,null);date.onchange?.();assert.equal(calls,0);
+  runInNewContext(source.slice(start,end)+'};renderFields();',{educationReference:null,dailyInvalidationCleanup:()=>{},select,$,dailyFields:{},details:{},Object});assert.equal(date.onchange,null);date.onchange?.();assert.equal(calls,0);
 });
 
 test('신규 교육은 출역 명단을 선택하고 날짜 변경 중 선택을 보존한다',async()=>{

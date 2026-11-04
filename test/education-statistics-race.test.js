@@ -18,8 +18,8 @@ test('교육 통계 조회 중 기간이나 현장이 바뀌면 이전 결과를
 });
 
 test('현재 통계는 조회한 현장의 결과를 사용한다',async()=>{
-  const state={page:'statistics',siteId:7,statisticsMonth:'2026-10',statisticsDay:'',types:{}},calls=[],context={state,detailEpoch:1,docs:[],today:()=>'',api:async path=>{calls.push(path);return path.includes('education/report')?[{id:3}]:[];}},code=fragment('    const month=state.statisticsMonth||today().slice(0,7),day=state.statisticsDay,siteId=', '    content.innerHTML=`<section class="panel"><div class="panel-head"><div><h2>안전 활동 통계');
-  const rows=await runInNewContext('(async()=>{'+code+';return education;})()',context);assert.equal(rows[0].id,3);assert.ok(calls.every(path=>path.includes('siteId=7')));
+  const state={page:'statistics',siteId:7,statisticsMonth:'2026-10',statisticsDay:'',types:{}},calls=[],context={state,detailEpoch:1,docs:[],today:()=>'',document:{createElement:()=>({})},content:{querySelector:()=>({append(){}})},showError:error=>{throw error;},api:async path=>{calls.push(path);return path.includes('education/report')?[{id:3}]:path.includes('hazard-report-count')?{count:0}:[];}},code=fragment('    const month=state.statisticsMonth||today().slice(0,7),day=state.statisticsDay,siteId=', '    content.innerHTML=`<section class="panel"><div class="panel-head"><div><h2>안전 활동 통계');
+  const rows=await runInNewContext('(async()=>{'+code+';return education;})()',context);assert.equal(rows[0].id,3);assert.equal(calls.length,3);assert.ok(calls.every(path=>path.includes('siteId=7')||path.startsWith('/api/sites/7/hazard-report-count?')));
 });
 
 test('오래된 교육 통계의 안전활동 버튼은 다른 현장을 열지 않는다',()=>{
