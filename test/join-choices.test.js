@@ -23,12 +23,13 @@ class Node {
 test('협력업체 가입은 등록 소속 선택이 필요하고 기존 초대는 영향을 받지 않는다',()=>{
   const company=new Node('input'),occupation=new Node('input'),category={value:'협력업체 근로자',addEventListener(_event,callback){this.change=callback;}};
   company.label=new Node('label');occupation.label=new Node('label');const form=new Node('form');form.ownerDocument={createElement:tag=>new Node(tag)};form.elements={company,occupation,category};
-  const update=mountJoinChoices(form),select=company.label.beforeNode.children[0];
-  update({companyOptions:[]});assert.equal(select.required,true);assert.equal(company.readOnly,true);assert.equal(company.label.beforeNode.hidden,false);
+  const update=mountJoinChoices(form),select=company.label.beforeNode.children[0],occupationSelect=occupation.label.beforeNode.children[0];
+  update({companyOptions:[]});assert.equal(select.required,true);assert.equal(company.readOnly,true);assert.equal(company.label.beforeNode.hidden,false);assert.match(select.options[0].textContent,/관리자에게 문의/);assert.equal(occupationSelect.required,true);assert.equal(occupation.readOnly,true);
   update({companyOptions:[{id:2,name:'가상 업체'}]});select.value='2';select.onchange();assert.equal(company.value,'가상 업체');
-  category.value='직영';category.change();assert.equal(select.required,false);assert.equal(company.readOnly,false);
+  category.value='직영';category.change();assert.equal(select.required,false);assert.equal(company.readOnly,false);assert.equal(occupationSelect.required,true);occupationSelect.value='전기-내선';occupationSelect.onchange();assert.equal(occupation.value,'전기-내선');
+  category.value='근로를 제공하지 않는 사람';category.change();assert.equal(occupationSelect.required,false);assert.equal(occupation.readOnly,false);
   category.value='협력업체 관리자';category.change();assert.equal(select.required,true);
-  update({companyOptions:[{id:2,name:'가상 업체'}],existingWorker:true});assert.equal(select.required,false);assert.equal(company.readOnly,false);assert.equal(company.label.beforeNode.hidden,true);
+  update({companyOptions:[{id:2,name:'가상 업체'}],existingWorker:true});assert.equal(select.required,false);assert.equal(company.readOnly,false);assert.equal(company.label.beforeNode.hidden,true);assert.equal(occupationSelect.required,false);assert.equal(occupation.readOnly,false);
 });
 test('가입 선택은 동명 업체의 번호를 구분하고 직접 입력 시 연결을 해제한다',()=>{
   const company=new Node('input'),occupation=new Node('input');company.label=new Node('label');occupation.label=new Node('label');const form=new Node('form');form.ownerDocument={createElement:tag=>new Node(tag)};form.elements={company,occupation};

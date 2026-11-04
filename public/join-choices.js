@@ -15,11 +15,17 @@ export function mountJoinChoices(form){
   function updateCompanyRequirement(){
     const {input,label,select,registered}=controls.company,required=!existingWorker&&Array.isArray(registered)&&['협력업체 근로자','협력업체 관리자'].includes(form.elements.category?.value);
     select.required=required;input.readOnly=required;
-    if(select.options.length)select.options[0].textContent=required?'소속을 선택하세요':'직접 입력';
+    if(select.options.length)select.options[0].textContent=required?(registered.length?'소속을 선택하세요':'등록된 소속이 없습니다. 관리자에게 문의하세요'):'직접 입력';
     if(required)label.hidden=false;
     else label.hidden=existingWorker||!(registered?.length);
   }
-  form.elements.category?.addEventListener('change',updateCompanyRequirement);
+  function updateOccupationRequirement(){
+    const category=form.elements.category;if(!category)return;
+    const {input,select}=controls.occupation,required=!existingWorker&&category.value!=='근로를 제공하지 않는 사람';
+    select.required=required;input.readOnly=required;
+    if(select.options.length)select.options[0].textContent=required?'직종을 선택하세요':'직접 입력';
+  }
+  form.elements.category?.addEventListener('change',()=>{updateCompanyRequirement();updateOccupationRequirement();});
   return data=>{
     existingWorker=data.existingWorker===true;
     for(const [key,names] of [['company',data.companies||[]],['occupation',data.occupations||[]]]){
@@ -33,5 +39,6 @@ export function mountJoinChoices(form){
       if(key==='occupation'){const quickNames=unique.length?unique:commonQuickOccupations;quick.hidden=data.existingWorker===true;buttons.replaceChildren(...quickNames.map(name=>{const button=doc.createElement('button');button.type='button';button.textContent=name;button.onclick=()=>{input.value=name;select.value=name;input.focus();};return button;}));}
     }
     if(Array.isArray(controls.company.registered))updateCompanyRequirement();
+    updateOccupationRequirement();
   };
 }
