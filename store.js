@@ -1023,6 +1023,10 @@ export class Store {
     return this.db.prepare('INSERT INTO equipment_attachments(equipment_id,category,name,data) VALUES(?,?,?,?)').run(Number(id),category,name,data).lastInsertRowid;
   }
   equipmentAttachment(siteId,equipmentId,id){return this.db.prepare('SELECT a.* FROM equipment_attachments a JOIN equipment e ON e.id=a.equipment_id WHERE e.site_id=? AND e.id=? AND a.id=?').get(Number(siteId),Number(equipmentId),Number(id)) || null;}
+  equipmentCheckCount(siteId,date){
+    date=dateValue(date);siteId=Number(siteId);if(!this.db.prepare('SELECT 1 FROM sites WHERE id=?').get(siteId))throw new Error('현장을 선택해 주세요.');
+    return this.db.prepare("SELECT COUNT(*) AS count FROM equipment_checks e JOIN documents d ON d.id=e.document_id WHERE d.site_id=? AND d.type='work_plan' AND e.date=?").get(siteId,date).count;
+  }
   equipmentChecks(documentId){
     const doc=this.document(documentId);if(!doc || doc.type!=='work_plan')throw new Error('작업계획서를 확인해 주세요.');
     const rows=this.db.prepare('SELECT id,equipment_id,date,items,created_at,equipment_snapshot,inspector,signature IS NOT NULL AS has_signature FROM equipment_checks WHERE document_id=? ORDER BY date DESC,id DESC').all(Number(documentId)),latest=this.db.prepare('SELECT id,status,created_at,ended_at FROM equipment_check_approval_cycles WHERE check_id=? ORDER BY id DESC LIMIT 1');

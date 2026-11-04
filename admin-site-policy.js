@@ -17,6 +17,7 @@ export function adminSitePolicy(db,req,url,session){
   if(input?.siteId!==undefined&&url.searchParams.has('siteId')&&Number(input.siteId)!==Number(url.searchParams.get('siteId')))return denied();
   const worker=path.match(/^\/api\/workers\/([1-9]\d*)$/);
   const fields=keys=>input&&Object.keys(input).every(key=>keys.includes(key));
+  if(path==='/api/equipment-check-count'&&method==='GET')return [...url.searchParams.keys()].every(key=>['siteId','date'].includes(key))&&url.searchParams.getAll('date').length===1?site(url.searchParams.get('siteId')):denied();
   if(path==='/api/companies'&&method==='GET')return [...url.searchParams.keys()].every(key=>key==='siteId')?site(url.searchParams.get('siteId')):denied();
   if(path==='/api/equipment'&&method==='GET')return [...url.searchParams.keys()].every(key=>key==='siteId')?site(url.searchParams.get('siteId')):denied();
   const equipmentAttendance=path.match(/^\/api\/equipment-attendance(?:\/([1-9]\d*))?$/);

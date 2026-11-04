@@ -18,7 +18,7 @@ function screen(initialPage='dashboard'){
   assert.ok(start>=0&&end>start);
   const documents=deferred(),attendance=deferred(),requests=[],weeklyRequests=[],tables=[],content={innerHTML:'현재 화면'};
   const context={state:{page:initialPage,siteId:1,admin:{id:1},types},detailEpoch:1,content,statusLabels:{draft:'임시저장',pending:'결재 대기',approved:'승인',rejected:'반려'},
-    loadDocuments:current=>{context.documentsCurrent=current;return documents.promise;},api:(path,options,current)=>{if(path.startsWith('/api/weekly-activity?')){weeklyRequests.push(path);return context.weekPromise||Promise.resolve(context.weekRows||[]);}requests.push(path);context.attendanceCurrent=current;return attendance.promise;},
+    loadDocuments:current=>{context.documentsCurrent=current;return documents.promise;},api:(path,options,current)=>{if(path.startsWith('/api/equipment-check-count?'))return context.equipmentPromise||Promise.resolve({count:context.equipmentCount??0});if(path.startsWith('/api/weekly-activity?')){weeklyRequests.push(path);return context.weekPromise||Promise.resolve(context.weekRows||[]);}requests.push(path);context.attendanceCurrent=current;return attendance.promise;},
     today:()=> '2026-11-04',documentTable:rows=>{tables.push(rows);return '';},editDocument:()=>{},wireDocLinks:()=>{},esc:s=>String(s).replaceAll('<','&lt;').replaceAll('>','&gt;'),
     $:()=>({}),Number};
   const render=runInNewContext('(async()=>{'+source.slice(start,end)+'})',context);
@@ -91,8 +91,13 @@ test('오늘 안전 활동은 선택 현장의 당일 안전 문서와 각 상�
   ui.documents.resolve([{id:1,site_id:1,type:'tbm',date:'2026-11-04',status:'pending'},{id:2,site_id:1,type:'notice',date:'2026-11-04',status:'approved'},{id:3,site_id:1,type:'tbm',date:'2026-11-03',status:'draft'},{id:4,site_id:2,type:'tbm',date:'2026-11-04',status:'approved'},{id:5,site_id:1,type:'office',date:'2026-11-04',status:'approved'}]);
   await new Promise(setImmediate);ui.attendance.resolve([]);await run;
   assert.match(ui.content.innerHTML,/오늘 안전 활동/);assert.deepEqual(Array.from(ui.tables[0],d=>[d.id,d.status]),[[1,'pending'],[2,'approved']]);
-  assert.match(ui.content.innerHTML,/TBM: 결재 대기 1건/);assert.match(ui.content.innerHTML,/유해·위험 공지: 승인 1건/);assert.match(ui.content.innerHTML,/위험성평가: 오늘 날짜 문서 없음/);
+  assert.match(ui.content.innerHTML,/기계·장비 시험 점검: 0건/);assert.match(ui.content.innerHTML,/TBM: 결재 대기 1건/);assert.match(ui.content.innerHTML,/유해·위험 공지: 승인 1건/);assert.match(ui.content.innerHTML,/위험성평가: 오늘 날짜 문서 없음/);
 });
+test('장비 점검 집계는 점검 날짜와 계획서 현장만 사용한다',()=>{
+  const s=new Store(':memory:');try{const a=s.createSite({name:'가상 현장'}),b=s.createSite({name:'다른 현장'}),make=site=>{const equipment=s.createEquipment({siteId:site.id,kind:'장비',model:'모델',capacity:'',manufacturer:'',registration:''}),doc=s.createDocument({siteId:site.id,type:'work_plan',title:'계획',date:'2026-10-01',details:{equipmentIds:[equipment.id]}});return {equipment,doc};},one=make(a),two=make(b),check=(item,date)=>s.addEquipmentCheck(item.doc.id,{equipmentId:item.equipment.id,date,items:[{name:'점검',result:'적정'}]});check(one,'2026-11-04');check(one,'2026-11-03');check(two,'2026-11-04');assert.equal(s.equipmentCheckCount(a.id,'2026-11-04'),1);assert.equal(s.equipmentCheckCount(b.id,'2026-11-04'),1);assert.throws(()=>s.equipmentCheckCount(a.id,'2026-02-30'));}finally{s.close();}
+});
+test('장비 점검 조회 실패는 다른 활동을 가리지 않는다',async()=>{const ui=screen();ui.context.equipmentPromise=Promise.reject(new Error('실패'));const run=ui.render();ui.documents.resolve([]);await new Promise(setImmediate);ui.attendance.resolve([]);await run;assert.match(ui.content.innerHTML,/기계·장비 시험 점검: 조회하지 못했습니다/);});
+test('장비 점검 수를 표시하고 현장 변경 후 늦은 응답은 버린다',async()=>{const ui=screen();ui.context.equipmentCount=2;let run=ui.render();ui.documents.resolve([]);await new Promise(setImmediate);ui.attendance.resolve([]);await run;assert.match(ui.content.innerHTML,/기계·장비 시험 점검: 2건/);const stale=screen(),pending=deferred();stale.context.equipmentPromise=pending.promise;run=stale.render();stale.documents.resolve([]);await new Promise(setImmediate);stale.attendance.resolve([]);stale.context.state.siteId=2;pending.resolve({count:3});await run;assert.equal(stale.content.innerHTML,'현재 화면');});
 test('실제 서버의 문서 목록과 출역 응답으로 당일 활동을 그린다',{timeout:30000},async()=>{
   const dir=mkdtempSync(join(tmpdir(),'jweb-dashboard-')),reservation=createServer();
   await new Promise(resolve=>reservation.listen(0,'127.0.0.1',resolve));const port=reservation.address().port;await new Promise(resolve=>reservation.close(resolve));
@@ -104,6 +109,7 @@ test('실제 서버의 문서 목록과 출역 응답으로 당일 활동을 그
     const site=await (await call('/api/sites','POST',{name:'가상 현장'},cookie)).json();
     const doc=await (await call('/api/documents','POST',{siteId:site.id,type:'notice',title:'가상 공지',date:'2026-11-04'},cookie)).json();
     await call('/api/documents','POST',{siteId:site.id,type:'notice',title:'이전 가상 공지',date:'2026-11-03'},cookie);
+    assert.equal((await call(`/api/equipment-check-count?siteId=${site.id}&date=2026-11-04`)).status,401);const count=await call(`/api/equipment-check-count?siteId=${site.id}&date=2026-11-04`,'GET',undefined,cookie);assert.equal(count.status,200);assert.equal((await count.json()).count,0);
     const docs=await (await call(`/api/documents?siteId=${site.id}`,'GET',undefined,cookie)).json(),rows=await (await call(`/api/attendance?siteId=${site.id}&date=2026-11-04`,'GET',undefined,cookie)).json();
     const ui=screen();ui.context.weekRows=await (await call(`/api/weekly-activity?siteId=${site.id}&start=2026-10-29`,'GET',undefined,cookie)).json();const run=ui.render();ui.documents.resolve(docs);await new Promise(setImmediate);ui.attendance.resolve(rows);await run;
     assert.deepEqual(Array.from(ui.tables[0],d=>[d.id,d.status]),[[doc.id,'draft']]);

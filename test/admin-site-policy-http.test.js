@@ -26,6 +26,8 @@ test('현장 관리자 HTTP 경계: 위조·미분류·관계 검증·지연 본
   const login=async id=>(await send('/api/login','POST',{loginId:id,password})).headers.get('set-cookie').split(';')[0];let cookie=await login('limited');const global=await login('admin');
   assert.deepEqual((await (await send('/api/sites','GET',null,cookie)).json()).map(s=>s.id),[a.id]);assert.deepEqual(await (await send('/api/sites','GET',null,await login('empty'))).json(),[]);
   assert.equal((await send('/api/types','GET',null,cookie)).status,200);
+  assert.equal((await send(`/api/equipment-check-count?siteId=${a.id}&date=2026-11-04`,'GET',null,cookie)).status,200);
+  for(const query of [`siteId=${b.id}&date=2026-11-04`,`siteId=${a.id}&siteId=${b.id}&date=2026-11-04`,`siteId=${a.id}`])assert.equal((await send('/api/equipment-check-count?'+query,'GET',null,cookie)).status,403);
   assert.equal((await send(`/api/documents?siteId=${a.id}`,'GET',null,cookie)).status,200);
   const shared=store.createDocument({...input,siteId:b.id,type:'basic',details:{shared:true}});store.db.prepare("UPDATE documents SET status='approved' WHERE id=?").run(shared.id);
   for(const query of ['', '&type=basic', '&q=가상']){const rows=await (await send(`/api/documents?siteId=${a.id}${query}`,'GET',null,cookie)).json();assert.ok(rows.every(row=>row.site_id===a.id));assert.ok(!rows.some(row=>row.id===shared.id));}
