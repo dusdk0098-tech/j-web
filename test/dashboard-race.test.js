@@ -15,13 +15,13 @@ function screen(initialPage='dashboard'){
   const start=source.indexOf('  const docsRequest=detailEpoch,docsSite=state.siteId,docsPage=state.page');
   const end=source.indexOf("  if(state.page==='statistics'){",start);
   assert.ok(start>=0&&end>start);
-  const documents=deferred(),attendance=deferred(),requests=[],tables=[],content={innerHTML:'현재 화면'};
+  const documents=deferred(),attendance=deferred(),requests=[],weeklyRequests=[],tables=[],content={innerHTML:'현재 화면'};
   const context={state:{page:initialPage,siteId:1,admin:{id:1}},detailEpoch:1,content,
-    loadDocuments:current=>{context.documentsCurrent=current;return documents.promise;},api:(path,options,current)=>{requests.push(path);context.attendanceCurrent=current;return attendance.promise;},
+    loadDocuments:current=>{context.documentsCurrent=current;return documents.promise;},api:(path,options,current)=>{if(path.startsWith('/api/weekly-activity?')){weeklyRequests.push(path);return context.weekPromise||Promise.resolve(context.weekRows||[]);}requests.push(path);context.attendanceCurrent=current;return attendance.promise;},
     today:()=> '2026-11-04',documentTable:rows=>{tables.push(rows);return '';},editDocument:()=>{},wireDocLinks:()=>{},esc:s=>String(s).replaceAll('<','&lt;').replaceAll('>','&gt;'),
     $:()=>({}),Number};
   const render=runInNewContext('(async()=>{'+source.slice(start,end)+'})',context);
-  return {context,documents,attendance,requests,tables,content,render};
+  return {context,documents,attendance,requests,weeklyRequests,tables,content,render};
 }
 test('이전 현장의 문서나 출역 응답은 다른 화면을 덮지 않는다',async()=>{
   for(const stage of ['documents','attendance']){
@@ -64,6 +64,27 @@ test('출역 당시 구분이 없는 기록을 현재 정보로 추정하지 않
   ui.attendance.resolve([{present:true,category:'현재 구분',occupation:'현재 직종',attendance_category:null,attendance_occupation:null}]);await run;
   assert.match(ui.content.innerHTML,/기록 없음: 1명/);assert.doesNotMatch(ui.content.innerHTML,/현재 구분|현재 직종/);
 });
+test('최근 7일 출역은 연도 경계와 빈 날짜를 표시한다',async()=>{
+  const store=new Store(':memory:');
+  try{
+    const site=store.createSite({name:'가상 현장'}),worker=store.createWorker({siteId:site.id,name:'가상 근로자',category:'직영',company:'가상 업체',occupation:'가상 직종'});
+    store.setAttendance({siteId:site.id,workerId:worker.id,date:'2025-12-31',present:true});
+    const ui=screen();ui.context.today=()=> '2026-01-03';ui.context.weekRows=store.weeklyActivity(site.id,'2025-12-28');
+    const run=ui.render();ui.documents.resolve([]);await new Promise(setImmediate);ui.attendance.resolve([]);await run;
+    assert.deepEqual(ui.weeklyRequests,['/api/weekly-activity?siteId=1&start=2025-12-28']);
+    assert.match(ui.content.innerHTML,/2025-12-31: 1명/);assert.match(ui.content.innerHTML,/2026-01-03: 0명/);
+    assert.equal((ui.content.innerHTML.match(/202[56]-\d\d-\d\d: \d+명/g)||[]).length,7);
+  }finally{store.close();}
+});
+test('최근 출역 조회가 실패해도 오늘 현황과 오류 안내를 표시한다',async()=>{
+  const ui=screen();ui.context.weekPromise=Promise.reject(new Error('가상 조회 실패'));const run=ui.render();ui.documents.resolve([]);await new Promise(setImmediate);ui.attendance.resolve([{present:true}]);await run;
+  assert.match(ui.content.innerHTML,/오늘 출역/);assert.match(ui.content.innerHTML,/>1명</);assert.match(ui.content.innerHTML,/최근 출역을 조회하지 못했습니다/);
+});
+test('최근 출역 응답을 기다리는 중 현장이 바뀌면 이전 화면을 그리지 않는다',async()=>{
+  const ui=screen(),week=deferred();ui.context.weekPromise=week.promise;const run=ui.render();
+  ui.documents.resolve([]);await new Promise(setImmediate);ui.attendance.resolve([{present:true}]);ui.context.state.siteId=2;week.resolve([{date:'2026-11-04',attendance:1}]);await run;
+  assert.equal(ui.content.innerHTML,'현재 화면');
+});
 test('오늘 안전 활동은 선택 현장의 당일 안전 문서와 각 상태를 표시한다',async()=>{
   const ui=screen(),run=ui.render();
   ui.documents.resolve([{id:1,site_id:1,type:'tbm',date:'2026-11-04',status:'pending'},{id:2,site_id:1,type:'notice',date:'2026-11-04',status:'approved'},{id:3,site_id:1,type:'tbm',date:'2026-11-03',status:'draft'},{id:4,site_id:2,type:'tbm',date:'2026-11-04',status:'approved'},{id:5,site_id:1,type:'office',date:'2026-11-04',status:'approved'}]);
@@ -82,8 +103,9 @@ test('실제 서버의 문서 목록과 출역 응답으로 당일 활동을 그
     const doc=await (await call('/api/documents','POST',{siteId:site.id,type:'notice',title:'가상 공지',date:'2026-11-04'},cookie)).json();
     await call('/api/documents','POST',{siteId:site.id,type:'notice',title:'이전 가상 공지',date:'2026-11-03'},cookie);
     const docs=await (await call(`/api/documents?siteId=${site.id}`,'GET',undefined,cookie)).json(),rows=await (await call(`/api/attendance?siteId=${site.id}&date=2026-11-04`,'GET',undefined,cookie)).json();
-    const ui=screen(),run=ui.render();ui.documents.resolve(docs);await new Promise(setImmediate);ui.attendance.resolve(rows);await run;
+    const ui=screen();ui.context.weekRows=await (await call(`/api/weekly-activity?siteId=${site.id}&start=2026-10-29`,'GET',undefined,cookie)).json();const run=ui.render();ui.documents.resolve(docs);await new Promise(setImmediate);ui.attendance.resolve(rows);await run;
     assert.deepEqual(Array.from(ui.tables[0],d=>[d.id,d.status]),[[doc.id,'draft']]);
+    assert.match(ui.content.innerHTML,/2026-10-29: 0명/);assert.match(ui.content.innerHTML,/2026-11-04: 0명/);
   }finally{if(child.exitCode===null){const exited=once(child,'exit');child.kill();await exited;}rmSync(dir,{recursive:true,force:true});}
 });
 test('저장 후 출입자 정보가 바뀌어도 대시보드는 출역 당시 분류를 표시한다',async()=>{
