@@ -1774,7 +1774,7 @@ export class Store {
   }
   workerLoginIdentity(siteId,name,birthDigits){
     if(typeof name!=='string'||!name.trim()||name.length>200||/[\x00-\x1f\x7f]/.test(name)||typeof birthDigits!=='string'||!/^\d{6}$/.test(birthDigits))return null;
-    const rows=this.db.prepare("SELECT a.worker_id,a.login_id FROM workers w JOIN worker_accounts a ON a.worker_id=w.id AND a.site_id=w.site_id JOIN join_acknowledgements j ON j.worker_id=w.id WHERE w.site_id=? AND w.name=? AND replace(substr(json_extract(j.profile,'$.birthDate'),3),'-','')=? LIMIT 2").all(Number(siteId),name.trim(),birthDigits);return rows.length===1?rows[0]:null;
+    const rows=this.db.prepare("SELECT a.worker_id,a.login_id,w.name FROM workers w JOIN worker_accounts a ON a.worker_id=w.id AND a.site_id=w.site_id JOIN join_acknowledgements j ON j.worker_id=w.id WHERE w.site_id=? AND w.name=? AND replace(substr(json_extract(j.profile,'$.birthDate'),3),'-','')=? LIMIT 2").all(Number(siteId),name.trim(),birthDigits);return rows.length===1?rows[0]:null;
   }
   authenticateWorker(token,loginId,password,siteKey=null,withCredential=false) {
     const site=siteKey?this.siteFromAccess(siteKey):this.invitation(token);

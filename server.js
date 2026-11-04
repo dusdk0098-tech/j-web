@@ -409,7 +409,7 @@ const server = http.createServer((req,res)=>passwordRequests.run(true,()=>adminR
       const input=await body(req),now=Date.now(),site=input.siteKey?store.siteFromAccess(input.siteKey):store.invitation(input.token),identityMode=input.method==='identity',identity=identityMode&&site?store.workerLoginIdentity(site.id,input.name,input.birthDigits):null,loginId=identityMode?identity?.login_id:input.loginId,accountKey=site&&typeof loginId==='string'&&/^[a-zA-Z0-9_]{3,40}$/.test(loginId)?`${site.id}:${loginId}`:identityMode&&site?`${site.id}:identity:${createHash('sha256').update(JSON.stringify([input.name,input.birthDigits])).digest('hex')}`:'invalid';
       const peer=workerPeer(req);if(peer===null)return json(res,503,{error:'로그인 중계 설정을 확인해 주세요.'});
       const release=workerLoginFailures.reserve(peer,accountKey,now);let authenticated;
-      try{authenticated=await store.authenticateWorkerAsync(input.token,loginId,input.password,input.siteKey,true,peer);}finally{release();}
+      try{authenticated=identityMode?(identity?{worker:{id:identity.worker_id,name:identity.name,site_id:site.id,site_name:site.name},credentialHash:null}:null):await store.authenticateWorkerAsync(input.token,loginId,input.password,input.siteKey,true,peer);}finally{release();}
       if(!authenticated){workerLoginFailures.record(peer,accountKey,Date.now());return json(res,401,{error:'가입 링크 또는 로그인 정보를 확인해 주세요.'});}
       const {worker,credentialHash}=authenticated;
       const current=new Date(),date=new Date(current.getTime()-current.getTimezoneOffset()*60000).toISOString().slice(0,10);
