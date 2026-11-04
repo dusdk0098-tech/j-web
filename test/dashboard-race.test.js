@@ -1,7 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {readFileSync} from 'node:fs';
+import {readFileSync,mkdtempSync,rmSync} from 'node:fs';
 import {runInNewContext} from 'node:vm';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import {createServer} from 'node:net';
+import {spawn} from 'node:child_process';
+import {once} from 'node:events';
 import {Store} from '../store.js';
 
 function deferred(){let resolve,reject;const promise=new Promise((r,j)=>{resolve=r;reject=j;});return {promise,resolve,reject};}
@@ -64,6 +69,22 @@ test('오늘 안전 활동은 선택 현장의 당일 안전 문서와 각 상�
   ui.documents.resolve([{id:1,site_id:1,type:'tbm',date:'2026-11-04',status:'pending'},{id:2,site_id:1,type:'notice',date:'2026-11-04',status:'approved'},{id:3,site_id:1,type:'tbm',date:'2026-11-03',status:'draft'},{id:4,site_id:2,type:'tbm',date:'2026-11-04',status:'approved'},{id:5,site_id:1,type:'office',date:'2026-11-04',status:'approved'}]);
   await new Promise(setImmediate);ui.attendance.resolve([]);await run;
   assert.match(ui.content.innerHTML,/오늘 안전 활동/);assert.deepEqual(Array.from(ui.tables[0],d=>[d.id,d.status]),[[1,'pending'],[2,'approved']]);
+});
+test('실제 서버의 문서 목록과 출역 응답으로 당일 활동을 그린다',{timeout:30000},async()=>{
+  const dir=mkdtempSync(join(tmpdir(),'jweb-dashboard-')),reservation=createServer();
+  await new Promise(resolve=>reservation.listen(0,'127.0.0.1',resolve));const port=reservation.address().port;await new Promise(resolve=>reservation.close(resolve));
+  const child=spawn(process.execPath,['server.js'],{cwd:process.cwd(),env:{...process.env,PORT:String(port),JWEB_DATA_DIR:dir,JWEB_ADMIN_PASSWORD:'virtual-admin-password'},stdio:['ignore','pipe','pipe']});
+  try{
+    await Promise.race([once(child.stdout,'data'),once(child,'exit').then(()=>{throw Error('시험 서버 종료');})]);
+    const base=`http://127.0.0.1:${port}`,call=(path,method='GET',body,cookie)=>fetch(base+path,{method,headers:{...(body?{'content-type':'application/json'}:{}),...(cookie?{cookie}:{})},...(body?{body:JSON.stringify(body)}:{})});
+    const login=await call('/api/login','POST',{password:'virtual-admin-password'}),cookie=login.headers.get('set-cookie').split(';')[0];
+    const site=await (await call('/api/sites','POST',{name:'가상 현장'},cookie)).json();
+    const doc=await (await call('/api/documents','POST',{siteId:site.id,type:'notice',title:'가상 공지',date:'2026-11-04'},cookie)).json();
+    await call('/api/documents','POST',{siteId:site.id,type:'notice',title:'이전 가상 공지',date:'2026-11-03'},cookie);
+    const docs=await (await call(`/api/documents?siteId=${site.id}`,'GET',undefined,cookie)).json(),rows=await (await call(`/api/attendance?siteId=${site.id}&date=2026-11-04`,'GET',undefined,cookie)).json();
+    const ui=screen(),run=ui.render();ui.documents.resolve(docs);await new Promise(setImmediate);ui.attendance.resolve(rows);await run;
+    assert.deepEqual(Array.from(ui.tables[0],d=>[d.id,d.status]),[[doc.id,'draft']]);
+  }finally{if(child.exitCode===null){const exited=once(child,'exit');child.kill();await exited;}rmSync(dir,{recursive:true,force:true});}
 });
 test('저장 후 출입자 정보가 바뀌어도 대시보드는 출역 당시 분류를 표시한다',async()=>{
   const store=new Store(':memory:');
