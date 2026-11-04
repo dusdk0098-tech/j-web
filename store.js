@@ -267,6 +267,8 @@ export class Store {
       if(!this.db.prepare('PRAGMA table_info(site_articles)').all().some(c=>c.name==='version'))this.db.exec("ALTER TABLE site_articles ADD COLUMN version TEXT NOT NULL DEFAULT ''");
       if(!this.db.prepare('PRAGMA table_info(site_article_files)').all().some(c=>c.name==='version'))this.db.exec("ALTER TABLE site_article_files ADD COLUMN version TEXT NOT NULL DEFAULT ''");
       this.db.exec("UPDATE site_article_files SET version=lower(hex(randomblob(16))) WHERE version=''");
+      if(!this.db.prepare('PRAGMA table_info(worker_files)').all().some(c=>c.name==='version'))this.db.exec("ALTER TABLE worker_files ADD COLUMN version TEXT NOT NULL DEFAULT ''");
+      this.db.exec("UPDATE worker_files SET version=lower(hex(randomblob(16))) WHERE version=''");
       if(!this.db.prepare('PRAGMA table_info(workers)').all().some(c=>c.name==='licenses_json'))this.db.exec("ALTER TABLE workers ADD COLUMN licenses_json TEXT NOT NULL DEFAULT '[]'");
       if(!this.db.prepare('PRAGMA table_info(workers)').all().some(c=>c.name==='memo'))this.db.exec("ALTER TABLE workers ADD COLUMN memo TEXT NOT NULL DEFAULT ''");
       if(!this.db.prepare('PRAGMA table_info(workers)').all().some(c=>c.name==='registration_type')){
@@ -685,17 +687,17 @@ export class Store {
   }
   workerFiles(siteId,workerId){
     siteId=Number(siteId);workerId=Number(workerId);if(!this.db.prepare('SELECT 1 FROM workers WHERE id=? AND site_id=?').get(workerId,siteId))throw new Error('선택한 현장의 출입자를 확인해 주세요.');
-    return this.db.prepare('SELECT id,category,name,length(data) AS size,created_at FROM worker_files WHERE worker_id=? ORDER BY id').all(workerId);
+    return this.db.prepare('SELECT id,category,name,length(data) AS size,created_at,version FROM worker_files WHERE worker_id=? ORDER BY id').all(workerId);
   }
   addWorkerFile(siteId,workerId,category,name,data){
     const files=this.workerFiles(siteId,workerId);if(files.length>=20)throw new Error('첨부파일은 출입자당 20개까지 가능합니다.');
     if(!['agreement','identity','training','license','bank','other'].includes(category))throw new Error('서류 종류를 확인해 주세요.');
     if(typeof name!=='string'||!name.trim()||name.length>200||/[\\\\/\x00-\x1f\x7f]/.test(name))throw new Error('파일 이름을 확인해 주세요.');
     if(!(data instanceof Uint8Array)||!data.length||data.length>2*1024*1024)throw new Error('파일은 1바이트 이상 2MB 이하여야 합니다.');
-    return this.db.prepare('INSERT INTO worker_files(worker_id,category,name,data) VALUES(?,?,?,?)').run(Number(workerId),category,name,data).lastInsertRowid;
+    return this.db.prepare('INSERT INTO worker_files(worker_id,category,name,data,version) VALUES(?,?,?,?,lower(hex(randomblob(16))))').run(Number(workerId),category,name,data).lastInsertRowid;
   }
   workerFile(siteId,workerId,fileId){return this.db.prepare('SELECT f.* FROM worker_files f JOIN workers w ON w.id=f.worker_id WHERE w.site_id=? AND w.id=? AND f.id=?').get(Number(siteId),Number(workerId),Number(fileId))||null;}
-  deleteWorkerFile(siteId,workerId,fileId){if(!this.workerFile(siteId,workerId,fileId))throw new Error('첨부파일을 찾을 수 없습니다.');this.db.prepare('DELETE FROM worker_files WHERE id=?').run(Number(fileId));}
+  deleteWorkerFile(siteId,workerId,fileId,expectedVersion=null,authorize=()=>{}){this.db.exec('BEGIN IMMEDIATE');try{authorize();const file=this.workerFile(siteId,workerId,fileId);if(!file)throw new Error('첨부파일을 찾을 수 없습니다.');if(expectedVersion!==null&&file.version!==expectedVersion)throw Object.assign(new Error('첨부파일이 변경되었습니다. 다시 조회해 주세요.'),{sessionStatus:409});this.db.prepare('DELETE FROM worker_files WHERE id=?').run(Number(fileId));this.db.exec('COMMIT');}catch(error){this.db.exec('ROLLBACK');throw error;}}
   addPpeIssue(input){
     const siteId=Number(input.siteId),workerId=Number(input.workerId),{date,item,quantity}=ppeValues(input);
     const worker=this.db.prepare('SELECT name,category,company,occupation FROM workers WHERE id=? AND site_id=?').get(workerId,siteId);if(!worker)throw new Error('선택한 현장의 출입자를 확인해 주세요.');
