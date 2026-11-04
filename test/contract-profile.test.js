@@ -24,7 +24,7 @@ test('미리보기는 저장하지 않은 입력과 변경된 출력 정보를 �
   const target={ownerDocument:document,set innerHTML(value){this.html=value;},querySelector(selector){return {'[data-profile]':form,'[data-status]':status,'[data-preview]':preview}[selector];}};
   const api=async()=>structuredClone(current);await mountContractProfile({target,siteId:1,api,active:()=>true,sessionCheck:async()=>{}});
   form.elements.employer.value='미저장';await preview.onclick();assert.match(status.textContent,/저장/);assert.equal(dialog,undefined);
-  form.elements.employer.value=input.employer;await preview.onclick();assert.match(dialog.html,/&lt;가상&gt;/);await buttons['[data-print]'].onclick();assert.equal(prints,1);
+  form.elements.employer.value=input.employer;await preview.onclick();assert.match(dialog.html,/&lt;가상&gt;/);for(const label of ['가상 근로자 주소','연락처','근로 시작일','종료일','업무 및 직종','휴게','근무일','주휴일','가상 일급 또는 월급','수당','임금 지급일','지급방법','연차휴가','사회보험','작성일','사업주 시험 서명','근로자 시험 서명'])assert.ok(dialog.html.includes(label),label);await buttons['[data-print]'].onclick();assert.equal(prints,1);
   current.profile.version='v2';await buttons['[data-print]'].onclick();assert.equal(prints,1);assert.match(buttons['[data-print-status]'].textContent,/변경/);
 });
 test('현장별 출력 정보는 변경 충돌과 권한 실패 시 보존된다',()=>{
