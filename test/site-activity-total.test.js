@@ -36,7 +36,7 @@ test('윤년 월 경계의 전체 표시 기간과 복수 현장 합계는 월 �
     assert.match(view.target.html,/전체 표시 기간: 2024-01-28 ~ 2024-03-02/);
     assert.match(view.target.html,/<th>전체 표시 기간 합계<\/th>/);
     assert.match(view.target.html,/선택한 월 밖 날짜도 포함/);
-    assert.match(view.target.html,/선택 월만의 합계나 원본의 등급·비교점수가 아닙니다/);
+    assert.match(view.target.html,/선택 월만의 합계가 아닙니다/);assert.match(view.target.html,/점수와 등급은 산출하지 않습니다/);
     assert.match(view.content.innerHTML,/문서는 모든 상태를 집계/);
     totalRow(view.target.html,'가상 &lt;A&gt;',5,5);totalRow(view.target.html,'가상 B',1,2);
     assert.doesNotMatch(view.target.html,/<A>/);
