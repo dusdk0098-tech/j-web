@@ -539,7 +539,7 @@ export class Store {
   workerArticles(workerId) {
     return this.db.prepare('SELECT a.id,a.category,a.title,a.body,a.rich_body,a.created_at FROM site_articles a JOIN workers w ON w.site_id=a.site_id WHERE w.id=? AND a.visible=1 ORDER BY a.id DESC').all(Number(workerId)).map(a=>({...siteArticleRow(a),files:this.articleFiles(a.id)}));
   }
-  articleFiles(articleId){return this.db.prepare('SELECT id,name,data,version FROM site_article_files WHERE article_id=? ORDER BY id').all(Number(articleId)).map(({data,...file})=>({...file,size:data.length,imageType:costImageType(data)}));}
+  articleFiles(articleId){return this.db.prepare('SELECT id,name,length(data) AS size,substr(data,1,20) AS header,version FROM site_article_files WHERE article_id=? ORDER BY id').all(Number(articleId)).map(({header,...file})=>({...file,imageType:costImageType(header,file.size)}));}
   addArticleFile(siteId,articleId,name,data,onAuthorize=()=>{},expectedVersion=undefined){
     if(typeof name!=='string'||!name.trim()||name.length>200||/[\\/\x00-\x1f\x7f]/.test(name))throw new Error('파일 이름을 확인해 주세요.');
     if(!(data instanceof Uint8Array)||!data.length||data.length>2*1024*1024)throw new Error('파일은 1바이트 이상 2MB 이하여야 합니다.');

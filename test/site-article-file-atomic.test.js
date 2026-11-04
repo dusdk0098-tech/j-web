@@ -7,6 +7,15 @@ import {pathToFileURL} from 'node:url';
 import {spawn} from 'node:child_process';
 import {once} from 'node:events';
 import {Store} from '../store.js';
+import {costImageType} from '../cost-image.js';
+
+test('자료실 목록은 파일 앞부분과 전체 길이로 WebP를 판별한다',()=>{
+  const store=new Store(':memory:');try{
+    const site=store.createSite({name:'가상 현장'}),article=store.saveSiteArticle({siteId:site.id,category:'기타',title:'가상 문서',body:'가상 내용',visible:true}),webp=Buffer.alloc(1024*1024);webp.write('RIFF',0,'ascii');webp.writeUInt32LE(webp.length-8,4);webp.write('WEBPVP8X',8,'ascii');
+    const id=store.addArticleFile(site.id,article.id,'가상.webp',webp),file=store.siteArticles(site.id)[0].files[0];assert.equal(file.id,id);assert.equal(file.size,webp.length);assert.equal(file.imageType,'image/webp');assert.equal('data' in file,false);assert.equal('header' in file,false);
+    assert.equal(costImageType(webp.subarray(0,20),webp.length),'image/webp');assert.equal(costImageType(webp.subarray(0,20),webp.length+1),null);assert.equal(costImageType(webp.subarray(0,19),webp.length),null);
+  }finally{store.close();}
+});
 
 test('첨부 저장과 삭제는 잠금 안에서 권한을 확인하고 실패 시 보존한다',()=>{
   const store=new Store(':memory:');try{
