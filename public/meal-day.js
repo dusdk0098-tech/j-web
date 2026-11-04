@@ -1,5 +1,5 @@
 const kinds={breakfast:'조식',lunch:'중식',dinner:'석식',snack:'간식'};
-const snapshot=row=>row?[row.id,row.restaurant_id,row.restaurant_name,row.price,row.tax_snapshot]:null;
+const snapshot=row=>row?row.revision:null;
 
 export function mountDailyMeals(root,{siteId,date,workers,restaurants,checks,api,esc,active,onSaved,onError}){
   root.innerHTML=`<h2>날짜별 식대 일괄 체크</h2><p>선택한 출역자만 변경합니다. 기존 기록은 식당과 단가를 유지합니다.</p>${!workers.length?'<p>출역자가 없습니다.</p>':`<label>새 기록의 식당 <select data-restaurant>${restaurants.map(r=>`<option value="${r.id}">${esc(r.name)}</option>`).join('')}</select></label><div class="table-wrap"><table><thead><tr><th>출역자</th>${Object.entries(kinds).map(([kind,label])=>`<th><label>${label} 전체 <input type="checkbox" data-all="${kind}"></label></th>`).join('')}</tr></thead><tbody>${workers.map(w=>`<tr><th>${esc(w.name)} · ${esc(w.company)}</th>${Object.entries(kinds).map(([kind,label])=>{const row=checks.find(c=>c.worker_id===w.id&&c.kind===kind);return `<td><label><input type="checkbox" data-worker="${w.id}" data-kind="${kind}" ${row?'checked':''} aria-label="${esc(w.name)} ${label}">${row?` ${esc(row.restaurant_name)} ${row.price}원`:''}</label></td>`;}).join('')}</tr>`).join('')}</tbody></table></div><button type="button" data-save>변경 저장</button>`}`;

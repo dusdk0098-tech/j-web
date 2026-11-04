@@ -301,6 +301,10 @@ export class Store {
     if (!this.db.prepare('PRAGMA table_info(work_stops)').all().some(c=>c.name==='response')) this.db.exec('ALTER TABLE work_stops ADD COLUMN response TEXT');
     if (!this.db.prepare('PRAGMA table_info(work_stops)').all().some(c=>c.name==='version')) this.db.exec("ALTER TABLE work_stops ADD COLUMN version TEXT NOT NULL DEFAULT ''");
     this.db.exec("UPDATE work_stops SET version=lower(hex(randomblob(16))) WHERE version=''");
+    if(!this.db.prepare('PRAGMA table_info(meal_checks)').all().some(c=>c.name==='revision'))this.db.exec("ALTER TABLE meal_checks ADD COLUMN revision TEXT NOT NULL DEFAULT ''");
+    this.db.exec(`UPDATE meal_checks SET revision=lower(hex(randomblob(16))) WHERE revision='';
+      CREATE TRIGGER IF NOT EXISTS meal_check_created_revision AFTER INSERT ON meal_checks BEGIN UPDATE meal_checks SET revision=lower(hex(randomblob(16))) WHERE id=NEW.id; END;
+      CREATE TRIGGER IF NOT EXISTS meal_check_changed_revision AFTER UPDATE ON meal_checks WHEN NEW.revision=OLD.revision BEGIN UPDATE meal_checks SET revision=lower(hex(randomblob(16))) WHERE id=NEW.id; END;`);
     if (!this.db.prepare('PRAGMA table_info(worker_self_checks)').all().some(c=>c.name==='signature')) this.db.exec('ALTER TABLE worker_self_checks ADD COLUMN signature BLOB');
     if (!this.db.prepare('PRAGMA table_info(worker_self_checks)').all().some(c=>c.name==='answers')) this.db.exec('ALTER TABLE worker_self_checks ADD COLUMN answers TEXT');
     if (!this.db.prepare('PRAGMA table_info(attachments)').all().some(c=>c.name==='category')) this.db.exec("ALTER TABLE attachments ADD COLUMN category TEXT NOT NULL DEFAULT 'general'");
@@ -831,13 +835,13 @@ export class Store {
     const siteId=Number(input.siteId),date=dateValue(input.date),changes=input.changes;
     if(!Number.isSafeInteger(siteId)||siteId<1||!Array.isArray(changes)||!changes.length||changes.length>500)throw new Error('식대 변경 항목을 확인해 주세요.');
     const seen=new Set(),kinds=['breakfast','lunch','dinner','snack'];
-    for(const c of changes){const key=`${c?.workerId}:${c?.kind}`;if(!Number.isSafeInteger(c?.workerId)||c.workerId<1||!kinds.includes(c.kind)||typeof c.selected!=='boolean'||!(c.expected===null||Array.isArray(c.expected)&&c.expected.length===5)||seen.has(key))throw new Error('식대 변경 항목을 확인해 주세요.');seen.add(key);}
+    for(const c of changes){const key=`${c?.workerId}:${c?.kind}`;if(!Number.isSafeInteger(c?.workerId)||c.workerId<1||!kinds.includes(c.kind)||typeof c.selected!=='boolean'||!(c.expected===null||typeof c.expected==='string'&&/^[0-9a-f]{32}$/.test(c.expected))||seen.has(key))throw new Error('식대 변경 항목을 확인해 주세요.');seen.add(key);}
     this.db.exec('BEGIN IMMEDIATE');try{
-      authorize();const find=this.db.prepare('SELECT id,restaurant_id,restaurant_name,price,tax_snapshot FROM meal_checks WHERE site_id=? AND worker_id=? AND date=? AND kind=?'),present=this.db.prepare('SELECT 1 FROM workers w JOIN attendance a ON a.worker_id=w.id WHERE w.site_id=? AND w.id=? AND a.date=? AND a.present=1');
+      authorize();const find=this.db.prepare('SELECT id,revision FROM meal_checks WHERE site_id=? AND worker_id=? AND date=? AND kind=?'),present=this.db.prepare('SELECT 1 FROM workers w JOIN attendance a ON a.worker_id=w.id WHERE w.site_id=? AND w.id=? AND a.date=? AND a.present=1');
       let restaurant=null;if(changes.some(c=>c.selected&&c.expected===null)){restaurant=this.db.prepare('SELECT * FROM restaurants WHERE site_id=? AND id=?').get(siteId,Number(input.restaurantId));if(!restaurant)throw new Error('선택한 현장의 식당을 확인해 주세요.');}
-      for(const c of changes){if(!present.get(siteId,c.workerId,date))throw new Error('선택한 날짜의 출역자를 확인해 주세요.');const row=find.get(siteId,c.workerId,date,c.kind),snapshot=row?[row.id,row.restaurant_id,row.restaurant_name,row.price,row.tax_snapshot]:null;if(JSON.stringify(snapshot)!==JSON.stringify(c.expected))throw Object.assign(new Error('식대 기록이 변경되었습니다. 다시 조회해 주세요.'),{sessionStatus:409});}
-      const insert=this.db.prepare('INSERT INTO meal_checks(site_id,worker_id,date,kind,restaurant_id,restaurant_name,price,tax_snapshot) VALUES(?,?,?,?,?,?,?,?)'),remove=this.db.prepare('DELETE FROM meal_checks WHERE site_id=? AND id=?');let changed=0;
-      for(const c of changes){if(c.selected&&c.expected===null){insert.run(siteId,c.workerId,date,c.kind,restaurant.id,restaurant.name,c.kind==='snack'?restaurant.snack_price:restaurant.meal_price,c.kind==='snack'?null:restaurant.tax);changed++;}else if(!c.selected&&c.expected!==null){remove.run(siteId,c.expected[0]);changed++;}}
+      for(const c of changes){if(!present.get(siteId,c.workerId,date))throw new Error('선택한 날짜의 출역자를 확인해 주세요.');const row=find.get(siteId,c.workerId,date,c.kind);if((row?.revision??null)!==c.expected)throw Object.assign(new Error('식대 기록이 변경되었습니다. 다시 조회해 주세요.'),{sessionStatus:409});}
+      const insert=this.db.prepare('INSERT INTO meal_checks(site_id,worker_id,date,kind,restaurant_id,restaurant_name,price,tax_snapshot) VALUES(?,?,?,?,?,?,?,?)'),remove=this.db.prepare('DELETE FROM meal_checks WHERE site_id=? AND worker_id=? AND date=? AND kind=? AND revision=?');let changed=0;
+      for(const c of changes){if(c.selected&&c.expected===null){insert.run(siteId,c.workerId,date,c.kind,restaurant.id,restaurant.name,c.kind==='snack'?restaurant.snack_price:restaurant.meal_price,c.kind==='snack'?null:restaurant.tax);changed++;}else if(!c.selected&&c.expected!==null){remove.run(siteId,c.workerId,date,c.kind,c.expected);changed++;}}
       authorize();this.db.exec('COMMIT');return changed;
     }catch(error){this.db.exec('ROLLBACK');throw error;}
   }
