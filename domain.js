@@ -139,6 +139,15 @@ export function recordInput(input) {
       details.safetyMeasures=value.safetyMeasures.map(row=>{if(!row||typeof row!=='object'||Array.isArray(row))throw new Error('안전대책 항목을 확인해 주세요.');const item={};for(const key of ['accidentType','hazard','measure']){if(typeof row[key]!=='string'||row[key].length>2000)throw new Error('안전대책 항목을 확인해 주세요.');item[key]=row[key].trim();}if(!item.accidentType&&!item.hazard&&!item.measure)throw new Error('안전대책 내용을 입력해 주세요.');if(row.equipmentId!==undefined){if(!Number.isSafeInteger(row.equipmentId)||row.equipmentId<1)throw new Error('안전대책 장비를 확인해 주세요.');item.equipmentId=row.equipmentId;}return item;});
     }
     if(value.workPlaceId!==undefined){if(!Number.isSafeInteger(value.workPlaceId) || value.workPlaceId<0)throw new Error('작업장소를 확인해 주세요.');details.workPlaceId=value.workPlaceId;}
+    if(value.additionalCharts!==undefined){
+      if(!Array.isArray(value.additionalCharts)||value.additionalCharts.length>50)throw new Error('추가 작업계획도를 확인해 주세요.');
+      details.additionalCharts=value.additionalCharts.map(row=>{
+        if(!row||typeof row!=='object'||Array.isArray(row)||!Number.isSafeInteger(row.workPlaceId)||row.workPlaceId<1)throw new Error('계획도의 작업장소를 확인해 주세요.');
+        const item={workPlaceId:row.workPlaceId};
+        for(const key of ['routeDescription','workSequence','managementPoints']){if(typeof row[key]!=='string'||row[key].length>4000)throw new Error('추가 작업계획도 내용을 확인해 주세요.');item[key]=row[key].trim();}
+        return item;
+      });
+    }
     if(value.riggingIds!==undefined){if(!Array.isArray(value.riggingIds)||value.riggingIds.length>100||value.riggingIds.some(id=>!Number.isSafeInteger(id)||id<1)||new Set(value.riggingIds).size!==value.riggingIds.length)throw new Error('장구 선택을 확인해 주세요.');details.riggingIds=value.riggingIds;}
     if(value.heavyLoads!==undefined){
       if(!Array.isArray(value.heavyLoads)||value.heavyLoads.length>100)throw new Error('중량물 항목을 확인해 주세요.');
