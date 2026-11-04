@@ -3,14 +3,20 @@ import assert from 'node:assert/strict';
 import {Store} from '../store.js';
 import {ContractProfile} from '../contract-profile.js';
 import {mountContractProfile} from '../public/contract-profile-view.js';
-import {mkdtempSync,rmSync} from 'node:fs';
+import {mkdtempSync,readFileSync,rmSync} from 'node:fs';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
 import {createServer} from 'node:net';
 import {spawn} from 'node:child_process';
 import {once} from 'node:events';
+import {runInNewContext} from 'node:vm';
 
 const input={employer:'가상 업체',address:'가상 주소',phone:'000-0000',representative:'가상 대표',workplace:'가상 현장',version:''};
+test('계약 설정 조회 지연과 실패가 일괄 출력 목록을 막지 않는다',async()=>{
+  const source=readFileSync(new URL('../public/app.js',import.meta.url),'utf8'),start=source.indexOf("    const contract=document.createElement('section')"),end=source.indexOf('\n',source.indexOf('    mountSiteBatchResults(',start));assert.ok(start>=0&&end>start);
+  let reject,mounted=0,live=true;const section={isConnected:true},state={siteId:1},context={document:{createElement:()=>section},content:{append(){}},state,current:()=>live,api(){},adminSession:Promise.resolve({}),mountContractProfile:()=>new Promise((_,fail)=>{reject=fail;}),mountSiteBatchResults:()=>{mounted++;},$:()=>({}),sites:[],esc:String,showError(){},showBatchPreview(){}};
+  await runInNewContext('(async()=>{'+source.slice(start,end)+'})()',context);assert.equal(mounted,1);reject(Error('조회 오류'));await new Promise(resolve=>setImmediate(resolve));assert.match(section.textContent,/조회 오류/);
+});
 test('미리보기는 저장하지 않은 입력과 변경된 출력 정보를 차단한다',async()=>{
   let current={site:{id:1,name:'<가상>'},profile:{...input,version:'v1'}},prints=0,dialog;
   const form={elements:Object.fromEntries(Object.entries(input).filter(([key])=>key!=='version').map(([key,value])=>[key,{value}]))},status={},preview={},buttons={};
