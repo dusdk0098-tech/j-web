@@ -16,6 +16,10 @@ function setup() {
   return {show:context.showDialog,send:()=>form.onsubmit({preventDefault(){},currentTarget:form}),close:()=>elements['#dialog-close'].onclick(),cancel:()=>elements['#dialog-cancel'].onclick(),submit,error,dialog,flashes,renders:()=>renders};
 }
 
+test('성공 결과의 안내를 표시한다',async()=>{const ui=setup();ui.show('시험 창','',async()=>({loginId:'virtual_user'}),()=>true,result=>'시험 아이디: '+result.loginId);await ui.send();assert.deepEqual(ui.flashes,['시험 아이디: virtual_user']);});
+
+test('저장 중 현장 범위가 바뀌면 반환된 계정 정보를 표시하지 않는다',async()=>{const ui=setup(),pending=deferred();let current=true;ui.show('시험 창','',()=>pending.promise,()=>current,result=>'시험 아이디: '+result.loginId);const save=ui.send();current=false;pending.resolve({loginId:'virtual_user'});await save;assert.deepEqual(ui.flashes,[]);assert.equal(ui.renders(),0);});
+
 function deferred() {
   let resolve,reject;
   const promise=new Promise((yes,no)=>{resolve=yes;reject=no;});

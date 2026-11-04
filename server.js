@@ -1050,7 +1050,7 @@ const server = http.createServer((req,res)=>passwordRequests.run(true,()=>adminR
     const workerAccountBlock=url.pathname.match(/^\/api\/workers\/(\d+)\/access-block$/);
     if(workerAccountBlock){if(req.method==='GET')return json(res,200,store.workerAccountBlock(url.searchParams.get('siteId'),workerAccountBlock[1]));if(req.method==='PUT'){const input=await body(req),result=store.setWorkerAccountBlock(input.siteId,workerAccountBlock[1],input,()=>checkRequestSession(req));return json(res,200,result);}}
     const workerPassword=url.pathname.match(/^\/api\/workers\/(\d+)\/password$/);
-    if(workerPassword&&req.method==='PUT'){const input=await body(req),siteId=Number(input.siteId),id=Number(workerPassword[1]),loginId=await store.resetWorkerPasswordAsync(siteId,id,input.password,()=>checkRequestSession(req),workerPeer(req));for(const [key,session] of workerSessions)if(session.worker.id===id&&session.worker.site_id===siteId)Map.prototype.delete.call(workerSessions,key);workerAccountFailures.delete(`${siteId}:${loginId}`);return json(res,200,{ok:true});}
+    if(workerPassword&&req.method==='PUT'){const input=await body(req),siteId=Number(input.siteId),id=Number(workerPassword[1]),loginId=await store.resetWorkerPasswordAsync(siteId,id,input.password,()=>checkRequestSession(req),workerPeer(req));for(const [key,session] of workerSessions)if(session.worker.id===id&&session.worker.site_id===siteId)Map.prototype.delete.call(workerSessions,key);workerAccountFailures.delete(`${siteId}:${loginId}`);return json(res,200,{ok:true,loginId});}
     const workerFiles=url.pathname.match(/^\/api\/workers\/(\d+)\/files(?:\/(\d+))?$/);
     if(workerFiles){
       const [,workerId,fileId]=workerFiles,siteId=url.searchParams.get('siteId');
