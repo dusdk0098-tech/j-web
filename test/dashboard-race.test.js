@@ -12,7 +12,7 @@ function screen(initialPage='dashboard'){
   const documents=deferred(),attendance=deferred(),requests=[],content={innerHTML:'현재 화면'};
   const context={state:{page:initialPage,siteId:1,admin:{id:1}},detailEpoch:1,content,
     loadDocuments:current=>{context.documentsCurrent=current;return documents.promise;},api:(path,options,current)=>{requests.push(path);context.attendanceCurrent=current;return attendance.promise;},
-    today:()=> '2026-11-04',documentTable:()=>'',editDocument:()=>{},wireDocLinks:()=>{},
+    today:()=> '2026-11-04',documentTable:()=>'',editDocument:()=>{},wireDocLinks:()=>{},esc:s=>String(s).replaceAll('<','&lt;').replaceAll('>','&gt;'),
     $:()=>({}),Number};
   const render=runInNewContext('(async()=>{'+source.slice(start,end)+'})',context);
   return {context,documents,attendance,requests,content,render};
@@ -49,6 +49,12 @@ test('지난 조회의 오류는 무시하고 현재 조회의 오류는 전달�
 });
 test('현재 현장의 대시보드는 출역 결과를 표시한다',async()=>{
   const ui=screen(),run=ui.render();ui.documents.resolve([]);await new Promise(setImmediate);
-  ui.attendance.resolve([{present:true},{present:false}]);await run;
-  assert.match(ui.content.innerHTML,/오늘 출역/);assert.match(ui.content.innerHTML,/>1명</);
+  ui.attendance.resolve([{present:true,attendance_category:'직영',attendance_occupation:'가상 <배관>'},{present:true,attendance_category:'직영',attendance_occupation:'가상 <배관>'},{present:false,attendance_category:'미출역',attendance_occupation:'미출역'}]);await run;
+  assert.match(ui.content.innerHTML,/오늘 출역/);assert.match(ui.content.innerHTML,/>2명</);
+  assert.match(ui.content.innerHTML,/직영: 2명/);assert.match(ui.content.innerHTML,/가상 &lt;배관&gt;: 2명/);assert.doesNotMatch(ui.content.innerHTML,/미출역/);
+});
+test('출역 당시 구분이 없는 기록을 현재 정보로 추정하지 않는다',async()=>{
+  const ui=screen(),run=ui.render();ui.documents.resolve([]);await new Promise(setImmediate);
+  ui.attendance.resolve([{present:true,category:'현재 구분',occupation:'현재 직종',attendance_category:null,attendance_occupation:null}]);await run;
+  assert.match(ui.content.innerHTML,/기록 없음: 1명/);assert.doesNotMatch(ui.content.innerHTML,/현재 구분|현재 직종/);
 });
