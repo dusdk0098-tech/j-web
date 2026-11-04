@@ -37,7 +37,7 @@ test('현장별 일괄 출력은 날짜와 현장을 분리하고 신고 본문�
     assert.deepEqual(reports.map(row=>[row.site.id,row.rows[0].id]),[[a.id,second],[a.id,first],[b.id,foreign]]);
     assert.ok(!reports.some(row=>row.rows[0].id===old));assert.ok(paths.includes(`/api/sites/${a.id}/hazard-reports?from=${date}&to=${date}`));
     const report=reports.find(row=>row.rows[0].id===first),html=dailyBatchReport(report,esc);
-    for(const text of ['&lt;가상 신고 A&gt;','&lt;가상 위험 내용&gt;','&lt;가상 조치&gt;','&lt;가상 답변&gt;','조치 완료'])assert.ok(html.includes(text),text);
+    for(const text of ['&lt;가상 신고 A&gt;','&lt;가상 위험 내용&gt;','&lt;가상 조치&gt;','&lt;가상 답변&gt;','조치 완료','시험 처리 이력','접수 → 조치 완료'])assert.ok(html.includes(text),text);
     assert.doesNotMatch(html,/<가상/);assert.match(html,new RegExp(`/api/sites/${a.id}/hazard-reports/${first}/photo\\?preview=1`));
     assert.doesNotMatch(dailyBatchReport(reports.find(row=>row.rows[0].id===second),esc),/<img/);
     assert.deepEqual(await reloadDailyBatchRows(report,api),report.rows);
@@ -72,6 +72,13 @@ test('선택 신고와 문서·신고 함께 인쇄는 선택 자료와 인쇄 �
   await mixed[0].onclick();await mixed[1].onclick();assert.deepEqual(Array.from(calls[2][0]),[7]);assert.deepEqual(Array.from(calls[2][1],report=>report.id),[2]);assert.equal(calls[1][5],false);assert.equal(calls[2][5],true);
   selected.reports=[];selected.documents=[];await mixed[1].onclick();assert.equal(calls.length,3);assert.match(errors.at(-1),/선택/);
   selected.reports=[{dataset:{hazardDocument:'999'}}];await reportPrint.onclick();assert.equal(calls.length,3);assert.match(errors.at(-1),/다시 확인/);
+});
+
+test('신고 목록의 각 인쇄 버튼은 해당 신고와 현장을 확인 경로로 전달한다',async()=>{
+  const source=readFileSync(new URL('../public/app.js',import.meta.url),'utf8'),start=source.indexOf("    content.querySelectorAll('article').forEach((article,index)=>{const button=document.createElement('button');button.type='button';button.textContent='인쇄'");
+  assert.ok(start>=0);const end=source.indexOf('\n',start),articles=[{append(button){this.button=button;}},{append(button){this.button=button;}}],reports=[{id:1},{id:2}],calls=[];
+  runInNewContext(source.slice(start,end),{content:{querySelectorAll:()=>articles},document:{createElement:()=>({})},reports,siteId:7,showBatchPreview:async(...args)=>calls.push(args),showError:error=>{throw error;}});
+  await articles[1].button.onclick();assert.deepEqual(Array.from(calls[0][1],report=>report.id),[2]);assert.equal(calls[0][2],7);assert.equal(calls[0][5],true);
 });
 
 test('실제 임시 서버에서 신고 출력은 현장·날짜·권한과 사진을 구분한다',{timeout:30000},async()=>{
