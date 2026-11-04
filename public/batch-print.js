@@ -65,7 +65,7 @@ export async function siteReportsForDay(sites,date,api) {
 export function dailyBatchReport(report,esc) {
   const table=(heads,rows)=>rows.length?`<div class="table-wrap"><table><thead><tr>${heads.map(head=>`<th>${esc(head)}</th>`).join('')}</tr></thead><tbody>${rows.map(row=>`<tr>${row.map(value=>`<td>${esc(value)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`:'<p>해당 날짜의 기록이 없습니다.</p>';
   let body;
-  if(report.kind==='joined-worker')body=`<p>가입기록 일자: ${esc(report.date)} (한국시간 UTC+09:00). 등록일과 다르며 현재 인적사항·보호구·첨부 이름을 표시합니다. 첨부 원문은 포함하지 않습니다.</p>`+workerPreviewArticles(report.preview.workers);
+  if(report.kind==='joined-worker')body=`<p>가입기록 일자: ${esc(report.date)} (한국시간 UTC+09:00). 등록일과 다르며 현재 인적사항·보호구·이미지 첨부를 표시합니다. PDF 등 다른 첨부는 별도로 확인하세요.</p>`+workerPreviewArticles(report.preview.workers,{includeImages:true});
   else if(report.kind==='hazard-report')body=hazardReportBody(report.rows[0],report.site.id,esc);
   else if(report.kind==='ppe-summary')body=table(['보호구','수량'],report.rows.map(row=>[row.item,row.quantity]));
   else if(report.kind==='ppe-detail')body=table(['이름','구분','소속','직종','보호구','수량','시험 수령 확인'],report.rows.map(row=>[row.worker.name,row.worker.category,row.worker.company,row.worker.occupation,row.item,row.quantity,row.receipt_at?'시험 확인 기록 있음':'미확인']));
