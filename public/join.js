@@ -69,7 +69,7 @@ form.onsubmit=async event=>{
     let changed=true;try{changed=JSON.stringify(payload())!==sent;}catch{}
     flow.note(ticket,'');adoptSiteAddress(data.siteKey);
     if(changed){message.textContent='전송한 등록이 완료되었습니다. 전송 후 수정한 내용은 저장되지 않았습니다. 전송 당시 이름과 생년월일로 로그인하세요. 중복 정보가 있으면 아이디와 암호를 사용하세요.';return;}
-    form.reset();updateWorkerRequirements();if(form.elements.useCredentials)updateJoinCredentials();joinPad.clear();if(flow.registered())message.textContent='시험 등록이 완료되었습니다. 등록한 이름과 생년월일로 로그인하세요. 중복 정보가 있으면 아이디와 암호를 사용하세요.';
+    form.reset();form.elements.category.dispatchEvent(new Event('change'));if(form.elements.useCredentials)updateJoinCredentials();joinPad.clear();if(flow.registered())message.textContent='시험 등록이 완료되었습니다. 등록한 이름과 생년월일로 로그인하세요. 중복 정보가 있으면 아이디와 암호를 사용하세요.';
   }catch(error){if(flow.active(ticket)){flow.note(ticket,'');message.textContent=error.message;}else flow.note(ticket,'이전에 보낸 가입 요청: '+error.message);}finally{submit.disabled=false;}
 };
 async function showWorker(worker,reportContext){

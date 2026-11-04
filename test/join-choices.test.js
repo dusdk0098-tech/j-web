@@ -20,6 +20,16 @@ class Node {
   focus(){this.focused=true;}
   get options(){return this.children;}
 }
+test('협력업체 가입은 등록 소속 선택이 필요하고 기존 초대는 영향을 받지 않는다',()=>{
+  const company=new Node('input'),occupation=new Node('input'),category={value:'협력업체 근로자',addEventListener(_event,callback){this.change=callback;}};
+  company.label=new Node('label');occupation.label=new Node('label');const form=new Node('form');form.ownerDocument={createElement:tag=>new Node(tag)};form.elements={company,occupation,category};
+  const update=mountJoinChoices(form),select=company.label.beforeNode.children[0];
+  update({companyOptions:[]});assert.equal(select.required,true);assert.equal(company.readOnly,true);assert.equal(company.label.beforeNode.hidden,false);
+  update({companyOptions:[{id:2,name:'가상 업체'}]});select.value='2';select.onchange();assert.equal(company.value,'가상 업체');
+  category.value='직영';category.change();assert.equal(select.required,false);assert.equal(company.readOnly,false);
+  category.value='협력업체 관리자';category.change();assert.equal(select.required,true);
+  update({companyOptions:[{id:2,name:'가상 업체'}],existingWorker:true});assert.equal(select.required,false);assert.equal(company.readOnly,false);assert.equal(company.label.beforeNode.hidden,true);
+});
 test('가입 선택은 동명 업체의 번호를 구분하고 직접 입력 시 연결을 해제한다',()=>{
   const company=new Node('input'),occupation=new Node('input');company.label=new Node('label');occupation.label=new Node('label');const form=new Node('form');form.ownerDocument={createElement:tag=>new Node(tag)};form.elements={company,occupation};
   mountJoinChoices(form)({companies:['같은 업체'],companyOptions:[{id:1,name:'같은 업체',trade:'A'},{id:2,name:'같은 업체',trade:'B'}]});

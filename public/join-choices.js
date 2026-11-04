@@ -11,7 +11,17 @@ export function mountJoinChoices(form){
     controls[key]={input,label,select,list};
   }
   const quick=doc.createElement('details'),summary=doc.createElement('summary'),buttons=doc.createElement('div');summary.textContent='직종 빠른 선택';quick.append(summary,buttons);controls.occupation.input.closest('label').after(quick);
+  let existingWorker=false;
+  function updateCompanyRequirement(){
+    const {input,label,select,registered}=controls.company,required=!existingWorker&&Array.isArray(registered)&&['협력업체 근로자','협력업체 관리자'].includes(form.elements.category?.value);
+    select.required=required;input.readOnly=required;
+    if(select.options.length)select.options[0].textContent=required?'소속을 선택하세요':'직접 입력';
+    if(required)label.hidden=false;
+    else label.hidden=existingWorker||!(registered?.length);
+  }
+  form.elements.category?.addEventListener('change',updateCompanyRequirement);
   return data=>{
+    existingWorker=data.existingWorker===true;
     for(const [key,names] of [['company',data.companies||[]],['occupation',data.occupations||[]]]){
       const {input,label,select,list}=controls[key],unique=[...new Set(names.filter(name=>typeof name==='string'&&name.length))],choices=key==='occupation'?[...new Set([...unique,...commonOccupations])]:unique;
       const option=(value,text)=>{const item=doc.createElement('option');item.value=value;item.textContent=text;return item;};
@@ -22,5 +32,6 @@ export function mountJoinChoices(form){
       list.replaceChildren(...choices.map(name=>option(name,name)));select.replaceChildren(option('','직접 입력'),...choices.map(name=>option(name,name)));select.value=choices.includes(input.value)?input.value:'';label.hidden=data.existingWorker===true||!choices.length;select.disabled=data.existingWorker===true;
       if(key==='occupation'){const quickNames=unique.length?unique:commonQuickOccupations;quick.hidden=data.existingWorker===true;buttons.replaceChildren(...quickNames.map(name=>{const button=doc.createElement('button');button.type='button';button.textContent=name;button.onclick=()=>{input.value=name;select.value=name;input.focus();};return button;}));}
     }
+    if(Array.isArray(controls.company.registered))updateCompanyRequirement();
   };
 }
