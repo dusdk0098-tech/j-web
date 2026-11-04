@@ -743,6 +743,8 @@ const server = http.createServer((req,res)=>passwordRequests.run(true,()=>adminR
       const preview=url.searchParams.get('preview')==='1';res.writeHead(200,{'Content-Type':preview?'image/png':'application/octet-stream',...(preview?{}:{'Content-Disposition':'attachment; filename="test-signature.png"'}),'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(signature);
     }
     const siteStops=url.pathname.match(/^\/api\/sites\/(\d+)\/work-stops$/);
+    const hazardCount=url.pathname.match(/^\/api\/sites\/(\d+)\/hazard-report-count$/);
+    if(hazardCount&&req.method==='GET')return json(res,200,{count:store.hazardReportCount(hazardCount[1],url.searchParams.get('to'))});
     const hazardReply=url.pathname.match(/^\/api\/sites\/(\d+)\/hazard-reports\/(\d+)\/replies(?:\/(\d+))?$/);
     if(hazardReply){const [,siteId,reportId,replyId]=hazardReply;if(!replyId&&req.method==='POST'){const input=await body(req);checkRequestSession(req);return json(res,201,{id:store.addHazardReply(siteId,reportId,input)});}if(replyId&&req.method==='DELETE'){checkRequestSession(req);store.deleteHazardReply(siteId,reportId,replyId);return json(res,200,{ok:true});}}
     const hazardStatus=url.pathname.match(/^\/api\/sites\/(\d+)\/hazard-reports\/(\d+)$/);
