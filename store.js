@@ -2357,7 +2357,7 @@ export class Store {
     const doc=this.document(id);
     if (!doc || !['draft','rejected'].includes(doc.status)) throw new Error('임시저장 또는 반려된 문서에만 첨부할 수 있습니다.');
     if (typeof name!=='string' || !name.trim() || name.length>200 || /[\\/\x00-\x1f\x7f]/.test(name)) throw new Error('파일 이름을 확인해 주세요.');
-    if (!(data instanceof Uint8Array) || data.length===0 || data.length>2*1024*1024) throw new Error('파일은 1바이트 이상 2MB 이하여야 합니다.');
+    const limit=category==='plan_diagram'&&doc.type==='work_plan'?10:2;if (!(data instanceof Uint8Array) || data.length===0 || data.length>limit*1024*1024) throw new Error(`파일은 1바이트 이상 ${limit}MB 이하여야 합니다.`);
     if(!['general','plan_diagram','morning_hazard_photo','education_photo','education_material','inspection_photo','patrol_photo'].includes(category)||['education_photo','education_material'].includes(category)&&doc.type!=='education'||category==='inspection_photo'&&doc.type!=='inspection'||category==='patrol_photo'&&doc.type!=='patrol'||category==='plan_diagram'&&doc.type!=='work_plan'||category==='morning_hazard_photo'&&(doc.type!=='checklist'||JSON.parse(doc.details).kind!=='morning'))throw new Error('첨부 구분을 확인해 주세요.');
     if(['plan_diagram','morning_hazard_photo','education_photo','inspection_photo','patrol_photo'].includes(category)){const bytes=Buffer.from(data);if(!bytes.subarray(0,8).equals(Buffer.from('89504e470d0a1a0a','hex'))&&!bytes.subarray(0,3).equals(Buffer.from('ffd8ff','hex')))throw new Error('시험 이미지는 PNG 또는 JPEG를 선택해 주세요.');}
     if (this.attachments(id).length>=20) throw new Error('첨부파일은 문서당 20개까지 가능합니다.');

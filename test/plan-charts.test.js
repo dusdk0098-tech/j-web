@@ -26,6 +26,7 @@ test('계획도별 이미지는 같은 문서에서 선택하고 복사할 때 �
     const site=s.createSite({name:'가상 현장'}),area={terrain:'평지',ground:'보통',drainage:'양호',reinforcement:'',obstacles:'',protection:''},place=s.createWorkPlace({siteId:site.id,name:'가상 장소',work:area,route:area});
     const chart={workPlaceId:place.id,routeDescription:'경로',workSequence:'순서',managementPoints:'관리',imageIds:[]},input={siteId:site.id,type:'work_plan',title:'계획',date:'2026-11-04',details:{additionalCharts:[chart]}},doc=s.createDocument(input),other=s.createDocument({...input,title:'다른 계획'});
     const image=s.addAttachment(doc.id,'가상.png',Buffer.from('89504e470d0a1a0a00','hex'),'plan_diagram'),foreign=s.addAttachment(other.id,'다른.png',Buffer.from('89504e470d0a1a0a00','hex'),'plan_diagram'),general=s.addAttachment(doc.id,'일반.txt',Buffer.from('abc'),'general');
+    const large=Buffer.alloc(10*1024*1024);Buffer.from('89504e470d0a1a0a','hex').copy(large);assert.ok(s.addAttachment(doc.id,'큰 이미지.png',large,'plan_diagram'));assert.throws(()=>s.addAttachment(doc.id,'초과.png',Buffer.concat([large,Buffer.alloc(1)]),'plan_diagram'),/10MB/);assert.throws(()=>s.addAttachment(doc.id,'일반.bin',large,'general'),/2MB/);
     const withImages=ids=>({...input,details:{additionalCharts:[{...chart,imageIds:ids}]}});
     for(const bad of [[foreign],[general],[image,image],Array(6).fill(image)])assert.throws(()=>s.updateDocument(doc.id,withImages(bad)),/이미지/);
     s.updateDocument(doc.id,withImages([image]));assert.throws(()=>s.deleteAttachment(image),/연결을 해제/);
