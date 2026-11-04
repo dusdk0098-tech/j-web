@@ -7,9 +7,9 @@ import {siteArticleImageLimits} from '../public/site-article-images.js';
 const source=readFileSync(new URL('../public/app.js',import.meta.url),'utf8'),from=source.indexOf("  if(state.page==='site-articles')"),to=source.indexOf("  if(state.page==='wages')",from);assert.ok(from>=0&&to>from);
 
 async function screen(){
-  const state={page:'site-articles',siteId:1,query:'',admin:{}},input={files:[{name:'가상.txt'}]},button={dataset:{file:'3'}},section={innerHTML:'',querySelector:()=>input,querySelectorAll:()=>[button]},node={isConnected:true,append(){}},content={innerHTML:'',querySelectorAll:selector=>selector==='article'?[node]:[]},elements={'#article-query':{closest:()=>({insertAdjacentHTML(){}})},'#article-add':{},'#article-search':{}},calls=[];let release,renders=0;
-  const context={state,detailEpoch:1,content,document:{createElement:()=>section},URLSearchParams,encodeURIComponent,siteArticleImageLimits,richBody:()=>'',api:async(path,options)=>{calls.push({path,options});if(!options?.method)return [{id:2,title:'가상',category:'기타',version:'article-v',files:[{id:3,name:'가상.txt',version:'file-v'}]}];return {};},fetch:(path,options)=>{calls.push({path,options});return new Promise(resolve=>{release=resolve;});},$:selector=>elements[selector],render:async()=>{renders++;},showError:error=>{throw error;}};
-  await runInNewContext(`${source.match(/^const esc = .*$/m)[0]}\n(async(renderEpoch)=>{${source.slice(from,to)}})(1)`,context);return {state,input,button,section,calls,release:()=>release({ok:true}),renders:()=>renders};
+  const state={page:'site-articles',siteId:1,query:'',admin:{}},input={files:[{name:'가상.txt'}]},button={dataset:{file:'3'}},remove={dataset:{articleDelete:'2'},isConnected:true},section={innerHTML:'',querySelector:()=>input,querySelectorAll:()=>[button]},node={isConnected:true,append(){}},content={innerHTML:'',querySelectorAll:selector=>selector==='article'?[node]:selector==='[data-article-delete]'?[remove]:[]},elements={'#article-query':{closest:()=>({insertAdjacentHTML(){}})},'#article-add':{},'#article-search':{}},calls=[];let release,renders=0;
+  const context={state,detailEpoch:1,content,document:{createElement:()=>section},URLSearchParams,encodeURIComponent,siteArticleImageLimits,confirm:()=>true,richBody:()=>'',api:async(path,options)=>{calls.push({path,options});if(!options?.method)return [{id:2,title:'가상',category:'기타',version:'article-v',files:[{id:3,name:'가상.txt',version:'file-v'}]}];return {};},fetch:(path,options)=>{calls.push({path,options});return new Promise(resolve=>{release=resolve;});},$:selector=>elements[selector],render:async()=>{renders++;},showError:error=>{throw error;}};
+  await runInNewContext(`${source.match(/^const esc = .*$/m)[0]}\n(async(renderEpoch)=>{${source.slice(from,to)}})(1)`,context);return {state,input,button,remove,section,calls,release:()=>release({ok:true}),renders:()=>renders};
 }
 
 test('파일 업로드는 게시글 버전을 보내고 화면 이동 후 중복 실행과 재표시를 막는다',async()=>{
@@ -19,4 +19,8 @@ test('파일 업로드는 게시글 버전을 보내고 화면 이동 후 중복
 
 test('첨부 삭제는 조회한 파일 버전을 전송한다',async()=>{
   const ui=await screen();assert.match(ui.section.innerHTML,/version=file-v/);await ui.button.onclick();assert.match(ui.calls.at(-1).path,/version=file-v/);assert.equal(ui.calls.at(-1).options.method,'DELETE');assert.equal(ui.renders(),1);
+});
+
+test('게시글 삭제는 확인 후 조회한 글과 첨부 식별자를 전송한다',async()=>{
+  const ui=await screen();await ui.remove.onclick();const call=ui.calls.at(-1);assert.equal(call.path,'/api/site-articles/2');assert.equal(call.options.method,'DELETE');assert.deepEqual(JSON.parse(call.options.body),{siteId:1,version:'article-v',files:[{id:3,version:'file-v'}]});assert.equal(ui.renders(),1);
 });

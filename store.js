@@ -561,6 +561,10 @@ export class Store {
       const result=siteArticleRow(this.db.prepare('SELECT id,category,title,body,rich_body,visible,version,created_at FROM site_articles WHERE id=? AND site_id=?').get(Number(id),siteId));this.db.exec('COMMIT');return result;
     }catch(error){this.db.exec('ROLLBACK');throw error;}
   }
+  deleteSiteArticle(siteId,id,version,files,onAuthorize=()=>{}){
+    if(typeof version!=='string'||!/^[a-f0-9]{32}$/.test(version)||!Array.isArray(files)||files.length>20||files.some(file=>!Number.isSafeInteger(file?.id)||file.id<1||typeof file.version!=='string'||!/^[a-f0-9]{32}$/.test(file.version)))throw new Error('삭제할 자료를 다시 확인해 주세요.');
+    this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();const article=this.db.prepare('SELECT version FROM site_articles WHERE id=? AND site_id=?').get(Number(id),Number(siteId));if(!article)throw new Error('선택한 현장의 게시글을 확인해 주세요.');const expected=files.map(({id,version})=>({id,version})).sort((a,b)=>a.id-b.id),current=this.articleFiles(id).map(({id,version})=>({id,version}));if(article.version!==version||JSON.stringify(current)!==JSON.stringify(expected))throw Object.assign(new Error('게시글이나 첨부파일이 변경되었습니다. 다시 조회해 주세요.'),{sessionStatus:409});this.db.prepare('DELETE FROM site_article_files WHERE article_id=?').run(Number(id));this.db.prepare('DELETE FROM site_articles WHERE id=? AND site_id=?').run(Number(id),Number(siteId));this.db.exec('COMMIT');}catch(error){this.db.exec('ROLLBACK');throw error;}
+  }
   createSite(input) {
     const name = text(input.name, '현장명');
     const id = this.db.prepare('INSERT INTO sites(name) VALUES (?)').run(name).lastInsertRowid;

@@ -937,6 +937,7 @@ const server = http.createServer((req,res)=>passwordRequests.run(true,()=>adminR
     }
     const siteArticle=url.pathname.match(/^\/api\/site-articles\/(\d+)$/);
     if(siteArticle&&req.method==='PUT')return json(res,200,store.saveSiteArticle(await body(req),siteArticle[1],()=>checkRequestSession(req)));
+    if(siteArticle&&req.method==='DELETE'){const input=await body(req);store.deleteSiteArticle(input.siteId,siteArticle[1],input.version,input.files,()=>checkRequestSession(req));return json(res,200,{ok:true});}
     if(url.pathname==='/api/wages/estimate'&&req.method==='GET')return json(res,200,store.wageEstimate(url.searchParams.get('siteId'),url.searchParams.get('workerId'),url.searchParams.get('month')));
     if(url.pathname==='/api/wages/summary'&&req.method==='GET')return json(res,200,store.wageSummary(url.searchParams.get('siteId'),url.searchParams.get('month'),Object.fromEntries(url.searchParams)));
     if(url.pathname==='/api/wages/daily'&&req.method==='GET')return json(res,200,store.wageDailyRecords(url.searchParams.get('siteId'),url.searchParams.get('month'),Object.fromEntries(url.searchParams)));

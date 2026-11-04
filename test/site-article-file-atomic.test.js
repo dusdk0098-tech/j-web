@@ -9,6 +9,15 @@ import {once} from 'node:events';
 import {Store} from '../store.js';
 import {costImageType} from '../cost-image.js';
 
+test('자료실 글 삭제는 권한·글과 첨부 변경을 확인하며 실패 시 전체를 보존한다',()=>{
+  const store=new Store(':memory:');try{
+    const site=store.createSite({name:'가상 현장'}),other=store.createSite({name:'다른 현장'}),article=store.saveSiteArticle({siteId:site.id,category:'기타',title:'가상 문서',body:'가상 내용',visible:true}),file=store.addArticleFile(site.id,article.id,'시험.txt',Buffer.from('시험')),snapshot=store.articleFiles(article.id).map(({id,version})=>({id,version})),deny=()=>{throw Error('세션 만료');};
+    assert.throws(()=>store.deleteSiteArticle(site.id,article.id,article.version,snapshot,deny),/세션 만료/);assert.throws(()=>store.deleteSiteArticle(other.id,article.id,article.version,snapshot),/현장/);assert.throws(()=>store.deleteSiteArticle(site.id,article.id,article.version,[]),error=>error.sessionStatus===409);assert.equal(store.articleFiles(article.id).length,1);
+    store.db.exec("CREATE TEMP TRIGGER fail_site_article_delete BEFORE DELETE ON site_articles BEGIN SELECT RAISE(ABORT,'가상 삭제 실패'); END");assert.throws(()=>store.deleteSiteArticle(site.id,article.id,article.version,snapshot),/가상 삭제 실패/);assert.equal(store.articleFile(site.id,article.id,file).name,'시험.txt');store.db.exec('DROP TRIGGER fail_site_article_delete');
+    store.deleteSiteArticle(site.id,article.id,article.version,snapshot);assert.equal(store.articleFile(site.id,article.id,file),null);assert.deepEqual(store.siteArticles(site.id),[]);
+  }finally{store.close();}
+});
+
 test('자료실 목록은 파일 앞부분과 전체 길이로 WebP를 판별한다',()=>{
   const store=new Store(':memory:');try{
     const site=store.createSite({name:'가상 현장'}),article=store.saveSiteArticle({siteId:site.id,category:'기타',title:'가상 문서',body:'가상 내용',visible:true}),webp=Buffer.alloc(1024*1024);webp.write('RIFF',0,'ascii');webp.writeUInt32LE(webp.length-8,4);webp.write('WEBPVP8X',8,'ascii');
