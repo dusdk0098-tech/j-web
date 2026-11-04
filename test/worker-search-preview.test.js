@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync,rmSync } from 'node:fs';
+import { mkdtempSync,rmSync,readFileSync } from 'node:fs';
+import {runInNewContext} from 'node:vm';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createServer } from 'node:net';
@@ -10,9 +11,15 @@ import { DatabaseSync } from 'node:sqlite';
 import { PNG } from 'pngjs';
 import { Store } from '../store.js';
 import { showWorkerPreview } from '../public/worker-preview.js';
+import { selectBatchDocuments } from '../public/batch-print.js';
 
 const person=siteId=>({siteId,name:'가상 근로자',category:'직영',company:'가상 업체',occupation:'가상 직종'});
 const picture=()=>{const png=new PNG({width:1,height:1});png.data[3]=255;return PNG.sync.write(png);};
+test('선택 출입자 출력 버튼은 각 사람의 확인값을 일괄 출력에 전달한다',async()=>{
+  const source=readFileSync(new URL('../public/app.js',import.meta.url),'utf8'),section=source.indexOf('data-worker-all>현재 쪽'),from=source.indexOf('const preview=async autoPrint=>',section),to=source.indexOf(';view.onclick=',from);assert.ok(section>=0&&from>section&&to>from);
+  const pageWorkers=[{id:1,name:'가상 한',version:'a'.repeat(64)},{id:2,name:'가상 둘',version:'b'.repeat(64)}],view={},print={},calls=[],context={pageWorkers,view,print,selectBatchDocuments,selected:()=>['1','2'],active:()=>true,siteId:4,siteSelect:{selectedOptions:[{textContent:'가상 현장'}]},today:()=> '2026-11-01',showBatchPreview:async(...args)=>calls.push(args),showError:error=>{throw error;}};
+  await runInNewContext(source.slice(from,to)+';preview(true)',context);assert.equal(calls.length,1);assert.equal(calls[0][5],true);assert.deepEqual(Array.from(calls[0][6],item=>[item.kind,item.worker.id,item.worker.version,item.site.id]),[['worker-profile',1,'a'.repeat(64),4],['worker-profile',2,'b'.repeat(64),4]]);assert.equal(view.disabled,false);assert.equal(print.disabled,false);
+});
 function fakeDocument(images=[]){const state={last:null,prints:0},doc={body:{append(dialog){state.last=dialog;}},querySelector(){return state.last?.open?state.last:null;},defaultView:{print(){state.prints++;}},createElement(){const controls={'[data-preview-close]':{},'[data-preview-print]':{},'[data-preview-status]':{}};return {controls,open:false,removed:false,setAttribute(){},querySelector(selector){return controls[selector];},querySelectorAll(){return images;},addEventListener(type,callback){if(type==='close')this.onclose=callback;},showModal(){this.open=true;},close(){this.open=false;this.onclose?.();},remove(){this.removed=true;}};}};return {doc,state};}
 
 test('기존 출입자 이관 후 가상 생년월일·전화번호·메모 검색과 선택 범위를 지킨다',()=>{

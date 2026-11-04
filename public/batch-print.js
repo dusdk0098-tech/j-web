@@ -18,6 +18,12 @@ export async function joinedBatchPreview(report,api) {
   return result;
 }
 
+export async function workerBatchPreview(report,api) {
+  const result=await api('/api/workers/preview',{method:'POST',body:JSON.stringify({siteId:report.site.id,items:[{id:report.worker.id,version:report.worker.version}]})});
+  if(result.workers?.length!==1||result.workers[0].id!==report.worker.id||result.workers[0].site_id!==report.site.id)throw Error('출입자 정보가 변경되었습니다. 다시 조회해 주세요.');
+  return result;
+}
+
 export function selectBatchDocuments(documents,selectedIds) {
   if(!Array.isArray(documents)||!Array.isArray(selectedIds)||selectedIds.length===0)throw new Error('미리 볼 문서를 선택해 주세요.');
   if(selectedIds.length>20)throw new Error('한 번에 문서 20개까지 선택할 수 있습니다.');
@@ -66,6 +72,7 @@ export function dailyBatchReport(report,esc) {
   const table=(heads,rows)=>rows.length?`<div class="table-wrap"><table><thead><tr>${heads.map(head=>`<th>${esc(head)}</th>`).join('')}</tr></thead><tbody>${rows.map(row=>`<tr>${row.map(value=>`<td>${esc(value)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`:'<p>해당 날짜의 기록이 없습니다.</p>';
   let body;
   if(report.kind==='joined-worker')body=`<p>가입기록 일자: ${esc(report.date)} (한국시간 UTC+09:00). 등록일과 다르며 현재 인적사항·보호구·이미지와 PDF 첨부를 표시합니다. 그 밖의 파일은 별도로 확인하세요.</p>`+workerPreviewArticles(report.preview.workers,{includeImages:true});
+  else if(report.kind==='worker-profile')body='<p>현재 인적사항·보호구와 이미지·PDF 첨부를 표시합니다. 그 밖의 파일은 별도로 확인하세요.</p>'+workerPreviewArticles(report.preview.workers,{includeImages:true});
   else if(report.kind==='hazard-report')body=hazardReportBody(report.rows[0],report.site.id,esc);
   else if(report.kind==='ppe-summary')body=table(['보호구','수량'],report.rows.map(row=>[row.item,row.quantity]));
   else if(report.kind==='ppe-detail')body=table(['이름','구분','소속','직종','보호구','수량','시험 수령 확인'],report.rows.map(row=>[row.worker.name,row.worker.category,row.worker.company,row.worker.occupation,row.item,row.quantity,row.receipt_at?'시험 확인 기록 있음':'미확인']));
