@@ -23,8 +23,27 @@ test('월간 자료 번호가 재사용돼도 이전 확인값으로 새 파일�
 test('독립 증빙 입력은 종류와 설명을 업로드 요청에 전달한다',async()=>{
   const source=readFileSync(new URL('../public/app.js',import.meta.url),'utf8'),start=source.indexOf("    $('#cost-month-file-add').onclick="),end=source.indexOf('\n',start);assert.ok(start>=0&&end>start);
   const button={},file=new Blob(['가상 파일'],{type:'image/png'});file.name='가상.png';const controls={'#cost-month-file-add':button,'#cost-month-file-date':{value:'2026-10-10'},'#cost-month-file-note':{value:'비고'},'#cost-month-file-kind':{value:'evidence'},'#cost-month-file-description':{value:'가상 설명'},'#cost-month-file':{files:[file]}},sent=[];let rendered=0;
-  const context={$:key=>controls[key],state:{siteId:3,page:'safety-costs',costMonth:'2026-10'},siteId:3,month:'2026-10',today:()=>'',URLSearchParams,Blob,encodeURIComponent,fetch:async(url,options)=>{sent.push({url,options});return {ok:true,json:async()=>({id:1})};},render:async()=>rendered++,showError:error=>{throw error;}};
+  const context={$:key=>controls[key],state:{siteId:3,page:'safety-costs',costMonth:'2026-10'},siteId:3,month:'2026-10',epoch:1,detailEpoch:1,today:()=>'',URLSearchParams,Blob,encodeURIComponent,fetch:async(url,options)=>{sent.push({url,options});return {ok:true,json:async()=>({id:1})};},render:async()=>rendered++,flash(){},showError:error=>{throw error;}};
   runInNewContext(source.slice(start,end),context);await button.onclick({currentTarget:button});const params=new URL(sent[0].url,'http://example.test').searchParams;assert.equal(params.has('description'),false);assert.equal(params.has('note'),false);assert.equal(sent[0].options.headers['X-Cost-Metadata'],'json-prefix-v1');const [metadata,payload]=(await sent[0].options.body.text()).split('\n');assert.deepEqual(JSON.parse(metadata),{kind:'evidence',description:'가상 설명',note:'비고'});assert.equal(payload,'가상 파일');assert.equal(rendered,1);assert.equal(button.disabled,false);
+});
+
+function monthUploadHarness(){
+  const source=readFileSync(new URL('../public/app.js',import.meta.url),'utf8'),start=source.indexOf("    $('#cost-month-file-add').onclick="),end=source.indexOf('\n',start),file=new Blob(['가상 파일']);file.name='가상.png';
+  const button={disabled:false},controls={'#cost-month-file-add':button,'#cost-month-file-date':{value:'2026-10-10'},'#cost-month-file-note':{value:'가상 비고'},'#cost-month-file-kind':{value:'evidence'},'#cost-month-file-description':{value:'가상 설명'},'#cost-month-file':{files:[file]}},errors=[],messages=[];let resolve,requests=0,rendered=0;const pending=new Promise(done=>resolve=done);
+  const context={$:key=>controls[key],state:{siteId:3,page:'safety-costs',costMonth:'2026-10',admin:{id:1}},siteId:3,month:'2026-10',epoch:1,detailEpoch:1,today:()=>'',URLSearchParams,Blob,encodeURIComponent,fetch:()=>{requests++;return pending;},render:async()=>rendered++,flash:message=>messages.push(message),showError:error=>errors.push(error.message)};
+  runInNewContext(source.slice(start,end),context);return {button,controls,context,errors,messages,resolve,requests:()=>requests,rendered:()=>rendered};
+}
+
+test('월간 증빙 전송 중 입력과 중복 제출을 잠그고 실패하면 입력을 유지한다',async()=>{
+  const ui=monthUploadHarness(),first=ui.button.onclick({currentTarget:ui.button}),locked=Object.entries(ui.controls).filter(([key])=>key!=='#cost-month-file-add').every(([,control])=>control.disabled),second=ui.button.onclick({currentTarget:ui.button});ui.resolve({ok:false,json:async()=>({error:'가상 오류'})});await Promise.all([first,second]);assert.equal(locked,true);assert.equal(ui.requests(),1);assert.equal(ui.controls['#cost-month-file-description'].value,'가상 설명');assert.equal(ui.controls['#cost-month-file'].files[0].name,'가상.png');assert.equal(ui.button.disabled,false);assert.equal(ui.controls['#cost-month-file-description'].disabled,false);assert.deepEqual(ui.errors,['가상 오류']);assert.equal(ui.rendered(),0);
+});
+
+test('월간 증빙 전송 중 화면을 나갔다 돌아오면 이전 결과가 새 화면을 덮지 않는다',async()=>{
+  const ui=monthUploadHarness(),pending=ui.button.onclick({currentTarget:ui.button});ui.context.detailEpoch++;ui.resolve({ok:true,json:async()=>({id:1})});await pending;assert.equal(ui.rendered(),0);assert.deepEqual(ui.errors,[]);
+});
+
+test('월간 증빙 저장 후 목록 재조회가 실패해도 저장 성공을 안내한다',async()=>{
+  const ui=monthUploadHarness();ui.context.render=async()=>{ui.context.detailEpoch++;throw Error('가상 조회 실패');};const pending=ui.button.onclick({currentTarget:ui.button});ui.resolve({ok:true,json:async()=>({id:1})});await pending;assert.match(ui.messages[0],/저장했습니다/);assert.match(ui.messages[0],/다시 조회/);assert.deepEqual(ui.errors,[]);
 });
 
 test('독립 증빙은 사용내역 없이 저장하고 월간 문서와 결재 사본에 유형·설명을 보존한다',()=>{
