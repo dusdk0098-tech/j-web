@@ -1697,7 +1697,7 @@ export class Store {
   }
   siteRegistrationExpiry(siteId){return this.db.prepare('SELECT expires_at FROM site_registration WHERE site_id=? AND expires_at>?').get(Number(siteId),Date.now())?.expires_at||null;}
   siteRegistrationOpen(siteId){return this.siteRegistrationExpiry(siteId)!==null;}
-  joinAsync(token,input,peer){return withPasswordHashes(peer,[{password:input.password}],()=>this.join(token,input));}
+  joinAsync(token,input,peer){if(input.identityOnly===true){if(input.loginId!==undefined||input.password!==undefined)throw new Error('가입 방식을 확인해 주세요.');input={...input,loginId:'w_'+randomBytes(16).toString('hex'),password:randomBytes(32).toString('base64url')};}else if(input.identityOnly!==undefined&&input.identityOnly!==false)throw new Error('가입 방식을 확인해 주세요.');return withPasswordHashes(peer,[{password:input.password}],()=>this.join(token,input));}
   resetWorkerPasswordAsync(siteId,id,password,authorize,peer){return withPasswordHashes(peer,[{password}],()=>this.resetWorkerPassword(siteId,id,password,authorize));}
   createReviewerAsync(input,authorize,peer){return withPasswordHashes(peer,[{password:input.password}],()=>this.createReviewer(input,authorize));}
   updateReviewerAsync(siteId,id,input,authorize,peer){return input.password===undefined?this.updateReviewer(siteId,id,input,authorize):withPasswordHashes(peer,[{password:input.password}],()=>this.updateReviewer(siteId,id,input,authorize));}
@@ -1738,6 +1738,7 @@ export class Store {
       const current=input.siteKey?this.siteFromAccess(input.siteKey):this.invitation(token);
       if(!current||current.id!==invite.id)throw new Error('유효하지 않거나 만료된 가입 링크입니다.');
       if(input.siteKey&&!this.siteRegistrationOpen(current.id))throw new Error('이 현장의 시험 가입이 중지되었거나 만료되었습니다.');
+      if(input.identityOnly===true&&this.db.prepare("SELECT 1 FROM workers w JOIN worker_accounts a ON a.worker_id=w.id JOIN join_acknowledgements j ON j.worker_id=w.id WHERE w.site_id=? AND w.name=? AND replace(substr(json_extract(j.profile,'$.birthDate'),3),'-','')=? LIMIT 1").get(current.id,text(input.name,'이름'),profile.birthDate.slice(2).replaceAll('-','')))throw new Error('같은 이름과 생년월일의 가입 정보가 있습니다. 관리자에게 확인해 주세요.');
       let worker;
       if(current.worker_id){
         const row=this.db.prepare('SELECT * FROM workers WHERE id=? AND site_id=?').get(current.worker_id,current.id);
