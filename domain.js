@@ -144,6 +144,7 @@ export function recordInput(input) {
       details.additionalCharts=value.additionalCharts.map(row=>{
         if(!row||typeof row!=='object'||Array.isArray(row)||!Number.isSafeInteger(row.workPlaceId)||row.workPlaceId<1)throw new Error('계획도의 작업장소를 확인해 주세요.');
         const item={workPlaceId:row.workPlaceId};
+        if(row.imageIds!==undefined){if(!Array.isArray(row.imageIds)||row.imageIds.length>5||row.imageIds.some(id=>!Number.isSafeInteger(id)||id<1)||new Set(row.imageIds).size!==row.imageIds.length)throw new Error('계획도 이미지를 확인해 주세요.');item.imageIds=row.imageIds;}
         for(const key of ['routeDescription','workSequence','managementPoints']){if(typeof row[key]!=='string'||row[key].length>4000)throw new Error('추가 작업계획도 내용을 확인해 주세요.');item[key]=row[key].trim();}
         return item;
       });

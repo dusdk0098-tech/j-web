@@ -2106,6 +2106,7 @@ export class Store {
     if (!this.db.prepare('SELECT id FROM sites WHERE id=?').get(d.siteId)) throw new Error('현장을 선택해 주세요.');
     this.validateBasicCategory(d);
     this.validatePlanEquipment(d);
+    this.validatePlanImages(d);
     this.validateWorkPlanCompany(d);
     this.validateSafetyMeeting(d);
     this.validateInstructionRecipient(d);
@@ -2159,7 +2160,14 @@ export class Store {
     this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();const source=this.document(id);if(!source||source.type!=='office'||source.site_id!==Number(input.siteId))throw new Error('같은 현장의 업무 문서를 확인해 주세요.');const copy=this.createDocument({siteId:source.site_id,type:'office',title:input.title,date:input.date,body:source.body,details:JSON.parse(source.details)},adminAuthor());this.db.prepare('INSERT INTO office_document_copies(document_id,source_document_id) VALUES(?,?)').run(copy.id,source.id);this.db.exec('COMMIT');return this.document(copy.id);}catch(error){this.db.exec('ROLLBACK');throw error;}
   }
   copyWorkPlan(id,input,onAuthorize=()=>{},adminAuthor=()=>null){
-    this.db.exec('SAVEPOINT copy_work_plan');try{onAuthorize();const source=this.document(id);if(!source||source.type!=='work_plan'||source.site_id!==Number(input.siteId))throw new Error('같은 현장의 작업계획서를 확인해 주세요.');const copy=this.createDocument({siteId:source.site_id,type:'work_plan',title:input.title,date:input.date,body:source.body,details:JSON.parse(source.details)},adminAuthor());this.db.prepare('INSERT INTO work_plan_copies(document_id,source_document_id) VALUES(?,?)').run(copy.id,source.id);this.db.exec('RELEASE copy_work_plan');return this.document(copy.id);}catch(error){this.db.exec('ROLLBACK TO copy_work_plan');this.db.exec('RELEASE copy_work_plan');throw error;}
+    this.db.exec('SAVEPOINT copy_work_plan');try{
+      onAuthorize();const source=this.document(id);if(!source||source.type!=='work_plan'||source.site_id!==Number(input.siteId))throw new Error('같은 현장의 작업계획서를 확인해 주세요.');
+      const original=JSON.parse(source.details),charts=original.additionalCharts||[],details={...original,additionalCharts:charts.map(({imageIds,...chart})=>chart)};
+      const copy=this.createDocument({siteId:source.site_id,type:'work_plan',title:input.title,date:input.date,body:source.body,details},adminAuthor()),ids=new Map();
+      for(const chart of charts)for(const imageId of chart.imageIds||[]){if(ids.has(imageId))continue;const file=this.attachment(imageId);if(!file||file.document_id!==source.id||file.category!=='plan_diagram')throw new Error('계획도 이미지를 확인해 주세요.');const result=this.db.prepare('INSERT INTO attachments(document_id,name,data,category) VALUES(?,?,?,?)').run(copy.id,file.name,file.data,file.category);ids.set(imageId,Number(result.lastInsertRowid));}
+      const saved=JSON.parse(copy.details);saved.additionalCharts=(saved.additionalCharts||[]).map((chart,index)=>({...chart,...(charts[index].imageIds?{imageIds:charts[index].imageIds.map(id=>ids.get(id))}:{})}));
+      this.db.prepare('UPDATE documents SET details=? WHERE id=?').run(JSON.stringify(saved),copy.id);this.db.prepare('INSERT INTO work_plan_copies(document_id,source_document_id) VALUES(?,?)').run(copy.id,source.id);this.db.exec('RELEASE copy_work_plan');return this.document(copy.id);
+    }catch(error){this.db.exec('ROLLBACK TO copy_work_plan');this.db.exec('RELEASE copy_work_plan');throw error;}
   }
   permitRoles(documentId){
     const doc=this.document(documentId);if(!doc||doc.type!=='permit')throw new Error('시험 작업허가서를 확인해 주세요.');
@@ -2361,6 +2369,7 @@ export class Store {
     if(!attachment) throw new Error('첨부파일을 찾을 수 없습니다.');
     const doc=this.document(attachment.document_id);
     if(!doc || !['draft','rejected'].includes(doc.status)) throw new Error('임시저장 또는 반려된 문서의 첨부파일만 삭제할 수 있습니다.');
+    if(doc.type==='work_plan'&&(JSON.parse(doc.details).additionalCharts||[]).some(chart=>(chart.imageIds||[]).includes(Number(id))))throw new Error('계획도 이미지 연결을 해제한 뒤 삭제해 주세요.');
     this.db.prepare('DELETE FROM attachments WHERE id=?').run(Number(id));if(doc.type==='checklist')this.db.prepare('DELETE FROM checklist_signatures WHERE document_id=?').run(doc.id);if(doc.type==='tbm')this.db.prepare('DELETE FROM tbm_signatures WHERE document_id=?').run(doc.id);if(doc.type==='joint_inspection')this.db.prepare('DELETE FROM joint_inspection_signatures WHERE document_id=?').run(doc.id);if(['work_council','safety_meeting','office','inspection','safety_log','patrol','cost','work_plan'].includes(doc.type))this.db.prepare('DELETE FROM meeting_signatures WHERE document_id=?').run(doc.id);if(doc.type==='work_plan')this.db.prepare('DELETE FROM plan_signature_versions WHERE document_id=?').run(doc.id);this.db.exec('COMMIT');}catch(error){this.db.exec('ROLLBACK');throw error;}
   }
   updateDocument(id, input, onAuthorize=()=>{}) {
@@ -2383,6 +2392,7 @@ export class Store {
     if(current.type==='risk'&&JSON.parse(current.details).musculoskeletalItems?.length&&input.details?.musculoskeletalItems===undefined)throw new Error('근골격계 항목을 보존하려면 화면을 새로고침해 주세요.');
     if(current.type==='risk'&&JSON.parse(current.details).musculoskeletalItems?.some(row=>row.improvedGrade)&&(!Array.isArray(input.details?.musculoskeletalItems)||input.details.musculoskeletalItems.some(row=>row?.improvedGrade===undefined)))throw new Error('근골격계 개선 후 등급을 보존하려면 화면을 새로고침해 주세요.');
     if(current.type==='checklist'&&input.details?.kind==='wind'&&input.details.photoNote===undefined){const previous=JSON.parse(current.details);if(previous.kind==='wind'&&previous.photoNote!==undefined)input={...input,details:{...input.details,photoNote:previous.photoNote}};}
+    if(current.type==='work_plan'&&JSON.parse(current.details).additionalCharts?.some(row=>row.imageIds?.length)&&Array.isArray(input.details?.additionalCharts)&&input.details.additionalCharts.some(row=>row?.imageIds===undefined))throw new Error('계획도 이미지 연결을 보존하려면 화면을 새로고침해 주세요.');
     if(current.type==='work_plan'&&JSON.parse(current.details).workers?.some(row=>row.trainingOther||row.signalOther)&&(!Array.isArray(input.details?.workers)||input.details.workers.some(row=>row?.trainingOther===undefined||row?.signalOther===undefined)))throw new Error('작업자 기타 설명을 보존하려면 화면을 새로고침해 주세요.');
     if(current.type==='work_plan'&&JSON.parse(current.details).workers?.some(row=>row.trainingTypes?.length)&&(!Array.isArray(input.details?.workers)||input.details.workers.some(row=>row?.trainingTypes===undefined)))throw new Error('작업자 교육 구분을 보존하려면 화면을 새로고침해 주세요.');
     if(current.type==='work_plan'&&JSON.parse(current.details).workers?.some(row=>row.signalMethods?.length)&&(!Array.isArray(input.details?.workers)||input.details.workers.some(row=>row?.signalMethods===undefined)))throw new Error('작업자 신호 방법을 보존하려면 화면을 새로고침해 주세요.');
@@ -2403,6 +2413,7 @@ export class Store {
     this.validateBasicCategory(d);
     if(d.type==='checklist'&&d.details.kind!=='morning'&&this.db.prepare("SELECT 1 FROM attachments WHERE document_id=? AND category='morning_hazard_photo' LIMIT 1").get(Number(id)))throw new Error('점검 항목 사진을 삭제한 뒤 점검 종류를 변경해 주세요.');
     this.validatePlanEquipment(d);
+    this.validatePlanImages(d,id);
     this.validateWorkPlanCompany(d,current);
     this.validateSafetyMeeting(d,current);
     this.validateInstructionRecipient(d);
@@ -2454,6 +2465,11 @@ export class Store {
     if(!company)throw new Error('같은 현장의 협력사를 선택해 주세요.');
     const previous=current?JSON.parse(current.details):null;
     doc.details.company=previous?.companyId===doc.details.companyId&&previous.company?previous.company:company.name;
+  }
+  validatePlanImages(doc,documentId=0) {
+    if(doc.type!=='work_plan')return;
+    const find=this.db.prepare("SELECT 1 FROM attachments WHERE id=? AND document_id=? AND category='plan_diagram'");
+    for(const chart of doc.details.additionalCharts||[])for(const id of chart.imageIds||[])if(!find.get(id,Number(documentId)))throw new Error('같은 계획서의 이미지를 선택해 주세요.');
   }
   validatePlanEquipment(doc) {
     if(doc.type!=='work_plan')return;
