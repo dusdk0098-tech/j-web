@@ -827,6 +827,20 @@ export class Store {
     if(!restaurant)throw new Error('선택한 현장의 식당을 확인해 주세요.');
     this.db.prepare('INSERT INTO meal_checks(site_id,worker_id,date,kind,restaurant_id,restaurant_name,price,tax_snapshot) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(worker_id,date,kind) DO UPDATE SET restaurant_id=excluded.restaurant_id,restaurant_name=excluded.restaurant_name,price=excluded.price,tax_snapshot=excluded.tax_snapshot').run(siteId,workerId,date,kind,restaurant.id,restaurant.name,kind==='snack'?restaurant.snack_price:restaurant.meal_price,kind==='snack'?null:restaurant.tax);
   }
+  setDailyMealChecks(input,authorize=()=>{}) {
+    const siteId=Number(input.siteId),date=dateValue(input.date),changes=input.changes;
+    if(!Number.isSafeInteger(siteId)||siteId<1||!Array.isArray(changes)||!changes.length||changes.length>500)throw new Error('식대 변경 항목을 확인해 주세요.');
+    const seen=new Set(),kinds=['breakfast','lunch','dinner','snack'];
+    for(const c of changes){const key=`${c?.workerId}:${c?.kind}`;if(!Number.isSafeInteger(c?.workerId)||c.workerId<1||!kinds.includes(c.kind)||typeof c.selected!=='boolean'||!(c.expected===null||Array.isArray(c.expected)&&c.expected.length===5)||seen.has(key))throw new Error('식대 변경 항목을 확인해 주세요.');seen.add(key);}
+    this.db.exec('BEGIN IMMEDIATE');try{
+      authorize();const find=this.db.prepare('SELECT id,restaurant_id,restaurant_name,price,tax_snapshot FROM meal_checks WHERE site_id=? AND worker_id=? AND date=? AND kind=?'),present=this.db.prepare('SELECT 1 FROM workers w JOIN attendance a ON a.worker_id=w.id WHERE w.site_id=? AND w.id=? AND a.date=? AND a.present=1');
+      let restaurant=null;if(changes.some(c=>c.selected&&c.expected===null)){restaurant=this.db.prepare('SELECT * FROM restaurants WHERE site_id=? AND id=?').get(siteId,Number(input.restaurantId));if(!restaurant)throw new Error('선택한 현장의 식당을 확인해 주세요.');}
+      for(const c of changes){if(!present.get(siteId,c.workerId,date))throw new Error('선택한 날짜의 출역자를 확인해 주세요.');const row=find.get(siteId,c.workerId,date,c.kind),snapshot=row?[row.id,row.restaurant_id,row.restaurant_name,row.price,row.tax_snapshot]:null;if(JSON.stringify(snapshot)!==JSON.stringify(c.expected))throw Object.assign(new Error('식대 기록이 변경되었습니다. 다시 조회해 주세요.'),{sessionStatus:409});}
+      const insert=this.db.prepare('INSERT INTO meal_checks(site_id,worker_id,date,kind,restaurant_id,restaurant_name,price,tax_snapshot) VALUES(?,?,?,?,?,?,?,?)'),remove=this.db.prepare('DELETE FROM meal_checks WHERE site_id=? AND id=?');let changed=0;
+      for(const c of changes){if(c.selected&&c.expected===null){insert.run(siteId,c.workerId,date,c.kind,restaurant.id,restaurant.name,c.kind==='snack'?restaurant.snack_price:restaurant.meal_price,c.kind==='snack'?null:restaurant.tax);changed++;}else if(!c.selected&&c.expected!==null){remove.run(siteId,c.expected[0]);changed++;}}
+      authorize();this.db.exec('COMMIT');return changed;
+    }catch(error){this.db.exec('ROLLBACK');throw error;}
+  }
   deleteMealCheck(siteId,id) {
     if(!this.db.prepare('DELETE FROM meal_checks WHERE site_id=? AND id=?').run(Number(siteId),Number(id)).changes)throw new Error('선택한 현장의 식대 기록을 확인해 주세요.');
   }

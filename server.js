@@ -81,6 +81,7 @@ const mime = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; cha
 const assets = new Set(['/','/app.js','/office-template.js','/common-work-view.js','/rich-text.js','/rich-editor.js','/reviewer-office.js','/reviewer-profile.js','/employment-view.js','/employment-certificate','/employment-certificate.js','/messages-view.js','/board-view.js','/faq-pages.js','/schedule.js','/batch-print.js','/batch-images.js','/date-range.js','/daily-quantities.js','/risk-scale.js','/musculoskeletal.js','/worker-link.js','/worker-location.js','/remember-worker.js','/worker-documents.js','/plan-worker-other.js','/plan-charts.js','/rigging-standards.js','/equipment-filter.js','/worker-loads.js','/join-choices.js','/join-flow.js','/worker-fields.js','/site-qr.js','/tbm-sources.js','/training-groups.js','/site-statistics.js','/restaurant-price.js','/salary-summary.js','/attendance-meals.js','/joint-examples.js','/safety-log-sources.js','/style.css','/jweb-icon.svg','/jweb-icon-192.png','/jweb-icon-512.png','/worker-guide.html','/offline-forms.html','/join','/join.js','/login','/login.js','/review','/review.js']);
 const json = (res, code, value) => { res.writeHead(code, {'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}); res.end(JSON.stringify(value)); };
 assets.add('/admin-session.js');
+assets.add('/meal-day.js');
 assets.add('/education-draft-workers.js');
 assets.add('/notification-view.js');
 assets.add('/client');assets.add('/client.js');
@@ -950,6 +951,7 @@ const server = http.createServer((req,res)=>passwordRequests.run(true,()=>adminR
     if(url.pathname==='/api/meal-checks/statement'&&req.method==='GET')return json(res,200,store.mealStatement(url.searchParams.get('siteId'),url.searchParams.get('month'),url.searchParams.get('category')||''));
     if(url.pathname==='/api/meal-checks/month/worker'&&req.method==='GET')return json(res,200,store.workerMonthlyMealChecks(url.searchParams.get('siteId'),url.searchParams.get('workerId'),url.searchParams.get('month')));
     if(url.pathname==='/api/meal-checks/month/worker'&&req.method==='POST')return json(res,200,{changed:store.setWorkerMonthlyMeals(await body(req))});
+    if(url.pathname==='/api/meal-checks/day'&&req.method==='POST')return json(res,200,{changed:store.setDailyMealChecks(await body(req,120000),()=>checkRequestSession(req))});
     if(url.pathname==='/api/meal-checks'){
       if(req.method==='GET')return json(res,200,store.mealChecks(url.searchParams.get('siteId'),url.searchParams.get('date')));
       if(req.method==='POST'){store.saveMealCheck(await body(req));return json(res,200,{ok:true});}
