@@ -1,11 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdirSync,readFileSync,writeFileSync} from 'node:fs';
-import {resolve} from 'node:path';
+import {mkdirSync,readFileSync,writeFileSync,mkdtempSync,rmSync} from 'node:fs';
+import {resolve,join} from 'node:path';
+import {tmpdir} from 'node:os';
+import {createServer} from 'node:net';
+import {spawn} from 'node:child_process';
+import {once} from 'node:events';
 import {createHash} from 'node:crypto';
 import {PNG} from 'pngjs';
 import {createCanvas,DOMMatrix,ImageData,Path2D} from '@napi-rs/canvas';
-import {renderPlanPdfs} from '../public/plan-pdf.js';
+import {renderPlanPdfs,renderPdfFiles} from '../public/plan-pdf.js';
+import {Store} from '../store.js';
 
 Object.assign(globalThis,{DOMMatrix,ImageData,Path2D});
 const pdfjs=await import('pdfjs-dist/legacy/build/pdf.mjs');
@@ -38,6 +43,15 @@ function run(bytes){
   return {nodes,promise};
 }
 const pixel=(canvas,x,y)=>Array.from(canvas.getContext('2d').getImageData(x,y,1,1).data);
+test('출입자 첨부 PDF는 실제 서버에서 확인한 파일을 실제 캔버스에 출력한다',{timeout:30000},async()=>{
+  const dir=mkdtempSync(join(tmpdir(),'jweb-worker-pdf-')),store=new Store(join(dir,'jweb.sqlite'));let site,worker,row;
+  try{site=store.createSite({name:'가상 현장'});worker=store.createWorker({siteId:site.id,name:'가상 출입자',category:'직영',company:'가상 회사',occupation:'가상 직종'});store.addWorkerFile(site.id,worker.id,'other','가상.pdf',fixture());row=store.workers(site.id)[0];}finally{store.close();}
+  const reservation=createServer();await new Promise(resolve=>reservation.listen(0,'127.0.0.1',resolve));const port=reservation.address().port;await new Promise(resolve=>reservation.close(resolve));const child=spawn(process.execPath,['server.js'],{cwd:process.cwd(),env:{...process.env,PORT:String(port),JWEB_DATA_DIR:dir,JWEB_ADMIN_PASSWORD:'virtual-admin-password'},stdio:['ignore','pipe','pipe']});
+  try{await Promise.race([once(child.stdout,'data'),once(child,'exit').then(()=>{throw Error('시험 서버 종료');})]);const origin='http://127.0.0.1:'+port,request=(path,options={})=>fetch(origin+path,options),login=await request('/api/login',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({password:'virtual-admin-password'})}),cookie=login.headers.get('set-cookie').split(';')[0],response=await request('/api/workers/preview',{method:'POST',headers:{cookie,'content-type':'application/json'},body:JSON.stringify({siteId:site.id,items:[{id:worker.id,version:row.version}]})});assert.equal(response.status,200);const file=(await response.json()).workers[0].files[0];assert.equal(file.isPdf,true);
+    const nodes=[],area={ownerDocument:{createElement(tag){if(tag==='canvas'){const canvas=createCanvas(1,1);canvas.setAttribute=()=>{};return canvas;}return {children:[],append(...children){this.children.push(...children);}};}},append(node){nodes.push(node);}},url=`/api/workers/${worker.id}/files/${file.id}?siteId=${site.id}&version=${file.version}`,fetchFile=(path,options)=>request(path,{...options,headers:{cookie}}),pdfjsWithAssets={...pdfjs,getDocument(options){return pdfjs.getDocument({...options,cMapUrl:assets+'cmaps/',standardFontDataUrl:assets+'standard_fonts/',wasmUrl:assets+'wasm/'});}};
+    assert.equal(await renderPdfFiles({files:[{...file,url,area}],pdfjs:pdfjsWithAssets,signal:new AbortController().signal,fetchFile}),2);assert.deepEqual(pixel(nodes[0].children[1],30,270),[255,0,0,255]);assert.deepEqual(pixel(nodes[1].children[1],200,70),[0,255,0,255]);assert.equal((await request(url)).status,401);assert.equal((await request(url,{method:'DELETE',headers:{cookie}})).status,200);await assert.rejects(renderPdfFiles({files:[{...file,url,area}],pdfjs:pdfjsWithAssets,signal:new AbortController().signal,fetchFile}),/권한/);
+  }finally{if(child.exitCode===null){const exited=once(child,'exit');child.kill();await exited;}rmSync(dir,{recursive:true,force:true});}
+});
 test('실제 PDF.js 캔버스: 내장 한글 글꼴과 한글 인쇄 도장',{timeout:10000},async()=>{
   const bytes=readFileSync(new URL('./fixtures/korean-pdf/synthetic-korean.pdf',import.meta.url));
   artifact('korean-fixture.pdf',bytes);
