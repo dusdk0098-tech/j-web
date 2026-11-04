@@ -908,8 +908,8 @@ const server = http.createServer((req,res)=>passwordRequests.run(true,()=>adminR
     const articleFile=url.pathname.match(/^\/api\/site-articles\/(\d+)\/files(?:\/(\d+))?$/);
     if(articleFile){
       const [,articleId,fileId]=articleFile,siteId=url.searchParams.get('siteId');
-      if(!fileId&&req.method==='POST'){const chunks=[];let size=0;for await(const chunk of req){size+=chunk.length;if(size>2*1024*1024)throw new Error('파일은 2MB 이하여야 합니다.');chunks.push(chunk);}checkRequestSession(req);let name;try{name=decodeURIComponent(req.headers['x-file-name']||'');}catch{throw new Error('파일 이름을 확인해 주세요.');}return json(res,201,{id:store.addArticleFile(siteId,articleId,name,Buffer.concat(chunks))});}
-      if(fileId&&req.method==='DELETE'){store.deleteArticleFile(siteId,articleId,fileId);return json(res,200,{ok:true});}
+      if(!fileId&&req.method==='POST'){const chunks=[];let size=0;for await(const chunk of req){size+=chunk.length;if(size>2*1024*1024)throw new Error('파일은 2MB 이하여야 합니다.');chunks.push(chunk);}checkRequestSession(req);let name;try{name=decodeURIComponent(req.headers['x-file-name']||'');}catch{throw new Error('파일 이름을 확인해 주세요.');}return json(res,201,{id:store.addArticleFile(siteId,articleId,name,Buffer.concat(chunks),()=>checkRequestSession(req))});}
+      if(fileId&&req.method==='DELETE'){store.deleteArticleFile(siteId,articleId,fileId,()=>checkRequestSession(req));return json(res,200,{ok:true});}
       if(fileId&&req.method==='GET'){const file=store.articleFile(siteId,articleId,fileId);if(!file)return json(res,404,{error:'첨부파일을 찾을 수 없습니다.'});const name=encodeURIComponent(file.name).replace(/[!'()*]/g,c=>`%${c.charCodeAt(0).toString(16).toUpperCase()}`);res.writeHead(200,{'Content-Type':'application/octet-stream','Content-Disposition':`attachment; filename="attachment"; filename*=UTF-8''${name}`,'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(file.data);}
     }
     if(url.pathname==='/api/faq-posts'&&req.method==='GET')return json(res,200,store.faqPosts(url.searchParams.get('q')||'',url.searchParams.get('category')||''));

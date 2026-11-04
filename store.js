@@ -538,16 +538,17 @@ export class Store {
     return this.db.prepare('SELECT a.id,a.category,a.title,a.body,a.rich_body,a.created_at FROM site_articles a JOIN workers w ON w.site_id=a.site_id WHERE w.id=? AND a.visible=1 ORDER BY a.id DESC').all(Number(workerId)).map(a=>({...siteArticleRow(a),files:this.articleFiles(a.id)}));
   }
   articleFiles(articleId){return this.db.prepare('SELECT id,name,length(data) AS size FROM site_article_files WHERE article_id=? ORDER BY id').all(Number(articleId));}
-  addArticleFile(siteId,articleId,name,data){
-    if(!this.db.prepare('SELECT 1 FROM site_articles WHERE id=? AND site_id=?').get(Number(articleId),Number(siteId)))throw new Error('선택한 현장의 게시글을 확인해 주세요.');
+  addArticleFile(siteId,articleId,name,data,onAuthorize=()=>{}){
     if(typeof name!=='string'||!name.trim()||name.length>200||/[\\/\x00-\x1f\x7f]/.test(name))throw new Error('파일 이름을 확인해 주세요.');
     if(!(data instanceof Uint8Array)||!data.length||data.length>2*1024*1024)throw new Error('파일은 1바이트 이상 2MB 이하여야 합니다.');
-    if(this.articleFiles(articleId).length>=20)throw new Error('첨부파일은 게시글당 20개까지 가능합니다.');
-    return this.db.prepare('INSERT INTO site_article_files(article_id,name,data) VALUES(?,?,?)').run(Number(articleId),name,data).lastInsertRowid;
+    this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();if(!this.db.prepare('SELECT 1 FROM site_articles WHERE id=? AND site_id=?').get(Number(articleId),Number(siteId)))throw new Error('선택한 현장의 게시글을 확인해 주세요.');
+      if(this.articleFiles(articleId).length>=20)throw new Error('첨부파일은 게시글당 20개까지 가능합니다.');
+      const id=this.db.prepare('INSERT INTO site_article_files(article_id,name,data) VALUES(?,?,?)').run(Number(articleId),name,data).lastInsertRowid;this.db.exec('COMMIT');return id;
+    }catch(error){this.db.exec('ROLLBACK');throw error;}
   }
   articleFile(siteId,articleId,fileId){return this.db.prepare('SELECT f.* FROM site_article_files f JOIN site_articles a ON a.id=f.article_id WHERE a.site_id=? AND a.id=? AND f.id=?').get(Number(siteId),Number(articleId),Number(fileId))||null;}
   workerArticleFile(workerId,articleId,fileId){return this.db.prepare('SELECT f.* FROM site_article_files f JOIN site_articles a ON a.id=f.article_id JOIN workers w ON w.site_id=a.site_id WHERE w.id=? AND a.visible=1 AND a.id=? AND f.id=?').get(Number(workerId),Number(articleId),Number(fileId))||null;}
-  deleteArticleFile(siteId,articleId,fileId){if(!this.articleFile(siteId,articleId,fileId))throw new Error('첨부파일을 찾을 수 없습니다.');this.db.prepare('DELETE FROM site_article_files WHERE id=?').run(Number(fileId));}
+  deleteArticleFile(siteId,articleId,fileId,onAuthorize=()=>{}){this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();if(!this.articleFile(siteId,articleId,fileId))throw new Error('첨부파일을 찾을 수 없습니다.');this.db.prepare('DELETE FROM site_article_files WHERE id=?').run(Number(fileId));this.db.exec('COMMIT');}catch(error){this.db.exec('ROLLBACK');throw error;}}
   saveSiteArticle(input,id=null,onAuthorize=()=>{}) {
     const siteId=Number(input.siteId);
     if(!['안전·보건','기타'].includes(input.category)||typeof input.visible!=='boolean')throw new Error('분류와 공개 설정을 확인해 주세요.');
