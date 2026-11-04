@@ -1,3 +1,12 @@
+export function heavyRiggingChoices(kind, saved='') {
+  const choices=kind==='lines'?['1줄','2줄','3줄','4줄']:['일자형','올가미형','U자형'];
+  return saved&&!choices.includes(saved)?[...choices,saved]:choices;
+}
+
+export function heavyRiggingOptions(kind, saved, esc) {
+  return '<option value="">선택</option>'+heavyRiggingChoices(kind,saved).map(value=>'<option value="'+esc(value)+'" '+(value===saved?'selected':'')+'>'+esc(value)+'</option>').join('');
+}
+
 export function riggingStandardChoices(asset, saved='') {
   let standards=asset?.standards;
   if(!standards&&asset?.details){try{standards=JSON.parse(asset.details).standards;}catch{standards=[];}}

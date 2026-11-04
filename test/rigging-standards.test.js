@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {riggingStandardChoices,mountRiggingStandards} from '../public/rigging-standards.js';
+import {riggingStandardChoices,mountRiggingStandards,heavyRiggingChoices,heavyRiggingOptions} from '../public/rigging-standards.js';
 import {Store} from '../store.js';
 
 test('장구별 규격을 표시하고 다시 선택할 때 입력을 보존한다',()=>{
@@ -11,6 +11,7 @@ test('장구별 규격을 표시하고 다시 선택할 때 입력을 보존한�
   ropeSpec.value='12mm';ropeSpec.handlers.change();rope.value='2';rope.handlers.change();assert.match(ropeSpec.html,/20mm/);assert.equal(ropeSpec.value,'');
   rope.value='1';rope.handlers.change();assert.equal(ropeSpec.value,'12mm');
   assert.deepEqual(riggingStandardChoices({standards:['10mm']},'이전 값'),['10mm','이전 값']);assert.deepEqual(riggingStandardChoices({details:'잘못된 자료'}),[]);
+  assert.deepEqual(heavyRiggingChoices('lines'),['1줄','2줄','3줄','4줄']);assert.deepEqual(heavyRiggingChoices('method'),['일자형','올가미형','U자형']);assert.deepEqual(heavyRiggingChoices('method','기존 방식'),['일자형','올가미형','U자형','기존 방식']);assert.match(heavyRiggingOptions('method','기존 방식',String),/value="기존 방식" selected/);
 });
 
 test('근로자 장구 선택 정보에 같은 현장의 등록 규격이 포함된다',()=>{
