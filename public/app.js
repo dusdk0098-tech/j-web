@@ -387,9 +387,10 @@ async function editDocument(doc=null,initialDetails={},initialType=null) {
     const result=await api(doc?`/api/documents/${doc.id}`:'/api/documents',{method:doc?'PUT':'POST',body:JSON.stringify({...data,siteId:state.siteId,...(doc?{expectedEditVersion:doc.edit_version,...(doc.type==='basic'?{expectedBasicVersion:doc.basic_version}:{})}:{})})}); state.detail=result.id;
   });
   if(currentType==='office'){officeEditor=mountRichEditor($('#dialog-body'),{limits:documentRichLimits,onError:error=>$('#dialog-error').textContent=error.message});officeEditor.set(details.bodyRich,doc?.body||'');}
-  const select=$('#dialog-form select[name=type]'),educationEpoch=detailEpoch;let educationReference;
-  dialog.addEventListener('close',()=>educationReference?.destroy(),{once:true});
+  const select=$('#dialog-form select[name=type]'),educationEpoch=detailEpoch;let educationReference,dailyInvalidationCleanup=()=>{};
+  dialog.addEventListener('close',()=>{educationReference?.destroy();dailyInvalidationCleanup();},{once:true});
   const renderFields=()=>{
+    dailyInvalidationCleanup();dailyInvalidationCleanup=()=>{};
     educationReference?.destroy();educationReference=null;
     $('#dialog-form [name=date]').onchange=null;
     $('#dialog-form [name=date]').oninput=null;
@@ -687,7 +688,7 @@ async function editDocument(doc=null,initialDetails={},initialType=null) {
     $('#daily-fields').insertAdjacentHTML('afterbegin','<button type="button" class="outline" id="daily-sources">당일 TBM·교육 기록 조회</button><div id="daily-source-list" aria-live="polite"></div>');
     const dailyDate=$('#dialog-form [name=date]'),previousButton=$('#previous-report'),sourcesButton=$('#daily-sources'),sourceList=$('#daily-source-list'),submit=$('#dialog-form button[type=submit]');let previousGeneration=0,sourceGeneration=0;
     const dailyCurrent=(button,date)=>dialog.open&&button.isConnected&&state.admin===actor&&state.siteId===siteId&&state.page===page&&detailEpoch===educationEpoch&&select.value==='daily_report'&&dailyDate.value===date&&!submit.disabled;
-    const invalidateDaily=()=>{previousGeneration++;sourceGeneration++;sourceList.replaceChildren();};dailyDate.oninput=invalidateDaily;dailyDate.onchange=invalidateDaily;
+    const invalidateDaily=()=>{previousGeneration++;sourceGeneration++;sourceList.replaceChildren();};dailyDate.oninput=invalidateDaily;dailyDate.onchange=invalidateDaily;const dailyForm=$('#dialog-form');dailyForm.addEventListener('submit',invalidateDaily);dailyInvalidationCleanup=()=>dailyForm.removeEventListener('submit',invalidateDaily);
     $('#daily-sources').onclick=async()=>{
       const date=dailyDate.value,generation=++sourceGeneration,current=()=>generation===sourceGeneration&&dailyCurrent(sourcesButton,date);if(!current())return;sourceList.replaceChildren();
       try {
