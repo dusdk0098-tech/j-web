@@ -34,6 +34,13 @@ test('독립 증빙은 결재서류와 구분하고 설명을 안전하게 표�
   await runInNewContext('(async()=>{'+source.slice(start,end)+'})()',context);assert.match(html,/월간 독립 증빙/);assert.match(html,/&lt;설명&gt;/);assert.match(html,/&lt;비고&gt;/);assert.doesNotMatch(html,/<설명>/);assert.doesNotMatch(html,/시험 결재서류/);
 });
 
+test('독립 증빙은 일반 사진과 섞지 않고 각각 한 페이지로 표시한다',async()=>{
+  const source=readFileSync(new URL('../public/app.js',import.meta.url),'utf8'),start=source.indexOf("  if(doc.type==='cost'&&Array.isArray(details.rows)){const photos="),end=source.indexOf('\n',start);let html='';assert.ok(start>=0);
+  const photos=[{id:1,cost_id:1,name:'일반1',kind:'photo'},{id:2,cost_id:0,name:'독립1',kind:'photo'},{id:3,cost_id:0,name:'독립2',kind:'photo'},{id:4,cost_id:1,name:'일반2',kind:'photo'},{id:5,cost_id:0,name:'결재',kind:'receipt'}],context={doc:{type:'cost',id:9},details:{rows:[{id:1,description:'가상'}]},api:async()=>photos,content:{querySelector:()=>({insertAdjacentHTML:(_where,value)=>{html=value;}})},esc:String};
+  await runInNewContext('(async()=>{'+source.slice(start,end)+'})()',context);const pages=[...html.matchAll(/<div class="cost-photo-page( receipt)?">(.*?)<\/div>/g)];
+  assert.equal(pages.length,5);assert.deepEqual(pages.map(page=>!!page[1]),[false,true,true,false,true]);for(const [i,name] of ['일반1','독립1','독립2','일반2','결재'].entries())assert.ok(pages[i][2].includes(name));
+});
+
 test('결재 화면도 독립 증빙의 설명과 자료를 안전하게 표시한다',()=>{
   const source=readFileSync(new URL('../public/review.js',import.meta.url),'utf8'),start=source.indexOf('function planLinks('),end=source.indexOf('async function openReference(',start);assert.ok(start>=0&&end>start);
   const context={esc:value=>String(value).replaceAll('<','&lt;').replaceAll('>','&gt;')};runInNewContext(source.slice(start,end),context);const html=context.planLinks(4,{type:'cost',photos:[{id:3,cost_id:0,kind:'photo',name:'가상.png',source_description:'<설명>',note:'비고'}]},true);assert.match(html,/시험 독립 증빙/);assert.match(html,/&lt;설명&gt;/);assert.match(html,/linked\/cost-photo\/0\/3/);assert.doesNotMatch(html,/<설명>/);
