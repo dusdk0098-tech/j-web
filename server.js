@@ -6,6 +6,7 @@ import { readFileSync, mkdirSync, readdirSync } from 'node:fs';
 import { dirname, extname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Store } from './store.js';
+import { ContractProfile } from './contract-profile.js';
 import { PersonalNotes } from './personal-notes.js';
 import { StickerRequests } from './sticker-requests.js';
 import { CommonWork } from './common-work.js';
@@ -53,6 +54,7 @@ const dataDir = process.env.JWEB_DATA_DIR || join(root, 'data');
 
 mkdirSync(dataDir, { recursive: true });
 const store = new Store(join(dataDir, 'jweb.sqlite'));
+const contractProfile = new ContractProfile(store.db);
 const auth=new AdminAccounts(store.db);auth.bootstrap(process.env.JWEB_ADMIN_PASSWORD);
 const aiChat = new AiChat(store.db);
 const notificationOutbox = new NotificationOutbox(store.db,sensAlimtalk(),{systemWrite:fn=>adminRequests.exit(fn)});
@@ -95,6 +97,7 @@ assets.add('/plan-manual-print.js');assets.add('/plan-manual-print.css');assets.
 const pdfAssets=new Map(['pdf.mjs','pdf.worker.mjs'].map(name=>[`/pdfjs/${name}`,join(root,'node_modules/pdfjs-dist/legacy/build',name)]));
 for(const folder of ['cmaps','standard_fonts','wasm'])for(const name of readdirSync(join(root,'node_modules/pdfjs-dist',folder)))if(/\.(bcmap|pfb|ttf|wasm)$/.test(name))pdfAssets.set(`/pdfjs/${folder}/${name}`,join(root,'node_modules/pdfjs-dist',folder,name));
 assets.add('/site-photo-viewer.js');
+assets.add('/contract-profile-view.js');
 assets.add('/board-comments.js');
 assets.add('/community-navigation.js');
 assets.add('/board-create.js');
@@ -620,6 +623,11 @@ const server = http.createServer((req,res)=>passwordRequests.run(true,()=>adminR
     if(url.pathname.startsWith('/api/') && url.pathname!=='/api/join' && !auth.valid(token))return json(res,401,{error:'관리자 로그인이 필요합니다.'});
     if(url.pathname.startsWith('/api/')&&url.pathname!=='/api/join'){
       req.checkSession=()=>{if(!auth.valid(token))return {status:401,error:'관리자 로그인이 필요합니다.'};if((req.headers['x-admin-context']||!['GET','HEAD'].includes(req.method)&&(req.headers.origin||req.headers['sec-fetch-site']))&&req.headers['x-admin-context']!==auth.context(token))return {status:409,error:'관리자 세션이 변경되었습니다. 입력 내용을 복사하고 새로고침해 주세요.'};return adminSitePolicy(store.db,req,url,()=>auth.session(token));};checkRequestSession(req);req.adminProtected=true;const writeHead=res.writeHead;res.writeHead=function(...args){if(args[0]<400&&!url.pathname.startsWith('/api/admin-accounts'))checkRequestSession(req);return writeHead.apply(this,args);};
+    }
+    const contractSettings=url.pathname.match(/^\/api\/sites\/(\d+)\/contract-profile$/);
+    if(contractSettings){const authorize=()=>{checkRequestSession(req);auth.requireGlobal(token);};authorize();
+      if(req.method==='GET'){const result=contractProfile.get(contractSettings[1]);authorize();return json(res,200,result);}
+      if(req.method==='PUT')return json(res,200,contractProfile.save(contractSettings[1],await body(req),authorize));
     }
     if(url.pathname==='/api/notifications/status'&&req.method==='GET'){auth.requireGlobal(token);return json(res,200,notificationOutbox.status());}
     const notificationRoute=url.pathname.match(/^\/api\/sites\/([1-9]\d*)\/notifications(?:\/(preview|[\w-]{43})(?:\/(send|results\/(\d{1,2})))?)?$/);
