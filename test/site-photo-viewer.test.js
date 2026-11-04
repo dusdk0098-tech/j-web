@@ -11,6 +11,17 @@ import { PNG } from 'pngjs';
 import { Store } from '../store.js';
 import { showSitePhotoViewer } from '../public/site-photo-viewer.js';
 
+test('현장사진은 촬영 기간과 설명을 함께 검색하고 다른 현장을 제외한다',()=>{
+  const store=new Store(':memory:');try{
+    const site=store.createSite({name:'가상 현장'}),other=store.createSite({name:'다른 현장'}),png=new PNG({width:1,height:1});png.data[3]=255;const bytes=PNG.sync.write(png);
+    const add=(siteId,date,description)=>store.addSitePhoto(siteId,'가상 사진.png',bytes,()=>{},{date,description});
+    const before=add(site.id,'2026-10-29','안전 난간'),first=add(site.id,'2026-10-30','안전 난간'),last=add(site.id,'2026-10-31','안전 난간');add(site.id,'2026-10-31','바닥');add(other.id,'2026-10-30','안전 난간');
+    assert.deepEqual(store.sitePhotos(site.id,'2026-10-30','2026-10-31','난간').map(row=>row.id),[last,first]);
+    assert.deepEqual(store.sitePhotos(site.id,'','2026-10-29','난간').map(row=>row.id),[before]);
+    assert.throws(()=>store.sitePhotos(site.id,'2026-10-31','2026-10-30'),/기간/);
+  }finally{store.close();}
+});
+
 function fakeDocument(){
   const state={last:null},doc={body:{append(dialog){state.last=dialog;}},querySelector(){return state.last?.open?state.last:null;},createElement(){const controls={};for(const key of ['image','status','previous','next','download','close','name','date','description'])controls[`[data-photo-view-${key}]`]={};return {controls,open:false,removed:false,setAttribute(){},querySelector(selector){return controls[selector];},addEventListener(type,callback){if(type==='close')this.onclose=callback;},showModal(){this.open=true;},close(){this.open=false;this.onclose?.();},remove(){this.removed=true;}};}};return {doc,state};
 }
