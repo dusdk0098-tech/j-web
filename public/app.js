@@ -4,7 +4,7 @@ import { mountPlanCharts, readPlanCharts, planChartsMarkup, unassignedPlanImages
 import { mountRiggingStandards, heavyRiggingOptions, heavyImageChoices, heavyImageMarkup } from './rigging-standards.js';
 import { equipmentFilterMarkup, mountEquipmentFilter } from './equipment-filter.js';
 import { adminSession } from './admin-session.js';
-import { mountContractProfile } from './contract-profile-view.js';
+import { mountContractProfile,closeContractPreview } from './contract-profile-view.js';
 import { freezeBatchImages } from './batch-images.js';
 import { trainingFields, trainingDetailMarkup } from './training-detail.js';
 import { riskDetailMarkup, muscleDetailMarkup } from './risk-detail.js';
@@ -1275,7 +1275,7 @@ async function render(){
   const renderEpoch=detailEpoch;
   if(state.admin?.scope==='restricted'&&dialog.open){dialog.close();$('#dialog-body').innerHTML='';}
   if(state.admin?.scope==='restricted'||state.page==='admins')content.textContent='접근 가능한 자료를 확인하는 중입니다.';
-  workerListEpoch++;document.querySelector('dialog.worker-preview[open]')?.close();
+  workerListEpoch++;document.querySelector('dialog.worker-preview[open]')?.close();closeContractPreview(document);
   sitePhotoEpoch++;document.querySelector('dialog.site-photo-viewer[open]')?.close();
   document.querySelector('dialog.personal-note-preview[open]')?.close();
   await loadSites();
@@ -1878,4 +1878,4 @@ async function render(){
     }
   }
 }
-try {const session=await adminSession;if(!session?.authenticated||!session.context){location.assign('/login'+(location.hash&&readCommunityHash(location.hash)?location.hash:''));throw Error('관리자 로그인이 필요합니다.');}applyAdminScope(session.admin);const communityRoute=readCommunityHash(location.hash);if(communityRoute&&state.admin.scope==='global')applyCommunityRoute(communityRoute);if(session.enabled){const identity=document.createElement('span');identity.textContent=(session.admin?.name||'관리자')+(state.admin.scope==='global'?' · 전역 권한':' · 배정 현장만');document.querySelector('.top').append(identity);const logout=document.createElement('button');logout.className='outline';logout.textContent='로그아웃';logout.onclick=async()=>{siteEducationCleanup?.();joinRecordEpoch++;detailEpoch++;state.admin=null;if(dialog.open)dialog.close();content.innerHTML='';await api('/api/logout',{method:'POST',body:'{}'});location.assign('/login');};document.querySelector('.top').append(logout);}state.types=await api('/api/types'); await render();} catch(e) {showError(e);}
+try {const session=await adminSession;if(!session?.authenticated||!session.context){location.assign('/login'+(location.hash&&readCommunityHash(location.hash)?location.hash:''));throw Error('관리자 로그인이 필요합니다.');}applyAdminScope(session.admin);const communityRoute=readCommunityHash(location.hash);if(communityRoute&&state.admin.scope==='global')applyCommunityRoute(communityRoute);if(session.enabled){const identity=document.createElement('span');identity.textContent=(session.admin?.name||'관리자')+(state.admin.scope==='global'?' · 전역 권한':' · 배정 현장만');document.querySelector('.top').append(identity);const logout=document.createElement('button');logout.className='outline';logout.textContent='로그아웃';logout.onclick=async()=>{siteEducationCleanup?.();joinRecordEpoch++;detailEpoch++;state.admin=null;if(dialog.open)dialog.close();closeContractPreview(document);content.innerHTML='';await api('/api/logout',{method:'POST',body:'{}'});location.assign('/login');};document.querySelector('.top').append(logout);}state.types=await api('/api/types'); await render();} catch(e) {showError(e);}

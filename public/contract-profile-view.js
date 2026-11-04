@@ -1,6 +1,8 @@
 const escape=value=>String(value??'').replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
 const fields=[['employer','가상 사업체명'],['address','가상 사업체 주소'],['phone','가상 사업체 연락처'],['representative','가상 대표자'],['workplace','가상 근무장소']];
 
+export function closeContractPreview(doc){doc.querySelector('dialog.contract-preview[open]')?.close();}
+
 export async function mountContractProfile({target,siteId,api,active,sessionCheck}){
   const url=`/api/sites/${siteId}/contract-profile`,doc=target.ownerDocument;let current=await api(url);if(!active())return;
   target.innerHTML=`<h3>가상 근로계약 출력 정보</h3><p>현장별 가상 정보를 저장합니다. 시험용이며 실제 근로계약에 사용하지 마세요.</p><form data-profile>${fields.map(([key,label])=>`<label>${label}<input name="${key}" maxlength="300" value="${escape(current.profile[key])}"></label>`).join('')}<button type="submit">정보 저장</button></form><button type="button" data-preview>계약 서식 미리보기</button><p role="status" data-status></p>`;

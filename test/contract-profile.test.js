@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {Store} from '../store.js';
 import {ContractProfile} from '../contract-profile.js';
-import {mountContractProfile} from '../public/contract-profile-view.js';
+import {mountContractProfile,closeContractPreview} from '../public/contract-profile-view.js';
 import {mkdtempSync,readFileSync,rmSync} from 'node:fs';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
@@ -18,14 +18,15 @@ test('계약 설정 조회 지연과 실패가 일괄 출력 목록을 막지 �
   await runInNewContext('(async()=>{'+source.slice(start,end)+'})()',context);assert.equal(mounted,1);reject(Error('조회 오류'));await new Promise(resolve=>setImmediate(resolve));assert.match(section.textContent,/조회 오류/);
 });
 test('미리보기는 저장하지 않은 입력과 변경된 출력 정보를 차단한다',async()=>{
-  let current={site:{id:1,name:'<가상>'},profile:{...input,version:'v1'}},prints=0,dialog;
+  let current={site:{id:1,name:'<가상>'},profile:{...input,version:'v1'}},prints=0,dialog,wait=false,release;
   const form={elements:Object.fromEntries(Object.entries(input).filter(([key])=>key!=='version').map(([key,value])=>[key,{value}]))},status={},preview={},buttons={};
   const document={defaultView:{print(){prints++;}},body:{append(value){dialog=value;}},createElement(){return {open:false,set innerHTML(value){this.html=value;},querySelector(selector){return buttons[selector]??={};},addEventListener(){},showModal(){this.open=true;},close(){this.open=false;},remove(){}};}};
   const target={ownerDocument:document,set innerHTML(value){this.html=value;},querySelector(selector){return {'[data-profile]':form,'[data-status]':status,'[data-preview]':preview}[selector];}};
-  const api=async()=>structuredClone(current);await mountContractProfile({target,siteId:1,api,active:()=>true,sessionCheck:async()=>{}});
+  const api=async()=>structuredClone(current);await mountContractProfile({target,siteId:1,api,active:()=>true,sessionCheck:async()=>{if(wait)await new Promise(resolve=>{release=resolve;});}});
   form.elements.employer.value='미저장';await preview.onclick();assert.match(status.textContent,/저장/);assert.equal(dialog,undefined);
   form.elements.employer.value=input.employer;await preview.onclick();assert.match(dialog.html,/&lt;가상&gt;/);for(const label of ['가상 근로자 주소','연락처','근로 시작일','종료일','업무 및 직종','휴게','근무일','주휴일','가상 일급 또는 월급','수당','임금 지급일','지급방법','연차휴가','사회보험','작성일','사업주 시험 서명','근로자 시험 서명'])assert.ok(dialog.html.includes(label),label);await buttons['[data-print]'].onclick();assert.equal(prints,1);
   current.profile.version='v2';await buttons['[data-print]'].onclick();assert.equal(prints,1);assert.match(buttons['[data-print-status]'].textContent,/변경/);
+  current.profile.version='v1';wait=true;const pending=buttons['[data-print]'].onclick();await new Promise(resolve=>setImmediate(resolve));document.querySelector=()=>dialog.open?dialog:null;closeContractPreview(document);wait=false;release();await pending;assert.equal(dialog.open,false);assert.equal(prints,1);
 });
 test('현장별 출력 정보는 변경 충돌과 권한 실패 시 보존된다',()=>{
   const store=new Store(':memory:');try{const a=store.createSite({name:'첫 현장'}),b=store.createSite({name:'다른 현장'}),profiles=new ContractProfile(store.db);
