@@ -1426,6 +1426,8 @@ test('작업계획서의 역할별 작업자는 현장을 검증하고 당시 �
     s.updateDocument(doc.id,route);assert.equal(JSON.parse(s.document(doc.id).details).workSequence,'1. 준비\n2. 작업');
     assert.equal(JSON.parse(s.document(doc.id).details).managementPoints,'가상 중점관리');
     s.updateDocument(doc.id,{...route,details:{...route.details,managementPoints:undefined}});assert.equal(JSON.parse(s.document(doc.id).details).managementPoints,'가상 중점관리');
+    s.updateDocument(doc.id,{...route,details:{...route.details,routeDescription:undefined,workSequence:undefined,managementPoints:undefined}});
+    const preserved=JSON.parse(s.document(doc.id).details);assert.equal(preserved.routeDescription,'가상 진입로\n가상 출구');assert.equal(preserved.workSequence,'1. 준비\n2. 작업');assert.equal(preserved.managementPoints,'가상 중점관리');
     assert.throws(()=>s.updateDocument(doc.id,{...route,details:{...route.details,managementPoints:'가'.repeat(4001)}}),/중점관리사항/);
     assert.throws(()=>s.updateDocument(doc.id,{...route,details:{...route.details,workSequence:'가'.repeat(4001)}}),/작업순서/);
     assert.equal(JSON.parse(s.document(doc.id).details).routeDescription,'가상 진입로\n가상 출구');
