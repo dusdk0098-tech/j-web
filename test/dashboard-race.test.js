@@ -8,6 +8,7 @@ import {createServer} from 'node:net';
 import {spawn} from 'node:child_process';
 import {once} from 'node:events';
 import {Store} from '../store.js';
+import {types} from '../domain.js';
 
 function deferred(){let resolve,reject;const promise=new Promise((r,j)=>{resolve=r;reject=j;});return {promise,resolve,reject};}
 function screen(initialPage='dashboard'){
@@ -16,7 +17,7 @@ function screen(initialPage='dashboard'){
   const end=source.indexOf("  if(state.page==='statistics'){",start);
   assert.ok(start>=0&&end>start);
   const documents=deferred(),attendance=deferred(),requests=[],weeklyRequests=[],tables=[],content={innerHTML:'현재 화면'};
-  const context={state:{page:initialPage,siteId:1,admin:{id:1}},detailEpoch:1,content,
+  const context={state:{page:initialPage,siteId:1,admin:{id:1},types},detailEpoch:1,content,statusLabels:{draft:'임시저장',pending:'결재 대기',approved:'승인',rejected:'반려'},
     loadDocuments:current=>{context.documentsCurrent=current;return documents.promise;},api:(path,options,current)=>{if(path.startsWith('/api/weekly-activity?')){weeklyRequests.push(path);return context.weekPromise||Promise.resolve(context.weekRows||[]);}requests.push(path);context.attendanceCurrent=current;return attendance.promise;},
     today:()=> '2026-11-04',documentTable:rows=>{tables.push(rows);return '';},editDocument:()=>{},wireDocLinks:()=>{},esc:s=>String(s).replaceAll('<','&lt;').replaceAll('>','&gt;'),
     $:()=>({}),Number};
@@ -90,6 +91,7 @@ test('오늘 안전 활동은 선택 현장의 당일 안전 문서와 각 상�
   ui.documents.resolve([{id:1,site_id:1,type:'tbm',date:'2026-11-04',status:'pending'},{id:2,site_id:1,type:'notice',date:'2026-11-04',status:'approved'},{id:3,site_id:1,type:'tbm',date:'2026-11-03',status:'draft'},{id:4,site_id:2,type:'tbm',date:'2026-11-04',status:'approved'},{id:5,site_id:1,type:'office',date:'2026-11-04',status:'approved'}]);
   await new Promise(setImmediate);ui.attendance.resolve([]);await run;
   assert.match(ui.content.innerHTML,/오늘 안전 활동/);assert.deepEqual(Array.from(ui.tables[0],d=>[d.id,d.status]),[[1,'pending'],[2,'approved']]);
+  assert.match(ui.content.innerHTML,/TBM: 결재 대기 1건/);assert.match(ui.content.innerHTML,/유해·위험 공지: 승인 1건/);assert.match(ui.content.innerHTML,/위험성평가: 오늘 날짜 문서 없음/);
 });
 test('실제 서버의 문서 목록과 출역 응답으로 당일 활동을 그린다',{timeout:30000},async()=>{
   const dir=mkdtempSync(join(tmpdir(),'jweb-dashboard-')),reservation=createServer();
