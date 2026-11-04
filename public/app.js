@@ -392,6 +392,7 @@ async function editDocument(doc=null,initialDetails={},initialType=null) {
   const renderFields=()=>{
     educationReference?.destroy();educationReference=null;
     $('#dialog-form [name=date]').onchange=null;
+    $('#dialog-form [name=date]').oninput=null;
     const fields=select.value==='daily_report'?dailyFields:null;
     $('#daily-fields').innerHTML=fields?Object.entries(fields).map(([key,label])=>field(key,label,details[key]||'','text',false)).join(''):'';
     if(select.value==='office'){
@@ -684,32 +685,35 @@ async function editDocument(doc=null,initialDetails={},initialType=null) {
     if(select.value!=='daily_report') return;
     $('#daily-fields').insertAdjacentHTML('afterbegin','<button type="button" class="outline" id="previous-report">이전 일보의 빈 항목 불러오기</button>');
     $('#daily-fields').insertAdjacentHTML('afterbegin','<button type="button" class="outline" id="daily-sources">당일 TBM·교육 기록 조회</button><div id="daily-source-list" aria-live="polite"></div>');
+    const dailyDate=$('#dialog-form [name=date]'),previousButton=$('#previous-report'),sourcesButton=$('#daily-sources'),sourceList=$('#daily-source-list'),submit=$('#dialog-form button[type=submit]');let previousGeneration=0,sourceGeneration=0;
+    const dailyCurrent=(button,date)=>dialog.open&&button.isConnected&&state.admin===actor&&state.siteId===siteId&&state.page===page&&detailEpoch===educationEpoch&&select.value==='daily_report'&&dailyDate.value===date&&!submit.disabled;
+    const invalidateDaily=()=>{previousGeneration++;sourceGeneration++;sourceList.replaceChildren();};dailyDate.oninput=invalidateDaily;dailyDate.onchange=invalidateDaily;
     $('#daily-sources').onclick=async()=>{
+      const date=dailyDate.value,generation=++sourceGeneration,current=()=>generation===sourceGeneration&&dailyCurrent(sourcesButton,date);if(!current())return;sourceList.replaceChildren();
       try {
-        const date=$('#dialog-form input[name=date]').value;
-        const sources=await api(`/api/daily-report/sources?siteId=${state.siteId}&date=${encodeURIComponent(date)}`);
-        const list=$('#daily-source-list');
+        const sources=await api(`/api/daily-report/sources?siteId=${siteId}&date=${encodeURIComponent(date)}`,{},current);if(!current())return;
+        const list=sourceList;
         list.innerHTML=sources.length?sources.map((source,i)=>`<p>${esc(state.types[source.type])} · ${esc(source.title)} · ${esc(statusLabels[source.status])} <button type="button" class="small" data-source="${i}">내용 추가</button></p>`).join(''):'<p>해당 날짜의 TBM·교육 기록이 없습니다.</p>';
         list.querySelectorAll('[data-source]').forEach(button=>button.onclick=()=>{
-          if($('#dialog-form input[name=date]').value!==date){list.textContent='날짜가 변경되었습니다. 당일 기록을 다시 조회해 주세요.';return;}
+          if(!current())return;
           const source=sources[Number(button.dataset.source)],body=$('#dialog-form textarea[name=body]');
           const next=[body.value,`[${state.types[source.type]}] ${source.title}${source.body?`\n${source.body}`:''}`].filter(Boolean).join('\n\n');
           if(next.length>20000){$('#dialog-error').textContent='문서 내용은 20,000자 이내로 입력해 주세요.';return;}
           body.value=next;button.disabled=true;$('#dialog-error').textContent='선택한 기록을 내용에 추가했습니다. 내용을 확인하고 저장해 주세요.';
         });
-      } catch(error) {$('#dialog-error').textContent=error.message;}
+      } catch(error) {if(current())$('#dialog-error').textContent=error.message;}
     };
     $('#previous-report').onclick=async()=>{
+      const before=dailyDate.value,generation=++previousGeneration,current=()=>generation===previousGeneration&&dailyCurrent(previousButton,before);if(!current())return;
       try {
-        const before=$('#dialog-form input[name=date]').value;
-        const previous=await api(`/api/daily-report/previous?siteId=${state.siteId}&before=${encodeURIComponent(before)}`);
+        const previous=await api(`/api/daily-report/previous?siteId=${siteId}&before=${encodeURIComponent(before)}`,{},current);if(!current())return;
         if(!previous){$('#dialog-error').textContent='이 현장의 이전 작업일보가 없습니다.';return;}
         const prior=JSON.parse(previous.details||'{}');
         for(const key of Object.keys(dailyFields)){const input=$(`#dialog-form [name="${key}"]`);details[key]=input.value||prior[key]||'';}
         for(const key of Object.keys(dailyRows)){const rows=[...document.querySelectorAll(`[data-row-group="${key}"] .daily-row`)].map(readDailyRow),previous=prior[key]||[];details[key]=rows.some(row=>Object.values(row).some(value=>value.trim()))?rows:Array.isArray(previous)?previous.map(row=>({...row,previous:'',day:''})):previous;}
         const body=$('#dialog-form textarea[name=body]');if(!body.value)body.value=previous.body;
         renderFields();$('#dialog-error').textContent=`${previous.date} 작업일보의 빈 항목을 불러왔습니다. 내용을 확인하고 저장해 주세요.`;
-      } catch(error) {$('#dialog-error').textContent=error.message;}
+      } catch(error) {if(current())$('#dialog-error').textContent=error.message;}
     };
     for(const [key,label] of Object.entries(dailyRows)){
       const old=details[key];const rows=Array.isArray(old)?old:old?[{name:old,quantity:''}]:[];
