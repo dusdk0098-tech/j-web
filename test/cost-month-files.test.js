@@ -1,13 +1,39 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {Store} from '../store.js';
-import {mkdtempSync,rmSync} from 'node:fs';
+import {mkdtempSync,rmSync,readFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {createServer} from 'node:net';
 import {spawn} from 'node:child_process';
 import {once} from 'node:events';
 import {PNG} from 'pngjs';
+import {DatabaseSync} from 'node:sqlite';
+import {runInNewContext} from 'node:vm';
+
+test('이전 월간 결재서류 DB는 이관 후 기존 자료를 보존한다',()=>{
+  const dir=mkdtempSync(join(tmpdir(),'jweb-month-migration-')),path=join(dir,'test.sqlite'),bytes=Buffer.from('89504e470d0a1a0a00000000','hex');let s,db;
+  try{s=new Store(path);const site=s.createSite({name:'가상 현장'}),id=s.addSafetyCostMonthFile(site.id,'2026-10-10','이전 비고','이전.png',bytes);s.close();s=null;db=new DatabaseSync(path);db.exec('ALTER TABLE safety_cost_month_files DROP COLUMN description; ALTER TABLE safety_cost_month_files DROP COLUMN kind; ALTER TABLE safety_cost_report_photos DROP COLUMN source_description');db.close();db=null;s=new Store(path);const item=s.safetyCostMonthFiles(site.id,'2026-10')[0];assert.equal(item.id,id);assert.equal(item.kind,'approval');assert.equal(item.description,'');assert.equal(item.note,'이전 비고');assert.deepEqual(Buffer.from(s.safetyCostMonthFile(site.id,id).data),bytes);}finally{db?.close();s?.close();rmSync(dir,{recursive:true,force:true});}
+});
+
+test('독립 증빙 입력은 종류와 설명을 업로드 요청에 전달한다',async()=>{
+  const source=readFileSync(new URL('../public/app.js',import.meta.url),'utf8'),start=source.indexOf("    $('#cost-month-file-add').onclick="),end=source.indexOf('\n',start);assert.ok(start>=0&&end>start);
+  const button={},file=new Blob(['가상 파일'],{type:'image/png'});file.name='가상.png';const controls={'#cost-month-file-add':button,'#cost-month-file-date':{value:'2026-10-10'},'#cost-month-file-note':{value:'비고'},'#cost-month-file-kind':{value:'evidence'},'#cost-month-file-description':{value:'가상 설명'},'#cost-month-file':{files:[file]}},sent=[];let rendered=0;
+  const context={$:key=>controls[key],state:{siteId:3,page:'safety-costs',costMonth:'2026-10'},siteId:3,month:'2026-10',today:()=>'',URLSearchParams,Blob,encodeURIComponent,fetch:async(url,options)=>{sent.push({url,options});return {ok:true,json:async()=>({id:1})};},render:async()=>rendered++,showError:error=>{throw error;}};
+  runInNewContext(source.slice(start,end),context);await button.onclick({currentTarget:button});const params=new URL(sent[0].url,'http://example.test').searchParams;assert.equal(params.has('description'),false);assert.equal(params.has('note'),false);assert.equal(sent[0].options.headers['X-Cost-Metadata'],'json-prefix-v1');const [metadata,payload]=(await sent[0].options.body.text()).split('\n');assert.deepEqual(JSON.parse(metadata),{kind:'evidence',description:'가상 설명',note:'비고'});assert.equal(payload,'가상 파일');assert.equal(rendered,1);assert.equal(button.disabled,false);
+});
+
+test('독립 증빙은 사용내역 없이 저장하고 월간 문서와 결재 사본에 유형·설명을 보존한다',()=>{
+  const dir=mkdtempSync(join(tmpdir(),'jweb-month-evidence-')),path=join(dir,'test.sqlite'),png=new PNG({width:1,height:1});png.data[3]=255;const bytes=PNG.sync.write(png);let s;
+  try{
+    s=new Store(path);const site=s.createSite({name:'가상 현장'}),other=s.createSite({name:'다른 현장'}),id=s.addSafetyCostMonthFile(site.id,'2026-10-10','가상 비고','증빙.png',bytes,()=>{},{kind:'evidence',description:'가상 설명'}),list=s.safetyCostMonthFiles(site.id,'2026-10');
+    assert.equal(list[0].kind,'evidence');assert.equal(list[0].description,'가상 설명');assert.deepEqual(s.safetyCosts(site.id,'2026-10').rows,[]);assert.equal(s.safetyCostMonthFile(other.id,id),null);
+    assert.throws(()=>s.addSafetyCostMonthFile(site.id,'2026-10-10','','x.png',bytes,()=>{},{kind:'unknown'}),/유형/);assert.throws(()=>s.addSafetyCostMonthFile(site.id,'2026-10-10','','x.png',bytes,()=>{throw Error('세션 만료');},{kind:'evidence'}),/세션 만료/);
+    s.createSafetyCost({siteId:site.id,category:'2',date:'2026-10-29',description:'가상 내역',note:'',unitPrice:'1000',quantity:'1',unit:'개'});const report=s.createSafetyCostReport({siteId:site.id,month:'2026-10',date:'2026-10-29',periodFrom:'2026-01-01',periodTo:'2026-12-31',contractAmount:'100000',budget:'3000',progressAmount:'1000',progress:'50'}),photo=s.safetyCostReportPhotos(report.id)[0],cycle=s.captureApprovalCycle(report);
+    assert.equal(photo.kind,'photo');assert.equal(photo.source_description,'가상 설명');assert.equal(photo.note,'가상 비고');assert.equal(s.approvalCycle(report.id,cycle).linked.photos[0].source_description,'가상 설명');s.deleteSafetyCostMonthFile(site.id,id);assert.deepEqual(Buffer.from(s.approvalCycleFile(report.id,cycle,'cost-photo',0,photo.id).data),bytes);
+    s.close();s=new Store(path);assert.equal(s.safetyCostReportPhotos(report.id)[0].source_description,'가상 설명');
+  }finally{s?.close();rmSync(dir,{recursive:true,force:true});}
+});
 
 test('월별 결재서류는 현장과 월을 분리하고 문서·결재 사본을 보존한다',()=>{
   const dir=mkdtempSync(join(tmpdir(),'jweb-month-file-')),path=join(dir,'test.sqlite'),bytes=Buffer.from('89504e470d0a1a0a00000000','hex');let s;
@@ -23,7 +49,10 @@ test('월별 결재서류 API는 관리자·현장·날짜를 검증한다',{tim
   const dir=mkdtempSync(join(tmpdir(),'jweb-month-file-api-')),reservation=createServer();await new Promise(resolve=>reservation.listen(0,'127.0.0.1',resolve));const port=reservation.address().port;await new Promise(resolve=>reservation.close(resolve));const child=spawn(process.execPath,['server.js'],{env:{...process.env,PORT:String(port),JWEB_DATA_DIR:dir,JWEB_ADMIN_PASSWORD:'virtual-admin-password'},stdio:['ignore','pipe','pipe']});
   try{
     await Promise.race([once(child.stdout,'data'),once(child,'exit').then(()=>{throw Error('시험 서버가 종료됐습니다.');})]);const base=`http://127.0.0.1:${port}`,json=(path,data,cookie)=>fetch(base+path,{method:'POST',headers:{'content-type':'application/json',...(cookie?{cookie}:{})},body:JSON.stringify(data)}),cookie=(await json('/api/login',{password:'virtual-admin-password'})).headers.get('set-cookie').split(';')[0],site=await(await json('/api/sites',{name:'가상 현장'},cookie)).json(),other=await(await json('/api/sites',{name:'다른 현장'},cookie)).json(),image=new PNG({width:1,height:1});image.data[3]=255;const bytes=PNG.sync.write(image),params=new URLSearchParams({siteId:String(site.id),month:'2026-10',date:'2026-10-10',note:'가상'}),path=`/api/safety-cost-month-files?${params}`,upload=(url,auth)=>fetch(base+url,{method:'POST',headers:{...(auth?{cookie}:{}),'x-file-name':'virtual.png'},body:bytes});
-    assert.equal((await upload(path,false)).status,401);assert.equal((await upload(path.replace('2026-10-10','2026-11-01'),true)).status,400);const response=await upload(path,true);assert.equal(response.status,201);const {id}=await response.json(),list=await(await fetch(`${base}/api/safety-cost-month-files?siteId=${site.id}&month=2026-10`,{headers:{cookie}})).json();assert.equal(list.length,1);assert.equal(list[0].note,'가상');assert.equal((await fetch(`${base}/api/safety-cost-month-files/${id}?siteId=${other.id}`,{headers:{cookie}})).status,404);assert.equal((await fetch(`${base}/api/safety-cost-month-files/${id}?siteId=${site.id}`)).status,401);assert.deepEqual(Buffer.from(await(await fetch(`${base}/api/safety-cost-month-files/${id}?siteId=${site.id}`,{headers:{cookie}})).arrayBuffer()),bytes);assert.equal((await fetch(`${base}/api/safety-cost-month-files/${id}?siteId=${other.id}`,{method:'DELETE',headers:{cookie}})).status,400);assert.equal((await fetch(`${base}/api/safety-cost-month-files/${id}?siteId=${site.id}`,{method:'DELETE',headers:{cookie}})).status,200);
+    assert.equal((await upload(path,false)).status,401);assert.equal((await upload(path.replace('2026-10-10','2026-11-01'),true)).status,400);const response=await upload(path,true);assert.equal(response.status,201);const {id}=await response.json(),list=await(await fetch(`${base}/api/safety-cost-month-files?siteId=${site.id}&month=2026-10`,{headers:{cookie}})).json();assert.equal(list.length,1);assert.equal(list[0].note,'가상');assert.equal(list[0].kind,'approval');assert.equal((await fetch(`${base}/api/safety-cost-month-files/${id}?siteId=${other.id}`,{headers:{cookie}})).status,404);assert.equal((await fetch(`${base}/api/safety-cost-month-files/${id}?siteId=${site.id}`)).status,401);assert.deepEqual(Buffer.from(await(await fetch(`${base}/api/safety-cost-month-files/${id}?siteId=${site.id}`,{headers:{cookie}})).arrayBuffer()),bytes);assert.equal((await fetch(`${base}/api/safety-cost-month-files/${id}?siteId=${other.id}`,{method:'DELETE',headers:{cookie}})).status,400);assert.equal((await fetch(`${base}/api/safety-cost-month-files/${id}?siteId=${site.id}`,{method:'DELETE',headers:{cookie}})).status,200);
+    const evidencePath=path+'&kind=evidence&description='+encodeURIComponent('가상 증빙');assert.equal((await upload(evidencePath,false)).status,401);assert.equal((await upload(path+'&kind=unknown',true)).status,400);assert.equal((await upload(evidencePath,true)).status,201);const evidence=await(await fetch(`${base}/api/safety-cost-month-files?siteId=${site.id}&month=2026-10`,{headers:{cookie}})).json();assert.equal(evidence[0].kind,'evidence');assert.equal(evidence[0].description,'가상 증빙');
+    const metadata={kind:'evidence',description:'가'.repeat(2000),note:'나'.repeat(1000)},framed=await fetch(base+path,{method:'POST',headers:{cookie,'x-file-name':'framed.png','x-cost-metadata':'json-prefix-v1'},body:new Blob([JSON.stringify(metadata)+'\n',bytes])});assert.equal(framed.status,201);const items=await(await fetch(`${base}/api/safety-cost-month-files?siteId=${site.id}&month=2026-10`,{headers:{cookie}})).json();assert.equal(items[1].description,metadata.description);assert.equal(items[1].note,metadata.note);
+    const escaped={kind:'evidence',description:'\u0001'.repeat(2000),note:'\u0002'.repeat(1000)};assert.ok(JSON.stringify(escaped).length>16384);assert.equal((await fetch(base+path,{method:'POST',headers:{cookie,'x-file-name':'escaped.png','x-cost-metadata':'json-prefix-v1'},body:new Blob([JSON.stringify(escaped)+'\n',bytes])})).status,201);assert.equal((await fetch(base+path,{method:'POST',headers:{cookie,'x-file-name':'bad.png','x-cost-metadata':'json-prefix-v1'},body:bytes})).status,400);
   }finally{if(child.exitCode===null&&!child.signalCode){const exited=once(child,'exit');child.kill();await exited;}rmSync(dir,{recursive:true,force:true});}
 });
 

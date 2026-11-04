@@ -28,6 +28,17 @@ test('월간 결재서류의 날짜와 비고를 안전하게 표시한다',asyn
   await runInNewContext('(async()=>{'+source.slice(start,end)+'})()',context);assert.match(html,/시험 결재서류/);assert.match(html,/2026-10-10/);assert.match(html,/&lt;가상&gt;/);assert.doesNotMatch(html,/<가상>/);assert.match(html,/cost-photo-page receipt/);
 });
 
+test('독립 증빙은 결재서류와 구분하고 설명을 안전하게 표시한다',async()=>{
+  const source=readFileSync(new URL('../public/app.js',import.meta.url),'utf8'),start=source.indexOf("  if(doc.type==='cost'&&Array.isArray(details.rows)){const photos="),end=source.indexOf('\n',start);let html='';
+  const context={doc:{type:'cost',id:9},details:{rows:[]},api:async()=>[{id:3,cost_id:0,name:'가상.png',kind:'photo',source_date:'2026-10-10',source_description:'<설명>',note:'<비고>'}],content:{querySelector:()=>({insertAdjacentHTML:(_where,value)=>{html=value;}})},esc:value=>String(value).replaceAll('<','&lt;').replaceAll('>','&gt;')};
+  await runInNewContext('(async()=>{'+source.slice(start,end)+'})()',context);assert.match(html,/월간 독립 증빙/);assert.match(html,/&lt;설명&gt;/);assert.match(html,/&lt;비고&gt;/);assert.doesNotMatch(html,/<설명>/);assert.doesNotMatch(html,/시험 결재서류/);
+});
+
+test('결재 화면도 독립 증빙의 설명과 자료를 안전하게 표시한다',()=>{
+  const source=readFileSync(new URL('../public/review.js',import.meta.url),'utf8'),start=source.indexOf('function planLinks('),end=source.indexOf('async function openReference(',start);assert.ok(start>=0&&end>start);
+  const context={esc:value=>String(value).replaceAll('<','&lt;').replaceAll('>','&gt;')};runInNewContext(source.slice(start,end),context);const html=context.planLinks(4,{type:'cost',photos:[{id:3,cost_id:0,kind:'photo',name:'가상.png',source_description:'<설명>',note:'비고'}]},true);assert.match(html,/시험 독립 증빙/);assert.match(html,/&lt;설명&gt;/);assert.match(html,/linked\/cost-photo\/0\/3/);assert.doesNotMatch(html,/<설명>/);
+});
+
 test('문서 사진 미리보기는 관리자에게만 이미지로 제공하고 다운로드를 유지한다',{timeout:30000},async()=>{
   const dir=mkdtempSync(join(tmpdir(),'jweb-cost-preview-')),reservation=createServer();await new Promise(resolve=>reservation.listen(0,'127.0.0.1',resolve));const port=reservation.address().port;await new Promise(resolve=>reservation.close(resolve));
   const child=spawn(process.execPath,['server.js'],{env:{...process.env,PORT:String(port),JWEB_DATA_DIR:dir,JWEB_ADMIN_PASSWORD:'virtual-admin-password'},stdio:['ignore','pipe','pipe']});
