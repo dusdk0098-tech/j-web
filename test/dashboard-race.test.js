@@ -16,13 +16,13 @@ function screen(initialPage='dashboard'){
   const start=source.indexOf('  const docsRequest=detailEpoch,docsSite=state.siteId,docsPage=state.page');
   const end=source.indexOf("  if(state.page==='statistics'){",start);
   assert.ok(start>=0&&end>start);
-  const documents=deferred(),attendance=deferred(),requests=[],weeklyRequests=[],tables=[],content={innerHTML:'현재 화면'};
-  const context={state:{page:initialPage,siteId:1,admin:{id:1},types},detailEpoch:1,content,statusLabels:{draft:'임시저장',pending:'결재 대기',approved:'승인',rejected:'반려'},
+  const documents=deferred(),attendance=deferred(),requests=[],weeklyRequests=[],tables=[],elements=new Map(),content={innerHTML:'현재 화면'};
+  const context={state:{page:initialPage,siteId:1,admin:{id:1,scope:'global'},types},detailEpoch:1,content,statusLabels:{draft:'임시저장',pending:'결재 대기',approved:'승인',rejected:'반려'},
     loadDocuments:current=>{context.documentsCurrent=current;return documents.promise;},api:(path,options,current)=>{if(path.startsWith('/api/equipment-check-count?'))return context.equipmentPromise||Promise.resolve({count:context.equipmentCount??0});if(path.startsWith('/api/weekly-activity?')){weeklyRequests.push(path);return context.weekPromise||Promise.resolve(context.weekRows||[]);}requests.push(path);context.attendanceCurrent=current;return attendance.promise;},
     today:()=> '2026-11-04',documentTable:rows=>{tables.push(rows);return '';},editDocument:()=>{},wireDocLinks:()=>{},esc:s=>String(s).replaceAll('<','&lt;').replaceAll('>','&gt;'),
-    $:()=>({}),Number};
+    $:selector=>{if(!elements.has(selector))elements.set(selector,{});return elements.get(selector);},render:async()=>{context.navigations=(context.navigations||0)+1;},showError:()=>{},Number};
   const render=runInNewContext('(async()=>{'+source.slice(start,end)+'})',context);
-  return {context,documents,attendance,requests,weeklyRequests,tables,content,render};
+  return {context,documents,attendance,requests,weeklyRequests,tables,elements,content,render};
 }
 test('이전 현장의 문서나 출역 응답은 다른 화면을 덮지 않는다',async()=>{
   for(const stage of ['documents','attendance']){
@@ -93,6 +93,7 @@ test('오늘 안전 활동은 선택 현장의 당일 안전 문서와 각 상�
   assert.match(ui.content.innerHTML,/오늘 안전 활동/);assert.deepEqual(Array.from(ui.tables[0],d=>[d.id,d.status]),[[1,'pending'],[2,'approved']]);
   assert.match(ui.content.innerHTML,/기계·장비 시험 점검: 0건/);assert.match(ui.content.innerHTML,/TBM: 결재 대기 1건/);assert.match(ui.content.innerHTML,/유해·위험 공지: 승인 1건/);assert.match(ui.content.innerHTML,/위험성평가: 오늘 날짜 문서 없음/);
 });
+test('대시보드에서 선택 현장의 오늘 통계로 이동하고 오래된 버튼은 무시한다',async()=>{const ui=screen(),run=ui.render();ui.documents.resolve([]);await new Promise(setImmediate);ui.attendance.resolve([]);await run;assert.match(ui.content.innerHTML,/오늘의 안전 활동 통계 보기/);const click=ui.elements.get('#dashboard-statistics').onclick;click();assert.equal(ui.context.state.page,'statistics');assert.equal(ui.context.state.siteId,1);assert.equal(ui.context.state.statisticsMonth,'2026-11');assert.equal(ui.context.state.statisticsDay,'04');assert.equal(ui.context.navigations,1);click();assert.equal(ui.context.navigations,1);});
 test('장비 점검 집계는 점검 날짜와 계획서 현장만 사용한다',()=>{
   const s=new Store(':memory:');try{const a=s.createSite({name:'가상 현장'}),b=s.createSite({name:'다른 현장'}),make=site=>{const equipment=s.createEquipment({siteId:site.id,kind:'장비',model:'모델',capacity:'',manufacturer:'',registration:''}),doc=s.createDocument({siteId:site.id,type:'work_plan',title:'계획',date:'2026-10-01',details:{equipmentIds:[equipment.id]}});return {equipment,doc};},one=make(a),two=make(b),check=(item,date)=>s.addEquipmentCheck(item.doc.id,{equipmentId:item.equipment.id,date,items:[{name:'점검',result:'적정'}]});check(one,'2026-11-04');check(one,'2026-11-03');check(two,'2026-11-04');assert.equal(s.equipmentCheckCount(a.id,'2026-11-04'),1);assert.equal(s.equipmentCheckCount(b.id,'2026-11-04'),1);assert.throws(()=>s.equipmentCheckCount(a.id,'2026-02-30'));}finally{s.close();}
 });
