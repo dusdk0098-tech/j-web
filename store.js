@@ -1481,7 +1481,7 @@ export class Store {
     if(!Object.hasOwn(workerDocumentPermission,type)||!this.workerPermissions(siteId,workerId).includes(workerDocumentPermission[type]))throw new Error('문서 작성 시험 권한이 필요합니다.');
     if(type==='tbm'||type==='education')return {};
     const companies=this.companies(siteId).map(({id,name,trade})=>({id,name,trade}));if(type==='risk')return {companies};
-    return {companies,equipment:this.equipment(siteId).map(({id,kind,model,registration})=>({id,kind,model,registration})),places:this.workPlaces(siteId).map(({id,name})=>({id,name})),rigging:this.rigging(siteId).map(({id,category,kind,name})=>({id,category,kind,name})),workers:this.workers(siteId).map(({id,name,company})=>({id,name,company}))};
+    return {companies,equipment:this.equipment(siteId).map(({id,kind,model,registration})=>({id,kind,model,registration})),places:this.workPlaces(siteId).map(({id,name})=>({id,name})),rigging:this.rigging(siteId).map(({id,category,kind,name,details})=>({id,category,kind,name,standards:JSON.parse(details).standards})),workers:this.workers(siteId).map(({id,name,company})=>({id,name,company}))};
   }
   checkAttendanceDayVersion(siteId,workerId,date,version){
     if(version===undefined)return;if(!Number.isSafeInteger(version)||version<0)throw new Error('일별 출역 기록을 다시 확인해 주세요.');
