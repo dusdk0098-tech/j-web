@@ -58,16 +58,16 @@ try {
 form.onsubmit=async event=>{
   event.preventDefault();const submit=form.querySelector('button[type=submit], button:not([type])'),ticket=flow.ticket();if(submit.disabled||!flow.active(ticket))return;submit.disabled=true;
   const payload=()=>{const equipment=[...form.querySelectorAll('[name=equipment]:checked')].map(input=>input.value),profile=Object.fromEntries(['birthDate','phone','emergencyName','emergencyPhone','address','nationality','bloodType','healthStatus','pledge'].map(key=>[key,form.elements[key].value]));return {...Object.fromEntries(new FormData(form)),companyId:Number(form.elements.companyId?.value||0),profile,equipment,signature:joinPad.value(),acknowledged:form.elements.acknowledged.checked,...workerJoinCredentials(params,siteKey)};};
-  const uncertain='등록 결과를 확인하지 못했습니다. 전송한 아이디로 로그인해 확인해 주세요.';
+  const uncertain='등록 결과를 확인하지 못했습니다. 전송한 이름과 생년월일로 로그인해 확인해 주세요. 중복 정보가 있으면 전송한 아이디와 암호를 사용하세요.';
   try {
     const sent=JSON.stringify(payload());flow.note(ticket,'가입 요청을 보내는 중입니다. 화면을 이동해도 요청이 처리될 수 있습니다.');
     let response,data;try{response=await fetch('/api/join',{method:'POST',headers:{'Content-Type':'application/json'},body:sent});data=await response.json();}catch{throw Error(uncertain);}
     if(!response.ok)throw Error(response.status>=500?uncertain:data.error||'등록 요청이 거절되었습니다.');
-    if(!flow.active(ticket)){flow.note(ticket,'이전에 전송한 등록이 완료되었습니다. 전송 당시 아이디로 로그인하세요.');return;}
+    if(!flow.active(ticket)){flow.note(ticket,'이전에 전송한 등록이 완료되었습니다. 전송 당시 이름과 생년월일로 로그인하세요. 중복 정보가 있으면 아이디와 암호를 사용하세요.');return;}
     let changed=true;try{changed=JSON.stringify(payload())!==sent;}catch{}
     flow.note(ticket,'');adoptSiteAddress(data.siteKey);
-    if(changed){message.textContent='전송한 등록이 완료되었습니다. 전송 후 수정한 내용은 저장되지 않았습니다. 전송 당시 아이디로 로그인하세요.';return;}
-    form.reset();updateWorkerRequirements();joinPad.clear();if(flow.registered())message.textContent='시험 등록이 완료되었습니다. 등록한 아이디와 암호로 로그인하세요.';
+    if(changed){message.textContent='전송한 등록이 완료되었습니다. 전송 후 수정한 내용은 저장되지 않았습니다. 전송 당시 이름과 생년월일로 로그인하세요. 중복 정보가 있으면 아이디와 암호를 사용하세요.';return;}
+    form.reset();updateWorkerRequirements();joinPad.clear();if(flow.registered())message.textContent='시험 등록이 완료되었습니다. 등록한 이름과 생년월일로 로그인하세요. 중복 정보가 있으면 아이디와 암호를 사용하세요.';
   }catch(error){if(flow.active(ticket)){flow.note(ticket,'');message.textContent=error.message;}else flow.note(ticket,'이전에 보낸 가입 요청: '+error.message);}finally{submit.disabled=false;}
 };
 async function showWorker(worker,reportContext){
