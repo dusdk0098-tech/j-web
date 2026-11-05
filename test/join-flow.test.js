@@ -31,10 +31,10 @@ test('현장 진입은 로그인과 동의 후 가입을 구분하고 닫힌 가
   const loginChoice={},joinChoice={},consent={},details={},status={textContent:''},next={},back={},acknowledged={checked:false},choices={hidden:true,querySelector:key=>({'[data-choose-login]':loginChoice,'[data-choose-join]':joinChoice})[key]},login={hidden:true},form={hidden:true,elements:{acknowledged},querySelector:key=>({'#join-consent':consent,'#join-details':details,'#join-consent-status':status,'#join-next':next,'#join-back':back})[key]},message={textContent:'이전 메시지'},flow=createJoinFlow(choices,login,form,message);
   flow.open(false);assert.equal(choices.hidden,false);assert.equal(joinChoice.hidden,true);joinChoice.onclick();assert.equal(form.hidden,true);loginChoice.onclick();assert.equal(login.hidden,false);assert.equal(form.hidden,true);
   flow.open(true);assert.equal(joinChoice.hidden,false);assert.equal(login.hidden,true);joinChoice.onclick();assert.equal(form.hidden,false);assert.equal(consent.hidden,false);assert.equal(details.hidden,true);next.onclick();assert.equal(details.hidden,true);assert.match(status.textContent,/확인/);
-  acknowledged.checked=true;next.onclick();assert.equal(consent.hidden,true);assert.equal(details.hidden,false);back.onclick();assert.equal(consent.hidden,false);assert.equal(details.hidden,true);assert.equal(acknowledged.checked,true);
+  acknowledged.checked=true;next.onclick();assert.equal(consent.hidden,true);assert.equal(details.hidden,false);form.registrationCompleted=true;back.onclick();assert.equal(form.registrationCompleted,true);assert.equal(consent.hidden,false);assert.equal(details.hidden,true);assert.equal(acknowledged.checked,true);
   acknowledged.checked=false;next.onclick();assert.equal(consent.hidden,false);assert.equal(details.hidden,true);assert.match(status.textContent,/세 가지.*모두/);acknowledged.checked=true;next.onclick();assert.equal(details.hidden,false);assert.equal(status.textContent,'');
   loginChoice.onclick();assert.equal(login.hidden,false);assert.equal(form.hidden,true);flow.hide();assert.equal(choices.hidden,true);assert.equal(login.hidden,true);assert.equal(form.hidden,true);flow.open(false);assert.equal(joinChoice.hidden,true);
-  flow.open(true);joinChoice.onclick();assert.equal(flow.registered(),true);assert.equal(login.hidden,false);assert.equal(form.hidden,true);flow.hide();message.textContent='로그인 완료';assert.equal(flow.registered(),false);assert.equal(login.hidden,true);assert.equal(choices.hidden,true);assert.equal(message.textContent,'로그인 완료');
+  flow.open(true);joinChoice.onclick();assert.equal(form.registrationCompleted,false);assert.equal(flow.registered(),true);assert.equal(login.hidden,false);assert.equal(form.hidden,true);flow.hide();message.textContent='로그인 완료';assert.equal(flow.registered(),false);assert.equal(login.hidden,true);assert.equal(choices.hidden,true);assert.equal(message.textContent,'로그인 완료');
 });
 
 function pendingRegistration(options={}){
@@ -72,6 +72,7 @@ test('가입 전송 후 수정한 입력은 보존하고 통신 오류는 결과
   edited.release({ok:true,status:201,json:async()=>({siteKey:'가상'})});await request;
   assert.equal(edited.form.hidden,false);assert.equal(edited.fields.name.value,'전송 후 수정한 가상 이름');assert.equal(edited.state.signature,'수정한 가상 서명');
   assert.equal(edited.state.reset,0);assert.equal(edited.state.cleared,0);assert.match(edited.message.textContent,/등록.*완료/);assert.match(edited.message.textContent,/수정.*저장되지/);
+  await edited.form.onsubmit(event);assert.equal(edited.calls(),1);assert.match(edited.message.textContent,/이미 등록이 완료/);assert.equal(edited.fields.name.value,'전송 후 수정한 가상 이름');edited.choiceJoin.onclick();await edited.form.onsubmit(event);assert.equal(edited.calls(),2);
   const lost=pendingRegistration(),failed=lost.form.onsubmit(event);lost.reject(new Error('가상 네트워크 오류'));await failed;
   assert.equal(lost.form.hidden,false);assert.equal(lost.state.reset,0);assert.match(lost.message.textContent,/결과.*확인하지 못/);assert.match(lost.message.textContent,/로그인/);
 });

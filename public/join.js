@@ -58,7 +58,7 @@ try {
   if(data.siteKey&&!siteKey){const link=document.createElement('a');link.id='worker-site-link';link.href=`/join?site=${encodeURIComponent(data.siteKey)}`;link.textContent='기존 가입자 로그인 주소';site.after(link);}
 } catch(error) {site.textContent='';message.textContent=error.message;}
 form.onsubmit=async event=>{
-  event.preventDefault();const submit=form.querySelector('button[type=submit], button:not([type])'),ticket=flow.ticket();if(submit.disabled||!flow.active(ticket))return;submit.disabled=true;
+  event.preventDefault();const submit=form.querySelector('button[type=submit], button:not([type])'),ticket=flow.ticket();if(submit.disabled||!flow.active(ticket))return;if(form.registrationCompleted){message.textContent='이미 등록이 완료되었습니다. 수정한 내용을 복사하고, 새로 등록하려면 처음 방문자 등록을 다시 선택하세요.';return;}submit.disabled=true;
   const payload=()=>{const equipment=[...form.querySelectorAll('[name=equipment]:checked')].map(input=>input.value),profile=Object.fromEntries(['birthDate','phone','emergencyName','emergencyPhone','address','nationality','bloodType','healthStatus','pledge'].map(key=>[key,form.elements[key].value]));return {...Object.fromEntries(new FormData(form)),companyId:Number(form.elements.companyId?.value||0),profile,equipment,signature:joinPad.value(),acknowledged:form.elements.acknowledged.checked,...(form.elements.useCredentials?.checked===false?{identityOnly:true}:{}),...workerJoinCredentials(params,siteKey)};};
   const uncertain='등록 결과를 확인하지 못했습니다. 전송한 이름과 생년월일로 로그인해 확인해 주세요. 중복 정보가 있으면 설정한 아이디로 로그인하거나 관리자에게 확인하세요.';
   try {
@@ -68,7 +68,7 @@ form.onsubmit=async event=>{
     if(!flow.active(ticket)){flow.note(ticket,'이전에 전송한 등록이 완료되었습니다. 전송 당시 이름과 생년월일로 로그인하세요. 중복 정보가 있으면 설정한 아이디로 로그인하거나 관리자에게 확인하세요.');return;}
     let changed=true;try{changed=JSON.stringify(payload())!==sent;}catch{}
     flow.note(ticket,'');adoptSiteAddress(data.siteKey);
-    if(changed){message.textContent='전송한 등록이 완료되었습니다. 전송 후 수정한 내용은 저장되지 않았습니다. 전송 당시 이름과 생년월일로 로그인하세요. 중복 정보가 있으면 설정한 아이디로 로그인하거나 관리자에게 확인하세요.';return;}
+    if(changed){form.registrationCompleted=true;message.textContent='전송한 등록이 완료되었습니다. 전송 후 수정한 내용은 저장되지 않았습니다. 수정한 내용을 복사하고, 새로 등록하려면 처음 방문자 등록을 다시 선택하세요. 전송 당시 이름과 생년월일로 로그인하세요.';return;}
     form.reset();form.elements.category.dispatchEvent(new Event('change'));if(form.elements.useCredentials)updateJoinCredentials();joinPad.clear();if(flow.registered())message.textContent='시험 등록이 완료되었습니다. 등록한 이름과 생년월일로 로그인하세요. 중복 정보가 있으면 설정한 아이디로 로그인하거나 관리자에게 확인하세요.';
   }catch(error){if(flow.active(ticket)){flow.note(ticket,'');message.textContent=error.message;}else flow.note(ticket,'이전에 보낸 가입 요청: '+error.message);}finally{submit.disabled=false;}
 };
