@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {runInNewContext} from 'node:vm';
 import {selectBatchDocuments} from '../public/batch-print.js';
+import {prepareWorkerPdfs} from '../public/plan-pdf.js';
 
 const source=readFileSync(new URL('../public/app.js',import.meta.url),'utf8');
 const start=source.indexOf('async function showBatchPreview('),end=source.indexOf('async function renderDailyTrainingStatistics(',start);
@@ -12,6 +13,7 @@ function harness({images=[],detail}={}){
   const content={children:[],style:{},append(){},querySelectorAll:()=>images};
   const document={body:{inert:false},createDocumentFragment:()=>({querySelectorAll:()=>[],append(){}}),createElement:()=>({append(){},prepend(){},querySelectorAll:()=>[]})};
   const context={freezeBatchImages:async()=>({dispose(){},check:async()=>{}}),api:async()=>({authenticated:true,admin:{scope:'global'},context:'batch-test'}),adminSession:Promise.resolve({context:'batch-test'}),showError:error=>flashes.push(error.message),detailEpoch:0,state,content,document,$:id=>nodes[id]??={},flash:message=>flashes.push(message),window:{print(){assert.equal(document.body.inert,false);assert.equal(content.style.visibility,'');prints++;}},render:async()=>{context.detailEpoch++;restores++;},renderDetail:async()=>{context.detailEpoch++;const id=state.detail,site_id=state.siteId;seen.push(id);return detail?detail(id):{id,site_id};}};
+  context.prepareWorkerPdfs=prepareWorkerPdfs;
   runInNewContext(source.slice(start,end),context);
   return {context,state,nodes,flashes,seen,content,document,prints:()=>prints,restores:()=>restores,run:(auto=true)=>context.showBatchPreview([1,2],[],1,false,null,auto)};
 }
