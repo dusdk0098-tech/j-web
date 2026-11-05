@@ -91,6 +91,8 @@ export function adminSitePolicy(db,req,url,session){
     if(method==='GET')return site(url.searchParams.get('siteId'));
     if(method==='POST')return input===undefined?null:input.officeSetup===undefined?site(input.siteId):denied();
   }
+  const planLinked=path.match(/^\/api\/documents\/([1-9]\d*)\/plan-linked$/);
+  if(planLinked){const row=doc(planLinked[1]);return method==='GET'&&!url.search&&!owned(row)&&row.type==='work_plan'?null:denied();}
   const document=path.match(/^\/api\/documents\/(\d+)(?:\/(events|attachments))?$/);
   if(document){
     const row=doc(document[1]),failure=owned(row);if(failure)return failure;

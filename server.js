@@ -1209,6 +1209,8 @@ const server = http.createServer((req,res)=>passwordRequests.run(true,()=>adminR
       const mime=Buffer.from(file.data).subarray(0,3).equals(Buffer.from('ffd8ff','hex'))?'image/jpeg':'image/png';
       res.writeHead(200,{'Content-Type':mime,'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(file.data);
     }
+    const planLinked=url.pathname.match(/^\/api\/documents\/([1-9]\d*)\/plan-linked$/);
+    if(planLinked&&req.method==='GET'&&!url.search){const doc=store.document(planLinked[1]);if(!doc||doc.type!=='work_plan')return json(res,404,{error:'작업계획서를 찾을 수 없습니다.'});const details=JSON.parse(doc.details||'{}'),ids=Array.isArray(details.riggingIds)?details.riggingIds:[],rigging=store.rigging(doc.site_id).filter(row=>ids.includes(row.id)).map(({id,category,kind,name,details})=>({id,category,kind,name,details:JSON.parse(details)})),place=store.workPlaces(doc.site_id).find(row=>row.id===details.workPlaceId);checkRequestSession(req);return json(res,200,{rigging,place:place?{id:place.id,name:place.name,details:JSON.parse(place.details)}:null});}
     const documentAttach=url.pathname.match(/^\/api\/documents\/(\d+)\/attachments\/(\d+)$/);
     const attach=url.pathname.match(/^\/api\/attachments\/(\d+)$/)|| (documentAttach&&req.method==='GET'?[documentAttach[0],documentAttach[2]]:null);
     if(attach){
