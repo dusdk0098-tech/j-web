@@ -93,6 +93,10 @@ export function adminSitePolicy(db,req,url,session){
   }
   const planLinked=path.match(/^\/api\/documents\/([1-9]\d*)\/plan-linked(?:\/(?:rigging|place)\/[1-9]\d*\/[1-9]\d*)?$/);
   if(planLinked){const row=doc(planLinked[1]);return method==='GET'&&!url.search&&!owned(row)&&row.type==='work_plan'?null:denied();}
+  const riskView=path.match(/^\/api\/documents\/([1-9]\d*)\/risk-activity-view$/);
+  if(riskView){const row=doc(riskView[1]);return method==='GET'&&!url.search&&!owned(row)&&row.type==='risk'?null:denied();}
+  const riskFile=path.match(/^\/api\/documents\/([1-9]\d*)\/risk-activities\/([1-9]\d*)\/photos\/([1-9]\d*)$/);
+  if(riskFile){const row=doc(riskFile[1]),params=url.searchParams,belongs=db.prepare('SELECT 1 FROM risk_activity_photos p JOIN risk_activities a ON a.id=p.activity_id WHERE a.document_id=? AND a.id=? AND p.id=?').get(...riskFile.slice(1).map(Number));return method==='GET'&&!owned(row)&&row.type==='risk'&&belongs&&[...params.keys()].every(key=>key==='expectedRevision')&&params.getAll('expectedRevision').length===1&&/^[a-f0-9]{64}$/.test(params.get('expectedRevision'))?null:denied();}
   const permitSignature=path.match(/^\/api\/documents\/([1-9]\d*)\/permit-extensions\/([1-9]\d*)\/signature$/);
   if(permitSignature){const row=doc(permitSignature[1]),params=url.searchParams;return method==='GET'&&!owned(row)&&row.type==='permit'&&[...params.keys()].every(key=>key==='expectedVersion')&&params.getAll('expectedVersion').length===1&&/^[a-f0-9]{64}$/.test(params.get('expectedVersion'))?null:denied();}
   const permitSnapshotFile=path.match(/^\/api\/documents\/([1-9]\d*)\/permit-snapshot-files\/(document|permit-signature|review-signature)\/([1-9]\d*)$/);
