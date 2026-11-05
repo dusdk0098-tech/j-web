@@ -19,10 +19,16 @@ function screen(){
  const form=nodes.get('#dialog-form'),date=nodes.get('#dialog-form [name=date]'),selection=nodes.get('#safety-source-selection'),status=nodes.get('#safety-source-status'),submit=nodes.get('#dialog-form button[type=submit]');form.onsubmit=()=>{};date.value='2026-11-01';
  runInNewContext('globalThis.mount=()=>{'+source.slice(start,end)+'};mount()',context);
  const load=()=>nodes.get('#safety-sources').onclick(),notice=()=>selection.children.find(label=>label.children?.some(child=>child.dataset?.safetySource==='notice'))?.children.find(child=>child.dataset?.safetySource==='notice'),apply=()=>selection.children.find(child=>child.tag==='button'),target=nodes.get('#dialog-form [name=safety_notices]');
- return {pending,state,dialog,context,date,selection,status,submit,form,load,notice,apply,target};
+ return {pending,state,dialog,context,date,selection,status,submit,form,load,notice,apply,target,markup:nodes.get('#daily-fields').innerHTML};
 }
 const result=text=>({present:1,documents:[{id:7,type:'notice',title:'가상 자료',status:'draft',body:text}]});
 
+test('작성 화면은 결재 필수 항목과 별도 서명을 알리면서 임시저장을 허용한다',()=>{
+ const ui=screen();assert.match(ui.markup,/임시저장할 때는 비워둘 수 있습니다/);assert.match(ui.markup,/작성자 시험 서명/);for(const name of ['weather','todayWork','tomorrowWork'])assert.ok(ui.markup.includes('결재 요청 시 필수)<textarea name="safety_'+name+'"'));assert.doesNotMatch(ui.markup,/required/);
+});
+test('상세 화면은 결재 필수 항목의 미입력 상태를 표시한다',()=>{
+ const line=source.split('\n').find(value=>value.startsWith("  if(doc.type==='safety_log')content.querySelector"));assert.ok(line);let html='';const content={querySelector:()=>({insertAdjacentHTML:(_position,value)=>{html=value;}})},details={todayWork:'가상 <업무>'};runInNewContext(line,{doc:{type:'safety_log'},details,content,safetyLogFields:fields,esc:value=>String(value).replaceAll('<','&lt;').replaceAll('>','&gt;')});assert.match(html,/<strong>날씨<\/strong> 미입력/);assert.match(html,/<strong>명일<\/strong> 미입력/);assert.match(html,/가상 &lt;업무&gt;/);assert.doesNotMatch(html,/<업무>/);
+});
 test('선택한 자료는 빈 항목에만 적용하고 저장 중에는 적용하지 않는다',async()=>{
  const ui=screen(),loading=ui.load();ui.pending[0].resolve(result('가상 공지'));await loading;ui.notice().value='7';ui.submit.disabled=true;ui.apply().onclick();assert.equal(ui.target.value,'');assert.match(ui.status.textContent,/저장이 끝난 뒤/);ui.submit.disabled=false;ui.apply().onclick();assert.equal(ui.target.value,'가상 공지');ui.target.value='직접 입력';ui.apply().onclick();assert.equal(ui.target.value,'직접 입력');
 });
