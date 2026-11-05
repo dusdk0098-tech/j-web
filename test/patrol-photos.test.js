@@ -1,3 +1,4 @@
+import {patrolActivitiesSummary} from '../public/patrol-activities.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync,mkdtempSync,rmSync} from 'node:fs';
@@ -36,5 +37,5 @@ test('순회 사진 HTTP는 권한과 결재 차수를 검사하며 요청 당�
 
 test('전역 순회 점검 상세는 항목별 판정과 개선 내용을 표로 표시한다',()=>{
   const source=readFileSync(new URL('../public/app.js',import.meta.url),'utf8'),line=source.split(String.fromCharCode(10)).find(line=>line.includes("if(doc.type==='patrol')")&&line.includes('순회 점검 내용'));assert.ok(line);let html='';
-  const doc={type:'patrol'},details={inspector:'가상 <점검자>',items:[{name:'가상 <항목>',result:'X',note:'가상 <조치>',patrolGroup:'가상 <구분>',patrolGuidance:'가상 <세부>'}]},content={querySelector:()=>({insertAdjacentHTML(_where,value){html=value;}})},esc=value=>String(value).replaceAll('<','&lt;').replaceAll('>','&gt;');runInNewContext(line,{doc,details,content,esc});for(const text of ['<th>점검 구분</th>','<th>점검 항목</th>','<th>세부 점검사항</th>','<th>결과</th>','<th>개선대책 지시 / 비고</th>','가상 &lt;점검자&gt;','가상 &lt;항목&gt;','가상 &lt;조치&gt;','가상 &lt;구분&gt;','가상 &lt;세부&gt;'])assert.ok(html.includes(text),text);assert.doesNotMatch(html,/<항목>|<조치>/);
+  const doc={type:'patrol'},details={inspector:'가상 <점검자>',patrolActivities:[{inspector:'활동 <담당>',timeFrom:'09:10',timeTo:'15:20',content:'활동 내용',action:'활동 조치'}],items:[{name:'가상 <항목>',result:'X',note:'가상 <조치>',patrolGroup:'가상 <구분>',patrolGuidance:'가상 <세부>'}]},content={querySelector:()=>({insertAdjacentHTML(_where,value){html=value;}})},esc=value=>String(value).replaceAll('<','&lt;').replaceAll('>','&gt;');runInNewContext(line,{doc,details,content,esc,patrolActivitiesSummary});for(const text of ['<th>점검 구분</th>','<th>점검 항목</th>','<th>세부 점검사항</th>','<th>결과</th>','<th>개선대책 지시 / 비고</th>','가상 &lt;점검자&gt;','가상 &lt;항목&gt;','가상 &lt;조치&gt;','가상 &lt;구분&gt;','가상 &lt;세부&gt;','활동 &lt;담당&gt;','09:10','활동 조치'])assert.ok(html.includes(text),text);assert.doesNotMatch(html,/<항목>|<조치>/);
 });

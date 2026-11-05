@@ -14,6 +14,7 @@ import { changedTrainingWorkers } from '../public/training-groups.js';
 import { attendanceNoticesMarkup } from '../public/attendance-matrix.js';
 import { trainingDetailMarkup } from '../public/training-detail.js';
 import { riskDetailMarkup, muscleDetailMarkup } from '../public/risk-detail.js';
+import { patrolActivitiesSummary } from '../public/patrol-activities.js';
 import { planDetailMarkup } from '../public/plan-detail.js';
 import { educationAttachmentLabels } from '../public/education-kinds.js';
 import { checklistCategories } from '../public/checklist-copy.js';
@@ -51,7 +52,7 @@ function screen(fetcher=async()=>({ok:true,status:200,json:async()=>[]})){
   context.changedTrainingWorkers=changedTrainingWorkers;
   context.attendanceNoticesMarkup=attendanceNoticesMarkup;
   context.trainingDetailMarkup=trainingDetailMarkup;context.educationAttachmentLabels=educationAttachmentLabels;
-  Object.assign(context,{riskDetailMarkup,muscleDetailMarkup,planDetailMarkup});
+  Object.assign(context,{riskDetailMarkup,muscleDetailMarkup,planDetailMarkup,patrolActivitiesSummary});
   for(const key of ['riskFields','riskKinds','riskScales','planFields','safetyLogFields','placeChoiceLabels'])context[key]=runInNewContext(source.split('\n').find(line=>line.startsWith('const '+key+'='))+'\n'+key);
   runInNewContext(source.split('\n').find(line=>line.startsWith('function placeSummary(')),context);
   for(const key of ['rainChecks','windChecks','thawChecks','heatChecks','coldChecks','wetSeasonChecks','heavyRainChecks','electricalChecks','fireChecks','formworkChecks','fallingChecks','confinedChecks','excavationChecks','semiannualChecks','morningChecks','afternoonChecks','eveningChecks'])context[key]=runInNewContext(source.split('\n').find(line=>line.startsWith('const '+key+'='))+'\n'+key);
@@ -131,8 +132,8 @@ test('제한 문서 목록 A→B→A 이동 뒤 첫 A 응답과 이전 검색 �
 });
 
 test('배정 현장의 점검과 일지 상세는 저장 항목만 안전하게 표시한다',async()=>{
-  const samples={inspection:{rows:[{inspector:'가상 <점검자>',hazard:'가상 위험',action:'가상 조치'}],instruction:'가상 지시'},patrol:{inspector:'가상 <점검자>',items:[{name:'가상 위험',result:'X',note:'가상 조치',patrolGroup:'가상 구분',patrolGuidance:'가상 세부'}],instruction:'가상 지시'},safety_log:{todayWork:'가상 <점검자>',inspection:'가상 위험',notes:'가상 조치',inspectionKind:'가상 지시',attendanceSnapshot:{present:2,capturedAt:'가상 시각'}}};
-  for(const [type,details] of Object.entries(samples)){details.secret='표시 금지';const doc={id:5,site_id:1,type,title:'가상 문서',details:JSON.stringify(details)},ui=screen(async path=>response(path.endsWith('/attachments')?[{id:7,name:'가상 사진.png',size:10,category:'inspection_photo'}]:doc));ui.state.page='documents';ui.state.detail=5;await ui.context.renderRestrictedDocuments();for(const value of ['가상 &lt;점검자&gt;','가상 위험','가상 조치','가상 지시','가상 사진.png'])assert.ok(ui.content.innerHTML.includes(value),type+value);assert.doesNotMatch(ui.content.innerHTML,/표시 금지|<점검자>/);if(type==='patrol')for(const heading of ['점검 구분','점검 항목','세부 점검사항','결과','개선대책 지시 / 비고'])assert.ok(ui.content.innerHTML.includes('<th>'+heading+'</th>'),heading);if(type==='safety_log')assert.match(ui.content.innerHTML,/2명.*가상 시각/);const wrong=screen(async()=>response({...doc,site_id:2}));wrong.state.page='documents';wrong.state.detail=5;await assert.rejects(wrong.context.renderRestrictedDocuments(),/현장/);}
+  const samples={inspection:{rows:[{inspector:'가상 <점검자>',hazard:'가상 위험',action:'가상 조치'}],instruction:'가상 지시'},patrol:{inspector:'가상 <점검자>',patrolActivities:[{inspector:'활동 <담당>',timeFrom:'09:00',timeTo:'10:00',content:'활동 내용',action:'활동 조치'}],items:[{name:'가상 위험',result:'X',note:'가상 조치',patrolGroup:'가상 구분',patrolGuidance:'가상 세부'}],instruction:'가상 지시'},safety_log:{todayWork:'가상 <점검자>',inspection:'가상 위험',notes:'가상 조치',inspectionKind:'가상 지시',attendanceSnapshot:{present:2,capturedAt:'가상 시각'}}};
+  for(const [type,details] of Object.entries(samples)){details.secret='표시 금지';const doc={id:5,site_id:1,type,title:'가상 문서',details:JSON.stringify(details)},ui=screen(async path=>response(path.endsWith('/attachments')?[{id:7,name:'가상 사진.png',size:10,category:'inspection_photo'}]:doc));ui.state.page='documents';ui.state.detail=5;await ui.context.renderRestrictedDocuments();for(const value of ['가상 &lt;점검자&gt;','가상 위험','가상 조치','가상 지시','가상 사진.png'])assert.ok(ui.content.innerHTML.includes(value),type+value);assert.doesNotMatch(ui.content.innerHTML,/표시 금지|<점검자>/);if(type==='patrol')for(const heading of ['점검 구분','점검 항목','세부 점검사항','결과','개선대책 지시 / 비고'])assert.ok(ui.content.innerHTML.includes('<th>'+heading+'</th>'),heading);if(type==='patrol'){assert.match(ui.content.innerHTML,/활동 &lt;담당&gt;/);assert.match(ui.content.innerHTML,/활동 조치/);assert.doesNotMatch(ui.content.innerHTML,/<담당>/);}if(type==='safety_log')assert.match(ui.content.innerHTML,/2명.*가상 시각/);const wrong=screen(async()=>response({...doc,site_id:2}));wrong.state.page='documents';wrong.state.detail=5;await assert.rejects(wrong.context.renderRestrictedDocuments(),/현장/);}
 });
 
 test('배정 현장의 체크리스트는 모든 종류의 문항과 저장된 답을 표시한다',async()=>{
