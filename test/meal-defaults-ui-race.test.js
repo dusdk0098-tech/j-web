@@ -29,3 +29,10 @@ for(const group of ['','manager'])test(`${group||'worker'} 식대 설정은 저�
 test('저장 중 현장 전환 뒤 결과는 새 화면을 다시 그리지 않는다',async()=>{
  const ui=screen();await ui.load();const form=ui.forms['#meal-defaults'],pending=form.onsubmit({preventDefault(){},currentTarget:form}),request=ui.requests.at(-1);ui.state.siteId=2;assert.equal(request.scope(),false);request.resolve({});await pending;assert.deepEqual(ui.messages,[]);assert.deepEqual(form.controls.map(c=>c.disabled),[false,false,true]);await form.onsubmit({preventDefault(){},currentTarget:form});assert.equal(ui.requests.length,4);
 });
+
+test('식당 작성에서 간식 부가세를 별도로 수정하고 단가 변경 시 자동 계산한다',()=>{
+ const begin=source.indexOf('    const edit=r=>{',start),end=source.indexOf("    $('#restaurant-add').onclick=",begin);assert.ok(begin>start&&end>begin);
+ const nodes=Object.fromEntries(['mealPrice','tax','snackPrice','snackTax'].map(name=>[`#dialog-form [name=${name}]`,{value:name==='snackPrice'?'0':'',addEventListener(_event,fn){this.change=fn;}}]));nodes['#restaurant-total']={textContent:''};let markup,submit;
+ const context={current:()=>true,siteId:1,field:(name,label,value)=>`<label>${label}<input name="${name}" value="${value}"></label>`,showDialog:(_title,html,onSubmit)=>{markup=html;submit=onSubmit;},$:key=>nodes[key],restaurantPrice:(price,tax,auto)=>/^\d+$/.test(price)?{tax:auto?Math.floor(Number(price)/10):Number(tax),total:Number(price)+Number(tax)}:null,api:(_path,options)=>JSON.parse(options.body)};
+ runInNewContext(source.slice(begin,end)+';globalThis.edit=edit;',context);context.edit({id:3,name:'가상',meal_price:5000,snack_price:1000,tax:500,snack_tax:90});assert.match(markup,/간식 부가세/);assert.match(markup,/name="snackTax" value="90"/);nodes['#dialog-form [name=snackPrice]'].value='1234';nodes['#dialog-form [name=snackPrice]'].change();assert.equal(nodes['#dialog-form [name=snackTax]'].value,'123');assert.equal(submit({snackTax:'123'}).snackTax,'123');
+});

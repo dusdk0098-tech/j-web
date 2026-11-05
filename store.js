@@ -298,6 +298,7 @@ export class Store {
       }
       this.db.exec('COMMIT');
     }catch(error){this.db.exec('ROLLBACK');throw error;}
+    if (!this.db.prepare('PRAGMA table_info(restaurants)').all().some(c=>c.name==='snack_tax')) this.db.exec('ALTER TABLE restaurants ADD COLUMN snack_tax INTEGER CHECK(snack_tax IS NULL OR snack_tax BETWEEN 0 AND 999999999)');
     if (!this.db.prepare('PRAGMA table_info(meal_checks)').all().some(c=>c.name==='tax_snapshot')) this.db.exec('ALTER TABLE meal_checks ADD COLUMN tax_snapshot INTEGER CHECK(tax_snapshot IS NULL OR tax_snapshot BETWEEN 0 AND 999999999)');
     if (!this.db.prepare('PRAGMA table_info(ppe_issues)').all().some(c=>c.name==='version')) this.db.exec("ALTER TABLE ppe_issues ADD COLUMN version TEXT NOT NULL DEFAULT ''");
     this.db.exec("UPDATE ppe_issues SET version=lower(hex(randomblob(16))) WHERE version=''");
@@ -755,7 +756,7 @@ export class Store {
   }
   applyMealDefaults(workerId,date) {
     const category=this.db.prepare('SELECT category FROM workers WHERE id=?').get(Number(workerId))?.category,table=category==='직영'?'meal_defaults':category==='현장관리자'?'manager_meal_defaults':null;if(!table)return;
-    this.db.prepare(`INSERT OR IGNORE INTO meal_checks(site_id,worker_id,date,kind,restaurant_id,restaurant_name,price,tax_snapshot) SELECT w.site_id,w.id,?,d.kind,r.id,r.name,CASE WHEN d.kind='snack' THEN r.snack_price ELSE r.meal_price END,CASE WHEN d.kind='snack' THEN NULL ELSE r.tax END FROM workers w JOIN ${table} d ON d.site_id=w.site_id JOIN restaurants r ON r.id=d.restaurant_id AND r.site_id=w.site_id WHERE w.id=?`).run(date,Number(workerId));
+    this.db.prepare(`INSERT OR IGNORE INTO meal_checks(site_id,worker_id,date,kind,restaurant_id,restaurant_name,price,tax_snapshot) SELECT w.site_id,w.id,?,d.kind,r.id,r.name,CASE WHEN d.kind='snack' THEN r.snack_price ELSE r.meal_price END,CASE WHEN d.kind='snack' THEN r.snack_tax ELSE r.tax END FROM workers w JOIN ${table} d ON d.site_id=w.site_id JOIN restaurants r ON r.id=d.restaurant_id AND r.site_id=w.site_id WHERE w.id=?`).run(date,Number(workerId));
   }
   wageEstimate(siteId,workerId,month){
     siteId=Number(siteId);workerId=Number(workerId);month=monthValue(month);
@@ -835,7 +836,7 @@ export class Store {
     if(input.present){
       const restaurant=this.db.prepare('SELECT * FROM restaurants WHERE id=? AND site_id=?').get(Number(input.restaurantId),siteId);
       if(!restaurant)throw new Error('선택한 현장의 식당을 확인해 주세요.');
-      return this.db.prepare('INSERT OR IGNORE INTO meal_checks(site_id,worker_id,date,kind,restaurant_id,restaurant_name,price,tax_snapshot) SELECT ?,a.worker_id,a.date,?,?,?,?,? FROM attendance a WHERE a.worker_id=? AND a.present=1 AND a.date BETWEEN ? AND ?').run(siteId,kind,restaurant.id,restaurant.name,kind==='snack'?restaurant.snack_price:restaurant.meal_price,kind==='snack'?null:restaurant.tax,workerId,`${month}-01`,`${month}-31`).changes;
+      return this.db.prepare('INSERT OR IGNORE INTO meal_checks(site_id,worker_id,date,kind,restaurant_id,restaurant_name,price,tax_snapshot) SELECT ?,a.worker_id,a.date,?,?,?,?,? FROM attendance a WHERE a.worker_id=? AND a.present=1 AND a.date BETWEEN ? AND ?').run(siteId,kind,restaurant.id,restaurant.name,kind==='snack'?restaurant.snack_price:restaurant.meal_price,kind==='snack'?restaurant.snack_tax:restaurant.tax,workerId,`${month}-01`,`${month}-31`).changes;
     }
     return this.db.prepare('DELETE FROM meal_checks WHERE site_id=? AND worker_id=? AND kind=? AND date BETWEEN ? AND ? AND EXISTS (SELECT 1 FROM attendance a WHERE a.worker_id=meal_checks.worker_id AND a.date=meal_checks.date AND a.present=1)').run(siteId,workerId,kind,`${month}-01`,`${month}-31`).changes;
   }
@@ -851,7 +852,7 @@ export class Store {
     if(!worker)throw new Error('선택한 날짜의 출역자를 확인해 주세요.');
     const restaurant=this.db.prepare('SELECT * FROM restaurants WHERE id=? AND site_id=?').get(Number(input.restaurantId),siteId);
     if(!restaurant)throw new Error('선택한 현장의 식당을 확인해 주세요.');
-    this.db.prepare('INSERT INTO meal_checks(site_id,worker_id,date,kind,restaurant_id,restaurant_name,price,tax_snapshot) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(worker_id,date,kind) DO UPDATE SET restaurant_id=excluded.restaurant_id,restaurant_name=excluded.restaurant_name,price=excluded.price,tax_snapshot=excluded.tax_snapshot').run(siteId,workerId,date,kind,restaurant.id,restaurant.name,kind==='snack'?restaurant.snack_price:restaurant.meal_price,kind==='snack'?null:restaurant.tax);
+    this.db.prepare('INSERT INTO meal_checks(site_id,worker_id,date,kind,restaurant_id,restaurant_name,price,tax_snapshot) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(worker_id,date,kind) DO UPDATE SET restaurant_id=excluded.restaurant_id,restaurant_name=excluded.restaurant_name,price=excluded.price,tax_snapshot=excluded.tax_snapshot').run(siteId,workerId,date,kind,restaurant.id,restaurant.name,kind==='snack'?restaurant.snack_price:restaurant.meal_price,kind==='snack'?restaurant.snack_tax:restaurant.tax);
   }
   setDailyMealChecks(input,authorize=()=>{}) {
     const siteId=Number(input.siteId),date=dateValue(input.date),changes=input.changes;
@@ -863,7 +864,7 @@ export class Store {
       let restaurant=null;if(changes.some(c=>c.selected&&c.expected===null)){restaurant=this.db.prepare('SELECT * FROM restaurants WHERE site_id=? AND id=?').get(siteId,Number(input.restaurantId));if(!restaurant)throw new Error('선택한 현장의 식당을 확인해 주세요.');}
       for(const c of changes){if(!present.get(siteId,c.workerId,date))throw new Error('선택한 날짜의 출역자를 확인해 주세요.');const row=find.get(siteId,c.workerId,date,c.kind);if((row?.revision??null)!==c.expected)throw Object.assign(new Error('식대 기록이 변경되었습니다. 다시 조회해 주세요.'),{sessionStatus:409});}
       const insert=this.db.prepare('INSERT INTO meal_checks(site_id,worker_id,date,kind,restaurant_id,restaurant_name,price,tax_snapshot) VALUES(?,?,?,?,?,?,?,?)'),remove=this.db.prepare('DELETE FROM meal_checks WHERE site_id=? AND worker_id=? AND date=? AND kind=? AND revision=?');let changed=0;
-      for(const c of changes){if(c.selected&&c.expected===null){insert.run(siteId,c.workerId,date,c.kind,restaurant.id,restaurant.name,c.kind==='snack'?restaurant.snack_price:restaurant.meal_price,c.kind==='snack'?null:restaurant.tax);changed++;}else if(!c.selected&&c.expected!==null){remove.run(siteId,c.workerId,date,c.kind,c.expected);changed++;}}
+      for(const c of changes){if(c.selected&&c.expected===null){insert.run(siteId,c.workerId,date,c.kind,restaurant.id,restaurant.name,c.kind==='snack'?restaurant.snack_price:restaurant.meal_price,c.kind==='snack'?restaurant.snack_tax:restaurant.tax);changed++;}else if(!c.selected&&c.expected!==null){remove.run(siteId,c.workerId,date,c.kind,c.expected);changed++;}}
       authorize();this.db.exec('COMMIT');return changed;
     }catch(error){this.db.exec('ROLLBACK');throw error;}
   }
@@ -873,11 +874,11 @@ export class Store {
   saveRestaurant(input,id=null) {
     const siteId=Number(input.siteId);
     if(!this.db.prepare('SELECT 1 FROM sites WHERE id=?').get(siteId))throw new Error('현장을 선택해 주세요.');
-    if(id!==null&&!this.db.prepare('SELECT 1 FROM restaurants WHERE id=? AND site_id=?').get(Number(id),siteId))throw new Error('선택한 현장의 식당을 확인해 주세요.');
+    const existing=id===null?null:this.db.prepare('SELECT snack_tax FROM restaurants WHERE id=? AND site_id=?').get(Number(id),siteId);if(id!==null&&!existing)throw new Error('선택한 현장의 식당을 확인해 주세요.');
     const name=text(input.name,'식당명'),amount=(value,label)=>{if(typeof value!=='string'||!/^\d{1,9}$/.test(value))throw new Error(label+'을 확인해 주세요.');return Number(value);};
-    const meal=amount(input.mealPrice,'식비'),snack=amount(input.snackPrice,'간식비'),tax=amount(input.tax,'부가세');
-    if(id===null)id=this.db.prepare('INSERT INTO restaurants(site_id,name,meal_price,snack_price,tax) VALUES(?,?,?,?,?)').run(siteId,name,meal,snack,tax).lastInsertRowid;
-    else this.db.prepare('UPDATE restaurants SET name=?,meal_price=?,snack_price=?,tax=? WHERE id=? AND site_id=?').run(name,meal,snack,tax,Number(id),siteId);
+    const meal=amount(input.mealPrice,'식비'),snack=amount(input.snackPrice,'간식비'),tax=amount(input.tax,'부가세'),snackTax=input.snackTax===undefined?existing?.snack_tax??null:input.snackTax===''?null:amount(input.snackTax,'간식 부가세');
+    if(id===null)id=this.db.prepare('INSERT INTO restaurants(site_id,name,meal_price,snack_price,tax,snack_tax) VALUES(?,?,?,?,?,?)').run(siteId,name,meal,snack,tax,snackTax).lastInsertRowid;
+    else this.db.prepare('UPDATE restaurants SET name=?,meal_price=?,snack_price=?,tax=?,snack_tax=? WHERE id=? AND site_id=?').run(name,meal,snack,tax,snackTax,Number(id),siteId);
     return this.db.prepare('SELECT * FROM restaurants WHERE id=? AND site_id=?').get(Number(id),siteId);
   }
   safetyCosts(siteId,month){
