@@ -93,6 +93,8 @@ export function adminSitePolicy(db,req,url,session){
   }
   const planLinked=path.match(/^\/api\/documents\/([1-9]\d*)\/plan-linked(?:\/(?:rigging|place)\/[1-9]\d*\/[1-9]\d*)?$/);
   if(planLinked){const row=doc(planLinked[1]);return method==='GET'&&!url.search&&!owned(row)&&row.type==='work_plan'?null:denied();}
+  const permitRecords=path.match(/^\/api\/documents\/([1-9]\d*)\/permit-(?:checks|extensions)$/);
+  if(permitRecords){const row=doc(permitRecords[1]);return method==='GET'&&!url.search&&!owned(row)&&row.type==='permit'?null:denied();}
   const document=path.match(/^\/api\/documents\/(\d+)(?:\/(events|attachments))?$/);
   if(document){
     const row=doc(document[1]),failure=owned(row);if(failure)return failure;
