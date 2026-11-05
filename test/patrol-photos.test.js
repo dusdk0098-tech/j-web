@@ -33,3 +33,8 @@ test('순회 사진 HTTP는 권한과 결재 차수를 검사하며 요청 당�
     const upload=`${base}/api/documents/${draft.id}/attachments?category=patrol_photo`,headers={'x-file-name':encodeURIComponent('가상.png')};assert.equal((await fetch(upload,{method:'POST',headers,body:bytes})).status,401);const created=await fetch(upload,{method:'POST',headers:{...headers,cookie:admin},body:bytes});assert.equal(created.status,201);const preview=await get(`/api/documents/${draft.id}/attachments/${(await created.json()).id}?preview=1`,admin);assert.deepEqual(Buffer.from(await preview.arrayBuffer()),bytes);assert.equal((await fetch(upload,{method:'POST',headers:{...headers,cookie:admin},body:Buffer.from('잘못된 파일')})).status,400);
   }finally{if(child.exitCode===null){const exited=once(child,'exit');child.kill();await exited;}rmSync(dir,{recursive:true,force:true});}
 });
+
+test('전역 순회 점검 상세는 항목별 판정과 개선 내용을 표로 표시한다',()=>{
+  const source=readFileSync(new URL('../public/app.js',import.meta.url),'utf8'),line=source.split(String.fromCharCode(10)).find(line=>line.includes("if(doc.type==='patrol')")&&line.includes('순회 점검 내용'));assert.ok(line);let html='';
+  const doc={type:'patrol'},details={inspector:'가상 <점검자>',items:[{name:'가상 <항목>',result:'X',note:'가상 <조치>'}]},content={querySelector:()=>({insertAdjacentHTML(_where,value){html=value;}})},esc=value=>String(value).replaceAll('<','&lt;').replaceAll('>','&gt;');runInNewContext(line,{doc,details,content,esc});for(const text of ['<th>점검 항목</th>','<th>결과</th>','<th>개선대책 지시 / 비고</th>','가상 &lt;점검자&gt;','가상 &lt;항목&gt;','가상 &lt;조치&gt;'])assert.ok(html.includes(text),text);assert.doesNotMatch(html,/<항목>|<조치>/);
+});
