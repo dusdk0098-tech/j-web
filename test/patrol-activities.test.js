@@ -27,10 +27,10 @@ test('순회 저장 중 입력을 잠그고 실패 또는 화면 이동 뒤 상�
  assert.ok(start>0&&end>start);
  const body=source.slice(start,end),actor={},state={admin:actor,siteId:1,page:'documents',detail:0},controls=[{disabled:false},{disabled:false},{disabled:true}],form={onsubmit:()=>{}},dialog={open:true};
  let resolve,reject;const api=()=>new Promise((yes,no)=>{resolve=yes;reject=no;});
- const context={data:{type:'patrol'},doc:null,state,siteId:1,page:'documents',actor,detailEpoch:1,educationEpoch:1,dialog,api,$:key=>key==='#dialog-form'?form:{querySelectorAll:()=>controls}};
+ const context={data:{type:'patrol'},doc:null,state,siteId:1,page:'documents',actor,detailEpoch:1,educationEpoch:1,editCurrent:()=>state.admin===actor&&state.siteId===1&&state.page==='documents',dialog,api,$:key=>key==='#dialog-form'?form:{querySelectorAll:()=>controls}};
  const run=()=>runInNewContext(`(async()=>{${body}})()`,context);
  let pending=run();assert.deepEqual(controls.map(c=>c.disabled),[true,true,true]);reject(Error('저장 실패'));await assert.rejects(pending,/저장 실패/);assert.deepEqual(controls.map(c=>c.disabled),[false,false,true]);assert.equal(state.detail,0);
- pending=run();state.siteId=2;resolve({id:55});await pending;assert.equal(state.detail,0);assert.deepEqual(controls.map(c=>c.disabled),[false,false,true]);
+ pending=run();state.siteId=2;resolve({id:55});await assert.rejects(pending,/현장이 변경/);assert.equal(state.detail,0);assert.deepEqual(controls.map(c=>c.disabled),[false,false,true]);
  state.siteId=1;pending=run();resolve({id:56});await pending;assert.equal(state.detail,56);assert.deepEqual(controls.map(c=>c.disabled),[false,false,true]);
 });
 test('관리자 HTTP는 활동 저장·구형 수정·사본과 파일 제공을 지원한다',{timeout:30000},async()=>{
