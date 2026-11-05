@@ -26,12 +26,14 @@ test('합동 점검 항목별 보완과 조치는 수정·결재 사본에 보�
 
 test('작성 화면은 항목별 입력을 안전하게 표시하고 저장 요청에 포함한다',()=>{
   const source=readFileSync(new URL('../public/app.js',import.meta.url),'utf8'),start=source.indexOf('const addItem=item=>'),end=source.indexOf('\n',start);
-  assert.ok(start>=0&&end>start);let html='';const remove={};
-  const list={insertAdjacentHTML(_where,value){html=value;},lastElementChild:{querySelector(){return remove;}}};
+  assert.ok(start>=0&&end>start);let html='';const remove={},select={value:'보완사항'},extra={hidden:false},issue={value:'기존 문제'},action={value:'기존 조치'},controls={'[data-joint-remove]':remove,select,'[data-joint-extra]':extra,'[data-joint-issue]':issue,'[data-joint-action]':action};
+  const list={insertAdjacentHTML(_where,value){html=value;},lastElementChild:{querySelector:key=>controls[key]}};
   const esc=value=>String(value).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;');
   const add=runInNewContext(source.slice(start,end)+';addItem',{esc,$:()=>list});
   add({name:'<항목>',result:'보완사항',issueDetail:'<문제>',action:'<조치>'});
   assert.match(html,/&lt;항목&gt;/);assert.match(html,/data-joint-issue[^>]*>&lt;문제&gt;/);assert.match(html,/data-joint-action[^>]*>&lt;조치&gt;/);
+  select.value='양호';select.onchange();assert.equal(extra.hidden,true);assert.equal(issue.value,'');assert.equal(action.value,'');select.value='보완사항';select.onchange();assert.equal(extra.hidden,false);
+  add({name:'이전 항목',result:'양호',issueDetail:'이전 내용'});assert.match(html,/<div data-joint-extra\s*>/);add({name:'새 항목',result:'양호'});assert.match(html,/<div data-joint-extra hidden>/);
   const expression=source.match(/items:\[\.\.\.document\.querySelectorAll\('\[data-joint-item\]'\)\]\.map\(row=>\(\{[^}]+\}\)\)/)?.[0];assert.ok(expression);
   const fields={input:{value:'항목'},select:{value:'보완사항'},'[data-joint-issue]':{value:'문제'},'[data-joint-action]':{value:'조치'}},row={querySelector:key=>fields[key]};
   const payload=runInNewContext(`({${expression}})`,{document:{querySelectorAll:()=>[row]}});
