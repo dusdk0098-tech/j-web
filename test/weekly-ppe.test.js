@@ -5,8 +5,9 @@ import { Store } from '../store.js';
 import { weeklyPpeMarkup,weeklyActivitySummaryMarkup } from '../public/weekly-ppe.js';
 
 test('주간 활동 합계는 문서와 시험 확인을 종류별로 분리해 합산한다',()=>{
-  const days=[{documents:{notice:2,tbm:1},noticeReads:3,trainingByType:{tbm:2,education:0}},{documents:{notice:1,education:4},noticeReads:1,trainingByType:{tbm:0,education:3}}];
+  const days=[{documents:{notice:2,tbm:1,inspection:2,patrol:1,safety_log:1,work_plan:1,checklist:3},noticeReads:3,trainingByType:{tbm:2,education:0}},{documents:{notice:1,education:4,patrol:2,checklist:1},noticeReads:1,trainingByType:{tbm:0,education:3}}];
   const html=weeklyActivitySummaryMarkup(days);assert.match(html,/<td>공지<\/td><td>3<\/td><td>4<\/td>/);assert.match(html,/<td>TBM<\/td><td>1<\/td><td>2<\/td>/);assert.match(html,/<td>교육<\/td><td>4<\/td><td>3<\/td>/);assert.match(html,/여러 건/);
+  for(const [label,count] of [['안전 점검',2],['순회 점검',3],['안전 업무 일지',1],['작업계획서',1],['체크리스트',4]])assert.ok(html.includes(`<td>${label}</td><td>${count}</td><td>—</td>`),label);
   assert.match(weeklyActivitySummaryMarkup([]),/<td>공지<\/td><td>0<\/td><td>0<\/td>/);
 });
 
@@ -14,8 +15,10 @@ test('주간 활동 합계는 저장된 현장과 기간 및 승인 문서의 �
   const store=new Store(':memory:');try{
     const site=store.createSite({name:'가상 현장'}),other=store.createSite({name:'다른 현장'}),worker=store.createWorker({siteId:site.id,name:'가상 근로자',category:'직영',company:'가상 업체',occupation:'가상 직종'}),make=(siteId,type,date,status)=>{const doc=store.createDocument({siteId,type,title:'가상 문서',date});store.db.prepare('UPDATE documents SET status=? WHERE id=?').run(status,doc.id);return doc;};
     const first=make(site.id,'notice','2024-02-27','approved'),second=make(site.id,'notice','2024-02-28','approved'),draft=make(site.id,'notice','2024-02-28','draft'),tbm=make(site.id,'tbm','2024-02-29','approved'),education=make(site.id,'education','2024-03-01','approved');make(other.id,'notice','2024-02-27','approved');make(site.id,'notice','2024-03-05','approved');
+    for(const type of ['inspection','patrol','safety_log','work_plan','checklist']){make(site.id,type,'2024-03-01','draft');make(other.id,type,'2024-03-01','approved');make(site.id,type,'2024-03-05','approved');}
     for(const doc of [first,second,draft])store.db.prepare('INSERT INTO worker_notice_reads(worker_id,document_id) VALUES(?,?)').run(worker.id,doc.id);for(const doc of [tbm,education])store.db.prepare('INSERT INTO worker_training_checks(worker_id,document_id) VALUES(?,?)').run(worker.id,doc.id);
     const html=weeklyActivitySummaryMarkup(store.weeklyActivity(site.id,'2024-02-27'));assert.match(html,/<td>공지<\/td><td>3<\/td><td>2<\/td>/);assert.match(html,/<td>TBM<\/td><td>1<\/td><td>1<\/td>/);assert.match(html,/<td>교육<\/td><td>1<\/td><td>1<\/td>/);
+    for(const label of ['안전 점검','순회 점검','안전 업무 일지','작업계획서','체크리스트'])assert.ok(html.includes(`<td>${label}</td><td>1</td><td>—</td>`),label);
   }finally{store.close();}
 });
 
