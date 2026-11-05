@@ -38,3 +38,11 @@ test('실제 임시 서버의 현장 장비를 검색하고 다른 현장의 장
  try{await Promise.race([once(child.stdout,'data'),once(child,'exit').then(()=>{throw Error('서버 종료');})]);const base='http://127.0.0.1:'+port,login=await fetch(base+'/api/login',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({password:'virtual-password-123'})}),cookie=login.headers.get('set-cookie').split(';')[0],path=base+'/api/equipment?siteId='+a.id;assert.equal((await fetch(path)).status,401);const rows=await (await fetch(path,{headers:{cookie}})).json(),ui=screen({siteId:a.id,equipmentSearchSite:a.id,equipmentKind:'굴착기',equipmentQuery:'abc'}),work=ui.run();ui.requests[0].resolve(rows);await work;assert.match(ui.content.innerHTML,/ABC/);assert.doesNotMatch(ui.content.innerHTML,/XYZ|다른 현장/);
  }finally{if(child.exitCode===null){const ended=once(child,'exit');child.kill();await ended;}rmSync(dir,{recursive:true,force:true});}
 });
+
+test('기본 장비 분류는 빈 현장에도 표시하고 등록된 다른 종류도 추가한다',async()=>{
+ const empty=screen(),loading=empty.run();empty.requests[0].resolve([]);await loading;const html=empty.content.innerHTML;let last=-1;for(const kind of ['굴착기','덤프트럭','콘크리트펌프카','기타']){const index=html.indexOf('value="'+kind+'"');assert.ok(index>last,kind);last=index;}
+ const custom=screen(),pending=custom.run();custom.requests[0].resolve([{id:9,kind:'<맞춤 장비>',model:'가상',capacity:'',manufacturer:'',registration:''}]);await pending;assert.match(custom.content.innerHTML,/&lt;맞춤 장비&gt;/);assert.doesNotMatch(custom.content.innerHTML,/<맞춤 장비>/);
+});
+test('기타 선택은 등록된 기타 종류만 표시한다',async()=>{
+ const ui=screen({equipmentKind:'기타'}),loading=ui.run();ui.requests[0].resolve([{id:1,kind:'기타',model:'기타 모델',capacity:'',manufacturer:'',registration:''},{id:2,kind:'기타 장비',model:'다른 모델',capacity:'',manufacturer:'',registration:''}]);await loading;assert.match(ui.content.innerHTML,/기타 모델/);assert.doesNotMatch(ui.content.innerHTML,/다른 모델/);
+});
