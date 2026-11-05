@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {Store} from '../store.js';
-import {riskProcessSummary,mountRiskProcesses} from '../public/risk-review-roles.js';
+import {riskProcessSummary,mountRiskProcesses,mountRiskProcessPicker} from '../public/risk-review-roles.js';
 import {riskDetailMarkup} from '../public/risk-detail.js';
 const esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 test('공정은 위험요인 없이 저장하고 이전 화면 수정·결재 사본에서 보존한다',()=>{
@@ -20,4 +20,14 @@ test('공정 입력기는 목록을 읽고 삭제하며 이름과 업체를 안�
  const old=globalThis.document,list={children:[],append(row){this.children.push(row)}},add={},host={set innerHTML(value){this.html=value},querySelector(sel){return sel==='[data-process-list]'?list:add}};
  globalThis.document={createElement(){const row={set innerHTML(value){this.html=value;this.name={value:value.match(/data-process-name[^>]*value="([^"]*)"/)?.[1]||''};this.company={value:value.includes('value="1" selected')?'1':'0'};this.removeButton={}},querySelector(sel){return sel==='[data-process-name]'?this.name:sel==='[data-process-company]'?this.company:this.removeButton},remove(){list.children.splice(list.children.indexOf(this),1)}};return row;}};
  try{const editor=mountRiskProcesses(host,[{name:'가상',contractorId:1}],[{id:1,name:'<업체>',trade:'가상'}],esc);assert.match(list.children[0].html,/&lt;업체&gt;/);assert.deepEqual(editor.read(),[{name:'가상',contractorId:1}]);add.onclick();list.children[1].name.value='새 공정';assert.equal(editor.read().length,2);list.children[0].removeButton.onclick();assert.deepEqual(editor.read(),[{name:'새 공정',contractorId:0}]);}finally{globalThis.document=old;}
+});
+
+
+test('위험요인에서 현재 공정을 선택하면 공정명과 협력사를 함께 입력한다',()=>{
+ const listeners={},container={addEventListener:(name,fn)=>{listeners[name]=fn;}},values={process:{value:'기존 공정'},company:{value:'3'},name:{value:'기존 업체'}},row={parentElement:container,querySelector:sel=>values[sel]},select={value:'',innerHTML:'',matches:sel=>sel==='[data-risk-process]',closest:()=>row},companies=[{id:1,name:'<가상 업체>'}],processes=[{name:' 가상 공정 ',contractorId:1},{name:'직영 공정',contractorId:0},{name:'다른 업체',contractorId:99}],editor={read:()=>processes},selectors={process:'process',companySelect:'company',companyName:'name'};
+ mountRiskProcessPicker(container,editor,companies,selectors,esc);listeners.focusin({target:select});assert.match(select.innerHTML,/&lt;가상 업체&gt;/);assert.doesNotMatch(select.innerHTML,/다른 업체|<가상 업체>/);
+ select.value=JSON.stringify(['가상 공정',1]);listeners.change({target:select});assert.deepEqual(Object.values(values).map(v=>v.value),['가상 공정','1','<가상 업체>']);assert.equal(select.value,'');
+ select.value=JSON.stringify(['직영 공정',0]);listeners.change({target:select});assert.deepEqual(Object.values(values).map(v=>v.value),['직영 공정','','직영']);
+ select.value=JSON.stringify(['가상 공정',1]);processes.shift();listeners.change({target:select});assert.deepEqual(Object.values(values).map(v=>v.value),['직영 공정','','직영']);
+ select.value='잘못된 값';listeners.change({target:select});assert.deepEqual(Object.values(values).map(v=>v.value),['직영 공정','','직영']);
 });
