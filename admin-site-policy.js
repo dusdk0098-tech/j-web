@@ -93,6 +93,10 @@ export function adminSitePolicy(db,req,url,session){
   }
   const planLinked=path.match(/^\/api\/documents\/([1-9]\d*)\/plan-linked(?:\/(?:rigging|place)\/[1-9]\d*\/[1-9]\d*)?$/);
   if(planLinked){const row=doc(planLinked[1]);return method==='GET'&&!url.search&&!owned(row)&&row.type==='work_plan'?null:denied();}
+  const riskSnapshot=path.match(/^\/api\/documents\/([1-9]\d*)\/risk-activity-snapshot$/);
+  if(riskSnapshot){const row=doc(riskSnapshot[1]);return method==='GET'&&!url.search&&!owned(row)&&row.type==='risk'?null:denied();}
+  const riskSnapshotFile=path.match(/^\/api\/documents\/([1-9]\d*)\/risk-snapshot-files\/(file|signature)\/([1-9]\d*)\/(0|[1-9]\d*)$/);
+  if(riskSnapshotFile){const row=doc(riskSnapshotFile[1]),params=url.searchParams;return method==='GET'&&!owned(row)&&row.type==='risk'&&[...params.keys()].every(key=>key==='cycle')&&params.getAll('cycle').length===1&&positive(params.get('cycle'))&&(riskSnapshotFile[2]==='signature'?riskSnapshotFile[4]==='0':positive(riskSnapshotFile[4]))?null:denied();}
   const riskView=path.match(/^\/api\/documents\/([1-9]\d*)\/risk-activity-view$/);
   if(riskView){const row=doc(riskView[1]);return method==='GET'&&!url.search&&!owned(row)&&row.type==='risk'?null:denied();}
   const riskFile=path.match(/^\/api\/documents\/([1-9]\d*)\/risk-activities\/([1-9]\d*)\/photos\/([1-9]\d*)$/);
