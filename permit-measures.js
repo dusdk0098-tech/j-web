@@ -21,7 +21,7 @@ export function savePermitMeasure(db,siteId,equipmentId,id,input,remove,authoriz
 export function validatePermitMeasureSources(db,input){
   if(input.permitMeasureSources===undefined)return;
   const sources=input.permitMeasureSources;
-  if(input.type!=='permit'||!Array.isArray(sources)||sources.length>100)throw Error('적용한 장비 안전대책을 확인해 주세요.');
+  if(!['permit','work_plan'].includes(input.type)||!Array.isArray(sources)||sources.length>100)throw Error('적용한 장비 안전대책을 확인해 주세요.');
   for(const source of sources){
     if(!source||!Number.isSafeInteger(source.id)||!Number.isSafeInteger(source.equipmentId)||typeof source.version!=='string')throw Error('적용한 장비 안전대책을 확인해 주세요.');
     equipment(db,input.siteId,source.equipmentId);

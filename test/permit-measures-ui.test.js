@@ -6,11 +6,11 @@ const row={id:3,equipment_id:11,version:'v1',accidentType:'가상 유형',hazard
 const deferred=()=>{let resolve;const promise=new Promise(r=>resolve=r);return {promise,resolve};};
 const tick=()=>new Promise(r=>setImmediate(r));
 // shortcut: 모의 DOM 이벤트로 검증하며 브라우저 배치·키보드 접근성은 승인된 브라우저 시험에서 확인한다.
-async function screen(){
+async function screen(documentLabel='허가서'){
  const nodes=new Map(),node=()=>({value:'',textContent:'',innerHTML:'',disabled:false,isConnected:true});
  const panel={...node(),querySelector(key){if(!nodes.has(key))nodes.set(key,node());return nodes.get(key);},querySelectorAll(){return [...nodes.values()];}},host={insertAdjacentHTML(_position,html){this.html=html;},querySelector(){return panel;}},calls=[],added=[];let sources,active=true,fail=false,delay=null,rows=[{...row}];
  const api=async(path,options)=>{calls.push({path,options});if(delay){const wait=delay;delay=null;await wait.promise;}if(fail)throw Error('가상 저장 충돌');if(path.startsWith('/api/equipment?'))return [{id:11,kind:'가상 장비',model:'<img>',registration:''},{id:12,kind:'다른 장비'}];if(options?.method){if(options.method==='DELETE')rows=[];else if(options.method==='POST')rows.push({...JSON.parse(options.body),id:4,version:'v2'});else rows=[{...JSON.parse(options.body),id:3,version:'v2'}];return rows[0]||{ok:true};}return rows.map(r=>({...r}));};
- await mountPermitMeasures({host,api,siteId:7,current:()=>active,addSafety:item=>added.push({...item}),count:()=>added.length,onSources:value=>sources=value,esc:value=>String(value).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;')});
+ await mountPermitMeasures({host,api,siteId:7,current:()=>active,addSafety:item=>added.push({...item}),count:()=>added.length,onSources:value=>sources=value,documentLabel,esc:value=>String(value).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;')});
  const get=key=>panel.querySelector(`[data-measure-${key}]`),choose=async id=>{get('equipment').value=String(id);get('equipment').onchange();await tick();},action=(name,id=3)=>get('list').onclick({target:{closest:()=>({dataset:{measureAction:name,id:String(id)}})}});
  return {host,panel,calls,added,get,choose,action,sources:()=>sources,field:key=>panel.querySelector(`[data-measure-field="${key}"]`),fail:value=>{fail=value;},rows:value=>{rows=value;},stop:()=>{active=false;},delay:value=>{delay=value;}};
 }
@@ -23,6 +23,10 @@ test('목록 관리 및 허가서 추가는 직접 입력 보존·이스케이�
  ui.fail(false);await ui.get('load').onclick();assert.equal(ui.field('measure').value,'저장 전 목록 편집');await ui.get('save').onclick();assert.equal(ui.field('measure').value,'');assert.equal(ui.sources()[0].version,'v1');
  ui.get('detach').onclick();assert.deepEqual(ui.sources(),[]);assert.equal(ui.added.length,2);
  await ui.action('delete');assert.match(ui.get('list').innerHTML,/등록한 안전대책이 없습니다/);ui.field('measure').value='등록 대책';await ui.get('save').onclick();assert.equal(ui.calls.findLast(call=>call.options?.method)?.options.method,'POST');
+});
+
+test('계획서도 같은 목록의 문구와 버전을 사용한다',async()=>{
+ const ui=await screen('계획서');assert.match(ui.host.html,/계획서에 사본/);await ui.choose(11);assert.match(ui.get('list').innerHTML,/계획서에 추가/);await ui.action('apply');assert.equal(ui.added[0].equipment_id,11);assert.equal(ui.sources()[0].version,'v1');assert.match(ui.get('status').textContent,/계획서에 추가/);
 });
 
 test('목록 변경·100개 제한·늦은 응답·중복 클릭은 허가서 입력을 변경하지 않는다',async()=>{
