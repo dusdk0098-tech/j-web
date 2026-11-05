@@ -121,6 +121,7 @@ assets.add('/risk-activity-mode.js');
 assets.add('/plan-detail.js');
 assets.add('/reviewer-education.js');
 assets.add('/reviewer-meetings.js');
+assets.add('/risk-process-confirmation.js');
 assets.add('/education-reference.js');
 assets.add('/checklist-copy.js');
 assets.add('/permit-sources.js');
@@ -265,6 +266,10 @@ const server = http.createServer((req,res)=>passwordRequests.run(true,()=>adminR
       if(url.pathname==='/api/reviewer/logout'&&req.method==='POST'){reviewerSessions.delete(key);res.setHeader('Set-Cookie',`jweb_reviewer=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0${secureCookie}`);return json(res,200,{ok:true});}
       if(await handleCommonWork(req,res,url,'/api/reviewer/common-work',reviewer))return;
       if(url.pathname==='/api/reviewer/session'&&req.method==='GET')return json(res,200,{reviewer,context});
+      if(url.pathname==='/api/reviewer/risk-process-confirmations'){
+        if(req.method==='GET'){const rows=store.riskProcessAssignments(reviewer.site_id,'reviewer',reviewer.id);checkRequestSession(req);return json(res,200,rows);}
+        if(req.method==='POST'){const input=await body(req);store.confirmRiskProcess(reviewer.site_id,'reviewer',reviewer.id,input,()=>checkRequestSession(req));return json(res,200,{ok:true});}
+      }
       const reviewerMeetingConfirm=url.pathname.match(/^\/api\/reviewer\/meetings\/(\d+)\/confirmation$/);
       if(reviewerMeetingConfirm&&req.method==='POST'){const input=await body(req);store.confirmReviewerMeeting(reviewer.id,Number(reviewerMeetingConfirm[1]),input.expectedEditVersion,input.signature,()=>checkRequestSession(req));return json(res,200,{ok:true});}
       const reviewerMeeting=url.pathname.match(/^\/api\/reviewer\/meetings(?:\/(\d+)(?:\/attachments\/(\d+))?)?$/);
@@ -446,6 +451,11 @@ const server = http.createServer((req,res)=>passwordRequests.run(true,()=>adminR
       if(!session || session.expires<=Date.now()){workerSessions.delete(key);return json(res,401,{error:'근로자 로그인이 필요합니다.'});}
       const input=await body(req),site=input.siteKey?store.siteFromAccess(input.siteKey):store.invitation(input.token);if(!Number.isSafeInteger(input.siteId)||input.siteId!==session.worker.site_id||!site||site.id!==session.worker.site_id)return json(res,400,{error:'유효한 현장 접속 주소를 확인해 주세요.'});
       const now=new Date(),date=new Date(now.getTime()-now.getTimezoneOffset()*60000).toISOString().slice(0,10);store.recordWorkerLogin(session.worker.id,date,null,()=>{checkWorkerReport(req,key,session,input);const failure=workerSessionError(workerToken,session);if(failure)throw Object.assign(new Error(failure.error),{sessionStatus:failure.status});const currentSite=input.siteKey?store.siteFromAccess(input.siteKey):store.invitation(input.token);if(!currentSite||currentSite.id!==session.worker.site_id)throw new Error('유효한 현장 접속 주소를 확인해 주세요.');},input.location);return json(res,200,{ok:true,siteKey:store.siteAccessKey(session.worker.site_id)});
+    }
+    if(url.pathname==='/api/worker/risk-process-confirmations'){
+      const key=workerKey(workerToken),session=workerSessions.get(key);if(!session||session.expires<=Date.now())return json(res,401,{error:'근로자 로그인이 필요합니다.'});
+      if(req.method==='GET'){checkWorkerReport(req,key,session);const rows=store.riskProcessAssignments(session.worker.site_id,'worker',session.worker.id);checkWorkerReport(req,key,session);return json(res,200,rows);}
+      if(req.method==='POST'){const input=await body(req);store.confirmRiskProcess(session.worker.site_id,'worker',session.worker.id,input,()=>checkWorkerReport(req,key,session,input));return json(res,200,{ok:true});}
     }
     if(url.pathname==='/api/worker/permissions'&&req.method==='GET'){
       const key=workerKey(workerToken),session=workerSessions.get(key);if(!session||session.expires<=Date.now())return json(res,401,{error:'근로자 로그인이 필요합니다.'});if(req.headers['x-worker-report-context']!==undefined)checkWorkerReport(req,key,session);return json(res,200,store.workerPermissions(session.worker.site_id,session.worker.id));
@@ -1247,6 +1257,8 @@ const server = http.createServer((req,res)=>passwordRequests.run(true,()=>adminR
         res.writeHead(200,{'Content-Type':'application/octet-stream','Content-Disposition':`attachment; filename="attachment"; filename*=UTF-8''${name}`,'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(file.data);
       }
     }
+    const riskProcessReview=url.pathname.match(/^\/api\/documents\/([1-9]\d*)\/risk-process-confirmations(?:\/(0|[1-9]\d*)\/([A-Za-z]+))?$/);
+    if(riskProcessReview&&req.method==='GET'){const [,id,index,role]=riskProcessReview,cycle=Number(url.searchParams.get('cycle'));if(index===undefined){const rows=store.riskProcessConfirmationReview(Number(id),cycle);checkRequestSession(req);return json(res,200,rows);}const signature=store.riskProcessConfirmationImage(Number(id),cycle,Number(index),role);checkRequestSession(req);if(!signature)return json(res,404,{error:'시험 서명을 찾을 수 없습니다.'});res.writeHead(200,{'Content-Type':'image/png','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(signature);}
     const riskSignature=url.pathname.match(/^\/api\/documents\/(\d+)\/risk-activities\/(\d+)\/signature$/);
     if(riskSignature){const [,docId,activityId]=riskSignature;if(req.method==='POST'){const input=await body(req);store.saveRiskActivitySignature(docId,activityId,input.signature,()=>checkRequestSession(req),input.expectedRevision??null);return json(res,200,{ok:true});}if(req.method==='GET'){const saved=store.riskActivitySignature(docId,activityId);if(!saved)return json(res,404,{error:'시험 서명을 찾을 수 없습니다.'});res.writeHead(200,{'Content-Type':'image/png','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(saved.signature);}}
     const riskPhotos=url.pathname.match(/^\/api\/documents\/(\d+)\/risk-activities\/(\d+)\/photos(?:\/(\d+))?$/);
