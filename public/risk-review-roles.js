@@ -9,3 +9,12 @@ export function riskReviewSummary(details,esc){
   const roles=details?.riskReviewRoles;if(!roles||typeof roles!=='object')return '';
   return `<section><h3>평가 담당자 시험 기록</h3><p>직접 입력한 기록이며 계정 확인이나 실제 검토·결재를 뜻하지 않습니다.</p>${riskReviewRoles.map(([key,label])=>`<p>${esc(label)}: ${esc(roles[key]?.name||'미기록')} · ${esc(roles[key]?.date||'미기록')}</p>`).join('')}</section>`;
 }
+
+export function mountRiskProcesses(host,rows,companies,esc){
+  host.innerHTML='<fieldset><legend>시험 공정 목록</legend><p>공정은 최대 100개까지 먼저 등록할 수 있습니다. 위험요인은 공정명과 협력사를 별도로 입력해야 합니다. 담당자 지정과 공정별 결재는 아직 제공하지 않습니다.</p><div data-process-list></div><button type="button" data-process-add>공정 추가</button></fieldset>';
+  const list=host.querySelector('[data-process-list]');
+  const add=row=>{const field=document.createElement('fieldset');field.innerHTML=`<legend>시험 공정</legend><label>공정명<input data-process-name maxlength="200" required value="${esc(row.name||'')}"></label><label>협력사<select data-process-company><option value="0">직영</option>${row.contractorId&&!companies.some(c=>c.id===row.contractorId)?`<option value="${esc(row.contractorId)}" selected>이전 업체 (다시 선택 필요)</option>`:''}${companies.map(c=>`<option value="${c.id}" ${c.id===row.contractorId?'selected':''}>${esc(c.name)} · ${esc(c.trade||'')}</option>`).join('')}</select></label><button type="button" data-process-remove>공정 삭제</button>`;field.querySelector('[data-process-remove]').onclick=()=>field.remove();list.append(field);};
+  host.querySelector('[data-process-add]').onclick=()=>{if(list.children.length<100)add({});};
+  rows.forEach(add);return {read:()=>[...list.children].map(row=>({name:row.querySelector('[data-process-name]').value,contractorId:Number(row.querySelector('[data-process-company]').value)}))};
+}
+export function riskProcessSummary(details,esc){return details?.processes?.length?`<section><h3>시험 공정 목록</h3><p>담당자 지정과 공정별 결재는 제공하지 않습니다.</p><ul>${details.processes.map(row=>`<li>${esc(row.name)} · ${esc(row.contractorId?row.contractor:'직영')}</li>`).join('')}</ul></section>`:'';}

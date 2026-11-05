@@ -1876,7 +1876,7 @@ export class Store {
     if(instructionCompanyId)return rows.filter(doc=>JSON.parse(doc.details).companyId===Number(instructionCompanyId));
     if(permitCompany||permitFrom||permitTo)return rows.filter(doc=>{const details=JSON.parse(doc.details);if(permitCompany&&(permitCompany==='direct'?details.directWork!==true:details.companyId!==Number(permitCompany)))return false;if(permitFrom||permitTo)return !!details.periodFrom&&!!details.periodTo&&(!permitFrom||details.periodTo>=permitFrom)&&(!permitTo||details.periodFrom<=permitTo);return true;});
     if(!riskKind&&!riskContractorId)return rows;
-    return rows.filter(doc=>{const details=JSON.parse(doc.details);if(riskKind&&details.kind!==riskKind)return false;if(!riskContractorId)return true;return [details,...(Array.isArray(details.items)?details.items:[]),...(Array.isArray(details.musculoskeletalItems)?details.musculoskeletalItems:[])].some(item=>item&&item.contractorId===Number(riskContractorId));});
+    return rows.filter(doc=>{const details=JSON.parse(doc.details);if(riskKind&&details.kind!==riskKind)return false;if(!riskContractorId)return true;return [details,...(Array.isArray(details.items)?details.items:[]),...(Array.isArray(details.musculoskeletalItems)?details.musculoskeletalItems:[]),...(Array.isArray(details.processes)?details.processes:[])].some(item=>item&&item.contractorId===Number(riskContractorId));});
   }
   previousDailyReport(siteId, before) {
     before=dateValue(before);
@@ -2469,6 +2469,7 @@ export class Store {
     if(input.expectedEditVersion!==undefined&&(!Number.isSafeInteger(input.expectedEditVersion)||input.expectedEditVersion!==current.edit_version))throw Object.assign(new Error('문서가 변경되었습니다. 입력 내용은 유지됩니다. 필요한 내용을 복사한 뒤 문서를 다시 열어 주세요.'),{sessionStatus:409});
     if(current.type==='cost' && Array.isArray(JSON.parse(current.details).rows))throw new Error('월간 사용내역서는 보존된 내역을 변경할 수 없습니다. 새 문서를 작성해 주세요.');
     if (current.status !== 'draft' && current.status !== 'rejected') throw new Error('임시저장 또는 반려된 문서만 수정할 수 있습니다.');
+    if(current.type==='risk'&&JSON.parse(current.details).processes!==undefined&&input.details?.processes===undefined)input={...input,details:{...input.details,processes:JSON.parse(current.details).processes}};
     if(current.type==='risk'&&JSON.parse(current.details).riskReviewRoles!==undefined&&input.details?.riskReviewRoles===undefined)input={...input,details:{...input.details,riskReviewRoles:JSON.parse(current.details).riskReviewRoles}};
     if(current.type==='risk'){const previous=JSON.parse(current.details),rows=Array.isArray(previous.items)?previous.items:[previous],keys=['improvedGrade','improvedLikelihood','improvedSeverity'];if(rows.some(row=>keys.some(key=>row[key]))){const next=input.details,items=next&&Array.isArray(next.items)?next.items:next&&typeof next==='object'?[next]:null;if(!items||items.some(item=>!item||keys.some(key=>item[key]===undefined)))throw new Error('개선 후 위험성 정보를 보존하려면 화면을 새로고침해 주세요.');}}
     if(current.type==='risk'&&JSON.parse(current.details).items?.some(row=>row.selected===false)&&(!Array.isArray(input.details?.items)||input.details.items.some(row=>row?.selected===undefined)))throw new Error('위험요인 선택을 보존하려면 화면을 새로고침해 주세요.');
@@ -2545,6 +2546,7 @@ export class Store {
   validateRiskContractors(doc){
     if(doc.type!=='risk')return;
     const find=this.db.prepare('SELECT c.name FROM companies c WHERE c.id=? AND c.site_id=? AND NOT EXISTS(SELECT 1 FROM archived_companies a WHERE a.company_id=c.id)');
+    for(const row of doc.details.processes||[])if(row.contractorId){const company=find.get(row.contractorId,doc.siteId);if(!company)throw new Error('같은 현장의 협력사를 선택해 주세요.');row.contractor=company.name;}
     for(const row of [...(Array.isArray(doc.details.items)?doc.details.items:[doc.details]),...(doc.details.musculoskeletalItems||[])])if(row.contractorId){const company=find.get(row.contractorId,doc.siteId);if(!company)throw new Error('같은 현장의 협력사를 선택해 주세요.');row.contractor=company.name;}
   }
   validateWorkPlanCompany(doc,current=null){

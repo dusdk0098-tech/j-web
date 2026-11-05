@@ -27,17 +27,17 @@ test('상세 화면은 선택 항목과 이전 항목을 표시하고 미선택 
 
 test('관리자와 근로자 저장 화면은 선택 상태를 전송한다',()=>{
   const admin=readFileSync(new URL('../public/app.js',import.meta.url),'utf8'),worker=readFileSync(new URL('../public/worker-documents.js',import.meta.url),'utf8');
-  const adminLine=admin.split('\n').find(line=>line.includes("if(data.type==='risk') data.details=")),workerLine=worker.split('\n').find(line=>line.includes('Object.assign(input.details,{riskReviewRoles:'));
+  const adminLine=admin.split('\n').find(line=>line.includes("if(data.type==='risk') data.details=")),workerLine=worker.split('\n').find(line=>line.includes('Object.assign(input.details,{processes:'));
   const row={querySelector(selector){if(selector.includes('selected'))return {checked:false};if(selector.includes('contractor'))return {value:''};return {value:'가상 위험'};}};
-  const data={type:'risk'},muscleEditor={read:()=>[]},document={querySelectorAll:()=>[row]},riskFields={task:'작업'};
-  runInNewContext(adminLine,{data,muscleEditor,document,riskFields,readRiskReviewRoles});assert.equal(data.details.items[0].selected,false);
+  const processEditor={read:()=>[]},data={type:'risk'},muscleEditor={read:()=>[]},document={querySelectorAll:()=>[row]},riskFields={task:'작업'};
+  runInNewContext(adminLine,{data,muscleEditor,processEditor,document,riskFields,readRiskReviewRoles});assert.equal(data.details.items[0].selected,false);
   const input={details:{}},form={elements:{kind:{value:''},scale:{value:''},periodFrom:{value:''},periodTo:{value:''}}},fields={querySelector:()=>({children:[row]})};
-  runInNewContext(workerLine,{input,form,fields,muscleEditor,riskFields,readRiskReviewRoles});assert.equal(input.details.items[0].selected,false);
+  runInNewContext(workerLine,{input,form,fields,muscleEditor,processEditor,riskFields,readRiskReviewRoles});assert.equal(input.details.items[0].selected,false);
 });
 
 test('결재 사본 화면은 미선택 항목을 숨기고 개수를 알린다',()=>{
   const code=readFileSync(new URL('../public/review.js',import.meta.url),'utf8'),start=code.indexOf('function displayFields('),end=code.indexOf('function pad(',start);
   const doc={type:'risk',details:JSON.stringify({items:[{task:'결재 선택',selected:true},{task:'결재 미선택',selected:false},{task:'결재 이전 항목'}]})};
-  const html=runInNewContext(`${code.slice(start,end)};displayDocumentDetails(doc)`,{doc,esc:String,labels:{task:'작업',items:'항목',selected:'선택'},riskReviewSummary:()=>'',educationKinds:{},selectedMusculoskeletalItems:rows=>rows.filter(row=>row.selected)});
+  const html=runInNewContext(`${code.slice(start,end)};displayDocumentDetails(doc)`,{doc,esc:String,labels:{task:'작업',items:'항목',selected:'선택'},riskReviewSummary:()=>'',riskProcessSummary:()=>'',educationKinds:{},selectedMusculoskeletalItems:rows=>rows.filter(row=>row.selected)});
   assert.match(html,/결재 선택/);assert.match(html,/결재 이전 항목/);assert.doesNotMatch(html,/결재 미선택/);assert.match(html,/1개는 수정 화면에 보존/);
 });
