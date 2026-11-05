@@ -249,13 +249,13 @@ test('제한 작업계획서 첨부의 늦은 응답과 권한 오류는 다른 
 
 test('제한 위험성평가 상세는 기존 전역 표시와 같은 항목·점수만 읽고 위험 내용을 이스케이프한다',async()=>{
   const row={processName:'가상 <공정>',contractor:'가상 &업체',contractorId:12,task:'시험 작업',hazard:'시험 <위험>',existingMeasures:'기존 조치',additionalMeasures:'추가 조치',riskCategory:'시험 분류',riskType:'시험 형태',legalBasis:'시험 근거',likelihood:'3',severity:'2',improvedLikelihood:'1',improvedSeverity:'2',dueDate:'2026-11-04',completionDate:'2026-11-05',responsible:'가상 담당',supervisorOpinion:'가상 검토'};
-  const details={kind:'regular',scale:'3x3',periodFrom:'2026-11-01',periodTo:'2026-11-30',items:[row,{...row,contractorId:13,hazard:'별도 업체 위험'}],musculoskeletalItems:[{...row,selected:true,task:'선택한 근골격계 <작업>'},{selected:false,task:'제외된 근골격계'}],phone:'노출 금지',files:[{name:'노출 금지 파일'}]};
+  const details={kind:'regular',scale:'3x3',periodFrom:'2026-11-01',periodTo:'2026-11-30',riskReviewRoles:{supervisor:{name:'가상 <평가 담당>',date:'2026-11-02'}},items:[row,{...row,contractorId:13,hazard:'별도 업체 위험'}],musculoskeletalItems:[{...row,selected:true,task:'선택한 근골격계 <작업>'},{selected:false,task:'제외된 근골격계'}],phone:'노출 금지',files:[{name:'노출 금지 파일'}]};
   const doc={id:5,site_id:1,type:'risk',title:'가상 위험성평가',body:'가상 본문',status:'draft',details:JSON.stringify(details)},ui=screen(async()=>response(doc));
   ui.state.page='documents';ui.state.detail=5;ui.state.admin={scope:'restricted',id:4};await ui.context.renderRestrictedDocuments();
   const html=ui.content.innerHTML;
   for(const value of Object.values(row))assert.ok(html.includes(esc(value)),String(value));
   assert.match(html,/정기평가/);assert.match(html,/3×3 위험성 추정/);assert.match(html,/시험 점수<\/strong> 6/);assert.match(html,/개선 후 시험 점수<\/strong> 2/);assert.match(html,/등록번호 12/);assert.match(html,/등록번호 13/);
-  assert.match(html,/선택한 근골격계 &lt;작업&gt;/);assert.match(html,/선택하지 않은 1개/);
+  assert.match(html,/가상 &lt;평가 담당&gt;/);assert.match(html,/2026-11-02/);assert.match(html,/선택한 근골격계 &lt;작업&gt;/);assert.match(html,/선택하지 않은 1개/);
   assert.doesNotMatch(html,/<공정>|<위험>|노출 금지|제외된 근골격계|data-action=|id="edit"|href=|data-training-file/);
   assert.deepEqual(ui.requests.map(r=>r.path),['/api/documents/5']);assert.ok(ui.requests.every(r=>!r.options.method));
   const {riskFields,riskKinds,riskScales}=ui.context;

@@ -1,3 +1,4 @@
+import { riskReviewSummary } from '../public/risk-review-roles.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync,mkdtempSync,rmSync} from 'node:fs';
@@ -46,7 +47,7 @@ test('근로자 교육 열람은 관리감독자 세부 유형의 이름을 표�
 });
 
 test('결재 문서 상세는 교육 유형을 한국어로 표시하고 다른 문서 값은 보존한다',()=>{
-  const source=readFileSync(new URL('../public/review.js',import.meta.url),'utf8'),start=source.indexOf('function displayFields('),end=source.indexOf('function pad(',start),esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));assert.ok(start>=0&&end>start);const render=runInNewContext(source.slice(start,end)+';displayDocumentDetails',{educationKinds,esc,labels:{kind:'종류'},selectedMusculoskeletalItems:items=>items});assert.match(render({type:'education',details:JSON.stringify({kind:'supervisor_special'})}),/관리감독자 특별교육/);assert.match(render({type:'education',details:JSON.stringify({kind:'supervisor'})}),/세부 구분 미기록/);assert.match(render({type:'risk',details:JSON.stringify({kind:'supervisor_special'})}),/supervisor_special/);assert.doesNotMatch(render({type:'education',details:JSON.stringify({kind:'<가상>'})}),/<가상>/);assert.equal(render({type:'education',details:'null'}),'');
+  const source=readFileSync(new URL('../public/review.js',import.meta.url),'utf8'),start=source.indexOf('function displayFields('),end=source.indexOf('function pad(',start),esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));assert.ok(start>=0&&end>start);const render=runInNewContext(source.slice(start,end)+';displayDocumentDetails',{educationKinds,esc,riskReviewSummary,labels:{kind:'종류'},selectedMusculoskeletalItems:items=>items});assert.match(render({type:'education',details:JSON.stringify({kind:'supervisor_special'})}),/관리감독자 특별교육/);assert.match(render({type:'education',details:JSON.stringify({kind:'supervisor'})}),/세부 구분 미기록/);assert.match(render({type:'risk',details:JSON.stringify({kind:'supervisor_special'})}),/supervisor_special/);assert.doesNotMatch(render({type:'education',details:JSON.stringify({kind:'<가상>'})}),/<가상>/);assert.equal(render({type:'education',details:'null'}),'');
 });
 
 test('교육 검색은 현장·종류·기간·검색어를 조합하고 미분류를 보존한다',()=>{

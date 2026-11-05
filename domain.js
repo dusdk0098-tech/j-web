@@ -1,3 +1,4 @@
+import { riskReviewRoles } from './public/risk-review-roles.js';
 import { riskScaleOptions, riskScore } from './public/risk-scale.js';
 import { quantityTenths } from './public/daily-quantities.js';
 import { documentRichLimits,normalizeRichText,richTextToPlain } from './public/rich-text.js';
@@ -295,6 +296,7 @@ export function recordInput(input) {
     for(const key of ['periodFrom','periodTo']){
       if(value[key]!==undefined){if(typeof value[key]!=='string')throw new Error('관리기간을 확인해 주세요.');details[key]=value[key]?dateValue(value[key]):'';}
     }
+    if(value.riskReviewRoles!==undefined){const roles=value.riskReviewRoles;if(!roles||typeof roles!=='object'||Array.isArray(roles)||Object.keys(roles).some(key=>!riskReviewRoles.some(([role])=>role===key)))throw new Error('평가 담당자 기록을 확인해 주세요.');details.riskReviewRoles=Object.fromEntries(riskReviewRoles.map(([key])=>{const row=roles[key]??{};if(!row||typeof row!=='object'||Array.isArray(row)||Object.keys(row).some(field=>!['name','date'].includes(field))||typeof (row.name??'')!=='string'||(row.name??'').length>200||typeof (row.date??'')!=='string')throw new Error('평가 담당자 기록을 확인해 주세요.');return [key,{name:(row.name??'').trim(),date:row.date?dateValue(row.date):''}];}));}
     if(details.periodFrom && details.periodTo && details.periodFrom>details.periodTo)throw new Error('관리기간 시작일은 종료일보다 늦을 수 없습니다.');
   }
   const body = type==='office'&&details.bodyRich!==undefined?richTextToPlain(details.bodyRich,documentRichLimits):(input.body ?? '');

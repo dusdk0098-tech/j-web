@@ -1,3 +1,4 @@
+import { riskReviewInputs,readRiskReviewRoles } from './risk-review-roles.js';
 import { mountPlanWorkerOther } from './plan-worker-other.js';
 import { mountPlanCharts, readPlanCharts, refreshPlanImageChoices } from './plan-charts.js';
 import { mountRiggingStandards, heavyRiggingOptions, heavyImageChoices } from './rigging-standards.js';
@@ -52,7 +53,7 @@ export async function mountWorkerDocuments(parent,permissions,signaturePad,repor
     const form=editor.querySelector('[data-form]'),fields=editor.querySelector('[data-fields]');let muscleEditor,educationReference,editVersion=doc?.edit_version,attachmentBusy=false;form.elements.title.required=true;form.elements.date.required=true;
     if(type==='risk'){
       const kinds={initial:'최초평가',regular:'정기평가',occasional:'수시평가',continuous:'상시평가'},scales={'three-level':'3등급','3x3':'3×3','5x4':'5×4'};
-      fields.innerHTML=`<label>평가 종류<select name="kind"><option value="">선택 안 함</option>${Object.entries(kinds).map(([key,label])=>`<option value="${key}" ${details.kind===key?'selected':''}>${label}</option>`).join('')}</select></label><label>평가척도<select name="scale"><option value="">선택 안 함</option>${Object.entries(scales).map(([key,label])=>`<option value="${key}" ${details.scale===key?'selected':''}>${label}</option>`).join('')}</select></label>${field('periodFrom','관리기간 시작',details.periodFrom||'','date')}${field('periodTo','관리기간 종료',details.periodTo||'','date')}<div data-risk-list></div><button type="button" data-add-risk>위험요인 추가</button>`;
+      fields.innerHTML=`<label>평가 종류<select name="kind"><option value="">선택 안 함</option>${Object.entries(kinds).map(([key,label])=>`<option value="${key}" ${details.kind===key?'selected':''}>${label}</option>`).join('')}</select></label><label>평가척도<select name="scale"><option value="">선택 안 함</option>${Object.entries(scales).map(([key,label])=>`<option value="${key}" ${details.scale===key?'selected':''}>${label}</option>`).join('')}</select></label>${field('periodFrom','관리기간 시작',details.periodFrom||'','date')}${field('periodTo','관리기간 종료',details.periodTo||'','date')}${riskReviewInputs(details,esc)}<div data-risk-list></div><button type="button" data-add-risk>위험요인 추가</button>`;
       const container=fields.querySelector('[data-risk-list]'),scale=form.elements.scale;let previousScale=scale.value;
       fields.insertAdjacentHTML('beforeend','<div data-mus-editor></div>');
       muscleEditor=mountMusculoskeletal(fields.querySelector('[data-mus-editor]'),{rows:details.musculoskeletalItems||[],companies:options.companies,scale:()=>scale.value,references:editable?{request:json,worker:true,active:()=>request===requestNo&&form.isConnected}:undefined});
@@ -87,7 +88,7 @@ export async function mountWorkerDocuments(parent,permissions,signaturePad,repor
       try{
         const input={type,title:form.elements.title.value,date:form.elements.date.value,body:form.elements.body.value,details:{}};
         if(type==='risk'){
-          Object.assign(input.details,{kind:form.elements.kind.value,scale:form.elements.scale.value,periodFrom:form.elements.periodFrom.value,periodTo:form.elements.periodTo.value,items:[...fields.querySelector('[data-risk-list]').children].map(row=>{const item=Object.fromEntries(Object.keys(riskFields).map(key=>[key,row.querySelector(`[data-risk="${key}"]`).value])),id=Number(row.querySelector('[data-contractor]').value);return id?{...item,contractorId:id}:item;}),musculoskeletalItems:muscleEditor.read()});
+          Object.assign(input.details,{riskReviewRoles:readRiskReviewRoles(name=>form.elements[name]?.value),kind:form.elements.kind.value,scale:form.elements.scale.value,periodFrom:form.elements.periodFrom.value,periodTo:form.elements.periodTo.value,items:[...fields.querySelector('[data-risk-list]').children].map(row=>{const item=Object.fromEntries(Object.keys(riskFields).map(key=>[key,row.querySelector(`[data-risk="${key}"]`).value])),id=Number(row.querySelector('[data-contractor]').value);return id?{...item,contractorId:id}:item;}),musculoskeletalItems:muscleEditor.read()});
         }else if(type==='work_plan'){
           input.details=Object.fromEntries(Object.keys(planFields).map(key=>[key,form.elements[key].value]));
           Object.assign(input.details,{

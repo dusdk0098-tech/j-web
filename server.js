@@ -114,6 +114,7 @@ assets.add('/restricted-month-editor.js');
 assets.add('/education-kinds.js');
 assets.add('/training-detail.js');
 assets.add('/risk-detail.js');
+assets.add('/risk-review-roles.js');
 assets.add('/risk-activity-mode.js');
 assets.add('/plan-detail.js');
 assets.add('/reviewer-education.js');
