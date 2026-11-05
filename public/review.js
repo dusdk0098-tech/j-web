@@ -33,6 +33,7 @@ labels.classification='자료 구분';
 Object.assign(labels,{equipmentAssignments:'시험 장비와 운전원',equipmentLabel:'장비',driverName:'운전원',driverCompany:'소속'});
 Object.assign(labels,{safetyMeasures:'시험 위험요인과 안전대책',accidentType:'재해 유형'});
 labels.section='점검 구분';
+Object.assign(labels,{patrolGroup:'점검 구분',patrolGuidance:'세부 점검사항'});
 Object.assign(labels,{improvedGrade:'개선 후 위험 등급',improvedLikelihood:'개선 후 가능성',improvedSeverity:'개선 후 중대성',improvedScore:'개선 후 시험 점수'});
 Object.assign(labels,{musculoskeletalItems:'근골격계 가상 위험요인',selected:'평가 선택',existingMeasures:'현재 조치',additionalMeasures:'추가 조치',grade:'현재 위험 등급',score:'시험 점수'});
 function displayFields(value){
