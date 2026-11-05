@@ -95,6 +95,8 @@ export function adminSitePolicy(db,req,url,session){
   if(planLinked){const row=doc(planLinked[1]);return method==='GET'&&!url.search&&!owned(row)&&row.type==='work_plan'?null:denied();}
   const permitSignature=path.match(/^\/api\/documents\/([1-9]\d*)\/permit-extensions\/([1-9]\d*)\/signature$/);
   if(permitSignature){const row=doc(permitSignature[1]),params=url.searchParams;return method==='GET'&&!owned(row)&&row.type==='permit'&&[...params.keys()].every(key=>key==='expectedVersion')&&params.getAll('expectedVersion').length===1&&/^[a-f0-9]{64}$/.test(params.get('expectedVersion'))?null:denied();}
+  const permitSnapshotFile=path.match(/^\/api\/documents\/([1-9]\d*)\/permit-snapshot-files\/(document|permit-signature)\/([1-9]\d*)$/);
+  if(permitSnapshotFile){const row=doc(permitSnapshotFile[1]),params=url.searchParams;return method==='GET'&&!owned(row)&&row.type==='permit'&&[...params.keys()].every(key=>key==='cycle')&&params.getAll('cycle').length===1&&positive(params.get('cycle'))?null:denied();}
   const permitRecords=path.match(/^\/api\/documents\/([1-9]\d*)\/permit-(?:checks|extensions|snapshot)$/);
   if(permitRecords){const row=doc(permitRecords[1]);return method==='GET'&&!url.search&&!owned(row)&&row.type==='permit'?null:denied();}
   const document=path.match(/^\/api\/documents\/(\d+)(?:\/(events|attachments))?$/);
