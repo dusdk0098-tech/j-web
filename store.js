@@ -16,6 +16,7 @@ import { safetyCostAmount } from './public/safety-cost.js';
 import { educationKinds, hasManagerEducationTargets, requireEducationSubmission } from './public/education-kinds.js';
 import { checklistCategories, checklistCategoryForKind } from './public/checklist-copy.js';
 import { costImageType, safetyCostImageType } from './cost-image.js';
+import { riskActivityFileLimit } from './public/risk-activity-mode.js';
 
 const siteArticleRow=row=>({...row,rich_body:row.rich_body===null?null:JSON.parse(row.rich_body)});
 const documentAuthorSql="COALESCE((SELECT w.name FROM worker_authored_documents a JOIN workers w ON w.id=a.worker_id AND w.site_id=documents.site_id WHERE a.document_id=documents.id),(SELECT r.name FROM office_document_authors a JOIN reviewers r ON r.id=a.reviewer_id AND r.site_id=documents.site_id WHERE a.document_id=documents.id),(SELECT a.author_name FROM admin_document_authors a WHERE a.document_id=documents.id))";
@@ -2317,11 +2318,12 @@ export class Store {
   riskActivityPhotos(documentId,id){if(!this.db.prepare('SELECT 1 FROM risk_activities WHERE id=? AND document_id=?').get(Number(id),Number(documentId)))throw new Error('시험 활동을 찾을 수 없습니다.');return this.db.prepare("SELECT id,name,purpose,length(data) AS size,CASE WHEN substr(data,1,8)=X'89504E470D0A1A0A' THEN 'image/png' WHEN substr(data,1,3)=X'FFD8FF' THEN 'image/jpeg' WHEN length(data)>=14 AND substr(data,1,6) IN (X'474946383761',X'474946383961') AND substr(data,7,2)<>X'0000' AND substr(data,9,2)<>X'0000' AND substr(data,-1,1)=X'3B' THEN 'image/gif' ELSE NULL END AS image_type FROM risk_activity_photos WHERE activity_id=? ORDER BY id").all(Number(id));}
   addRiskActivityPhoto(documentId,id,name,data,purpose='photo',expectedRevision,onAuthorize=()=>{}){
     this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();this.checkRiskActivityRevision(documentId,id,expectedRevision);
-    const photos=this.riskActivityPhotos(documentId,id);if(photos.length>=20)throw new Error('시험 사진은 20개까지 가능합니다.');
+    const photos=this.riskActivityPhotos(documentId,id);
     if(typeof name!=='string'||!name.trim()||name.length>200||/[\\/\x00-\x1f\x7f]/.test(name))throw new Error('사진 이름을 확인해 주세요.');
     if(!(data instanceof Uint8Array)||!data.length||data.length>50*1024*1024)throw new Error('파일은 1바이트 이상 50MB 이하여야 합니다.');
     const activity=this.db.prepare('SELECT kind,entry_mode FROM risk_activities WHERE id=? AND document_id=?').get(Number(id),Number(documentId));if(!['photo','minutes','material'].includes(purpose)||purpose==='minutes'&&(activity.kind!=='weekly'||activity.entry_mode!=='scan')||purpose==='material'&&activity.kind!=='other')throw new Error('첨부 구분을 확인해 주세요.');
     const bytes=Buffer.from(data),image=bytes.subarray(0,8).equals(Buffer.from('89504e470d0a1a0a','hex'))||bytes.subarray(0,3).equals(Buffer.from('ffd8ff','hex'))||safetyCostImageType(bytes)==='image/gif';if(purpose!=='material'&&!image&&!(purpose==='minutes'&&bytes.subarray(0,5).toString()==='%PDF-'))throw new Error('PNG·JPEG·GIF 사진이나 허용된 PDF 회의록을 선택해 주세요.');
+    const limit=riskActivityFileLimit(activity.kind,purpose);if(photos.filter(photo=>photo.purpose===purpose).length>=limit)throw new Error(`이 첨부 구분은 ${limit}개까지 가능합니다.`);
     const fileId=this.db.prepare('INSERT INTO risk_activity_photos(activity_id,name,data,purpose) VALUES(?,?,?,?)').run(Number(id),name,bytes,purpose).lastInsertRowid;this.db.prepare('DELETE FROM risk_activity_signatures WHERE activity_id=?').run(Number(id));this.db.exec('COMMIT');return fileId;}catch(error){this.db.exec('ROLLBACK');throw error;}
   }
   riskActivityPhoto(documentId,id,photoId){return this.db.prepare('SELECT p.* FROM risk_activity_photos p JOIN risk_activities a ON a.id=p.activity_id WHERE a.document_id=? AND a.id=? AND p.id=?').get(Number(documentId),Number(id),Number(photoId))||null;}

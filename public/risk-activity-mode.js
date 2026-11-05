@@ -1,3 +1,5 @@
+export function riskActivityFileLimit(kind,purpose){return purpose==='minutes'?2:purpose==='photo'&&kind==='weekly'?1:10;}
+
 export function mountRiskActivityMode(form){
   const {kind,entryMode,periodFrom,periodTo,place,host,participants,content,classification,subject}=form.elements;
   const label=input=>{const node=input.closest('label');node.classList.add('risk-activity-mode-field');return node;};
