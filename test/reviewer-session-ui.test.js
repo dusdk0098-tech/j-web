@@ -24,9 +24,9 @@ test('직원 화면의 JSON·첨부 요청은 처음 확인한 세션을 유지�
 
 test('직원 화면은 현재 세션을 고정한 다음에 문서를 읽고 늦은 세션 응답은 무시한다',async()=>{
   const source=readFileSync(new URL('../public/review.js',import.meta.url),'utf8'),start=source.indexOf('async function refresh(){'),end=source.indexOf("if(generation!==refreshEpoch)return;login.hidden=true",start);assert.ok(start>=0&&end>start);const code=source.slice(start,end)+'return {docs,refs};}';
-  const calls=[],context={refreshEpoch:0,api:async path=>{calls.push(path);return path.endsWith('/session')?{context:'가상 세션'}:[];},bindReviewerSession:value=>calls.push(value)};
+  const calls=[],context={refreshEpoch:0,reviewDetailEpoch:0,api:async path=>{calls.push(path);return path.endsWith('/session')?{context:'가상 세션'}:[];},bindReviewerSession:value=>calls.push(value)};
   await runInNewContext(code+';refresh();',context);assert.deepEqual(calls,['/api/reviewer/session','가상 세션','/api/reviewer/documents','/api/reviewer/references']);
-  let resolve;const delayed={refreshEpoch:0,api:()=>new Promise(done=>{resolve=done;}),bindReviewerSession:()=>{throw Error('지난 화면을 고정하면 안 됨');}},pending=runInNewContext(code+';refresh();',delayed);delayed.refreshEpoch++;resolve({context:'지난 세션'});await pending;
+  let resolve;const delayed={refreshEpoch:0,reviewDetailEpoch:0,api:()=>new Promise(done=>{resolve=done;}),bindReviewerSession:()=>{throw Error('지난 화면을 고정하면 안 됨');}},pending=runInNewContext(code+';refresh();',delayed);delayed.refreshEpoch++;resolve({context:'지난 세션'});await pending;
 });
 
 test('직접 로그인하면 응답의 세션을 즉시 고정하고 실패한 로그인은 기존 화면을 건드리지 않는다',async()=>{

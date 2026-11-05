@@ -138,7 +138,7 @@ test('관리자 결재 당시 사본과 결재자 상세는 내부 키 없이 �
   runInNewContext(source.match(/^const esc = .*$/m)[0]+'\n'+source.slice(source.indexOf('function capturedFields('),source.indexOf('function capturedFiles('))+'\nglobalThis.capture=capturedFields;',context);
   const details={companyId:0,company:'',directWork:true},snapshot=context.capture({details});assert.match(snapshot,/직영 작업/);assert.doesNotMatch(snapshot,/directWork|추가 항목/);assert.equal(details.company,'');
   const review=readFileSync(new URL('../public/review.js',import.meta.url),'utf8'),detail={dataset:{},querySelector:()=>null},decision={};
-  const reviewer={detail,$:()=>decision,pad:()=>()=>'',planLinks:()=>'',api:async()=>({document:{type:'permit',title:'가상 직영 문서',date:'2026-10-31',details:JSON.stringify(details)},attachments:[],priorReviews:[],frozen:true})};
+  const reviewer={detail,refreshEpoch:0,$:()=>decision,pad:()=>()=>'',planLinks:()=>'',api:async()=>({document:{type:'permit',title:'가상 직영 문서',date:'2026-10-31',details:JSON.stringify(details)},attachments:[],priorReviews:[],frozen:true})};
   runInNewContext(review.match(/^const esc=.*$/m)[0]+'\n'+review.slice(review.indexOf('const labels='),review.indexOf('function pad('))+'\n'+review.slice(review.indexOf('async function openReference('),review.indexOf('login.onsubmit='))+'\nglobalThis.open=openDocument;globalThis.fields=displayFields;',reviewer);
   await reviewer.open(5);assert.match(detail.innerHTML,/직영 작업/);assert.doesNotMatch(detail.innerHTML,/directWork|추가 항목/);
   for(const render of [context.capture,reviewer.fields]){const normal=render({company:'가상 업체',directWork:false});assert.match(normal,/가상 업체/);assert.doesNotMatch(normal,/직영 작업|directWork|추가 항목/);assert.match(render({company:'가상 이전 업체'}),/가상 이전 업체/);}
