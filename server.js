@@ -888,10 +888,10 @@ const server = http.createServer((req,res)=>passwordRequests.run(true,()=>adminR
     if(equipmentCopy&&req.method==='POST'){const input=await body(req);return json(res,201,store.copyEquipment(input.siteId,equipmentCopy[1],input,()=>checkRequestSession(req)));}
     if(url.pathname==='/api/equipment'){
       if(req.method==='GET')return json(res,200,adminEquipmentRows(req,store.equipment(url.searchParams.get('siteId'))));
-      if(req.method==='POST')return json(res,201,store.createEquipment(await body(req)));
+      if(req.method==='POST')return json(res,201,store.createEquipment(await body(req),()=>checkRequestSession(req)));
     }
     const equipmentId=url.pathname.match(/^\/api\/equipment\/(\d+)$/);
-    if(equipmentId && req.method==='PUT')return json(res,200,store.updateEquipment(equipmentId[1],await body(req)));
+    if(equipmentId && req.method==='PUT')return json(res,200,store.updateEquipment(equipmentId[1],await body(req),()=>checkRequestSession(req)));
     const equipmentFiles=url.pathname.match(/^\/api\/equipment\/(\d+)\/attachments(?:\/(\d+))?$/);
     if(equipmentFiles){
       const siteId=url.searchParams.get('siteId'),id=equipmentFiles[1],fileId=equipmentFiles[2];

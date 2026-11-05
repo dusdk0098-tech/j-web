@@ -1,10 +1,16 @@
 const originalKinds=['고소작업대(시저형)','고소작업대(차량형)','굴착기','덤프트럭','이동식크레인','콘크리트펌프카'];
 
+export function equipmentAlias(item) {
+  try {const details=typeof item?.details==='string'?JSON.parse(item.details):item?.details;return typeof details?.alias==='string'?details.alias:'';} catch{return '';}
+}
+export function equipmentAdditional(item) {
+  try {const details=typeof item?.details==='string'?JSON.parse(item.details):item?.details;return Array.isArray(details?.additional)?details.additional.filter(row=>row&&typeof row.label==='string'&&typeof row.value==='string'):[];} catch{return [];}
+}
 export function equipmentKinds(items) {
   return [...new Set([...originalKinds,...items.map(item=>item.kind).filter(Boolean)])];
 }
 export function equipmentOptions(items, kind, selected, esc) {
-  return '<option value="">선택</option>'+items.filter(item=>!kind||item.kind===kind).map(item=>'<option value="'+item.id+'" '+(String(item.id)===String(selected||'')?'selected':'')+'>'+esc(item.kind)+' · '+esc(item.model)+' · '+esc(item.registration)+'</option>').join('');
+  return '<option value="">선택</option>'+items.filter(item=>!kind||item.kind===kind).map(item=>'<option value="'+item.id+'" '+(String(item.id)===String(selected||'')?'selected':'')+'>'+esc(item.kind)+' · '+esc(item.model)+(equipmentAlias(item)?' · '+esc(equipmentAlias(item)):'')+' · '+esc(item.registration)+'</option>').join('');
 }
 export function equipmentFilterMarkup(items, selected, esc) {
   return '<label>장비 분류<select data-assignment-kind><option value="">전체</option>'+equipmentKinds(items).map(kind=>'<option value="'+esc(kind)+'">'+esc(kind)+'</option>').join('')+'</select></label><label>장비<select data-assignment-equipment required>'+equipmentOptions(items,'',selected,esc)+'</select></label>';

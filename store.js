@@ -77,7 +77,7 @@ function ppeValues(input){
   if(!['string','number'].includes(typeof input.quantity)||!/^\d{1,5}$/.test(String(input.quantity)))throw new Error('지급수량을 확인해 주세요.');
   const quantity=Number(input.quantity);if(quantity<1||quantity>10000)throw new Error('지급수량을 확인해 주세요.');return {date,item,quantity};
 }
-function equipmentDetails(input){
+function equipmentDetails(input,previous={}){
   const details={};
   for(const key of ['owner','businessNumber','insurer']){
     if(input[key]!==undefined && (typeof input[key]!=='string' || input[key].length>200))throw new Error('장비 정보를 확인해 주세요.');
@@ -88,6 +88,7 @@ function equipmentDetails(input){
     details[key]=input[key]?dateValue(input[key]):'';
   }
   if((details.insuranceFrom && details.insuranceTo && details.insuranceFrom>details.insuranceTo) || (details.inspectionFrom && details.inspectionTo && details.inspectionFrom>details.inspectionTo))throw new Error('보험 또는 검사 기간을 확인해 주세요.');
+  const alias=input.alias===undefined?(previous.alias??''):input.alias,additional=input.additional===undefined?(previous.additional??[]):input.additional;if(typeof alias!=='string'||alias.length>200)throw new Error('장비 별칭을 확인해 주세요.');if(!Array.isArray(additional)||additional.length>20||additional.some(row=>!row||typeof row!=='object'||Array.isArray(row)||typeof row.label!=='string'||typeof row.value!=='string'||!row.label.trim()||!row.value.trim()||row.label.length>200||row.value.length>2000))throw new Error('추가정보를 확인해 주세요.');details.alias=alias.trim();details.additional=additional.map(row=>({label:row.label.trim(),value:row.value.trim()}));
   return details;
 }
 export function signatureBytes(signature) {
@@ -1130,21 +1131,21 @@ export class Store {
     if(!this.equipmentAttachment(siteId,equipmentId,id))throw new Error('첨부파일을 찾을 수 없습니다.');
     this.db.prepare('DELETE FROM equipment_attachments WHERE equipment_id=? AND id=?').run(Number(equipmentId),Number(id));
   }
-  createEquipment(input) {
-    const siteId=Number(input.siteId);
+  createEquipment(input,onAuthorize=()=>{}) {
+    this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();const siteId=Number(input.siteId);
     if(!this.db.prepare('SELECT 1 FROM sites WHERE id=?').get(siteId))throw new Error('현장을 선택해 주세요.');
     const kind=text(input.kind,'장비 종류'),model=text(input.model,'형식');
     for(const key of ['capacity','manufacturer','registration'])if(typeof input[key]!=='string' || input[key].length>200)throw new Error('장비 항목을 확인해 주세요.');
     const id=this.db.prepare('INSERT INTO equipment(site_id,kind,model,capacity,manufacturer,registration,details) VALUES(?,?,?,?,?,?,?)').run(siteId,kind,model,input.capacity.trim(),input.manufacturer.trim(),input.registration.trim(),JSON.stringify(equipmentDetails(input))).lastInsertRowid;
-    return this.db.prepare('SELECT * FROM equipment WHERE id=?').get(id);
+    const result=this.db.prepare('SELECT * FROM equipment WHERE id=?').get(id);onAuthorize();this.db.exec('COMMIT');return result;}catch(error){this.db.exec('ROLLBACK');throw error;}
   }
-  updateEquipment(id,input) {
-    const siteId=Number(input.siteId);
-    if(!this.db.prepare('SELECT 1 FROM equipment WHERE id=? AND site_id=?').get(Number(id),siteId))throw new Error('선택한 현장의 장비를 확인해 주세요.');
+  updateEquipment(id,input,onAuthorize=()=>{}) {
+    this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();const siteId=Number(input.siteId);
+    const previous=this.db.prepare('SELECT * FROM equipment WHERE id=? AND site_id=?').get(Number(id),siteId);if(!previous)throw new Error('선택한 현장의 장비를 확인해 주세요.');if(input.expected!==undefined&&(!input.expected||typeof input.expected!=='object'||Array.isArray(input.expected)||['kind','model','capacity','manufacturer','registration','details'].some(key=>typeof input.expected[key]!=='string'||input.expected[key]!==previous[key])))throw Object.assign(new Error('장비 정보가 변경되었습니다. 다시 조회해 주세요.'),{sessionStatus:409});
     const kind=text(input.kind,'장비 종류'),model=text(input.model,'형식');
     for(const key of ['capacity','manufacturer','registration'])if(typeof input[key]!=='string' || input[key].length>200)throw new Error('장비 항목을 확인해 주세요.');
-    this.db.prepare('UPDATE equipment SET kind=?,model=?,capacity=?,manufacturer=?,registration=?,details=? WHERE id=? AND site_id=?').run(kind,model,input.capacity.trim(),input.manufacturer.trim(),input.registration.trim(),JSON.stringify(equipmentDetails(input)),Number(id),siteId);
-    return this.db.prepare('SELECT * FROM equipment WHERE id=? AND site_id=?').get(Number(id),siteId);
+    this.db.prepare('UPDATE equipment SET kind=?,model=?,capacity=?,manufacturer=?,registration=?,details=? WHERE id=? AND site_id=?').run(kind,model,input.capacity.trim(),input.manufacturer.trim(),input.registration.trim(),JSON.stringify(equipmentDetails(input,JSON.parse(previous.details))),Number(id),siteId);
+    const result=this.db.prepare('SELECT * FROM equipment WHERE id=? AND site_id=?').get(Number(id),siteId);onAuthorize();this.db.exec('COMMIT');return result;}catch(error){this.db.exec('ROLLBACK');throw error;}
   }
   createCompany(input,onAuthorize=()=>{}) {
     const siteId=Number(input.siteId);
