@@ -2624,6 +2624,11 @@ export class Store {
         if(!roles.siteManager||details.directWork!==true&&!roles.contractorLead)throw new Error('시험 결재 요청 전에 현장소장과 협력사 작업의 협력사 현장소장을 지정해 주세요.');
         if(JSON.stringify(ids)!==JSON.stringify(line.map(step=>step.reviewer_id)))throw new Error('역할별 시험 결재자를 다시 저장해 결재선을 설정해 주세요.');
       }
+      if(doc.type==='safety_log'&&action==='submit'){
+        this.db.prepare('UPDATE documents SET id=id WHERE id=?').run(Number(id));const latest=this.document(id);
+        if(!latest||['status','title','date','body','details'].some(key=>latest[key]!==doc[key]))throw new Error('안전 업무 일지가 변경되었습니다. 다시 확인해 주세요.');
+        const details=JSON.parse(latest.details);if(['weather','todayWork','tomorrowWork'].some(key=>typeof details[key]!=='string'||!details[key].trim())||!this.meetingSignature(id))throw new Error('결재 요청 전에 날씨, 금일 업무, 명일 계획과 작성자 서명을 확인해 주세요.');
+      }
       if(doc.type==='office'&&action==='submit'){
         this.db.prepare('UPDATE documents SET id=id WHERE id=?').run(Number(id));const currentDoc=this.document(id),currentLine=this.approvalLine(id);
         if(!currentDoc||['status','title','date','body','details'].some(key=>currentDoc[key]!==doc[key])||JSON.stringify(currentLine)!==JSON.stringify(line))throw new Error('문서 또는 결재선이 변경되었습니다. 다시 확인해 주세요.');
