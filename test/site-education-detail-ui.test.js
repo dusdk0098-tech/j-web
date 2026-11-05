@@ -116,3 +116,10 @@ test('월 변경으로 자료가 사라진 구분은 보존하고 새 구분은 
 test('전체 현장 행 버튼은 선택 현장과 날짜를 보존하여 상세를 열고 오래된 행은 무시한다',()=>{
  const button={dataset:{siteEducation:'8'}},state={siteId:7,page:'statistics',statisticsMonth:'2026-10',statisticsDay:'12'},section={isConnected:true,querySelectorAll:selector=>selector==='[data-site-education]'?[button]:[]},opened=[],context={section,state,siteId:7,month:'2026-10',day:'12',sites:[{id:8,name:'가상 상세'}],current:()=>state.siteId===7,today:()=>'',showSiteEducationDetail:(site,month)=>opened.push([site.id,month])};runInNewContext(fragment("  section.querySelectorAll('[data-site-education]')",'\n}'),context);const before=JSON.stringify(state);button.onclick();assert.deepEqual(opened,[[8,'2026-10']]);assert.equal(JSON.stringify(state),before);state.siteId=9;button.onclick();assert.equal(opened.length,1);
 });
+
+test('직원 교육 집계 상세는 해당 직원과 종류의 문서만 표시하고 월을 바꾸면 교체한다',async()=>{
+ const rows=[{id:1,name:'가상 직원',kind:'regular',date:'2026-10-01',title:'<가상 교육>',confirmed_at:'확인'},{id:1,name:'가상 직원',kind:'regular',date:'2026-10-02',title:'확인 전 교육',confirmed_at:null},{id:1,name:'가상 직원',kind:'special',date:'2026-10-03',title:'다른 종류',confirmed_at:'확인'},{id:2,name:'다른 직원',kind:'regular',date:'2026-10-04',title:'다른 사람',confirmed_at:null}];
+ const ui=screen(async()=>[],async path=>path.includes('2026-10')?rows:[{id:1,name:'가상 직원',kind:'regular',date:'2026-11-01',title:'다음 월',confirmed_at:null}]);await ui.open();
+ let html=ui.get('#site-education-staff').innerHTML;const groups=[...html.matchAll(/<tr><td>.*?<details><summary>상세보기<\/summary><ul>(.*?)<\/ul><\/details><\/td><\/tr>/g)].map(match=>match[1]);assert.equal(groups.length,3);assert.match(groups[0],/2026-10-01 · &lt;가상 교육&gt; · 시험 확인 완료/);assert.match(groups[0],/확인 전 교육 · 미확인/);assert.doesNotMatch(groups[0],/다른 종류|다른 사람|<가상 교육>/);assert.match(groups[1],/다른 종류/);assert.match(groups[2],/다른 사람/);
+ ui.month().value='2026-11';await ui.month().onchange();html=ui.get('#site-education-staff').innerHTML;assert.match(html,/다음 월 · 미확인/);assert.doesNotMatch(html,/가상 교육|다른 사람/);
+});
