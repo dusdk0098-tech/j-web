@@ -16,15 +16,15 @@ function screen(){
     set innerHTML(value){this.html=value;this.textContent='';this.buttons=[...value.matchAll(/data-patrol-source="(\d+)"/g)].map(([,index])=>({dataset:{patrolSource:index}}));},
     get innerHTML(){return this.html;},
     replaceChildren(){this.innerHTML='';},
-    querySelectorAll(selector){assert.equal(selector,'[data-patrol-source]');return this.buttons;}
+    querySelectorAll(selector){if(selector==='[data-patrol-activity]')return [];assert.equal(selector,'[data-patrol-source]');return this.buttons;},addEventListener(){}
   });
-  const context={state,dialog,URLSearchParams,$:selector=>{assert.ok(nodes.has(selector),selector);return nodes.get(selector);},api:url=>new Promise((resolve,reject)=>pending.push({url,resolve,reject})),FormData:class{constructor(){return [['patrolInstruction',nodes.get('#dialog-form [name=patrolInstruction]').value]];}},flash(){},render:async()=>{}};
+  const context={state,dialog,doc:null,actor:null,educationEpoch:1,detailEpoch:1,mountPatrolPrevious:()=>()=>{},confirm:()=>true,URLSearchParams,$:selector=>{assert.ok(nodes.has(selector),selector);return nodes.get(selector);},api:url=>new Promise((resolve,reject)=>pending.push({url,resolve,reject})),FormData:class{constructor(){return [['patrolInstruction',nodes.get('#dialog-form [name=patrolInstruction]').value]];}},flash(){},render:async()=>{}};
   const showDialogSource=source.slice(source.indexOf('function showDialog('),source.indexOf("$('#dialog-close').onclick="));
   runInNewContext(source.match(/^const esc = .*$/m)[0]+'\n'+showDialogSource+'\nglobalThis.mount=function(siteId,page,select){const details={},patrolItems=[];\n'+source.slice(start,end)+'\n};',context);
   const open=(siteId=1)=>{
     for(const node of nodes.values())node.isConnected=false;
     nodes.clear();state.siteId=siteId;dialog.open=true;
-    for(const key of ['#dialog-form','#dialog-form button[type=submit]','#dialog-title','#dialog-body','#daily-fields','#patrol-sources','#patrol-source-list','#dialog-form [name=date]','#dialog-form [name=patrolInstruction]','#dialog-error'])nodes.set(key,makeNode());
+    for(const key of ['#dialog-form','#dialog-form button[type=submit]','#dialog-title','#dialog-body','#daily-fields','#patrol-activities','#patrol-activity-add','#patrol-items','#patrol-previous','#patrol-previous-list','#dialog-form [name=patrolInspector]','#dialog-form [name=patrolOther]','#dialog-form [name=patrolNotes]','#patrol-sources','#patrol-source-list','#dialog-form [name=date]','#dialog-form [name=patrolInstruction]','#dialog-error'])nodes.set(key,makeNode());
     const date=nodes.get('#dialog-form [name=date]'),target=nodes.get('#dialog-form [name=patrolInstruction]'),error=nodes.get('#dialog-error'),list=nodes.get('#patrol-source-list'),button=nodes.get('#patrol-sources'),select={value:'patrol'};
     date.value='2026-11-01';context.showDialog('가상 순회 작성','',data=>new Promise((resolve,reject)=>saves.push({data,resolve,reject})));context.mount(siteId,state.page,select);
     const form=nodes.get('#dialog-form'),submit=nodes.get('#dialog-form button[type=submit]');
