@@ -5,7 +5,7 @@ export const educationKinds=Object.freeze({
 });
 
 export function requireEducationSubmission(details={}) {
-  const missing=[...(!String(details.timeFrom??'').trim()||!String(details.timeTo??'').trim()?['교육시간']:[]),...Object.entries({educationPlace:'교육장소',educationMethod:'교육방법',instructor:'교육강사'}).filter(([key])=>!String(details[key]??'').trim()).map(([,label])=>label)];
+  const missing=[...(!String(details.timeFrom??'').trim()||!String(details.timeTo??'').trim()?['교육시간']:[]),...Object.entries({educationPlace:'교육장소',educationMethod:'교육방법',instructor:'교육강사',textbook:'사용교재'}).filter(([key])=>!String(details[key]??'').trim()).map(([,label])=>label)];
   if(missing.length)throw Error('시험 결재 요청 전에 '+missing.join(', ')+' 항목을 입력하고 저장해 주세요.');
 }
 

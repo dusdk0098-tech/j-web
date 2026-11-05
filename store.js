@@ -13,7 +13,7 @@ import { summarizeWorkerCounts } from './public/worker-list.js';
 import { matchesAttendanceQuery } from './public/attendance-matrix.js';
 import { belongsToInstructionCompany } from './public/instruction-recipients.js';
 import { safetyCostAmount } from './public/safety-cost.js';
-import { educationKinds, hasManagerEducationTargets } from './public/education-kinds.js';
+import { educationKinds, hasManagerEducationTargets, requireEducationSubmission } from './public/education-kinds.js';
 import { checklistCategories, checklistCategoryForKind } from './public/checklist-copy.js';
 import { costImageType, safetyCostImageType } from './cost-image.js';
 
@@ -2586,7 +2586,7 @@ export class Store {
     if(action==='submit'&&line.some(step=>!step.active))throw new Error('활성 결재자를 확인해 주세요.');
     if(doc.type==='education'&&action==='submit'){
       const {details}=recordInput({...doc,details:JSON.parse(doc.details)});
-      if(['timeFrom','timeTo','educationPlace','educationMethod','instructor'].some(key=>!details[key]))throw new Error('시험 결재 요청 전에 교육시간, 교육장소, 교육방법과 교육강사를 입력해 주세요.');
+      requireEducationSubmission(details);
     }
     if(doc.type==='checklist'&&action==='submit'){const details=JSON.parse(doc.details),required={rain:[0,1,2,3,4,5,6],wind:[0,1,2,3,4,5,6,7,8],thaw:Array.from({length:15},(_,i)=>i),heat:Array.from({length:8},(_,i)=>i),cold:Array.from({length:10},(_,i)=>i),wet_season:Array.from({length:6},(_,i)=>i),heavy_rain:Array.from({length:11},(_,i)=>i),electrical:Array.from({length:12},(_,i)=>i),fire:Array.from({length:5},(_,i)=>i),formwork:Array.from({length:7},(_,i)=>i),falling:Array.from({length:8},(_,i)=>i),confined:Array.from({length:4},(_,i)=>i),excavation:Array.from({length:8},(_,i)=>i),semiannual:Array.from({length:11},(_,i)=>i),morning:[0,1,2,3,4,6],afternoon:[0,1,2,3,4,5],evening:[0,1,2,3,4,5,6,7,8]}[details.kind]||[];if(required.some(i=>!details.answers[i].answer))throw new Error('필수 체크리스트 답변을 모두 선택해 주세요.');}
     if(typeof opinion!=='string' || opinion.length>2000)throw new Error('검토 의견을 확인해 주세요.');

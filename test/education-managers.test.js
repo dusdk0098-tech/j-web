@@ -7,7 +7,7 @@ import {Store} from '../store.js';
 import {execFileSync} from 'node:child_process';
 import {hasManagerEducationTargets} from '../public/education-kinds.js';
 
-const details={kind:'supervisor_new',timeFrom:'09:00',timeTo:'10:00',educationPlace:'가상 교실',educationMethod:'강의식',instructor:'가상 강사'};
+const details={kind:'supervisor_new',timeFrom:'09:00',timeTo:'10:00',educationPlace:'가상 교실',educationMethod:'강의식',instructor:'가상 강사',textbook:'가상 교재'};
 function setup(path=':memory:'){
   const s=new Store(path),site=s.createSite({name:'가상 A'}),other=s.createSite({name:'가상 B'});
   const worker=s.createWorker({siteId:site.id,name:'가상 근로자',category:'직영',company:'가상 업체',occupation:'목공'});
