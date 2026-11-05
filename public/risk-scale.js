@@ -40,3 +40,15 @@ export function groupRiskItems(items){
   for(const item of items){const process=item.processName||'',contractor=item.contractor||'',contractorId=item.contractorId||0,key=JSON.stringify([process,contractorId,contractorId?'':contractor]);if(!groups.has(key))groups.set(key,{process,contractor,contractorId,items:[]});groups.get(key).items.push(item);}
   return [...groups.values()];
 }
+
+export function planProcessRiskCopy(source,currentProcesses,currentRiskCount,currentMuscleCount,companies,scale){
+  if(!source||!Array.isArray(source.processes)||!Array.isArray(currentProcesses)||!Array.isArray(companies)||![currentRiskCount,currentMuscleCount].every(value=>Number.isSafeInteger(value)&&value>=0))throw Error('이전 평가의 공정과 항목을 확인해 주세요.');
+  const keys=new Set(currentProcesses.map(row=>JSON.stringify([row.name.trim(),row.contractorId]))),processes=[];
+  for(const row of source.processes){if(!row||typeof row.name!=='string'||!row.name.trim()||row.name.length>200||!Number.isSafeInteger(row.contractorId)||row.contractorId<0||row.contractorId&&!companies.some(company=>company.id===row.contractorId))throw Error('이전 공정의 같은 현장 협력사를 확인해 주세요.');const item={name:row.name.trim(),contractorId:row.contractorId},key=JSON.stringify([item.name,item.contractorId]);if(!keys.has(key)){keys.add(key);processes.push(item);}}
+  if(currentProcesses.length+processes.length>100)throw Error('공정은 100개까지 등록할 수 있습니다.');
+  const matches=row=>row&&typeof row.processName==='string'&&processes.some(process=>row.processName.trim()===process.name&&(row.contractorId||0)===process.contractorId&&(process.contractorId||row.contractor==='직영'));
+  if(source.items!==undefined&&!Array.isArray(source.items)||source.musculoskeletalItems!==undefined&&!Array.isArray(source.musculoskeletalItems))throw Error('이전 평가 항목을 확인해 주세요.');
+  const items=(source.items||[]).filter(matches).map(copyRiskItem),musculoskeletalItems=copyMusculoskeletalItems((source.musculoskeletalItems||[]).filter(matches),currentMuscleCount,scale);
+  if(currentRiskCount+items.length>100)throw Error('위험요인은 100개까지 등록할 수 있습니다.');
+  return {processes,items,musculoskeletalItems};
+}
