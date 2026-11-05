@@ -122,6 +122,7 @@ assets.add('/plan-detail.js');
 assets.add('/reviewer-education.js');
 assets.add('/reviewer-meetings.js');
 assets.add('/risk-process-confirmation.js');
+assets.add('/worker-risk-previous.js');
 assets.add('/education-reference.js');
 assets.add('/checklist-copy.js');
 assets.add('/permit-sources.js');
@@ -459,6 +460,9 @@ const server = http.createServer((req,res)=>passwordRequests.run(true,()=>adminR
     }
     if(url.pathname==='/api/worker/permissions'&&req.method==='GET'){
       const key=workerKey(workerToken),session=workerSessions.get(key);if(!session||session.expires<=Date.now())return json(res,401,{error:'근로자 로그인이 필요합니다.'});if(req.headers['x-worker-report-context']!==undefined)checkWorkerReport(req,key,session);return json(res,200,store.workerPermissions(session.worker.site_id,session.worker.id));
+    }
+    if(url.pathname==='/api/worker/risk/previous'&&req.method==='GET'){
+      const key=workerKey(workerToken),session=workerSessions.get(key);if(!session||session.expires<=Date.now())return json(res,401,{error:'근로자 로그인이 필요합니다.'});checkWorkerReport(req,key,session);const {site_id:siteId,id:workerId}=session.worker,rows=store.workerPreviousRiskAssessments(siteId,workerId,url.searchParams.get('before'),url.searchParams.get('kind'),url.searchParams.get('scale'),url.searchParams.get('excludeId'));checkWorkerReport(req,key,session);if(!store.workerPermissions(siteId,workerId).includes('risk'))return json(res,403,{error:'위험성평가 작성 시험 권한이 필요합니다.'});return json(res,200,rows);
     }
     if(url.pathname==='/api/worker/muscle-references'&&req.method==='GET'){
       const session=workerSessions.get(workerKey(workerToken));if(!session||session.expires<=Date.now())return json(res,401,{error:'근로자 로그인이 필요합니다.'});
