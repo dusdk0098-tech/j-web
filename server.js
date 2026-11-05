@@ -461,6 +461,9 @@ const server = http.createServer((req,res)=>passwordRequests.run(true,()=>adminR
     if(url.pathname==='/api/worker/documents'&&['GET','POST'].includes(req.method)){
       const session=workerSessions.get(workerKey(workerToken));if(!session||session.expires<=Date.now())return json(res,401,{error:'근로자 로그인이 필요합니다.'});if(req.method==='GET')return json(res,200,store.workerDocuments(session.worker.site_id,session.worker.id));const input=await body(req,120000),failure=workerSessionError(workerToken,session);if(failure)return json(res,failure.status,{error:failure.error});return json(res,201,store.createWorkerDocument(session.worker.site_id,session.worker.id,input,()=>checkWorkerReport(req,workerKey(workerToken),session,input)));
     }
+    if(url.pathname==='/api/worker/plan-category-measures'&&req.method==='GET'){
+      const key=workerKey(workerToken),session=workerSessions.get(key);if(!session||session.expires<=Date.now())return json(res,401,{error:'근로자 로그인이 필요합니다.'});checkWorkerReport(req,key,session);if(!store.workerPermissions(session.worker.site_id,session.worker.id).includes('work_plan'))return json(res,403,{error:'작업계획서 작성 권한이 필요합니다.'});const rows=store.planCategoryMeasures(session.worker.site_id,url.searchParams.get('category'));checkWorkerReport(req,key,session);return json(res,200,rows);
+    }
     const workerPlanComponent=url.pathname.match(/^\/api\/worker\/documents\/(\d+)\/copy-plan-component$/);
     if(workerPlanComponent&&req.method==='POST'){
       const key=workerKey(workerToken),session=workerSessions.get(key);if(!session||session.expires<=Date.now())return json(res,401,{error:'근로자 로그인이 필요합니다.'});
@@ -884,6 +887,12 @@ const server = http.createServer((req,res)=>passwordRequests.run(true,()=>adminR
     }
     const equipmentAttendance=url.pathname.match(/^\/api\/equipment-attendance(?:\/(\d+))?$/);
     if(equipmentAttendance){const id=equipmentAttendance[1];if(!id&&req.method==='GET')return json(res,200,adminEquipmentRows(req,store.equipmentAttendance(url.searchParams.get('siteId'),url.searchParams.get('month')),true));if(!id&&req.method==='POST')return json(res,201,store.saveEquipmentAttendance(await body(req),null,()=>checkRequestSession(req),!!req.adminRestricted));if(id&&req.method==='PUT')return json(res,200,store.saveEquipmentAttendance(await body(req),id,()=>checkRequestSession(req),!!req.adminRestricted));if(id&&req.method==='DELETE'){const input=await body(req);store.deleteEquipmentAttendance(input.siteId,id,input.expectedVersion,()=>checkRequestSession(req));req.adminDeletedEquipment={id:Number(id),siteId:Number(input.siteId)};return json(res,200,{ok:true});}}
+    const planCategoryMeasure=url.pathname.match(/^\/api\/plan-category-measures(?:\/(\d+))?$/);
+    if(planCategoryMeasure){const id=planCategoryMeasure[1],siteId=url.searchParams.get('siteId'),category=url.searchParams.get('category');
+      if(!id&&req.method==='GET'){const rows=store.planCategoryMeasures(siteId,category);checkRequestSession(req);return json(res,200,rows);}
+      if(!id&&req.method==='POST')return json(res,201,store.savePlanCategoryMeasure(siteId,category,null,await body(req),false,()=>checkRequestSession(req)));
+      if(id&&['PUT','DELETE'].includes(req.method))return json(res,200,store.savePlanCategoryMeasure(siteId,category,id,await body(req),req.method==='DELETE',()=>checkRequestSession(req)));
+    }
     const permitMeasure=url.pathname.match(/^\/api\/equipment\/(\d+)\/permit-measures(?:\/(\d+))?$/);
     if(permitMeasure){const [,equipmentId,id]=permitMeasure,siteId=url.searchParams.get('siteId');
       if(!id&&req.method==='GET'){const rows=store.permitMeasures(siteId,equipmentId);checkRequestSession(req);return json(res,200,rows);}

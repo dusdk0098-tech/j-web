@@ -29,3 +29,24 @@ export function validatePermitMeasureSources(db,input){
     if(!row||row.version!==source.version)throw conflict();
   }
 }
+
+const planCategories=['excavation','bridge'];
+const categoryConflict=()=>Object.assign(new Error('작업구분 안전대책 목록이 변경되었습니다. 입력 내용은 유지됩니다. 다시 조회하거나 목록 연결을 해제해 주세요.'),{sessionStatus:409});
+function planCategory(db,siteId,category){
+  if(!Number.isSafeInteger(Number(siteId))||Number(siteId)<1||!db.prepare('SELECT 1 FROM sites WHERE id=?').get(Number(siteId))||!planCategories.includes(category))throw Error('현장과 작업구분을 확인해 주세요.');
+}
+export function listPlanCategoryMeasures(db,siteId,category){planCategory(db,siteId,category);return db.prepare('SELECT id,category,accidentType,hazard,measure,version FROM plan_category_measures WHERE site_id=? AND category=? ORDER BY id').all(Number(siteId),category);}
+export function savePlanCategoryMeasure(db,siteId,category,id,input,remove,authorize){
+  db.exec('BEGIN IMMEDIATE');try{
+    authorize();planCategory(db,siteId,category);if(id){const row=db.prepare('SELECT * FROM plan_category_measures WHERE id=? AND site_id=? AND category=?').get(Number(id),Number(siteId),category);if(!row||row.version!==input.expectedVersion)throw categoryConflict();}
+    if(remove)db.prepare('DELETE FROM plan_category_measures WHERE id=?').run(Number(id));else{
+      const values=['accidentType','hazard','measure'].map(key=>{const value=input[key];if(typeof value!=='string'||value.length>2000||/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/.test(value))throw Error('안전대책 각 항목은 2000자 이내로 입력해 주세요.');return value.trim();});if(!values[2])throw Error('안전대책을 입력해 주세요.');const version=randomUUID();
+      if(id)db.prepare('UPDATE plan_category_measures SET accidentType=?,hazard=?,measure=?,version=? WHERE id=?').run(...values,version,Number(id));else{if(listPlanCategoryMeasures(db,siteId,category).length>=100)throw Error('작업구분별 안전대책은 100개까지 등록할 수 있습니다.');id=db.prepare('INSERT INTO plan_category_measures(site_id,category,accidentType,hazard,measure,version) VALUES(?,?,?,?,?,?)').run(Number(siteId),category,...values,version).lastInsertRowid;}
+    }
+    authorize();const result=remove?{ok:true}:db.prepare('SELECT id,category,accidentType,hazard,measure,version FROM plan_category_measures WHERE id=?').get(Number(id));db.exec('COMMIT');return result;
+  }catch(error){db.exec('ROLLBACK');throw error;}
+}
+export function validatePlanCategorySources(db,input){
+  if(input.planCategorySources===undefined)return;const sources=input.planCategorySources;if(input.type!=='work_plan'||!Array.isArray(sources)||sources.length>100)throw Error('적용한 작업구분 안전대책을 확인해 주세요.');
+  for(const source of sources){if(!source||!Number.isSafeInteger(source.id)||typeof source.version!=='string')throw Error('적용한 작업구분 안전대책을 확인해 주세요.');planCategory(db,input.siteId,source.category);const row=db.prepare('SELECT version FROM plan_category_measures WHERE id=? AND site_id=? AND category=?').get(source.id,Number(input.siteId),source.category);if(!row||row.version!==source.version)throw categoryConflict();}
+}
