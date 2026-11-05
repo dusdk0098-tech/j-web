@@ -100,7 +100,7 @@ export function recordInput(input) {
     if(type==='joint_inspection'){
       for(const key of ['improvements','result','other']){if(typeof (value[key]??'')!=='string'||(value[key]??'').length>2000)throw new Error('합동 점검 항목을 확인해 주세요.');details[key]=(value[key]??'').trim();}
       const items=value.items??[];if(!Array.isArray(items)||items.length>100)throw new Error('점검 항목을 확인해 주세요.');
-      details.items=items.map(item=>{if(!item||typeof item.name!=='string'||!item.name.trim()||item.name.length>500||!['양호','보완사항','N/A'].includes(item.result))throw new Error('점검 항목을 확인해 주세요.');return {name:item.name.trim(),result:item.result};});
+      details.items=items.map(item=>{if(!item||typeof item.name!=='string'||!item.name.trim()||item.name.length>500||!['양호','보완사항','N/A'].includes(item.result)||['issueDetail','action'].some(key=>item[key]!==undefined&&(typeof item[key]!=='string'||item[key].length>2000)))throw new Error('점검 항목을 확인해 주세요.');const row={name:item.name.trim(),result:item.result};for(const key of ['issueDetail','action'])if(item[key]!==undefined)row[key]=item[key].trim();return row;});
     }
   }
   if(type==='work_plan'){
