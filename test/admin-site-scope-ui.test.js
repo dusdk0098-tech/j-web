@@ -127,6 +127,15 @@ test('제한 문서 목록 A→B→A 이동 뒤 첫 A 응답과 이전 검색 �
   assert.match(ui.get('#restricted-document-results').innerHTML,/새 A 결과/);assert.doesNotMatch(ui.get('#restricted-document-results').innerHTML,/옛/);assert.equal(ui.get('#restricted-document-q').value,'');
 });
 
+test('배정 현장의 합동 안전점검 상세는 항목과 참석자 이름을 안전하게 표시한다',async()=>{
+  const details={improvements:'<보완>',result:'가상 결과',other:'가상 비고',items:[{name:'가상 <항목>',result:'보완사항',issueDetail:'가상 문제',action:'가상 조치'}],managerSnapshot:[{name:'관리자 <가상>',phone:'표시 금지'}],workerSnapshot:[{name:'근로자 & 가상'}],secret:'표시 금지'};
+  const doc={id:5,site_id:1,type:'joint_inspection',title:'가상 점검',body:'가상 본문',status:'approved',details:JSON.stringify(details)},ui=screen(async()=>response(doc));ui.state.page='documents';ui.state.detail=5;await ui.context.renderRestrictedDocuments();
+  for(const text of ['&lt;보완&gt;','가상 결과','가상 비고','가상 &lt;항목&gt;','보완사항','가상 문제','가상 조치','관리자 &lt;가상&gt;','근로자 &amp; 가상'])assert.ok(ui.content.innerHTML.includes(text),text);
+  assert.doesNotMatch(ui.content.innerHTML,/표시 금지|<항목>|restricted-notice-edit/);assert.deepEqual(ui.requests.map(r=>r.path),['/api/documents/5']);
+  const wrong=screen(async()=>response({...doc,site_id:2}));wrong.state.page='documents';wrong.state.detail=5;await assert.rejects(wrong.context.renderRestrictedDocuments(),/현장/);assert.doesNotMatch(wrong.content.innerHTML,/가상 문제/);
+  const old=screen(async()=>response({...doc,details:null}));old.state.page='documents';old.state.detail=5;await old.context.renderRestrictedDocuments();assert.match(old.content.innerHTML,/점검 항목 없음/);
+});
+
 test('제한 작업계획서 기본정보는 명시된 필드·기존 시간·작업구분만 읽고 HTML과 중첩 자료를 차단한다',async()=>{
   const ui=screen(),details=Object.fromEntries(Object.keys(ui.context.planFields).map(key=>[key,'가상 <'+key+'> & 설명']));
   Object.assign(details,{timeFrom:'04:13',timeTo:'23:57',workKinds:['이전 구분 <시험>','기타',{secret:'노출금지'}],equipmentIds:[999],equipmentSnapshot:[{owner:'노출금지'}],workerSnapshot:[{name:'노출금지'}],signature:'노출금지',files:['노출금지']});
@@ -549,6 +558,9 @@ test('실제 HTTP 로그인→배정 현장 선택→공지·근로자·출역·
     const noticePath='/api/documents/'+documents[0].id,noticeInput={siteId:created[1].id,type:'notice',title:'가상 동시 수정',date:'2026-11-02',body:'다른 변경',expectedEditVersion:documents[0].edit_version};
     ui.get('#restricted-notice-edit').onclick();assert.equal((await send(noticePath,'PUT',noticeInput,globalCookie)).status,200);await ui.submit({title:'가상 충돌 입력',date:'2026-11-02',body:'보존할 본문'});assert.equal(ui.dialog.open,true);assert.equal(ui.get('#dialog-form').values.body,'보존할 본문');assert.match(ui.get('#dialog-error').textContent,/변경/);assert.equal((await(await send(noticePath,'GET',null,cookie)).json()).title,'가상 동시 수정');
     ui.dialog.close();await ui.context.render();ui.get('#restricted-notice-edit').onclick();await ui.submit({title:'가상 공지 수정 완료',date:'2026-11-03',body:'가상 수정 본문'});assert.equal(ui.dialog.open,false);const updatedNotice=await(await send(noticePath,'GET',null,cookie)).json();assert.equal(updatedNotice.title,'가상 공지 수정 완료');assert.equal(updatedNotice.body,'가상 수정 본문');assert.equal(updatedNotice.date,'2026-11-03');assert.equal(updatedNotice.status,'draft');
+    const jointInput={type:'joint_inspection',title:'가상 합동 점검',date:'2026-11-03',details:{items:[{name:'가상 점검 항목',result:'보완사항',issueDetail:'가상 문제',action:'가상 조치'}]}};
+    const jointResponse=await send('/api/documents','POST',{...jointInput,siteId:created[1].id},globalCookie),foreignResponse=await send('/api/documents','POST',{...jointInput,siteId:created[2].id},globalCookie);assert.equal(jointResponse.status,201);assert.equal(foreignResponse.status,201);const joint=await jointResponse.json(),foreignJoint=await foreignResponse.json();
+    const jointUi=screen((path,options)=>fetch(base+path,{...options,headers:{...options.headers,cookie,'x-admin-context':session.context}}));jointUi.context.applyAdminScope(session.admin);jointUi.state.siteId=created[1].id;jointUi.state.page='documents';jointUi.state.detail=joint.id;await jointUi.context.renderRestrictedDocuments();assert.match(jointUi.content.innerHTML,/가상 점검 항목/);assert.match(jointUi.content.innerHTML,/가상 문제/);assert.match(jointUi.content.innerHTML,/가상 조치/);assert.equal((await send('/api/documents/'+foreignJoint.id,'GET',null,cookie)).status,403);
     assert.equal((await send('/api/documents?siteId='+created[2].id,'GET',null,cookie)).status,403);assert.equal((await send('/api/admin-accounts','GET',null,cookie)).status,403);
     ui.state.page='workers';ui.state.detail=null;await ui.context.render();assert.match(ui.content.innerHTML,/등록된 근로자가 없습니다/);
     ui.get('#restricted-worker-add').onclick();addLicense(ui);licenseRows(ui)[0].name.value='가상 면허';licenseRows(ui)[0].number.value='가상-001';await ui.submit({name:'가상 UI 근로자',category:'직영',company:'',occupation:'가상 직종',memo:'가상 메모'});assert.equal(ui.dialog.open,false);assert.match(ui.content.innerHTML,/가상 UI 근로자/);
