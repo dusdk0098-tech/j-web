@@ -461,6 +461,13 @@ const server = http.createServer((req,res)=>passwordRequests.run(true,()=>adminR
     if(url.pathname==='/api/worker/documents'&&['GET','POST'].includes(req.method)){
       const session=workerSessions.get(workerKey(workerToken));if(!session||session.expires<=Date.now())return json(res,401,{error:'근로자 로그인이 필요합니다.'});if(req.method==='GET')return json(res,200,store.workerDocuments(session.worker.site_id,session.worker.id));const input=await body(req,120000),failure=workerSessionError(workerToken,session);if(failure)return json(res,failure.status,{error:failure.error});return json(res,201,store.createWorkerDocument(session.worker.site_id,session.worker.id,input,()=>checkWorkerReport(req,workerKey(workerToken),session,input)));
     }
+    const workerPlanComponent=url.pathname.match(/^\/api\/worker\/documents\/(\d+)\/copy-plan-component$/);
+    if(workerPlanComponent&&req.method==='POST'){
+      const key=workerKey(workerToken),session=workerSessions.get(key);if(!session||session.expires<=Date.now())return json(res,401,{error:'근로자 로그인이 필요합니다.'});
+      const input=await body(req),siteId=session.worker.site_id,workerId=session.worker.id;if(input.siteId!==siteId)throw new Error('같은 현장을 확인해 주세요.');
+      const authorize=()=>{checkWorkerReport(req,key,session,input);store.workerDocument(siteId,workerId,workerPlanComponent[1]);store.workerDocument(siteId,workerId,input.sourceId);};
+      return json(res,200,store.copyWorkPlanComponent(workerPlanComponent[1],input,authorize));
+    }
     const workerPlanSignature=url.pathname.match(/^\/api\/worker\/documents\/(\d+)\/author-signature(?:\/(image))?$/);
     if(workerPlanSignature){
       const session=workerSessions.get(workerKey(workerToken));if(!session||session.expires<=Date.now())return json(res,401,{error:'근로자 로그인이 필요합니다.'});

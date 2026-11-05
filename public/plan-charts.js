@@ -55,3 +55,20 @@ export function mountPlanComponentCopy({button,doc,current,dialog,api,showDialog
     }catch(error){if(current())showError(error);}finally{button.disabled=false;}
   };
 }
+
+export function mountWorkerPlanCopy({row,doc,documents,editor,send,active,updateList,status,reportContext}){
+  const candidates=documents.filter(item=>item.type==='work_plan').flatMap(source=>{const details=JSON.parse(source.details||'{}');return [['chart',details.additionalCharts||[]],['heavy',details.heavyLoads||[]]].flatMap(([kind,rows])=>rows.map((item,index)=>({source,kind,index,label:kind==='chart'?item.placeName||'작업장소':item.kind||'중량물'})));});
+  if(!candidates.length)return;
+  const button=document.createElement('button');button.type='button';button.textContent='계획도·중량물 가져오기';row.append(' ',button);let panel,busy=false;
+  const current=()=>active()&&row.isConnected;
+  button.onclick=()=>{
+    if(!current()||busy)return;if(editor.children.length){status.textContent='작성 중인 문서를 저장하거나 닫은 뒤 가져와 주세요.';return;}if(panel){panel.remove();panel=null;return;}
+    panel=document.createElement('span');const select=document.createElement('select'),placeholder=document.createElement('option');select.setAttribute('aria-label','복사할 계획 항목');placeholder.value='';placeholder.textContent='복사할 항목 선택';select.append(placeholder);
+    candidates.forEach((item,index)=>{const option=document.createElement('option');option.value=String(index);option.textContent=`${item.source.date} · ${item.source.title} · ${item.kind==='chart'?'계획도':'중량물'} · ${item.label}`;select.append(option);});
+    const notice=document.createElement('span');notice.textContent='연결 사진을 복사하며 작성자 시험 서명은 지워집니다. ';const apply=document.createElement('button');apply.type='button';apply.textContent='가져오기';panel.append(notice,select,apply);row.append(' ',panel);
+    apply.onclick=async()=>{if(!current()||apply.disabled)return;if(editor.children.length){status.textContent='작성 중인 문서를 저장하거나 닫은 뒤 가져와 주세요.';return;}if(!/^\d+$/.test(select.value)){status.textContent='복사할 항목을 선택해 주세요.';return;}const item=candidates[Number(select.value)];if(!item)return;busy=true;apply.disabled=true;select.disabled=true;try{
+      await send(`/api/worker/documents/${doc.id}/copy-plan-component`,'POST',{siteId:doc.site_id,sourceId:item.source.id,sourceVersion:item.source.edit_version,targetVersion:doc.edit_version,kind:item.kind,index:item.index,reportContext});
+      if(current()){status.textContent=editor.children.length?'항목을 가져왔습니다. 작성 중인 입력을 복사한 뒤 문서를 다시 열어 주세요.':'항목을 가져왔습니다. 작성자 시험 서명은 다시 확인해 주세요.';if(!editor.children.length)await updateList();}
+    }catch(error){if(current())status.textContent=error.message;}finally{busy=false;apply.disabled=false;select.disabled=false;}};
+  };
+}
