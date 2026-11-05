@@ -27,6 +27,6 @@ test('주간 스캔과 다른 활동 종류를 바꾸어도 입력을 보존하�
 test('활동 입력 대화상자에서 선택 방식 전환을 연결한다',()=>{
   const fields=Object.fromEntries(Object.entries({kind:'meeting',entryMode:'manual',periodFrom:'',periodTo:'',date:'2026-11-02',place:'',host:'',participants:'',content:'',classification:'',subject:''}).map(([name,value])=>[name,input(value)])),groups=[{hidden:false},{hidden:false}],notice={hidden:true};
   const form={elements:fields,querySelectorAll:()=>groups,querySelector:()=>notice},container={html:'',insertAdjacentHTML(_position,html){this.html+=html;}},source=readFileSync(new URL('../public/app.js',import.meta.url),'utf8'),handler=source.split('\n').find(line=>line.includes('const editRiskActivity='));assert.ok(handler);
-  runInNewContext(handler+'\neditRiskActivity(null)',{editActivity:()=>{},field:()=>'',mountRiskActivityMode,$:selector=>selector==='#dialog-form'?form:container});
+  runInNewContext(handler+'\neditRiskActivity(null)',{editActivity:()=>{},riskCurrent:()=>true,field:()=>'',mountRiskActivityMode,$:selector=>selector==='#dialog-form'?form:container});
   assert.match(container.html,/data-risk-scan-notice/);assert.equal(fields.entryMode.disabled,true);fields.kind.value='weekly';fields.kind.change();fields.entryMode.value='scan';fields.entryMode.change();assert.equal(fields.entryMode.disabled,false);assert.equal(fields.content.label.hidden,true);assert.equal(notice.hidden,false);
 });
