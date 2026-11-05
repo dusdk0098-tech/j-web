@@ -868,8 +868,9 @@ export class Store {
       authorize();this.db.exec('COMMIT');return changed;
     }catch(error){this.db.exec('ROLLBACK');throw error;}
   }
-  deleteMealCheck(siteId,id) {
-    if(!this.db.prepare('DELETE FROM meal_checks WHERE site_id=? AND id=?').run(Number(siteId),Number(id)).changes)throw new Error('선택한 현장의 식대 기록을 확인해 주세요.');
+  deleteMealCheck(siteId,id,expectedRevision=null,authorize=()=>{}) {
+    if(expectedRevision!==null&&(typeof expectedRevision!=='string'||!/^[0-9a-f]{32}$/.test(expectedRevision)))throw new Error('식대 기록을 다시 조회해 주세요.');
+    this.db.exec('BEGIN IMMEDIATE');try{authorize();const result=expectedRevision===null?this.db.prepare('DELETE FROM meal_checks WHERE site_id=? AND id=?').run(Number(siteId),Number(id)):this.db.prepare('DELETE FROM meal_checks WHERE site_id=? AND id=? AND revision=?').run(Number(siteId),Number(id),expectedRevision);if(!result.changes){if(expectedRevision!==null)throw Object.assign(new Error('식대 기록이 변경되었습니다. 다시 조회해 주세요.'),{sessionStatus:409});throw new Error('선택한 현장의 식대 기록을 확인해 주세요.');}authorize();this.db.exec('COMMIT');}catch(error){this.db.exec('ROLLBACK');throw error;}
   }
   saveRestaurant(input,id=null) {
     const siteId=Number(input.siteId);

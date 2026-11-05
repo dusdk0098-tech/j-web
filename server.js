@@ -975,7 +975,7 @@ const server = http.createServer((req,res)=>passwordRequests.run(true,()=>adminR
     if(url.pathname==='/api/meal-checks'){
       if(req.method==='GET')return json(res,200,store.mealChecks(url.searchParams.get('siteId'),url.searchParams.get('date')));
       if(req.method==='POST'){store.saveMealCheck(await body(req));return json(res,200,{ok:true});}
-      if(req.method==='DELETE'){store.deleteMealCheck(url.searchParams.get('siteId'),url.searchParams.get('id'));return json(res,200,{ok:true});}
+      if(req.method==='DELETE'){store.deleteMealCheck(url.searchParams.get('siteId'),url.searchParams.get('id'),url.searchParams.get('expectedRevision'),()=>checkRequestSession(req));return json(res,200,{ok:true});}
     }
     if(url.pathname==='/api/meal-defaults'){
       if(req.method==='GET')return json(res,200,store.mealDefaults(url.searchParams.get('siteId'),url.searchParams.get('group')??'direct'));
