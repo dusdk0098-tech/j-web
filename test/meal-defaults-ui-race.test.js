@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {runInNewContext} from 'node:vm';
+import {restaurantPrice} from '../public/restaurant-price.js';
 const source=readFileSync(new URL('../public/app.js',import.meta.url),'utf8');
 const start=source.indexOf("  if(state.page==='restaurants'){");
 const end=source.indexOf('    const edit=r=>{',start);
@@ -32,7 +33,7 @@ test('저장 중 현장 전환 뒤 결과는 새 화면을 다시 그리지 않�
 
 test('식당 작성에서 간식 부가세를 별도로 수정하고 단가 변경 시 자동 계산한다',()=>{
  const begin=source.indexOf('    const edit=r=>{',start),end=source.indexOf("    $('#restaurant-add').onclick=",begin);assert.ok(begin>start&&end>begin);
- const nodes=Object.fromEntries(['mealPrice','tax','snackPrice','snackTax'].map(name=>[`#dialog-form [name=${name}]`,{value:name==='snackPrice'?'0':'',addEventListener(_event,fn){this.change=fn;}}]));nodes['#restaurant-total']={textContent:''};let markup,submit;
- const context={current:()=>true,siteId:1,field:(name,label,value)=>`<label>${label}<input name="${name}" value="${value}"></label>`,showDialog:(_title,html,onSubmit)=>{markup=html;submit=onSubmit;},$:key=>nodes[key],restaurantPrice:(price,tax,auto)=>/^\d+$/.test(price)?{tax:auto?Math.floor(Number(price)/10):Number(tax),total:Number(price)+Number(tax)}:null,api:(_path,options)=>JSON.parse(options.body)};
- runInNewContext(source.slice(begin,end)+';globalThis.edit=edit;',context);context.edit({id:3,name:'가상',meal_price:5000,snack_price:1000,tax:500,snack_tax:90});assert.match(markup,/간식 부가세/);assert.match(markup,/name="snackTax" value="90"/);nodes['#dialog-form [name=snackPrice]'].value='1234';nodes['#dialog-form [name=snackPrice]'].change();assert.equal(nodes['#dialog-form [name=snackTax]'].value,'123');assert.equal(submit({snackTax:'123'}).snackTax,'123');
+ const nodes=Object.fromEntries(['mealPrice','tax','snackPrice','snackTax'].map(name=>[`#dialog-form [name=${name}]`,{value:name==='snackPrice'?'0':'',addEventListener(_event,fn){this.change=fn;}}]));nodes['#restaurant-total']={textContent:''};nodes['#restaurant-snack-total']={textContent:''};let markup,submit;
+ const context={current:()=>true,siteId:1,field:(name,label,value)=>`<label>${label}<input name="${name}" value="${value}"></label>`,showDialog:(_title,html,onSubmit)=>{markup=html;submit=onSubmit;},$:key=>nodes[key],restaurantPrice,api:(_path,options)=>JSON.parse(options.body)};
+ runInNewContext(source.slice(begin,end)+';globalThis.edit=edit;',context);context.edit({id:3,name:'가상',meal_price:5000,snack_price:1000,tax:500,snack_tax:90});assert.match(markup,/간식 부가세/);assert.match(markup,/name="snackTax" value="90"/);assert.equal(nodes['#restaurant-snack-total'].textContent,'간식 부가세 미기록');nodes['#dialog-form [name=snackPrice]'].value='1234';nodes['#dialog-form [name=snackPrice]'].change();assert.equal(nodes['#dialog-form [name=snackTax]'].value,'123');assert.match(nodes['#restaurant-snack-total'].textContent,/1,357원/);nodes['#dialog-form [name=snackTax]'].value='200';nodes['#dialog-form [name=snackTax]'].change();assert.match(nodes['#restaurant-snack-total'].textContent,/1,434원/);nodes['#dialog-form [name=snackPrice]'].value='-1';nodes['#dialog-form [name=snackPrice]'].change();assert.match(nodes['#restaurant-snack-total'].textContent,/정수/);assert.equal(submit({snackTax:'123'}).snackTax,'123');
 });
