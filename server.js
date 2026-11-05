@@ -117,6 +117,7 @@ assets.add('/risk-detail.js');
 assets.add('/risk-activity-mode.js');
 assets.add('/plan-detail.js');
 assets.add('/reviewer-education.js');
+assets.add('/reviewer-meetings.js');
 assets.add('/education-reference.js');
 assets.add('/checklist-copy.js');
 assets.add('/permit-sources.js');
@@ -261,6 +262,10 @@ const server = http.createServer((req,res)=>passwordRequests.run(true,()=>adminR
       if(url.pathname==='/api/reviewer/logout'&&req.method==='POST'){reviewerSessions.delete(key);res.setHeader('Set-Cookie',`jweb_reviewer=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0${secureCookie}`);return json(res,200,{ok:true});}
       if(await handleCommonWork(req,res,url,'/api/reviewer/common-work',reviewer))return;
       if(url.pathname==='/api/reviewer/session'&&req.method==='GET')return json(res,200,{reviewer,context});
+      const reviewerMeetingConfirm=url.pathname.match(/^\/api\/reviewer\/meetings\/(\d+)\/confirmation$/);
+      if(reviewerMeetingConfirm&&req.method==='POST'){const input=await body(req);store.confirmReviewerMeeting(reviewer.id,Number(reviewerMeetingConfirm[1]),input.expectedEditVersion,input.signature,()=>checkRequestSession(req));return json(res,200,{ok:true});}
+      const reviewerMeeting=url.pathname.match(/^\/api\/reviewer\/meetings(?:\/(\d+)(?:\/attachments\/(\d+))?)?$/);
+      if(reviewerMeeting&&req.method==='GET'){const [,id,fileId]=reviewerMeeting,result=fileId?store.reviewerMeetingAttachment(reviewer.id,id,fileId):store.reviewerMeetings(reviewer.id,id);checkRequestSession(req);if(!result)return json(res,404,{error:'회의 자료를 찾을 수 없습니다.'});if(!fileId)return json(res,200,result);const name=encodeURIComponent(result.name).replace(/[!'()*]/g,c=>`%${c.charCodeAt(0).toString(16).toUpperCase()}`);res.writeHead(200,{'Content-Type':'application/octet-stream','Content-Disposition':`attachment; filename="attachment"; filename*=UTF-8''${name}`,'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(result.data);}
       const reviewerEducationConfirm=url.pathname.match(/^\/api\/reviewer\/education\/(\d+)\/confirmation$/);
       if(reviewerEducationConfirm&&req.method==='POST'){const input=await body(req);store.confirmReviewerEducation(reviewer.id,Number(reviewerEducationConfirm[1]),input.expectedEditVersion,input.signature,()=>checkRequestSession(req));return json(res,200,{ok:true});}
       const reviewerEducation=url.pathname.match(/^\/api\/reviewer\/education(?:\/(\d+)(?:\/attachments\/(\d+))?)?$/);
@@ -1170,6 +1175,8 @@ const server = http.createServer((req,res)=>passwordRequests.run(true,()=>adminR
     }
     const meetingChecks=url.pathname.match(/^\/api\/documents\/(\d+)\/meeting-checks(?:\/(\d+)\/signature)?$/);
     if(meetingChecks&&req.method==='GET'){const [,id,workerId]=meetingChecks;if(!workerId)return json(res,200,store.meetingChecks(id));const signature=store.meetingWorkerSignature(id,workerId);if(!signature)return json(res,404,{error:'시험 서명을 찾을 수 없습니다.'});res.writeHead(200,{'Content-Type':'image/png','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(signature);}
+    const meetingEmployeeChecks=url.pathname.match(/^\/api\/documents\/(\d+)\/meeting-employee-checks(?:\/(\d+)\/signature)?$/);
+    if(meetingEmployeeChecks&&req.method==='GET'){const [,id,reviewerId]=meetingEmployeeChecks;checkRequestSession(req);if(!reviewerId)return json(res,200,store.meetingEmployeeChecks(id));const signature=store.meetingEmployeeSignature(id,reviewerId);if(!signature)return json(res,404,{error:'시험 서명을 찾을 수 없습니다.'});res.writeHead(200,{'Content-Type':'image/png','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(signature);}
     const checklistSignature=url.pathname.match(/^\/api\/documents\/(\d+)\/checklist-signature(?:\/(image))?$/);
     if(checklistSignature){const [,id,image]=checklistSignature;if(req.method==='POST'&&!image){const input=await body(req);store.saveChecklistSignature(id,input.signature,()=>checkRequestSession(req),input.expectedEditVersion??null);return json(res,200,{ok:true});}if(req.method==='GET'){const saved=store.checklistSignature(id);if(!image)return json(res,200,{hasSignature:!!saved,createdAt:saved?.created_at||null});if(!saved)return json(res,404,{error:'시험 서명을 찾을 수 없습니다.'});res.writeHead(200,{'Content-Type':'image/png','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(saved.signature);}}
     const tbmSignature=url.pathname.match(/^\/api\/documents\/(\d+)\/tbm-signature(?:\/(image))?$/);

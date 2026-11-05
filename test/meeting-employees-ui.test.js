@@ -83,8 +83,9 @@ test('목록을 받은 뒤 현장이 바뀌어도 이전 현장 직원으로 저
 test('상세 화면은 스냅샷 이름을 이스케이프해 표시하고 실제 참석·서명을 주장하지 않는다',()=>{
   const line=source.split('\n').find(line=>line.includes('<h3>선택한 직원</h3>'));assert.ok(line);
   for(const type of ['safety_meeting','work_council']){
-    let html='';const context={doc:{type},details:{employeeSnapshot:[{id:9,name:'<가상 이전 직원>'}]},content:{querySelector:()=>({insertAdjacentHTML:(_,value)=>{html=value;}})}};
-    runInNewContext(source.match(/^const esc = .*$/m)[0]+'\n'+line,context);assert.match(html,/&lt;가상 이전 직원&gt;/);assert.match(html,/실제 참석·본인 인증·서명을 증명하지 않습니다/);assert.doesNotMatch(html,/<img|<가상 이전 직원>/);
+    let html='';const context={doc:{type,id:1},meetingEmployeeChecks:[],details:{employeeSnapshot:[{id:9,name:'<가상 이전 직원>'}]},content:{querySelector:()=>({insertAdjacentHTML:(_,value)=>{html=value;}})}};
+    runInNewContext(source.match(/^const esc = .*$/m)[0]+'\n'+line,context);assert.match(html,/&lt;가상 이전 직원&gt;/);assert.match(html,/실제 참석이나 본인 인증을 증명하지 않습니다/);assert.doesNotMatch(html,/<img|<가상 이전 직원>/);
+    runInNewContext(source.match(/^const esc = .*$/m)[0]+'\n'+line,{...context,meetingEmployeeChecks:[{reviewer_id:9}]});assert.match(html,/meeting-employee-checks\/9\/signature/);
   }
 });
 

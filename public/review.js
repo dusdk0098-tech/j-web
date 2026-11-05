@@ -15,6 +15,7 @@ import { mountReviewerBasicDocuments } from './reviewer-basic-documents.js';
 import { permitRoleSnapshot } from './permit-roles.js';
 import { educationKinds, educationAttachmentLabels } from './education-kinds.js';
 import { mountReviewerEducation } from './reviewer-education.js';
+import { mountReviewerMeetings } from './reviewer-meetings.js';
 import { reviewerLogin } from './reviewer-login.js';
 import { bindReviewerSession, clearReviewerSession } from './reviewer-session.js';
 const $=selector=>document.querySelector(selector),message=$('#message'),login=$('#review-login'),main=$('#review-main'),list=$('#review-list'),detail=$('#review-document');
@@ -44,6 +45,7 @@ let notesEpoch=0,commonEpoch=0,scheduleEpoch=0,refreshEpoch=0,messagesEpoch=0,me
 let basicDocumentsEpoch=0,basicDocumentsActor=null;
 async function renderPersonalNotes(reviewer){
   $('#review-education')?.remove();const educationPanel=document.createElement('section');educationPanel.id='review-education';educationPanel.className='panel';main.append(educationPanel);mountReviewerEducation({target:educationPanel,api,pad,active:()=>!main.hidden&&educationPanel.isConnected}).catch(error=>{if(!main.hidden&&educationPanel.isConnected)educationPanel.textContent=error.message;});
+  $('#review-meetings')?.remove();const meetingPanel=document.createElement('section');meetingPanel.id='review-meetings';meetingPanel.className='panel';main.append(meetingPanel);mountReviewerMeetings({target:meetingPanel,api,pad,active:()=>!main.hidden&&meetingPanel.isConnected}).catch(error=>{if(!main.hidden&&meetingPanel.isConnected)meetingPanel.textContent=error.message;});
   const basicActor=`${reviewer.id}:${reviewer.site_id}`;if(basicDocumentsActor!==basicActor){basicDocumentsEpoch++;$('#review-basic-documents')?.remove();basicDocumentsActor=basicActor;}if(!$('#review-basic-documents')){const panel=document.createElement('section'),epoch=++basicDocumentsEpoch;panel.id='review-basic-documents';panel.className='panel';main.append(panel);mountReviewerBasicDocuments({target:panel,siteId:reviewer.site_id,api,active:()=>!main.hidden&&panel.isConnected&&basicDocumentsActor===basicActor&&basicDocumentsEpoch===epoch}).catch(error=>{if(!main.hidden&&panel.isConnected&&basicDocumentsEpoch===epoch)panel.textContent=error.message;});}
   document.querySelector('dialog.personal-note-preview[open]')?.close();if(personalNoteActor!==reviewer.id){personalNoteActor=reviewer.id;personalNoteFilters={};}
   const epoch=++notesEpoch,[notes,supervisor]=await Promise.all([api('/api/reviewer/personal-notes'),api('/api/reviewer/personal-supervisor')]);if(epoch!==notesEpoch||main.hidden)return;
