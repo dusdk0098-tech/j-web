@@ -28,7 +28,7 @@ function screen(){
   training.querySelector=key=>key==='#training-list'?trainingList:rights;
   const document={visibilityState:'visible',body:new Node(),createElement:()=>{const node=new Node();node.click=()=>downloads.push(node.download);return node;},addEventListener:(name,fn)=>documentEvents.set(name,fn),removeEventListener:name=>documentEvents.delete(name)};
   const window={addEventListener:(name,fn)=>windowEvents.set(name,fn),removeEventListener:name=>windowEvents.delete(name)};
-  const signaturePad=canvas=>{const pad={clears:0,clear(){this.clears++;},value(){return canvas.signature||'virtual-signature';}};pads.push(pad);return pad;};
+  const signaturePad=canvas=>{const pad={canvas,clears:0,clear(){this.clears++;},hasValue(){return canvas.signature!=='';},value(){return canvas.signature||'virtual-signature';}};pads.push(pad);return pad;};
   let clock=Date.parse('2032-05-03T04:00:00Z'),timerId=0;
   class Clock extends Date {static now(){return clock;}}
   const context={reportContext:{workerId:1,siteId:7,generation:'original'},siteKey:'virtual-site',panel,logout:{disabled:false},worker:{id:1,site_id:7},button:{disabled:true},message,flow:{open(){context.opened=true;}},document,window,checkForm,checkStatus,check:new Node(),pad:signaturePad({}),dailyForm,dailyStatus,dailyPad:signaturePad({}),training,meetings,notices,initialLoads,educationKinds:{},educationAttachmentLabels:{},signaturePad,startWorkerLoads,Date:Clock,performance:{now:()=>clock},AbortController,
@@ -222,6 +222,13 @@ test('일일교육 저장은 중복을 막고 실패 시 입력을 보존하며 
   await ui.reply(saveRequest,{ok:true});await saved;
   const current=ui.pending('/api/worker/daily-training');assert.notEqual(current,saveRequest);await ui.reply(current,[]);
   assert.equal(ui.dailyStatus.textContent,'오늘 기록이 없습니다.');assert.equal(ui.dailyForm.querySelector('button').disabled,false);
+});
+
+for(const change of ['선택','서명','없음'])test(`일일교육 저장 중 ${change} 변경을 구분한다`,async()=>{
+  const ui=screen();await ui.start();ui.dailyForm.elements.rights.checked=true;ui.context.dailyPad.canvas.signature='전송 서명';
+  const saving=ui.dailyForm.onsubmit({preventDefault(){}}),request=ui.pending('/api/worker/daily-training');if(change==='선택')ui.dailyForm.elements.rights.checked=false;if(change==='서명')ui.context.dailyPad.canvas.signature='수정 서명';
+  await ui.reply(request,{ok:true});await saving;await ui.reply(ui.pending('/api/worker/daily-training'),[]);await ui.tick();
+  assert.equal(ui.context.dailyPad.clears,change==='없음'?1:0);assert.equal(ui.context.dailyPad.canvas.signature,change==='서명'?'수정 서명':'전송 서명');assert.equal(ui.dailyForm.elements.rights.checked,change!=='선택');if(change==='없음')assert.doesNotMatch(ui.dailyStatus.textContent,/전송 후 수정/);else assert.match(ui.dailyStatus.textContent,/전송 후 수정한 선택과 서명은 저장되지 않았습니다/);
 });
 
 test('교육 서명 저장 중 복귀해도 동일 문서를 유지하고 저장 결과를 다시 조회한다',async()=>{
