@@ -2227,6 +2227,24 @@ export class Store {
       this.db.prepare('UPDATE documents SET details=? WHERE id=?').run(JSON.stringify(saved),copy.id);this.db.prepare('INSERT INTO work_plan_copies(document_id,source_document_id) VALUES(?,?)').run(copy.id,source.id);this.db.exec('RELEASE copy_work_plan');return this.document(copy.id);
     }catch(error){this.db.exec('ROLLBACK TO copy_work_plan');this.db.exec('RELEASE copy_work_plan');throw error;}
   }
+  copyWorkPlanComponent(targetId,input,onAuthorize=()=>{}){
+    this.db.exec('BEGIN IMMEDIATE');try{
+      onAuthorize();const target=this.document(targetId),source=this.document(input.sourceId),siteId=Number(input.siteId),conflict=()=>Object.assign(new Error('계획서 또는 첨부가 변경되었습니다. 다시 조회해 주세요.'),{sessionStatus:409});
+      if(!target||!source||target.type!=='work_plan'||source.type!=='work_plan'||target.site_id!==siteId||source.site_id!==siteId||!['draft','rejected'].includes(target.status))throw Error('같은 현장의 수정 가능한 계획서를 확인해 주세요.');
+      if(!Number.isSafeInteger(input.targetVersion)||!Number.isSafeInteger(input.sourceVersion)||target.edit_version!==input.targetVersion||source.edit_version!==input.sourceVersion)throw conflict();
+      const key=input.kind==='chart'?'additionalCharts':input.kind==='heavy'?'heavyLoads':null,imageKey=input.kind==='chart'?'imageIds':'safetyImageIds';
+      if(!key||!Number.isSafeInteger(input.index)||input.index<0)throw Error('복사할 항목을 확인해 주세요.');
+      const sourceDetails=JSON.parse(source.details),targetDetails=JSON.parse(target.details),items=sourceDetails[key],existing=targetDetails[key]||[];
+      if(!Array.isArray(items)||!items[input.index]||!Array.isArray(existing)||existing.length>=(input.kind==='chart'?50:100))throw Error('복사할 항목이나 개수를 확인해 주세요.');
+      const item=structuredClone(items[input.index]),ids=item[imageKey]||[];if(!Array.isArray(ids))throw Error('연결 사진을 확인해 주세요.');
+      if(source.id!==target.id){
+        if(this.attachments(target.id).length+new Set(ids).size>20)throw Error('첨부파일은 문서당 20개까지 가능합니다.');
+        const copied=new Map();for(const imageId of ids){if(copied.has(imageId))continue;const file=this.attachment(imageId);if(!file||file.document_id!==source.id||file.category!=='plan_diagram')throw Error('연결 사진을 확인해 주세요.');const result=this.db.prepare('INSERT INTO attachments(document_id,name,data,category) VALUES(?,?,?,?)').run(target.id,file.name,file.data,file.category);copied.set(imageId,Number(result.lastInsertRowid));}item[imageKey]=ids.map(id=>copied.get(id));
+      }
+      const normalized=recordInput({siteId,type:'work_plan',title:target.title,date:target.date,body:target.body,details:{riggingIds:targetDetails.riggingIds||[],[key]:[item]}});this.validatePlanEquipment(normalized);this.validatePlanImages(normalized,target.id);targetDetails[key]=[...existing,normalized.details[key][0]];
+      this.db.prepare('UPDATE documents SET details=?,updated_at=CURRENT_TIMESTAMP WHERE id=?').run(JSON.stringify(targetDetails),target.id);this.db.prepare('DELETE FROM meeting_signatures WHERE document_id=?').run(target.id);this.db.prepare('DELETE FROM plan_signature_versions WHERE document_id=?').run(target.id);onAuthorize();this.db.exec('COMMIT');return this.document(target.id);
+    }catch(error){this.db.exec('ROLLBACK');throw error;}
+  }
   permitRoles(documentId){
     const doc=this.document(documentId);if(!doc||doc.type!=='permit')throw new Error('시험 작업허가서를 확인해 주세요.');
     const row=this.db.prepare('SELECT roles,version FROM permit_roles WHERE document_id=?').get(doc.id),saved=JSON.parse(row?.roles||'{}'),roles=Object.fromEntries(Object.keys(permitRoleLabels).map(key=>[key,saved[key]??null])),line=this.approvalLine(doc.id);
