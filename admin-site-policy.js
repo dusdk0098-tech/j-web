@@ -101,7 +101,7 @@ export function adminSitePolicy(db,req,url,session){
   const documentAttachment=path.match(/^\/api\/documents\/(\d+)\/attachments\/(\d+)$/);
   if(documentAttachment&&method==='GET'){
     const row=doc(documentAttachment[1]),file=db.prepare('SELECT document_id FROM attachments WHERE id=?').get(Number(documentAttachment[2]));
-    return owned(row)||!['tbm','education','work_plan','work_council','safety_meeting','joint_inspection','checklist'].includes(row.type)||file?.document_id!==row.id?denied():null;
+    return owned(row)||!['tbm','education','work_plan','work_council','safety_meeting','joint_inspection','checklist','inspection','patrol','safety_log'].includes(row.type)||file?.document_id!==row.id?denied():null;
   }
   const attachment=path.match(/^\/api\/attachments\/(\d+)$/);
   if(method==='GET'&&attachment)return owned(db.prepare('SELECT d.site_id FROM attachments a JOIN documents d ON d.id=a.document_id WHERE a.id=?').get(Number(attachment[1])));
