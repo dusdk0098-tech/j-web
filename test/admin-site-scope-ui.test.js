@@ -132,11 +132,13 @@ test('배정 현장의 회의 상세는 저장된 안건과 참석자 이름을 
   for(const type of ['work_council','safety_meeting']){const doc={id:5,site_id:1,type,title:'가상 회의',body:'가상 본문',status:'approved',details:JSON.stringify(details)},ui=screen(async path=>response(path.endsWith('/attachments')?[]:doc));ui.state.page='documents';ui.state.detail=5;await ui.context.renderRestrictedDocuments();for(const text of ['09:00','10:00','가상 장소','가상 비고','직원 &lt;가상&gt;','가상 관리자','가상 근로자','가상 &amp; 사용자'])assert.ok(ui.content.innerHTML.includes(text),text);assert.equal(ui.content.innerHTML.includes('가상 결정'),type==='work_council');assert.doesNotMatch(ui.content.innerHTML,/표시 금지|<가상>|restricted-notice-edit/);assert.deepEqual(ui.requests.map(r=>r.path),['/api/documents/5','/api/documents/5/attachments']);const wrong=screen(async()=>response({...doc,site_id:2}));wrong.state.page='documents';wrong.state.detail=5;await assert.rejects(wrong.context.renderRestrictedDocuments(),/현장/);assert.doesNotMatch(wrong.content.innerHTML,/가상 장소/);}
 });
 
-test('회의 첨부는 세션 요청으로 내려받고 다른 현장으로 이동하면 표시하지 않는다',async()=>{
-  let wait=delayed();const doc={id:5,site_id:1,type:'work_council',title:'가상',details:'{}'},button={dataset:{meetingFile:'0'},isConnected:true,disabled:false};let clicks=0,link;
+test('회의·교육·계획서 첨부는 현장 전환 후 내려받지 않는다',async()=>{
+  for(const type of ['work_council','education','tbm','work_plan']){
+  let wait=delayed();const doc={id:5,site_id:1,type,title:'가상',details:'{}'},button={dataset:{meetingFile:'0'},isConnected:true,disabled:false};let clicks=0,link;
   const ui=screen(async path=>path.endsWith('/attachments')?response([{id:7,name:'가상 <파일>.txt',size:4}]):path.endsWith('/attachments/7')?wait.promise:response(doc));ui.state.page='documents';ui.state.detail=5;ui.content.querySelectorAll=selector=>selector==='[data-meeting-file]'?[button]:[];ui.context.URL={createObjectURL:()=> 'blob:가상',revokeObjectURL:()=>{}};ui.context.setTimeout=()=>0;ui.context.document.body={append:()=>{}};ui.context.document.createElement=()=>link={click:()=>clicks++,remove:()=>{}};
   await ui.context.renderRestrictedDocuments();assert.match(ui.content.innerHTML,/가상 &lt;파일&gt;.txt/);const pending=button.onclick();await button.onclick();assert.equal(ui.requests.filter(r=>r.path.endsWith('/attachments/7')).length,1);ui.state.siteId=2;wait.resolve({ok:true,blob:async()=>new Blob(['가상'])});await pending;assert.equal(clicks,0);assert.equal(button.disabled,false);
   ui.state.siteId=1;wait=delayed();const download=button.onclick();wait.resolve({ok:true,blob:async()=>new Blob(['가상'])});await download;assert.equal(clicks,1);assert.equal(link.download,'가상 <파일>.txt');
+  }
 });
 
 test('배정 현장의 합동 안전점검 상세는 항목과 참석자 이름을 안전하게 표시한다',async()=>{
@@ -151,11 +153,11 @@ test('배정 현장의 합동 안전점검 상세는 항목과 참석자 이름�
 test('제한 작업계획서 기본정보는 명시된 필드·기존 시간·작업구분만 읽고 HTML과 중첩 자료를 차단한다',async()=>{
   const ui=screen(),details=Object.fromEntries(Object.keys(ui.context.planFields).map(key=>[key,'가상 <'+key+'> & 설명']));
   Object.assign(details,{timeFrom:'04:13',timeTo:'23:57',workKinds:['이전 구분 <시험>','기타',{secret:'노출금지'}],equipmentIds:[999],equipmentSnapshot:[{owner:'노출금지'}],workerSnapshot:[{name:'노출금지'}],signature:'노출금지',files:['노출금지']});
-  const doc={id:5,site_id:1,type:'work_plan',title:'가상 계획',body:'가상 본문',status:'draft',details:JSON.stringify(details)},files=[{id:7,name:'가상 <계획>.pdf',size:10}],view=screen(async path=>response(path.endsWith('/attachments')?files:doc));view.state.page='documents';view.state.detail=5;const link={};view.content.querySelectorAll=selector=>selector==='[data-plan-file]'?[link]:[];await view.context.renderRestrictedDocuments();
+  const doc={id:5,site_id:1,type:'work_plan',title:'가상 계획',body:'가상 본문',status:'draft',details:JSON.stringify(details)},files=[{id:7,name:'가상 <계획>.pdf',size:10}],view=screen(async path=>response(path.endsWith('/attachments')?files:doc));view.state.page='documents';view.state.detail=5;const button={dataset:{meetingFile:'0'},isConnected:true};view.content.querySelectorAll=selector=>selector==='[data-meeting-file]'?[button]:[];await view.context.renderRestrictedDocuments();
   for(const key of Object.keys(ui.context.planFields))assert.ok(view.content.innerHTML.includes(esc(details[key])),key);
   assert.match(view.content.innerHTML,/04:13 ~ 23:57/);assert.match(view.content.innerHTML,/이전 구분 &lt;시험&gt;, 기타/);
-  assert.doesNotMatch(view.content.innerHTML,/노출금지|999|\[object Object\]|<시험>|data-action=|id="edit"|restricted-notice-edit/);assert.match(view.content.innerHTML,/가상 &lt;계획&gt;\.pdf/);assert.match(view.content.innerHTML,/href="\/api\/documents\/5\/attachments\/7"/);
-  assert.deepEqual(view.requests.map(r=>r.path),['/api/documents/5','/api/documents/5/attachments']);assert.ok(view.requests.every(r=>!r.options.method));let prevented=false;link.onclick({preventDefault(){prevented=true;}});assert.equal(prevented,false);view.state.siteId=2;link.onclick({preventDefault(){prevented=true;}});assert.equal(prevented,true);
+  assert.doesNotMatch(view.content.innerHTML,/노출금지|999|\[object Object\]|<시험>|data-action=|id="edit"|restricted-notice-edit/);assert.match(view.content.innerHTML,/가상 &lt;계획&gt;\.pdf/);assert.match(view.content.innerHTML,/data-meeting-file="0"/);
+  assert.deepEqual(view.requests.map(r=>r.path),['/api/documents/5','/api/documents/5/attachments']);assert.ok(view.requests.every(r=>!r.options.method));view.state.siteId=2;await button.onclick();assert.equal(view.requests.length,2);
   assert.doesNotMatch(planDetailMarkup({equipment:{secret:'노출금지'},personnel:0},esc,ui.context.planFields),/노출금지|object/);assert.match(planDetailMarkup({personnel:0},esc,ui.context.planFields),/> 0</);
 });
 
@@ -223,14 +225,13 @@ test('제한 교육·TBM 상세는 저장된 필드와 첨부만 표시하고 �
     const doc={id:5,site_id:1,type,title:'가상 교육',body:'가상 본문',status:'approved',details:JSON.stringify(details)};
     const files=[{id:7,document_id:5,name:'가상 <교육>.txt',size:10,category:'education_material'}];
     const ui=screen(async path=>response(path.endsWith('/attachments')?files:doc));ui.state.page='documents';ui.state.detail=5;ui.state.admin={scope:'restricted',id:4};
-    const link={};ui.content.querySelectorAll=selector=>selector==='[data-training-file]'?[link]:[];
+    const button={dataset:{meetingFile:'0'},isConnected:true};ui.content.querySelectorAll=selector=>selector==='[data-meeting-file]'?[button]:[];
     await ui.context.renderRestrictedDocuments();
-    assert.match(ui.content.innerHTML,/href="\/api\/documents\/5\/attachments\/7"/);assert.match(ui.content.innerHTML,/가상 &lt;교육&gt;\.txt/);
+    assert.match(ui.content.innerHTML,/data-meeting-file="0"/);assert.match(ui.content.innerHTML,/가상 &lt;교육&gt;\.txt/);
     for(const value of Object.values(details).filter(v=>v!=='supervisor'))assert.ok(ui.content.innerHTML.includes(esc(value)),value);
     assert.doesNotMatch(ui.content.innerHTML,/id="edit"|data-action=|data-delete-attachment|id="attachment-add"/);
     assert.equal(ui.requests.every(r=>!r.options.method),true);
-    let prevented=false;link.onclick({preventDefault(){prevented=true;}});assert.equal(prevented,false);
-    ui.state.admin={scope:'restricted',id:8};link.onclick({preventDefault(){prevented=true;}});assert.equal(prevented,true);
+    ui.state.admin={scope:'restricted',id:8};await button.onclick();assert.equal(ui.requests.length,2);
   }
 });
 
@@ -573,6 +574,7 @@ test('실제 HTTP 로그인→배정 현장 선택→공지·근로자·출역·
     const jointInput={type:'joint_inspection',title:'가상 합동 점검',date:'2026-11-03',details:{items:[{name:'가상 점검 항목',result:'보완사항',issueDetail:'가상 문제',action:'가상 조치'}]}};
     const jointResponse=await send('/api/documents','POST',{...jointInput,siteId:created[1].id},globalCookie),foreignResponse=await send('/api/documents','POST',{...jointInput,siteId:created[2].id},globalCookie);assert.equal(jointResponse.status,201);assert.equal(foreignResponse.status,201);const joint=await jointResponse.json(),foreignJoint=await foreignResponse.json();
     const checkMeetingFile=async(id,foreignId)=>{const uploaded=await fetch(base+`/api/documents/${id}/attachments`,{method:'POST',headers:{cookie:globalCookie,'x-file-name':'virtual.txt','content-type':'application/octet-stream'},body:'virtual attachment'});assert.equal(uploaded.status,201);const file=await uploaded.json(),path=`/api/documents/${id}/attachments/${file.id}`,read=await send(path,'GET',null,cookie);assert.equal(read.status,200);assert.equal(await read.text(),'virtual attachment');assert.equal((await send(`/api/documents/${foreignId}/attachments/${file.id}`,'GET',null,cookie)).status,403);assert.equal((await send(`/api/documents/${documents[0].id}/attachments/${file.id}`,'GET',null,cookie)).status,403);};await checkMeetingFile(joint.id,foreignJoint.id);
+    for(const type of ['education','tbm','work_plan']){const input={type,title:'가상 문서',date:'2026-11-03',details:{}},createdDoc=await send('/api/documents','POST',{...input,siteId:created[1].id},globalCookie);assert.equal(createdDoc.status,201);const doc=await createdDoc.json(),upload=await fetch(base+`/api/documents/${doc.id}/attachments`,{method:'POST',headers:{cookie:globalCookie,'x-file-name':'virtual.txt'},body:'virtual attachment'});assert.equal(upload.status,201);const file=await upload.json(),path=`/api/documents/${doc.id}/attachments/${file.id}`;assert.equal((await fetch(base+path,{headers:{cookie,'x-admin-context':session.context}})).status,200);assert.equal((await fetch(base+path,{headers:{cookie:globalCookie,'x-admin-context':session.context}})).status,409);}
     const jointUi=screen((path,options)=>fetch(base+path,{...options,headers:{...options.headers,cookie,'x-admin-context':session.context}}));jointUi.context.applyAdminScope(session.admin);jointUi.state.siteId=created[1].id;jointUi.state.page='documents';jointUi.state.detail=joint.id;await jointUi.context.renderRestrictedDocuments();assert.match(jointUi.content.innerHTML,/가상 점검 항목/);assert.match(jointUi.content.innerHTML,/가상 문제/);assert.match(jointUi.content.innerHTML,/가상 조치/);assert.equal((await send('/api/documents/'+foreignJoint.id,'GET',null,cookie)).status,403);
     for(const type of ['work_council','safety_meeting']){const input={type,title:'가상 회의',date:'2026-11-03',details:{kind:'정기 회의',place:'가상 회의실',remarks:'가상 메모',employerParticipants:['가상 참석자']}},meetingResponse=await send('/api/documents','POST',{...input,siteId:created[1].id},globalCookie),foreignMeetingResponse=await send('/api/documents','POST',{...input,siteId:created[2].id},globalCookie);assert.equal(meetingResponse.status,201);assert.equal(foreignMeetingResponse.status,201);const meeting=await meetingResponse.json(),foreignMeeting=await foreignMeetingResponse.json();await checkMeetingFile(meeting.id,foreignMeeting.id);jointUi.state.detail=meeting.id;await jointUi.context.renderRestrictedDocuments();assert.match(jointUi.content.innerHTML,/가상 회의실/);assert.match(jointUi.content.innerHTML,/가상 참석자/);assert.match(jointUi.content.innerHTML,/virtual.txt/);assert.equal((await send('/api/documents/'+foreignMeeting.id,'GET',null,cookie)).status,403);}
     assert.equal((await send('/api/documents?siteId='+created[2].id,'GET',null,cookie)).status,403);assert.equal((await send('/api/admin-accounts','GET',null,cookie)).status,403);
