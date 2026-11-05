@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
+import { closeContractPreview } from '../public/contract-profile-view.js';
 
 const source=readFileSync(new URL('../public/app.js',import.meta.url),'utf8');
 const slice=(from,to)=>{const start=source.indexOf(from),end=source.indexOf(to,start);assert.ok(start>=0&&end>start,from);return source.slice(start,end);};
@@ -14,7 +15,7 @@ function screen(){
   for(const key of ['#dialog-form','#dialog-form button[type=submit]','#dialog-title','#dialog-body','#dialog-error','#dialog-close','#dialog-cancel','#sidebar','#menu-toggle'])nodes.set(key,node());
   const state={page:'workers',siteId:1},siteSelect={value:'1'},dialog={open:false,showModal(){this.open=true;},close(){this.open=false;}};
   const document={querySelector:()=>null,querySelectorAll:selector=>selector==='[data-page]'?pages:buttons,createElement:node};
-  const context={state,siteSelect,dialog,document,content:{...node(),innerHTML:"가상 이전 화면"},$:key=>nodes.get(key),fetch:(url,options)=>new Promise((resolve,reject)=>requests.push({url,options,resolve:data=>resolve({status:200,ok:true,json:async()=>data}),reject,http:status=>resolve({status,ok:false,json:async()=>({error:'가상 HTTP 오류'})})})),showError:error=>errors.push(error.message),flash:message=>flashes.push(message),location:{assign:path=>redirects.push(path)},FormData:class{constructor(){return [];}}};
+  const context={state,siteSelect,dialog,document,closeContractPreview,content:{...node(),innerHTML:"가상 이전 화면"},$:key=>nodes.get(key),fetch:(url,options)=>new Promise((resolve,reject)=>requests.push({url,options,resolve:data=>resolve({status:200,ok:true,json:async()=>data}),reject,http:status=>resolve({status,ok:false,json:async()=>({error:'가상 HTTP 오류'})})})),showError:error=>errors.push(error.message),flash:message=>flashes.push(message),location:{assign:path=>redirects.push(path)},FormData:class{constructor(){return [];}}};
   const renderIntro=slice('async function render(){','  await loadSites();');
   runInNewContext([
     source.match(/^let sitePhotoEpoch=.*$/m)[0],
