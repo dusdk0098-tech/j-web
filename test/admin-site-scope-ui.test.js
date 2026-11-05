@@ -17,6 +17,7 @@ import { planDetailMarkup } from '../public/plan-detail.js';
 import { educationAttachmentLabels } from '../public/education-kinds.js';
 import { checklistCategories } from '../public/checklist-copy.js';
 import { mountWorkerInvitation } from '../public/worker-invitation.js';
+import { closeContractPreview } from '../public/contract-profile-view.js';
 
 const source=readFileSync(new URL('../public/app.js',import.meta.url),'utf8');
 const part=(from,to)=>{const start=source.indexOf(from),end=source.indexOf(to,start);assert.ok(start>=0&&end>start,from);return source.slice(start,end);};
@@ -42,6 +43,7 @@ function screen(fetcher=async()=>({ok:true,status:200,json:async()=>[]})){
   const context={state,content,dialog,siteSelect:get('#site-select'),detailEpoch:1,workerListEpoch:0,sitePhotoEpoch:0,permitRoleCleanup:null,siteEducationCleanup:null,labels:{documents:'안전 문서',admins:'관리자 계정'},statusLabels:{draft:'임시저장'},esc,URLSearchParams,today:()=> '2026-11-02',document:{createElement:node,querySelector:selector=>selector.startsWith('dialog')?null:get(selector),querySelectorAll:()=>pages},$:get,location:{assign:path=>redirects.push(path)},flash:message=>flashes.push(message),showError:error=>errors.push(error.message),confirm:()=>true,FormData:class{constructor(form){return Object.entries(form.values||{});}},fetch:async(path,options)=>{requests.push({path,options});return fetcher(path,options);}};
   context.siteQrSession=siteQrSession;context.siteQrPrintAction=options=>siteQrPrintAction({...options,print:(dialog,mode)=>context.printSiteQr(dialog,mode)});
   context.mountWorkerInvitation=(...args)=>mountWorkerInvitation(...args,context.document);
+  context.closeContractPreview=closeContractPreview;
   context.mountRestrictedMonthEditor=()=>({dirty:()=>false,busy:()=>false});
   context.hasManagerEducationTargets=hasManagerEducationTargets;
   context.checklistCategories=checklistCategories;
