@@ -1,4 +1,4 @@
-import { riskReviewRoles } from './public/risk-review-roles.js';
+import { riskReviewRoles,riskProcessRoles } from './public/risk-review-roles.js';
 import { riskScaleOptions, riskScore } from './public/risk-scale.js';
 import { quantityTenths } from './public/daily-quantities.js';
 import { documentRichLimits,normalizeRichText,richTextToPlain } from './public/rich-text.js';
@@ -287,7 +287,7 @@ export function recordInput(input) {
       const keys=['processName','contractor','contractorId','task','hazard','existingMeasures','additionalMeasures','grade','likelihood','severity','score','improvedGrade'];
       details.musculoskeletalItems=value.musculoskeletalItems.map(item=>{if(!item||typeof item.selected!=='boolean')throw new Error('근골격계 선택을 확인해 주세요.');const row=validate(item);return {...Object.fromEntries(keys.filter(key=>Object.hasOwn(row,key)).map(key=>[key,row[key]])),selected:item.selected};});
     }
-    if(value.processes!==undefined){if(!Array.isArray(value.processes)||value.processes.length>100)throw new Error('공정 목록을 확인해 주세요.');const seen=new Set();details.processes=value.processes.map(item=>{if(!item||typeof item!=='object'||Array.isArray(item)||typeof item.name!=='string'||!item.name.trim()||item.name.length>200||!Number.isSafeInteger(item.contractorId)||item.contractorId<0)throw new Error('공정명과 협력사를 확인해 주세요.');const row={name:item.name.trim(),contractorId:item.contractorId},key=JSON.stringify([row.name,row.contractorId]);if(seen.has(key))throw new Error('같은 공정과 협력사는 한 번만 등록해 주세요.');seen.add(key);return row;});}
+    if(value.processes!==undefined){if(!Array.isArray(value.processes)||value.processes.length>100)throw new Error('공정 목록을 확인해 주세요.');const seen=new Set();details.processes=value.processes.map(item=>{if(!item||typeof item!=='object'||Array.isArray(item)||typeof item.name!=='string'||!item.name.trim()||item.name.length>200||!Number.isSafeInteger(item.contractorId)||item.contractorId<0)throw new Error('공정명과 협력사를 확인해 주세요.');const row={name:item.name.trim(),contractorId:item.contractorId};if(item.roles!==undefined){if(!item.roles||typeof item.roles!=='object'||Array.isArray(item.roles)||Object.keys(item.roles).some(key=>!riskProcessRoles.some(([role])=>role===key)))throw new Error('공정 담당자를 확인해 주세요.');row.roles=Object.fromEntries(Object.entries(item.roles).map(([key,person])=>{if(!person||typeof person!=='object'||Array.isArray(person)||!['worker','reviewer'].includes(person.kind)||!Number.isSafeInteger(person.id)||person.id<1)throw new Error('공정 담당자를 확인해 주세요.');return [key,{kind:person.kind,id:person.id}];}));}const key=JSON.stringify([row.name,row.contractorId]);if(seen.has(key))throw new Error('같은 공정과 협력사는 한 번만 등록해 주세요.');seen.add(key);return row;});}
     if(value.kind!==undefined && value.kind!==''){
       if(!['initial','regular','occasional','continuous'].includes(value.kind))throw new Error('위험성평가 종류를 확인해 주세요.');
       details.kind=value.kind;

@@ -1537,10 +1537,14 @@ export class Store {
   }
   updateWorkerDocument(siteId,workerId,id,input,onAuthorize=()=>{}){const doc=this.workerDocument(siteId,workerId,id);return this.updateDocument(doc.id,{...input,siteId:Number(siteId),type:doc.type},()=>{onAuthorize();const current=this.workerDocument(siteId,workerId,id);if(['status','title','date','body','details','updated_at'].some(key=>current[key]!==doc[key]))throw Object.assign(new Error('문서가 변경되었습니다. 입력 내용을 복사한 뒤 문서를 다시 열어 주세요.'),{sessionStatus:409});});}
   transitionWorkerDocument(siteId,workerId,id,action,onAuthorize=()=>{},expectedEditVersion){this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();const doc=this.workerDocument(siteId,workerId,id);this.assertDocumentEditVersion(id,expectedEditVersion);if(!['submit','withdraw','revise'].includes(action))throw new Error('허용된 문서 상태 변경을 확인해 주세요.');const result=this.transition(doc.id,action);this.db.exec('COMMIT');return result;}catch(error){this.db.exec('ROLLBACK');throw error;}}
+  riskProcessPeople(siteId){
+    const workers=this.db.prepare("SELECT w.id,w.name,w.company,w.company_id FROM workers w JOIN worker_accounts a ON a.worker_id=w.id AND a.site_id=w.site_id WHERE w.site_id=? AND NOT EXISTS(SELECT 1 FROM worker_account_blocks b WHERE b.worker_id=w.id AND b.blocked=1) ORDER BY w.name,w.id").all(Number(siteId)).map(row=>({...row,kind:'worker'}));
+    const staff=this.db.prepare('SELECT id,name FROM reviewers WHERE site_id=? AND active=1 ORDER BY name,id').all(Number(siteId)).map(row=>({...row,kind:'reviewer'}));return [...workers,...staff];
+  }
   workerDocumentOptions(siteId,workerId,type){
     if(!Object.hasOwn(workerDocumentPermission,type)||!this.workerPermissions(siteId,workerId).includes(workerDocumentPermission[type]))throw new Error('문서 작성 시험 권한이 필요합니다.');
     if(type==='tbm'||type==='education')return {};
-    const companies=this.companies(siteId).map(({id,name,trade})=>({id,name,trade}));if(type==='risk')return {companies};
+    const companies=this.companies(siteId).map(({id,name,trade})=>({id,name,trade}));if(type==='risk')return {companies,riskPeople:this.riskProcessPeople(siteId)};
     return {companies,equipment:this.equipment(siteId).map(({id,kind,model,registration})=>({id,kind,model,registration})),places:this.workPlaces(siteId).map(({id,name})=>({id,name})),rigging:this.rigging(siteId).map(({id,category,kind,name,details})=>({id,category,kind,name,standards:JSON.parse(details).standards})),workers:this.workers(siteId).map(({id,name,company})=>({id,name,company}))};
   }
   checkAttendanceDayVersion(siteId,workerId,date,version){
@@ -2469,6 +2473,7 @@ export class Store {
     if(input.expectedEditVersion!==undefined&&(!Number.isSafeInteger(input.expectedEditVersion)||input.expectedEditVersion!==current.edit_version))throw Object.assign(new Error('문서가 변경되었습니다. 입력 내용은 유지됩니다. 필요한 내용을 복사한 뒤 문서를 다시 열어 주세요.'),{sessionStatus:409});
     if(current.type==='cost' && Array.isArray(JSON.parse(current.details).rows))throw new Error('월간 사용내역서는 보존된 내역을 변경할 수 없습니다. 새 문서를 작성해 주세요.');
     if (current.status !== 'draft' && current.status !== 'rejected') throw new Error('임시저장 또는 반려된 문서만 수정할 수 있습니다.');
+    if(current.type==='risk'&&JSON.parse(current.details).processes?.some(row=>Object.keys(row.roles||{}).length)&&Array.isArray(input.details?.processes)&&input.details.processes.some(row=>row?.roles===undefined))throw new Error('공정 담당자를 보존하려면 화면을 새로고침해 주세요.');
     if(current.type==='risk'&&JSON.parse(current.details).processes!==undefined&&input.details?.processes===undefined)input={...input,details:{...input.details,processes:JSON.parse(current.details).processes}};
     if(current.type==='risk'&&JSON.parse(current.details).riskReviewRoles!==undefined&&input.details?.riskReviewRoles===undefined)input={...input,details:{...input.details,riskReviewRoles:JSON.parse(current.details).riskReviewRoles}};
     if(current.type==='risk'){const previous=JSON.parse(current.details),rows=Array.isArray(previous.items)?previous.items:[previous],keys=['improvedGrade','improvedLikelihood','improvedSeverity'];if(rows.some(row=>keys.some(key=>row[key]))){const next=input.details,items=next&&Array.isArray(next.items)?next.items:next&&typeof next==='object'?[next]:null;if(!items||items.some(item=>!item||keys.some(key=>item[key]===undefined)))throw new Error('개선 후 위험성 정보를 보존하려면 화면을 새로고침해 주세요.');}}
@@ -2506,7 +2511,7 @@ export class Store {
     this.validateWorkPlanCompany(d,current);
     this.validateSafetyMeeting(d,current);
     this.validateInstructionRecipient(d);
-    this.validateRiskContractors(d);
+    this.validateRiskContractors(d,current);
     this.validateOfficeReference(d,id);
     if(d.type==='safety_log'){
       const previous=JSON.parse(current.details).attendanceSnapshot;
@@ -2543,10 +2548,11 @@ export class Store {
     this.db.prepare('UPDATE documents SET details=?,updated_at=CURRENT_TIMESTAMP WHERE id=?').run(JSON.stringify(details),doc.id);
     const result=this.document(doc.id);this.db.exec('COMMIT');return result;}catch(error){this.db.exec('ROLLBACK');throw error;}
   }
-  validateRiskContractors(doc){
+  validateRiskContractors(doc,current=null){
     if(doc.type!=='risk')return;
     const find=this.db.prepare('SELECT c.name FROM companies c WHERE c.id=? AND c.site_id=? AND NOT EXISTS(SELECT 1 FROM archived_companies a WHERE a.company_id=c.id)');
-    for(const row of doc.details.processes||[])if(row.contractorId){const company=find.get(row.contractorId,doc.siteId);if(!company)throw new Error('같은 현장의 협력사를 선택해 주세요.');row.contractor=company.name;}
+    const previous=current?JSON.parse(current.details).processes||[]:[],companies=this.companies(doc.siteId),workers=this.db.prepare("SELECT w.id,w.name,w.company,w.company_id FROM workers w JOIN worker_accounts a ON a.worker_id=w.id AND a.site_id=w.site_id WHERE w.id=? AND w.site_id=? AND NOT EXISTS(SELECT 1 FROM worker_account_blocks b WHERE b.worker_id=w.id AND b.blocked=1)"),reviewers=this.db.prepare('SELECT id,name FROM reviewers WHERE id=? AND site_id=? AND active=1');
+    for(const row of doc.details.processes||[]){const company=row.contractorId&&companies.find(item=>item.id===row.contractorId);if(row.contractorId&&!company)throw new Error('같은 현장의 협력사를 선택해 주세요.');if(company)row.contractor=company.name;const old=previous.find(item=>item.name===row.name&&item.contractorId===row.contractorId);for(const [role,person] of Object.entries(row.roles||{})){const saved=old?.roles?.[role];if(saved?.kind===person.kind&&saved.id===person.id){row.roles[role]=saved;continue;}const candidate=person.kind==='worker'?workers.get(person.id,doc.siteId):reviewers.get(person.id,doc.siteId);if(!candidate||person.kind==='worker'&&company&&!belongsToInstructionCompany(candidate,company,companies))throw new Error('같은 현장과 협력사의 활성 시험 담당자를 선택해 주세요.');row.roles[role]={...person,name:candidate.name};}}
     for(const row of [...(Array.isArray(doc.details.items)?doc.details.items:[doc.details]),...(doc.details.musculoskeletalItems||[])])if(row.contractorId){const company=find.get(row.contractorId,doc.siteId);if(!company)throw new Error('같은 현장의 협력사를 선택해 주세요.');row.contractor=company.name;}
   }
   validateWorkPlanCompany(doc,current=null){

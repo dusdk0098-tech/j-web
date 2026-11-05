@@ -732,6 +732,7 @@ const server = http.createServer((req,res)=>passwordRequests.run(true,()=>adminR
     if(clientAccount&&req.method==='PUT'){const input=await body(req);return json(res,200,await clients.updateAsync(clientAccount[1],input,()=>checkRequestSession(req),workerPeer(req)));}
     const employmentProfile=url.pathname.match(/^\/api\/reviewers\/(\d+)\/employment$/);
     if(employmentProfile){if(req.method==='GET'){const result=employment.profile(url.searchParams.get('siteId'),employmentProfile[1]);checkRequestSession(req);return json(res,200,result);}if(req.method==='PUT'){const input=await body(req);return json(res,200,employment.saveProfile(input.siteId,employmentProfile[1],input,()=>checkRequestSession(req)));}}
+    if(url.pathname==='/api/risk-process-people'&&req.method==='GET'){const rows=store.riskProcessPeople(url.searchParams.get('siteId'));checkRequestSession(req);return json(res,200,rows);}
     if(url.pathname==='/api/reviewers'){if(req.method==='GET')return json(res,200,store.reviewers(url.searchParams.get('siteId')));if(req.method==='POST')return json(res,201,await store.createReviewerAsync(await body(req),()=>checkRequestSession(req),workerPeer(req)));}
     const reviewerAccount=url.pathname.match(/^\/api\/reviewers\/(\d+)$/);
     if(reviewerAccount&&req.method==='PUT'){const input=await body(req),account=await store.updateReviewerAsync(input.siteId,reviewerAccount[1],input,()=>checkRequestSession(req),workerPeer(req));if(input.password!==undefined){reviewerAccountFailures.delete(account.login_id);}return json(res,200,account);}
