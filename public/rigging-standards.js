@@ -10,7 +10,7 @@ export function heavyRiggingOptions(kind, saved, esc) {
 }
 
 export function heavyLiftOptions(saved='') {
-  return '<option value="">선택</option><option value="hook" '+(saved==='hook'?'selected':'')+'>훅 사용 (줄걸이 미사용)</option><option value="rigging" '+(saved==='rigging'?'selected':'')+'>줄걸이 사용</option>'+(saved==='other'?'<option value="other" selected>기타 방식 (기존 기록)</option>':'');
+  return '<option value="">선택</option><option value="hook" '+(saved==='hook'?'selected':'')+'>훅 사용 (줄걸이 미사용)</option><option value="rigging" '+(saved==='rigging'?'selected':'')+'>줄걸이 사용</option>'+'<option value="other" '+(saved==='other'?'selected':'')+'>기타 방식 (훅 포함)</option>';
 }
 
 export function heavyImageChoices(images, selected, esc) {

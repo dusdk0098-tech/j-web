@@ -22,7 +22,7 @@ test('근로자 장구 선택 정보에 같은 현장의 등록 규격이 포함
   }finally{s.close();}
 });
 
-test('훅과 줄걸이를 구분하고 기존 기타 선택은 기존 기록에만 남긴다',()=>{
- const fresh=heavyLiftOptions();assert.match(fresh,/value="hook"/);assert.match(fresh,/value="rigging"/);assert.doesNotMatch(fresh,/value="other"/);
+test('훅과 줄걸이를 구분하고 기존 기타 선택도 유지한다',()=>{
+ const fresh=heavyLiftOptions();assert.match(fresh,/value="hook"/);assert.match(fresh,/value="rigging"/);assert.match(fresh,/value="other"/);
  assert.match(heavyLiftOptions('hook'),/value="hook" selected/);assert.match(heavyLiftOptions('rigging'),/value="rigging" selected/);assert.match(heavyLiftOptions('other'),/value="other" selected/);
 });
