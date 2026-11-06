@@ -65,3 +65,10 @@ test('늦은 조회는 현장 이동·복귀 또는 더 최근에 연 수정창�
 test('조회 오류도 이동한 현장의 화면에 표시하지 않는다',async()=>{
   const ui=screen(),pending=deferred();ui.load=()=>pending.promise;const opening=ui.open();ui.state.siteId=2;pending.reject(Error('이전 조회 실패'));await opening;assert.deepEqual(ui.errors,[]);assert.equal(ui.dialog.open,false);
 });
+
+test('출역 기간 조건을 목록 검색에 전달하고 역순 기간을 거절한다',()=>{
+  const source=readFileSync(new URL('../public/app.js',import.meta.url),'utf8'),start=source.indexOf("    $('#search').onclick=()=>{const from=$('#worker-from')"),end=source.indexOf(';\n',start);assert.ok(start>=0&&end>start);
+  const fields={'#worker-from':{value:''},'#worker-to':{value:''},'#worker-attendance-from':{value:'2026-11-01'},'#worker-attendance-to':{value:'2026-11-06'},'#query':{value:'가상'},'#worker-order':{value:'default'},'#worker-category':{value:''},'#worker-company':{value:''},'#worker-occupation':{value:''},'#search':{}},state={workerFilters:{},workerPage:2},messages=[],context={$:key=>fields[key],state,filters:{category:'구분',company:'소속',occupation:'직종'},flash:value=>messages.push(value),render:()=>Promise.resolve(),showError:error=>{throw error;}};
+  runInNewContext(source.slice(start,end+1),context);fields['#search'].onclick();assert.equal(state.workerFilters.attendanceFrom,'2026-11-01');assert.equal(state.workerFilters.attendanceTo,'2026-11-06');assert.equal(state.workerPage,0);
+  fields['#worker-attendance-from'].value='2026-11-07';fields['#search'].onclick();assert.equal(state.workerFilters.attendanceFrom,'2026-11-01');assert.equal(messages.length,1);
+});

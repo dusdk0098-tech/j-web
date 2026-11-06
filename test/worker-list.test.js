@@ -85,3 +85,16 @@ test('목록과 요약은 같은 현장·검색 조건을 사용하고 권한 �
   }finally{store.close();}
 });
 
+
+test('출역 기간 검색은 등록일과 별개이며 같은 현장의 유효 출역만 찾는다',()=>{
+  const store=new Store(':memory:');try{
+    const site=store.createSite({name:'가상 현장'}),other=store.createSite({name:'다른 현장'}),make=(siteId,name)=>store.createWorker({siteId,name,category:'직영',company:'가상 업체',occupation:'가상 직종'}),a=make(site.id,'가상 첫째'),b=make(site.id,'가상 둘째'),c=make(site.id,'가상 셋째'),d=make(other.id,'가상 다른 현장');
+    for(const [s,w,date,present] of [[site,a,'2026-10-01',true],[site,a,'2026-10-03',true],[site,b,'2026-10-02',false],[site,b,'2026-11-01',true],[other,d,'2026-10-03',true]])store.setAttendance({siteId:s.id,workerId:w.id,date,present});
+    const read=filters=>store.workerListing(site.id,'',filters,()=>{},'2026-11-06');
+    let result=read({attendanceFrom:'2026-10-01',attendanceTo:'2026-10-03'});assert.deepEqual(result.workers.map(w=>w.id),[a.id]);assert.equal(result.summary.total,1);
+    assert.deepEqual(read({attendanceFrom:'2026-10-04'}).workers.map(w=>w.id),[b.id]);assert.deepEqual(read({attendanceTo:'2026-10-01'}).workers.map(w=>w.id),[a.id]);
+    assert.deepEqual(read({attendanceFrom:'2026-10-02',attendanceTo:'2026-10-02'}).workers,[]);assert.equal(read({}).summary.total,3);
+    assert.throws(()=>read({attendanceFrom:'2026-10-04',attendanceTo:'2026-10-03'}),/출역 조회/);assert.throws(()=>read({attendanceFrom:'2026-02-30'}),/날짜/);
+    assert.equal(store.workers(other.id,'',{attendanceFrom:'2026-10-01',attendanceTo:'2026-10-03'}).length,1);assert.ok(!read({attendanceFrom:'2026-10-01'}).workers.some(w=>w.id===c.id));
+  }finally{store.close();}
+});
