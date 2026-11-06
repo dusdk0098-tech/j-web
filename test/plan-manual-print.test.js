@@ -32,3 +32,12 @@ test('인쇄 직전 점검 구분이 바뀌면 인쇄를 중단한다',async()=>
  let changed=false;const h=harness(async path=>path.includes('equipment-checks')?[{equipment_id:1,items:JSON.stringify([{name:'가상 항목',section:changed?'변경':'이전'}])}]:path.includes('/api/equipment?')?equipment:plan);
  try{await h.button.onclick();changed=true;await h.nodes['[data-print]'].onclick();assert.equal(h.prints,0);assert.match(h.nodes['[data-status]'].textContent,/변경/);}finally{h.close();}
 });
+
+test('점검 유형별 표는 이름이 같아도 각각 보존하고 이전 기록을 별도로 표시한다',()=>{
+ const rows=[{name:'같은 항목',section:'같은 구분',checkType:'일반'},{name:'같은 항목',section:'같은 구분',checkType:'장비'},{name:'예전 항목'}],html=manualPlanMarkup(plan,equipment,[{equipment_id:1,items:JSON.stringify(rows)}],fields);
+ for(const label of ['일반 점검항목','장비 점검항목','유형 미기록 점검항목'])assert.match(html,new RegExp(label));assert.equal((html.match(/같은 항목/g)||[]).length,2);assert.equal((html.match(/<table>/g)||[]).length,3);
+});
+test('점검 유형 변경 시 인쇄 전 최신 정보 확인이 중단한다',async()=>{
+ let changed=false;const h=harness(async path=>path.includes('equipment-checks')?[{equipment_id:1,items:JSON.stringify([{name:'가상 항목',checkType:changed?'장비':'일반'}])}]:path.includes('/api/equipment?')?equipment:plan);
+ try{await h.button.onclick();changed=true;await h.nodes['[data-print]'].onclick();assert.equal(h.prints,0);assert.match(h.nodes['[data-status]'].textContent,/변경/);}finally{h.close();}
+});
