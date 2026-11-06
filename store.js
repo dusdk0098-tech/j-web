@@ -2062,6 +2062,7 @@ export class Store {
     }catch(error){this.db.exec('ROLLBACK');throw error;}
   }
   weeklyActivity(siteId,start){
+    this.db.exec('SAVEPOINT weekly_activity');try{
     start=dateValue(start);siteId=Number(siteId);if(!this.db.prepare('SELECT 1 FROM sites WHERE id=?').get(siteId))throw new Error('현장을 선택해 주세요.');
     const day=new Date(`${start}T00:00:00Z`),dates=Array.from({length:7},(_,i)=>{const value=new Date(day.getTime()+i*86400000).toISOString().slice(0,10);return dateValue(value);}),end=dates[6],rows=dates.map(date=>({date,attendance:0,attendanceCategories:[],attendanceOccupations:[],documents:{},noticeReads:0,noticePeople:0,trainingChecks:0,trainingByType:{tbm:0,education:0},trainingPeopleByType:{tbm:0,education:0},educationStaffChecks:0,educationStaffPeople:0,workerChecks:0,managerChecks:0,managerDaysOff:0,hazardReports:0,ppeIssues:[],ppeReceipts:{confirmed:0,total:0},ppeReceiptsByItem:[],checklists:[]})),byDate=new Map(rows.map(row=>[row.date,row]));
     for(const row of this.db.prepare('SELECT a.date,COUNT(*) AS n FROM attendance a JOIN workers w ON w.id=a.worker_id WHERE w.site_id=? AND a.present=1 AND a.date BETWEEN ? AND ? GROUP BY a.date').all(siteId,start,end))byDate.get(row.date).attendance=row.n;
@@ -2082,7 +2083,8 @@ export class Store {
     const staffByDate=new Map();
     for(const item of this.managerEducationAssignments(siteId,start,end)){if(!item.confirmed_at)continue;const row=byDate.get(item.date);row.educationStaffChecks++;if(!staffByDate.has(item.date))staffByDate.set(item.date,new Set());staffByDate.get(item.date).add(item.id);}
     for(const [date,ids] of staffByDate)byDate.get(date).educationStaffPeople=ids.size;
-    return rows;
+    this.db.exec('RELEASE weekly_activity');return rows;
+    }catch(error){this.db.exec('ROLLBACK TO weekly_activity');this.db.exec('RELEASE weekly_activity');throw error;}
   }
   reviewers(siteId){return this.db.prepare("SELECT r.id,r.site_id,r.login_id,r.name,r.active,EXISTS(SELECT 1 FROM reviewer_final_approvals f WHERE f.reviewer_id=r.id) AS final_approval_enabled,COALESCE((SELECT enabled FROM reviewer_notice_permissions n WHERE n.reviewer_id=r.id),0) AS notice_write_enabled,COALESCE((SELECT version FROM reviewer_notice_permissions n WHERE n.reviewer_id=r.id),'') AS notice_write_version FROM reviewers r WHERE r.site_id=? ORDER BY r.name,r.id").all(Number(siteId));}
   reviewer(id){return this.db.prepare('SELECT id,site_id,name FROM reviewers WHERE id=? AND active=1').get(Number(id))||null;}
