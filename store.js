@@ -3,7 +3,7 @@ import { listPermitMeasures,savePermitMeasure,validatePermitMeasureSources,listP
 import { DatabaseSync } from 'node:sqlite';
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { passwordHash as scryptSync, passwordSalt, passwordCandidate, withPasswordHashes, assertPasswordAccount } from './password-hashing.js';
-import { dateValue, officeKinds, recordInput, muscleReferenceInput, text, transitions } from './domain.js';
+import { dateValue, officeKinds, permitKinds, recordInput, muscleReferenceInput, text, transitions } from './domain.js';
 import { PNG } from 'pngjs';
 import { scheduleTypes, scheduleTargetRequired, validScheduleTime } from './public/schedule.js';
 import { verifyWorkerLocation } from './geo.js';
@@ -33,7 +33,7 @@ const communityKinds=['community_notice','community_event','community_info','com
 const communitySlots=communityKinds.map(()=>'?').join(',');
 const boardKinds=['notice','system_notice','faq','question','general',...communityKinds];
 const reviewerBoardKinds=['notice','question','general','community_info','community_resources','community_question','community_general','community_market'];
-const workerDocumentPermission={risk:'risk',work_plan:'work_plan',tbm:'training',education:'training'};
+const workerDocumentPermission={risk:'risk',work_plan:'work_plan',permit:'work_plan',tbm:'training',education:'training'};
 const workerVersion=worker=>createHash('sha256').update(JSON.stringify([worker.id,worker.site_id,worker.name,worker.category,worker.company,worker.occupation,worker.created_date,worker.memo,worker.registration_type,worker.licenses_json,...(worker.company_id?[worker.company_id]:[])])).digest('hex');
 const workerRow=({licenses_json,...row})=>({...row,licenses:JSON.parse(licenses_json),version:workerVersion({...row,licenses_json})});
 function workerLicenses(value){
@@ -1578,10 +1578,10 @@ export class Store {
   }
   workerDocument(siteId,workerId,id){const doc=this.workerDocuments(siteId,workerId).find(item=>item.id===Number(id));if(!doc)throw new Error('권한이 있는 본인 작성 문서를 확인해 주세요.');return doc;}
   workerDocumentPeople(details,type){
-    return type==='work_plan'?[...(Array.isArray(details.workers)?details.workers:[]),...(Array.isArray(details.equipmentAssignments)?details.equipmentAssignments:[])].map(row=>row?.workerId):type==='risk'?(Array.isArray(details.processes)?details.processes:[]).flatMap(process=>Object.values(process?.roles||{}).filter(person=>person?.kind==='worker').map(person=>person.id)):[];
+    return type==='permit'?(Array.isArray(details.permitWorkerIds)?details.permitWorkerIds:[]):type==='work_plan'?[...(Array.isArray(details.workers)?details.workers:[]),...(Array.isArray(details.equipmentAssignments)?details.equipmentAssignments:[])].map(row=>row?.workerId):type==='risk'?(Array.isArray(details.processes)?details.processes:[]).flatMap(process=>Object.values(process?.roles||{}).filter(person=>person?.kind==='worker').map(person=>person.id)):[];
   }
   workerDocumentInScope(doc,allowed){
-    if(!allowed||!['work_plan','risk'].includes(doc.type))return true;
+    if(!allowed||!['work_plan','risk','permit'].includes(doc.type))return true;
     try{return this.workerDocumentPeople(JSON.parse(doc.details),doc.type).every(id=>allowed.has(id));}catch{return false;}
   }
   checkWorkerDocumentPeople(siteId,workerId,input,type){
@@ -1620,7 +1620,7 @@ export class Store {
     const actor=this.db.prepare('SELECT category,company_id FROM workers WHERE id=? AND site_id=?').get(Number(workerId),Number(siteId));
     const allowed=actor.category==='협력업체 관리자'?new Set(this.db.prepare('SELECT id FROM workers WHERE site_id=? AND company_id=?').all(Number(siteId),actor.company_id).map(row=>row.id)):null;
     const companies=this.companies(siteId).map(({id,name,trade})=>({id,name,trade}));if(type==='risk')return {companies,riskPeople:this.riskProcessPeople(siteId).filter(person=>person.kind!=='worker'||!allowed||allowed.has(person.id))};
-    return {companies,equipment:this.equipment(siteId).map(({id,kind,model,registration})=>({id,kind,model,registration})),places:this.workPlaces(siteId).map(({id,name})=>({id,name})),rigging:this.rigging(siteId).map(({id,category,kind,name,details})=>({id,category,kind,name,standards:JSON.parse(details).standards})),workers:this.workers(siteId).filter(worker=>!allowed||allowed.has(worker.id)).map(({id,name,company})=>({id,name,company}))};
+    return {companies,equipment:this.equipment(siteId).map(({id,kind,model,registration})=>({id,kind,model,registration})),places:this.workPlaces(siteId).map(({id,name})=>({id,name})),rigging:this.rigging(siteId).map(({id,category,kind,name,details})=>({id,category,kind,name,standards:JSON.parse(details).standards})),workers:this.workers(siteId).filter(worker=>!allowed||allowed.has(worker.id)).map(({id,name,company})=>({id,name,company})),...(type==='permit'?{permitKinds}: {})};
   }
   checkAttendanceDayVersion(siteId,workerId,date,version){
     if(version===undefined)return;if(!Number.isSafeInteger(version)||version<0)throw new Error('일별 출역 기록을 다시 확인해 주세요.');
