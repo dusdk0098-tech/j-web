@@ -1339,12 +1339,13 @@ export class Store {
     return this.db.prepare('SELECT w.id,w.name,w.company,c.created_at,c.rights_ack,c.signature IS NOT NULL AS has_signature FROM worker_training_checks c JOIN workers w ON w.id=c.worker_id WHERE c.document_id=? AND w.site_id=? ORDER BY c.created_at,w.id').all(Number(documentId),doc.site_id);
   }
   trainingCheckSignature(documentId,workerId){return this.db.prepare("SELECT c.signature FROM worker_training_checks c JOIN documents d ON d.id=c.document_id JOIN workers w ON w.id=c.worker_id AND w.site_id=d.site_id WHERE d.id=? AND d.type IN ('tbm','education') AND w.id=? AND c.signature IS NOT NULL").get(Number(documentId),Number(workerId))?.signature||null;}
-  workerActivities(siteId,workerId,kinds=[],offset=0){
+  workerActivities(siteId,workerId,kinds=[],offset=0,from='',to=''){
     siteId=Number(siteId);workerId=Number(workerId);
     if(!this.db.prepare('SELECT 1 FROM workers WHERE id=? AND site_id=?').get(workerId,siteId))throw new Error('같은 현장의 출입자를 확인해 주세요.');
     const valid=['tbm','education','notice','checklist','hazard','risk','work_plan','instruction'];
     if(!Array.isArray(kinds)||kinds.some(kind=>!valid.includes(kind))||new Set(kinds).size!==kinds.length||!Number.isSafeInteger(offset)||offset<0)throw new Error('활동 검색 조건을 확인해 주세요.');
     if(!kinds.length)kinds=valid;
+    if(from)from=dateValue(from);if(to)to=dateValue(to);if(from&&to&&from>to)throw new Error('조회 시작일은 종료일보다 늦을 수 없습니다.');
     const query=`WITH ctx AS (SELECT ? AS site,? AS worker), activity AS (
       SELECT d.type AS kind,d.date,d.title,'문서별 시험 참가 확인' AS detail,d.id AS document_id FROM worker_training_checks c JOIN documents d ON d.id=c.document_id WHERE c.worker_id=(SELECT worker FROM ctx) AND d.site_id=(SELECT site FROM ctx) AND d.type IN ('tbm','education') AND d.status='approved'
       UNION ALL SELECT c.kind,c.date,'당일 종류별 확인','시험 확인 (문서별 확인과 별도)',NULL FROM worker_daily_training c WHERE c.worker_id=(SELECT worker FROM ctx) AND c.kind IN ('tbm','education')
@@ -1354,8 +1355,8 @@ export class Store {
       UNION ALL SELECT 'risk',a.date,d.title,'시험 활동의 선택 명단',d.id FROM risk_activities a JOIN documents d ON d.id=a.document_id WHERE d.site_id=(SELECT site FROM ctx) AND d.type='risk' AND EXISTS(SELECT 1 FROM json_each(a.worker_snapshot) w WHERE json_extract(w.value,'$.id')=(SELECT worker FROM ctx))
       UNION ALL SELECT 'work_plan',d.date,d.title,'계획서에 지정된 작업자',d.id FROM documents d WHERE d.site_id=(SELECT site FROM ctx) AND d.type='work_plan' AND d.status='approved' AND (EXISTS(SELECT 1 FROM json_each(d.details,'$.workers') w WHERE json_extract(w.value,'$.workerId')=(SELECT worker FROM ctx)) OR EXISTS(SELECT 1 FROM json_each(d.details,'$.equipmentAssignments') w WHERE json_extract(w.value,'$.workerId')=(SELECT worker FROM ctx)))
       UNION ALL SELECT 'instruction',d.date,d.title,'지정된 시험 수신자',d.id FROM documents d WHERE d.site_id=(SELECT site FROM ctx) AND d.type='instruction' AND d.status='approved' AND json_extract(d.details,'$.recipientId')=(SELECT worker FROM ctx)
-    ) SELECT kind,date,title,detail,document_id,CASE WHEN kind='checklist' THEN EXISTS(SELECT 1 FROM worker_self_checks c WHERE c.worker_id=(SELECT worker FROM ctx) AND c.date=activity.date AND c.signature IS NOT NULL) ELSE 0 END AS has_signature FROM activity WHERE kind IN (${kinds.map(()=>'?').join(',')}) ORDER BY date DESC,kind,title,document_id DESC LIMIT 101 OFFSET ?`;
-    const rows=this.db.prepare(query).all(siteId,workerId,...kinds,offset),hasMore=rows.length>100;
+    ) SELECT kind,date,title,detail,document_id,CASE WHEN kind='checklist' THEN EXISTS(SELECT 1 FROM worker_self_checks c WHERE c.worker_id=(SELECT worker FROM ctx) AND c.date=activity.date AND c.signature IS NOT NULL) ELSE 0 END AS has_signature FROM activity WHERE kind IN (${kinds.map(()=>'?').join(',')}) AND (?='' OR date>=?) AND (?='' OR date<=?) ORDER BY date DESC,kind,title,document_id DESC LIMIT 101 OFFSET ?`;
+    const rows=this.db.prepare(query).all(siteId,workerId,...kinds,from,from,to,to,offset),hasMore=rows.length>100;
     return {items:rows.slice(0,100),nextOffset:hasMore?offset+100:null};
   }
   dailyTrainingReport(siteId,from,to){

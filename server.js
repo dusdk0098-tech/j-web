@@ -1109,7 +1109,7 @@ const server = http.createServer((req,res)=>passwordRequests.run(true,()=>adminR
     const workerPermissionOverview=url.pathname.match(/^\/api\/sites\/(\d+)\/worker-permissions$/);
     if(workerPermissionOverview&&req.method==='GET'){const result=store.workerPermissionOverview(workerPermissionOverview[1]);checkRequestSession(req);return json(res,200,result);}
     const workerActivity=url.pathname.match(/^\/api\/workers\/(\d+)\/activities$/);
-    if(workerActivity&&req.method==='GET'){const raw=url.searchParams.get('offset')||'0';if(!/^\d+$/.test(raw))throw new Error('활동 검색 조건을 확인해 주세요.');return json(res,200,store.workerActivities(url.searchParams.get('siteId'),workerActivity[1],url.searchParams.getAll('kind'),Number(raw)));}
+    if(workerActivity&&req.method==='GET'){const raw=url.searchParams.get('offset')||'0';if(!/^\d+$/.test(raw)||['from','to'].some(key=>url.searchParams.getAll(key).length>1))throw new Error('활동 검색 조건을 확인해 주세요.');return json(res,200,store.workerActivities(url.searchParams.get('siteId'),workerActivity[1],url.searchParams.getAll('kind'),Number(raw),url.searchParams.get('from')||'',url.searchParams.get('to')||''));}
     const workerAccountBlock=url.pathname.match(/^\/api\/workers\/(\d+)\/access-block$/);
     if(workerAccountBlock){if(req.method==='GET')return json(res,200,store.workerAccountBlock(url.searchParams.get('siteId'),workerAccountBlock[1]));if(req.method==='PUT'){const input=await body(req),result=store.setWorkerAccountBlock(input.siteId,workerAccountBlock[1],input,()=>checkRequestSession(req));return json(res,200,result);}}
     const workerPassword=url.pathname.match(/^\/api\/workers\/(\d+)\/password$/);
