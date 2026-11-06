@@ -24,7 +24,7 @@ function screen(){
 test('목록의 등록 방식은 계정 유무와 독립적으로 표시하고 기존 검색·정렬 열을 유지한다',async()=>{
   const start=source.indexOf("  if(state.page==='workers')"),from=source.indexOf('    const epoch=workerListEpoch',start),to=source.indexOf("    $('#new-worker').onclick",from),content={},workers=[worker,{...worker,id:8,name:'가상 일반',registration_type:'general',has_account:true},{...worker,id:9,name:'가상 자기',has_account:false}],context={content,workerListEpoch:1,state:{page:'workers',siteId:1,query:'',workerOrder:'default',workerFilters:{},workerPage:0},URLSearchParams,paginateWorkers,workerSummaryMarkup:()=>'',api:async path=>path.startsWith('/api/workers/list')?{workers}:workers};
   assert.ok(from>start&&to>from);runInNewContext(source.match(/^const esc = .*$/m)[0],context);await runInNewContext(`(async()=>{${source.slice(from,to)}})()`,context);
-  assert.match(content.innerHTML,/<th>등록 방식<\/th>/);assert.equal((content.innerHTML.match(/<td>자기 등록<\/td>/g)||[]).length,2);assert.equal((content.innerHTML.match(/<td>일반등록<\/td>/g)||[]).length,1);assert.match(content.innerHTML,/worker-order/);assert.match(content.innerHTML,/worker-from/);assert.match(content.innerHTML,/data-edit-worker="7"/);
+  assert.match(content.innerHTML,/<th>최초 출역 기록<\/th>/);assert.match(content.innerHTML,/<td>기록 없음<\/td>/);assert.match(content.innerHTML,/<th>등록 방식<\/th>/);assert.equal((content.innerHTML.match(/<td>자기 등록<\/td>/g)||[]).length,2);assert.equal((content.innerHTML.match(/<td>일반등록<\/td>/g)||[]).length,1);assert.match(content.innerHTML,/worker-order/);assert.match(content.innerHTML,/worker-from/);assert.match(content.innerHTML,/data-edit-worker="7"/);
 });
 
 test('자기 등록 수정창은 자동 전환과 가상 보존 정책을 안내하고 일반등록에는 전환 버튼이 없다',async()=>{

@@ -98,3 +98,10 @@ test('출역 기간 검색은 등록일과 별개이며 같은 현장의 유효 
     assert.equal(store.workers(other.id,'',{attendanceFrom:'2026-10-01',attendanceTo:'2026-10-03'}).length,1);assert.ok(!read({attendanceFrom:'2026-10-01'}).workers.some(w=>w.id===c.id));
   }finally{store.close();}
 });
+
+test('최초 출역 기록은 출역 취소와 과거 기록 추가를 반영하되 근로자 수정 버전은 유지한다',()=>{
+  const store=new Store(':memory:');try{
+    const site=store.createSite({name:'가상 현장'}),worker=store.createWorker({siteId:site.id,name:'가상 근로자',category:'직영',company:'가상 업체',occupation:'가상 직종'}),get=()=>store.workers(site.id)[0],put=(date,present)=>store.setAttendance({siteId:site.id,workerId:worker.id,date,present});
+    assert.equal(get().first_attendance_date,null);const version=get().version;put('2026-11-06',true);put('2026-11-05',false);assert.equal(get().first_attendance_date,'2026-11-06');put('2026-10-30',true);assert.equal(get().first_attendance_date,'2026-10-30');assert.equal(get().version,version);put('2026-10-30',false);assert.equal(get().first_attendance_date,'2026-11-06');put('2026-11-06',false);assert.equal(get().first_attendance_date,null);
+  }finally{store.close();}
+});

@@ -21,9 +21,9 @@ test('엑셀에 선택한 현장과 검색 결과만 문자열로 기록한다',
     s.createWorker({siteId:a.id,name:'다른 사람',category:'직영',company:'가상 업체',occupation:'전기'});
     s.createWorker({siteId:b.id,name:'가상 시험자',category:'직영',company:'다른 현장',occupation:'목공'});
     const rows=await readSheet(await workerSpreadsheet(s.workers(a.id,'시험자')));
-    assert.deepEqual(rows,[['이름','구분','소속','직종'],['=가상 시험자','직영','가상 업체','목공']]);
+    assert.deepEqual(rows,[['이름','구분','소속','직종','최초 출역 기록'],['=가상 시험자','직영','가상 업체','목공','기록 없음']]);
     const filtered=await readSheet(await workerSpreadsheet(s.workers(a.id,'',{category:'직영',company:'가상 업체',occupation:'전기'})));
-    assert.deepEqual(filtered,[['이름','구분','소속','직종'],['다른 사람','직영','가상 업체','전기']]);
+    assert.deepEqual(filtered,[['이름','구분','소속','직종','최초 출역 기록'],['다른 사람','직영','가상 업체','전기','기록 없음']]);
     assert.equal(s.workers(b.id,'',{company:'가상 업체'}).length,0);
     s.db.prepare("UPDATE workers SET created_date='2026-10-01'").run();
     s.db.prepare("UPDATE workers SET created_date='2026-10-28' WHERE name='다른 사람'").run();

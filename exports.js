@@ -2,7 +2,7 @@ import writeExcelFile from 'write-excel-file/node';
 import { salaryDay } from './public/salary-summary.js';
 
 export function workerSpreadsheet(workers) {
-  const rows=[['이름','구분','소속','직종'],...workers.map(w=>[w.name,w.category,w.company,w.occupation])];
+  const rows=[['이름','구분','소속','직종','최초 출역 기록'],...workers.map(w=>[w.name,w.category,w.company,w.occupation,w.first_attendance_date||'기록 없음'])];
   return writeExcelFile(rows,{sheet:'출입자'}).toBuffer();
 }
 
