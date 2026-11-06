@@ -23,7 +23,7 @@ test('작성 화면에서 검색과 종류 변경을 반복해도 종류별 답�
     kind.options=[...body.matchAll(/<option value="([^"]*)"([^>]*)>([^<]*)<\/option>/g)].map(([,value,attrs,textContent])=>({value,textContent,dataset:{category:attrs.match(/data-category="([^"]*)"/)?.[1]||''},hidden:false,get selected(){return kind.value===value;}}));
     kind.value=body.match(/<option value="([^"]*)"[^>]*\bselected\b/)?.[1]||'';
   }};
-  let currentRows=[];const nodes={'#daily-fields':fields,'#dialog-form [name=checklistKind]':kind,'#checklist-category':category,'#checklist-search':search,'#rain-checks':checks,'#checklist-copy':{},'#checklist-copy-list':{isConnected:true}};
+  let currentRows=[];const nodes={'#daily-fields':fields,'#dialog-form [name=checklistKind]':kind,'#checklist-category':category,'#checklist-search':search,'#rain-checks':checks,'#checklist-copy':{},'#checklist-copy-list':{isConnected:true},'#dialog-form input[name=date]':{value:'2026-11-06'}};
   const context={select:{value:'checklist'},details:{kind:'rain',answers:[{answer:'O',note:'기존 가상 비고'}]},$:key=>nodes[key],document:{querySelectorAll:()=>currentRows},esc:String,checklistCategoryForKind};
   for(const name of ['rainChecks','rainDetailChecks','windChecks','thawChecks','heatChecks','heatDetailChecks','coldChecks','coldDetailChecks','wetSeasonChecks','heavyRainChecks','electricalChecks','fireChecks','formworkChecks','fallingChecks','confinedChecks','excavationChecks','semiannualChecks','morningChecks','afternoonChecks','eveningChecks'])context[name]=['가상 항목'];
   const filter=source.match(/^function filterChecklistKinds\(.*$/m)[0];runInNewContext(filter+'\nfunction render(){'+source.slice(start,end)+'}\nglobalThis.render=render;',context);context.render();

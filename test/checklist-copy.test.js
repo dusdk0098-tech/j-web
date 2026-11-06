@@ -37,6 +37,7 @@ test('작성 화면은 이전 기록을 선택해 빈 칸에 적용하고 현장
   const target={matches:selector=>selector==='[data-checklist-copy]',dataset:{checklistCopy:'0'}};copyList.onclick({target});
   assert.equal(firstAnswer.value,'X');assert.equal(firstNote.value,'이전 비고');assert.equal(secondAnswer.value,'O');assert.equal(secondNote.value,'현재 비고');assert.equal(photoNote.value,'이전 사진 설명');
   await copyButton.onclick();state.siteId=8;firstAnswer.value='';copyList.onclick({target});assert.equal(firstAnswer.value,'');assert.match(copyList.textContent,/변경/);
+  state.siteId=7;let resolve;context.api=()=>new Promise(done=>{resolve=done;});const pending=copyButton.onclick();date.value='2026-10-29';date.oninput();date.value='2026-10-30';date.onchange();resolve([prior]);await pending;assert.equal(copyList.innerHTML,'');copyList.onclick({target});assert.equal(firstAnswer.value,'');assert.match(copyList.textContent,/변경/);
 });
 
 test('서버가 이전 점검 모듈을 제공한다',{timeout:30000},async()=>{
