@@ -108,3 +108,7 @@ test('이전 목록 버튼은 현장 변경·복귀 및 페이지 이동 중 조
 test('가입 당시 정보와 현재 연락처는 구분하여 안전하게 표시한다',async()=>{
  const ui=screen(),pending=ui.open(11),data=record('가입 전화');data.currentContact={phone:'<현재 전화>',address:'<현재 주소>'};ui.requests[0].resolve(data);await pending;const html=ui.snapshot().html;assert.match(html,/가입 당시 기록/);assert.match(html,/가입 전화/);assert.match(html,/현재 가상 전화번호: &lt;현재 전화&gt;/);assert.match(html,/현재 가상 주소: &lt;현재 주소&gt;/);
 });
+
+test('가입 전 출입자는 가입 기록 없음과 현재 연락처를 구분해 표시한다',async()=>{
+ const ui=screen(),pending=ui.open(11);ui.requests[0].resolve({notJoined:true,currentContact:{phone:'<가상 번호>',address:'<가상 주소>'}});await pending;const html=ui.snapshot().html;assert.match(html,/가입 기록이 없습니다/);assert.match(html,/&lt;가상 번호&gt;/);assert.match(html,/&lt;가상 주소&gt;/);assert.doesNotMatch(html,/서명 다운로드/);
+});
