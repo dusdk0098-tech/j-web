@@ -1582,10 +1582,12 @@ export class Store {
   }
   workerDocumentInScope(doc,allowed){
     if(!allowed||!['work_plan','risk','permit'].includes(doc.type))return true;
-    try{return this.workerDocumentPeople(JSON.parse(doc.details),doc.type).every(id=>allowed.has(id));}catch{return false;}
+    try{const details=JSON.parse(doc.details);if(doc.type==='permit'){const first=allowed.values().next().value,company=first&&this.db.prepare('SELECT company_id FROM workers WHERE id=?').get(first)?.company_id;if(!company||details.companyId!==company)return false;}return this.workerDocumentPeople(details,doc.type).every(id=>allowed.has(id));}catch{return false;}
   }
   checkWorkerDocumentPeople(siteId,workerId,input,type){
-    const allowed=this.workerCompanyScope(siteId,workerId),details=input.details;if(!allowed||!details||typeof details!=='object')return;
+    const allowed=this.workerCompanyScope(siteId,workerId),details=input.details;if(!allowed)return;
+    if(type==='permit'){const actor=this.db.prepare('SELECT company_id FROM workers WHERE id=? AND site_id=?').get(Number(workerId),Number(siteId));if(!actor.company_id||!details||details.companyId!==actor.company_id||details.directWork===true)throw Object.assign(new Error('연결된 소속 업체로 작업허가서를 작성해 주세요.'),{sessionStatus:403});}
+    if(!details||typeof details!=='object')return;
     if(this.workerDocumentPeople(details,type).some(id=>!allowed.has(id)))throw Object.assign(new Error('같은 업체의 출입자를 선택해 주세요.'),{sessionStatus:403});
   }
   createWorkerDocument(siteId,workerId,input,onAuthorize=()=>{}){
@@ -1619,8 +1621,8 @@ export class Store {
     if(type==='tbm'||type==='education')return {};
     const actor=this.db.prepare('SELECT category,company_id FROM workers WHERE id=? AND site_id=?').get(Number(workerId),Number(siteId));
     const allowed=actor.category==='협력업체 관리자'?new Set(this.db.prepare('SELECT id FROM workers WHERE site_id=? AND company_id=?').all(Number(siteId),actor.company_id).map(row=>row.id)):null;
-    const companies=this.companies(siteId).map(({id,name,trade})=>({id,name,trade}));if(type==='risk')return {companies,riskPeople:this.riskProcessPeople(siteId).filter(person=>person.kind!=='worker'||!allowed||allowed.has(person.id))};
-    return {companies,equipment:this.equipment(siteId).map(({id,kind,model,registration})=>({id,kind,model,registration})),places:this.workPlaces(siteId).map(({id,name})=>({id,name})),rigging:this.rigging(siteId).map(({id,category,kind,name,details})=>({id,category,kind,name,standards:JSON.parse(details).standards})),workers:this.workers(siteId).filter(worker=>!allowed||allowed.has(worker.id)).map(({id,name,company})=>({id,name,company})),...(type==='permit'?{permitKinds}: {})};
+    const companies=this.companies(siteId).filter(company=>type!=='permit'||!allowed||company.id===actor.company_id).map(({id,name,trade})=>({id,name,trade}));if(type==='risk')return {companies,riskPeople:this.riskProcessPeople(siteId).filter(person=>person.kind!=='worker'||!allowed||allowed.has(person.id))};
+    return {companies,equipment:this.equipment(siteId).map(({id,kind,model,registration})=>({id,kind,model,registration})),places:this.workPlaces(siteId).map(({id,name})=>({id,name})),rigging:this.rigging(siteId).map(({id,category,kind,name,details})=>({id,category,kind,name,standards:JSON.parse(details).standards})),workers:this.workers(siteId).filter(worker=>!allowed||allowed.has(worker.id)).map(({id,name,company})=>({id,name,company})),...(type==='permit'?{permitKinds,...(allowed?{contractorCompanyId:actor.company_id||0}:{})}: {})};
   }
   checkAttendanceDayVersion(siteId,workerId,date,version){
     if(version===undefined)return;if(!Number.isSafeInteger(version)||version<0)throw new Error('일별 출역 기록을 다시 확인해 주세요.');
