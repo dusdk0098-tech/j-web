@@ -7,7 +7,7 @@ import {createServer} from 'node:net';
 import {spawn} from 'node:child_process';
 import {once} from 'node:events';
 import {runInNewContext} from 'node:vm';
-import {freezeBatchImages} from '../public/batch-images.js';
+import {freezeBatchImages,materializeInstructionPrintPhotos} from '../public/batch-images.js';
 import {prepareWorkerPdfs} from '../public/plan-pdf.js';
 import {reloadDailyBatchRows,dailyBatchReport,hazardReportBody,joinedBatchPreview} from '../public/batch-print.js';
 import {workerPreviewArticles} from '../public/worker-preview.js';
@@ -111,4 +111,22 @@ test('임시 DB와 HTTP에서 문서 수정·로그아웃은 인쇄를 막고 �
     await h.print();assert.equal(h.prints(),1);assert.match(h.errors.at(-1),/출력 자료가 변경/);
     await h.prepare();const logout=await request('/api/logout','POST',{});assert.equal(logout.status,200);await h.print();assert.equal(h.prints(),1);assert.match(h.errors.at(-1),/로그인|권한/);
   }finally{if(child.exitCode===null){const ended=once(child,'exit');child.kill();await ended;}rmSync(dir,{recursive:true,force:true});}
+});
+
+test('큰 지시 사진은 출력 준비 때만 이미지로 만들고 주소를 검증한다',async()=>{
+  const path='/api/documents/3/instruction-photos/7?preview=1',marker={getAttribute:()=>path,replaceWith:image=>{marker.image=image;}},root={querySelectorAll:()=>[marker]},doc={createElement:()=>({dataset:{}})};materializeInstructionPrintPhotos(root,doc);assert.equal(marker.image.dataset.batchSource,path);assert.equal(marker.image.src,undefined);
+  marker.image.decode=async()=>{};const requests=[],frozen=await freezeBatchImages([marker.image],()=>true,{fetchImage:async source=>{requests.push(source);return new Response(new Blob(['가상 이미지'],{type:'image/png'}));},urls:{createObjectURL:()=> 'blob:large',revokeObjectURL(){}},digest:async()=>new Uint8Array(32)});assert.equal(marker.image.src,'blob:large');await frozen.check();assert.deepEqual(requests,[path,path]);frozen.dispose();
+  const invalid={getAttribute:()=>'/api/other?preview=1',replaceWith(){throw Error('잘못된 주소 적용');}};assert.throws(()=>materializeInstructionPrintPhotos({querySelectorAll:()=>[invalid]},doc),/주소/);await assert.rejects(freezeBatchImages([{dataset:{batchSource:'https://external.invalid/x'}}],()=>true),/주소/);
+});
+
+test('선택 출력의 이미지 합계가 100MB를 넘으면 준비를 중단하고 임시 주소를 해제한다',async()=>{
+  let issued=0;const revoked=[],size=50*1024*1024,images=[1,2,3].map(id=>({dataset:{batchSource:`/api/documents/1/instruction-photos/${id}?preview=1`},decode:async()=>{}})),blob={size,type:'image/png',arrayBuffer:async()=>new Uint8Array([1]).buffer},options={fetchImage:async()=>({ok:true,blob:async()=>blob}),urls:{createObjectURL:()=>`blob:${++issued}`,revokeObjectURL:url=>revoked.push(url)},digest:async()=>new Uint8Array(32)};
+  await assert.rejects(freezeBatchImages(images,()=>true,options),/100MB/);assert.deepEqual(revoked,['blob:1','blob:2']);
+});
+
+test('지시서 선택 출력은 큰 사진을 출력 준비로 넘기고 이후 변경을 검사한다',async()=>{
+  const h=harness(),path='/api/documents/1/instruction-photos/7?preview=1',images=[],requests=[];h.values.get('/api/documents/1').type='instruction';h.context.materializeInstructionPrintPhotos=materializeInstructionPrintPhotos;
+  h.context.document.createElement=tag=>tag==='img'?{dataset:{},decode:async()=>{}}:{append(){},querySelectorAll:selector=>selector==='[data-instruction-print-photo]'?[{getAttribute:()=>path,replaceWith:image=>images.push(image)}]:[]};h.context.document.createDocumentFragment=()=>({append(){},querySelectorAll:()=>images});
+  let changed=false;h.context.freezeBatchImages=(nodes,active)=>freezeBatchImages(nodes,active,{fetchImage:async source=>{requests.push(source);return new Response(new Blob([changed?'변경':'가상'],{type:'image/png'}));},urls:{createObjectURL:()=> 'blob:virtual',revokeObjectURL(){}},digest:async bytes=>new Uint8Array(bytes)});
+  await h.prepare();assert.equal(images.length,1);assert.equal(images[0].src,'blob:virtual');await h.print();assert.equal(h.prints(),1);changed=true;await h.print();assert.equal(h.prints(),1);assert.match(h.errors.at(-1),/이미지가 변경/);assert.ok(requests.every(source=>source===path));
 });
