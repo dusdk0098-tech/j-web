@@ -1,3 +1,4 @@
+import * as checklistDefinitions from '../public/checklist-copy.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, mkdtempSync, rmSync } from 'node:fs';
@@ -55,7 +56,7 @@ function screen(fetcher=async()=>({ok:true,status:200,json:async()=>[]})){
   Object.assign(context,{riskDetailMarkup,muscleDetailMarkup,planDetailMarkup,patrolActivitiesSummary});
   for(const key of ['riskFields','riskKinds','riskScales','planFields','safetyLogFields','placeChoiceLabels','incidentFields','victimFields'])context[key]=runInNewContext(source.split('\n').find(line=>line.startsWith('const '+key+'='))+'\n'+key);
   runInNewContext(source.split('\n').find(line=>line.startsWith('function placeSummary(')),context);
-  for(const key of ['rainChecks','rainDetailChecks','windChecks','thawChecks','heatChecks','coldChecks','wetSeasonChecks','heavyRainChecks','electricalChecks','fireChecks','formworkChecks','fallingChecks','confinedChecks','excavationChecks','semiannualChecks','morningChecks','afternoonChecks','eveningChecks'])context[key]=runInNewContext(source.split('\n').find(line=>line.startsWith('const '+key+'='))+'\n'+key);
+  for(const key of ['rainChecks','rainDetailChecks','windChecks','thawChecks','heatChecks','coldChecks','wetSeasonChecks','heavyRainChecks','electricalChecks','fireChecks','formworkChecks','fallingChecks','confinedChecks','excavationChecks','semiannualChecks','morningChecks','afternoonChecks','eveningChecks'])context[key]=checklistDefinitions[key];
   context.siteSelect.selectedOptions=[{textContent:'가상 첫 현장'}];
   const oldQueryAll=context.document.querySelectorAll;
   context.document.querySelectorAll=selector=>{

@@ -63,7 +63,7 @@ import { richBody,richEditorMarkup,mountRichEditor } from './rich-editor.js';
 import { siteArticleImageLimits,mountSiteArticleImagePicker } from './site-article-images.js';
 import { documentRichLimits } from './rich-text.js';
 import { mountPermitRoles,permitRoleSnapshot } from './permit-roles.js';
-import { checklistSources,mergeChecklistAnswers,checklistCategories,checklistCategoryForKind } from './checklist-copy.js';
+import { checklistSources,mergeChecklistAnswers,checklistCategories,checklistCategoryForKind,rainChecks,rainDetailChecks,windChecks,thawChecks,heatChecks,coldChecks,wetSeasonChecks,heavyRainChecks,electricalChecks,fireChecks,formworkChecks,fallingChecks,confinedChecks,excavationChecks,semiannualChecks,morningChecks,afternoonChecks,eveningChecks } from './checklist-copy.js';
 import { permitSources,permitSourceItems,permitCheckSources,permitCheckSourceNames } from './permit-sources.js';
 
 const $ = (s) => document.querySelector(s);
@@ -297,24 +297,6 @@ async function showWorkerFiles(worker){
 }
 const dailyFields={weather:'날씨',progress:'공정률 (%)',todayWork:'금일 작업',tomorrowWork:'명일 작업',remarks:'비고'};
 const basicCategories=['안전·보건 경영 방침','안전·보건 관리 규정','안전·보건 조직도','안전·보건 관리 책임자 선임계','안전·보건 계획 및 이사회 의사록','유해·위험 방지 계획서','위험성 평가 실시 규정','안전 관리 계획서','위원회 운영규정','위원회 회의록','재해 기록 보존','하도급 업체 선정 및 평가 기준','안전·보건관리책임자 업무 수행 평가','중대재해 대응 매뉴얼','비상사태 시나리오','비상사태 모의 훈련 결과 보고서'];
-const rainChecks=['기상특보 확인','장화 및 우의 확보','분전반 및 차단기 점검','자재 보양상태 점검','굴착사면 보양','양수기 비치','배수로 점검'];
-const rainDetailChecks=['기상특보 확인','장화 및 우의 확보','분전반과 주 전원 차단기 확인','자재 보양상태 점검','굴착 사면 방수 덮개 확인','수중 배수 펌프 비치 확인','배수로 점검'];
-const windChecks=['장비의 안전한 이동 및 고정','자재와 공구의 안전한 보관','임시 시설물과 폐기물 정리·고정','배수 및 긴급 복구 장비 확보','지붕·외벽의 설치물 고정','도로와 배수 경로 정비','침수 위험 구역의 사전 조치','대피 장소와 이동 경로 안내','기상 예보와 경보 확인'];
-const thawChecks=['굴착 경사와 균열 확인','지표수 유입 차단','낙석·붕괴 방호와 출입 제한','굴착 지반 안정 및 지지 구조 확인','토류 구조물 손상·변위 확인','계측 결과 확인과 이상 조치','배면 토사 유실 방지','주변 지반의 수분·동결 확인','굴착 가장자리 차량·적치 제한','인접 지반과 건물 변형 확인','매설 설비 보호','장비 설치면 지지력과 받침 확인','콘크리트 강도 및 지지 기간 확인','작업 발판과 지지 구조 변형 확인','지지 구조의 받침과 바닥 상태 확인'];
-const heatChecks=['기상 변화와 열 위험 안내','더운 시간대 작업 조정과 휴식','장비 냉각 상태 확인','위생시설 청결 유지','그늘과 휴게 공간 준비','환기 부족 장소 확인','인화성 용기 보관 상태','자체 발열 물질의 보관·환기'];
-const coldChecks=['한파 알림과 작업 기준 공유','저체온·동상·미끄럼 위험 안내','방한 보호구 확보','난방 휴게 장소와 온음료','통행 구간 결빙 확인','제설·제빙 물품 확보','고소·양중 작업 제한 검토','동파 위험 설비 보온','저온 콘크리트 양생 확인','응급 대응 및 이송 절차 안내'];
-const wetSeasonChecks=['강우 예상과 물길 확보','침수 대비 물품 준비','경사지 표면 보호','굴착 가장자리 접근 제한','옹벽 배수구 상태','흙 유실 예방'];
-const heavyRainChecks=['기상 경보 파악','우천 보호 장비 준비','전기 설비의 물기 차단','자재 손상 방지','굴착 경사 보호','배수 펌프 준비','물 흐름 통로 확인','긴급 대응 인원 계획','연락 체계 준비','임시 경계 시설 확인','침수 우려 장소 확인'];
-const electricalChecks=['임시 전기 설비 침수 방지','전기 설비 접근 경고','배전함 잠금 확인','회로 식별 표시','노출 충전부 보호','통행 구간 전선 보호','실외 전원 연결부 방수','전선 외피 손상 확인','양수 장비 누전 보호','전기 접속부 절연','양수 장비 인양 안전','전기 기구 접지 확인'];
-const fireChecks=['가연성 물질과 열원 분리','소화 장비 준비','불꽃 차단 설비','작업 주변 위험물 정리','화기 작업장 소화 장비 배치'];
-const formworkChecks=['지지 구조의 설치 상태','받침 연결부 고정 방식','가로 연결 부재 상태','경사면 지지 구조 조립','조립·해체 책임자 지정','부재의 손상 및 변형','하부 콘크리트 강도 확인'];
-const fallingChecks=['임시 시설과 안내 표시','높은 장소의 자재 고정','낙하 방지 설비 상태','자재 정리와 보관','양중 장비 충돌 예방','기상 악화 시 작업 관리','양중 장비 고정 장치','신호 인원과 작업 구역'];
-const confinedChecks=['밀폐 장소의 환기','분무 작업 보호구','비상 구조 장비 준비','유해 물질 작업 관리'];
-const excavationChecks=['현장 주변 지반 확인','굴착 지지대 변형 방지','흙막이 뒤 빈 공간 확인','젖은 지지 부재 보강','굴착 경사와 배수','굴착 가장자리 중량물 제한','임시 지지 시설 상태','차량·장비 전도 예방'];
-const semiannualChecks=['사업장 이름','안전 관리 책임자','사업장 위치','위험요인 파악과 개선','안전 관리 업무 평가','종사자 의견과 개선 조치','사고 대응 절차 준비','협력 업무의 안전 기준','관련 의무 이행 확인','안전 교육 이행 확인','주요 개선 내용'];
-const morningChecks=['공정별 인원 수','안전체조','안전구호 3회','작업 불능자 확인','보호구 확인','위험 지역 사진','위험 지역 및 임시 수전설비 안내','안전점검 조치 사항','안전관련 특이 사항'];
-const afternoonChecks=['공정별 인원 수','음주자 확인','작업 불능자 확인','보호구 확인','오후 투입자 위험 지역 및 설비 안내','현장 정리 정돈','오후 추가 작업'];
-const eveningChecks=['주 출입구 확인','현장 정리','현장 사무실 확인','잔여 인원 확인','기계공구 및 안전모 확인','자재 적치장 확인','폐기물 적치장 확인','가설울타리 개방구 확인','작업용 전원 확인','야간 작업 인원·작업명·완료시간'];
 const safetyLogFields={weather:'날씨',todayWork:'금일 업무추진 현황',tomorrowWork:'명일 업무추진 계획',notices:'공지사항',training:'일일안전교육 및 TBM',inspection:'점검결과 및 지시사항',notes:'특기사항',supplies:'안전용품 반입 및 검수',inspector:'점검주체',participants:'참여자',inspectionResult:'점검결과',findings:'지적사항'};
 const dailyRows={labor:'인력',equipment:'장비',materials:'자재'};
 const readDailyRow=row=>Object.fromEntries(['name','quantity','previous','day','unit','specification'].map(key=>[key,row.querySelector(`[data-daily="${key}"]`)?.value||'']));
