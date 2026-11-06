@@ -755,8 +755,20 @@ test('현재 활동과 사본 조회가 겹치면 마지막으로 선택한 결�
 
 test('제한 관리자는 배정 현장의 출역 기간으로 근로자를 검색한다',async()=>{
   const ui=screen(async path=>response(path==='/api/sites'?sites:[]));ui.state.page='workers';ui.state.admin={id:4,scope:'restricted'};ui.state.workerFilters={};await ui.context.renderRestrictedWorkforce();
-  assert.match(ui.content.innerHTML,/출역 시작일/);ui.get('#restricted-worker-from').value='2026-11-01';ui.get('#restricted-worker-to').value='2026-11-06';ui.get('#restricted-worker-search').onclick();await ui.context.renderPending;
+  assert.match(ui.content.innerHTML,/출역 시작일/);ui.get('#restricted-worker-from').value='2026-11-01';ui.get('#restricted-worker-to').value='2026-11-06';await ui.get('#restricted-worker-search').onclick();
   const params=new URLSearchParams(ui.requests.at(-1).path.split('?')[1]);assert.equal(params.get('siteId'),'1');assert.equal(params.get('attendanceFrom'),'2026-11-01');assert.equal(params.get('attendanceTo'),'2026-11-06');assert.match(ui.content.innerHTML,/검색 결과가 없습니다/);
   const before=ui.requests.length;ui.get('#restricted-worker-from').value='2026-11-07';ui.get('#restricted-worker-to').value='2026-11-06';ui.get('#restricted-worker-search').onclick();assert.equal(ui.requests.length,before);assert.match(ui.flashes.at(-1),/기간/);
   const previous=ui.get('#restricted-worker-search').onclick;ui.context.detailEpoch++;ui.state.siteId=2;previous();assert.equal(ui.requests.length,before);
+});
+
+test('제한 관리자 출역 검색은 실패해도 입력을 보존하고 재시도한다',async()=>{
+  let fail=false;const ui=screen(async()=>fail?{ok:false,status:500,json:async()=>({error:'가상 연결 실패'})}:response([]));ui.state.page='workers';ui.state.admin={id:4,scope:'restricted'};ui.state.workerFilters={};await ui.context.renderRestrictedWorkforce();
+  const button=ui.get('#restricted-worker-search');ui.get('#restricted-worker-from').value='2026-11-01';ui.get('#restricted-worker-to').value='2026-11-06';fail=true;await button.onclick();assert.match(ui.errors.at(-1),/가상 연결 실패/);assert.equal(button.disabled,false);assert.equal(ui.get('#restricted-worker-from').value,'2026-11-01');assert.match(ui.content.innerHTML,/배정 현장 근로자/);assert.equal(ui.state.workerFilters.attendanceFrom,undefined);
+  fail=false;await button.onclick();const query=new URLSearchParams(ui.requests.at(-1).path.split('?')[1]);assert.equal(query.get('attendanceFrom'),'2026-11-01');assert.equal(query.get('attendanceTo'),'2026-11-06');assert.match(ui.content.innerHTML,/검색 결과가 없습니다/);
+});
+
+test('제한 관리자 출역 검색 중 중복 요청과 입력 변경을 막고 다른 현장 응답은 무시한다',async()=>{
+  const wait=delayed();let waiting=false;const ui=screen(async()=>waiting?wait.promise:response([]));ui.state.page='workers';ui.state.admin={id:4,scope:'restricted'};ui.state.workerFilters={};await ui.context.renderRestrictedWorkforce();
+  ui.get('#restricted-worker-from').value='2026-11-01';ui.get('#restricted-worker-to').value='2026-11-06';waiting=true;const button=ui.get('#restricted-worker-search'),pending=button.onclick(),count=ui.requests.length;assert.equal(button.disabled,true);assert.equal(ui.get('#restricted-worker-from').disabled,true);assert.equal(ui.get('#restricted-worker-to').disabled,true);await button.onclick();assert.equal(ui.requests.length,count);
+  ui.context.detailEpoch++;ui.state.siteId=2;ui.content.innerHTML='새 현장';wait.resolve(response([{id:3,name:'이전 가상 정보'}]));await pending;assert.equal(ui.content.innerHTML,'새 현장');
 });
