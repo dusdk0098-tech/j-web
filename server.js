@@ -1146,7 +1146,7 @@ const server = http.createServer((req,res)=>passwordRequests.run(true,()=>adminR
     const workerJoin=url.pathname.match(/^\/api\/workers\/(\d+)\/join-record(?:\/(signature))?$/);
     if(workerJoin&&req.method==='GET'){
       const siteId=url.searchParams.get('siteId');
-      if(!workerJoin[2])return json(res,200,store.joinAcknowledgement(siteId,workerJoin[1]));
+      if(!workerJoin[2]){const record=store.joinAcknowledgement(siteId,workerJoin[1]);if(record){const contact=store.db.prepare('SELECT phone,address FROM worker_contacts WHERE worker_id=?').get(Number(workerJoin[1]));record.currentContact=contact?{phone:contact.phone,address:contact.address}:{phone:record.profile?.phone||'',address:record.profile?.address||''};}checkRequestSession(req);return json(res,200,record);}
       const signature=store.joinSignature(siteId,workerJoin[1]);if(!signature)return json(res,404,{error:'시험 서명을 찾을 수 없습니다.'});
       res.writeHead(200,{'Content-Type':'application/octet-stream','Content-Disposition':'attachment; filename="test-join-signature.png"','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(signature);
     }

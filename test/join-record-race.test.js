@@ -104,3 +104,7 @@ test('이전 목록 버튼은 현장 변경·복귀 및 페이지 이동 중 조
   }
   const ui=screen();ui.bind(11)();assert.equal(ui.requests[0].url,'/api/workers/11/join-record?siteId=1');
 });
+
+test('가입 당시 정보와 현재 연락처는 구분하여 안전하게 표시한다',async()=>{
+ const ui=screen(),pending=ui.open(11),data=record('가입 전화');data.currentContact={phone:'<현재 전화>',address:'<현재 주소>'};ui.requests[0].resolve(data);await pending;const html=ui.snapshot().html;assert.match(html,/가입 당시 기록/);assert.match(html,/가입 전화/);assert.match(html,/현재 가상 전화번호: &lt;현재 전화&gt;/);assert.match(html,/현재 가상 주소: &lt;현재 주소&gt;/);
+});
