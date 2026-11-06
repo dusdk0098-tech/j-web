@@ -130,6 +130,7 @@ assets.add('/checklist-copy.js');
 assets.add('/permit-sources.js');
 assets.add('/permit-measures.js');
 assets.add('/worker-invitation.js');
+assets.add('/contractor-invitation.js');
 assets.add('/worker-password.js');
 assets.add('/safety-cost.js');
 assets.add('/weekly-ppe.js');
@@ -543,6 +544,13 @@ const server = http.createServer((req,res)=>passwordRequests.run(true,()=>adminR
       const input=req.method==='GET'?undefined:await body(req,120000),authorize=()=>{checkWorkerReport(req,key,session,input);const doc=store.workerDocument(session.worker.site_id,session.worker.id,workerPermitRecords[1]);if(doc.type!=='permit')throw new Error('작업허가서를 확인해 주세요.');};
       if(input){const recordId=workerPermitRecords[3]??null,isCheck=workerPermitRecords[2]==='checks';if(recordId&&(typeof input.expectedVersion!=='string'||!/^[a-f0-9]{64}$/.test(input.expectedVersion)))throw Object.assign(new Error('기록을 다시 조회해 주세요.'),{sessionStatus:409});if(req.method==='DELETE'){if(isCheck)store.deletePermitCheck(workerPermitRecords[1],recordId,authorize,input.expectedVersion);else store.deletePermitExtension(workerPermitRecords[1],recordId,authorize,input.expectedVersion);return json(res,200,{ok:true});}const id=isCheck?store.savePermitCheck(workerPermitRecords[1],input,recordId,authorize):store.savePermitExtension(workerPermitRecords[1],input,recordId,authorize);return json(res,req.method==='POST'?201:200,{id});}
       authorize();const checks=store.permitChecks(workerPermitRecords[1]),extensions=store.permitExtensions(workerPermitRecords[1]);authorize();return json(res,200,{checks,extensions});
+    }
+    const contractorInvitation=url.pathname.match(/^\/api\/worker\/company-workers\/([1-9]\d*)\/invitation$/);
+    if(contractorInvitation&&req.method==='POST'){
+      const key=workerKey(workerToken),session=workerSessions.get(key);if(!session||session.expires<=Date.now())return json(res,401,{error:'근로자 로그인이 필요합니다.'});const input=await body(req),siteId=session.worker.site_id,actorId=session.worker.id,workerId=Number(contractorInvitation[1]);
+      if(!input||Object.keys(input).some(key=>!['version','reportContext'].includes(key)))throw new Error('가입 QR 발급 요청을 확인해 주세요.');
+      const authorize=()=>{checkWorkerReport(req,key,session,input);store.assertContractorInvitationScope(siteId,actorId,workerId);};
+      const result=await issueWorkerInvitationQr(store,siteId,workerId,input.version,requestOrigin,link=>QRCode.toDataURL(link,{errorCorrectionLevel:'M',margin:4,width:512}),authorize);authorize();return result?json(res,201,result):json(res,409,{error:'가입 주소가 중지되었습니다. 다시 발급해 주세요.'});
     }
     const contractorWorker=url.pathname.match(/^\/api\/worker\/company-workers\/(\d+)$/);
     if(contractorWorker&&req.method==='PUT'){const key=workerKey(workerToken),session=workerSessions.get(key);if(!session||session.expires<=Date.now())return json(res,401,{error:'근로자 로그인이 필요합니다.'});const input=await body(req);store.updateContractorWorker(session.worker.site_id,session.worker.id,contractorWorker[1],input,()=>checkWorkerReport(req,key,session,input));return json(res,200,{ok:true});}
