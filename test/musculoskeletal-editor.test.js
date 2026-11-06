@@ -27,7 +27,7 @@ function rowNode(){
 }
 function screen(t,rows=[],companies=[],initialScale='3x3'){
   const previous=globalThis.document;globalThis.document={createElement:rowNode};t.after(()=>{if(previous===undefined)delete globalThis.document;else globalThis.document=previous;});
-  const submit={disabled:false},events=[],list={children:[],append(row){this.children.push(row);row.remove=()=>{this.children.splice(this.children.indexOf(row),1);};},addEventListener(){},querySelectorAll(selector){return this.children.flatMap(row=>row.querySelectorAll(selector));}},controls={'[data-mus-list]':list,'[data-mus-status]':{textContent:''},'[data-mus-add]':{},'[data-mus-delete]':{},'[data-mus-select-all]':{},'[data-mus-delete-all]':{}},direct={disabled:false,fieldsetDisabled:false,matches(selector){assert.equal(selector,':disabled');return this.disabled||this.fieldsetDisabled;}};
+  const submit={disabled:false},events=[],list={children:[],handlers:{},append(row){this.children.push(row);row.parentElement=this;row.remove=()=>{this.children.splice(this.children.indexOf(row),1);};},addEventListener(type,fn){this.handlers[type]=fn;},querySelectorAll(selector){return this.children.flatMap(row=>row.querySelectorAll(selector));}},controls={'[data-mus-list]':list,'[data-mus-status]':{textContent:''},'[data-mus-add]':{},'[data-mus-delete]':{},'[data-mus-select-all]':{},'[data-mus-delete-all]':{}},direct={disabled:false,fieldsetDisabled:false,matches(selector){assert.equal(selector,':disabled');return this.disabled||this.fieldsetDisabled;}};
   controls['[data-mus-direct]']=direct;
   const form={querySelector(selector){assert.equal(selector,'button[type=submit]');return submit;}},container={querySelector(selector){return controls[selector];},closest(selector){assert.equal(selector,'form');return form;},dispatchEvent(event){events.push(event);}};
   const scale={value:initialScale},editor=mountMusculoskeletal(container,{rows,companies,scale:()=>scale.value});
@@ -179,4 +179,20 @@ test('근골격계 전체 선택과 삭제는 확인과 기존 항목 선택을 
   ui.controls['[data-mus-delete-all]'].onclick();assert.equal(ui.editor.read().length,2);assert.equal(ui.events.length,0);
   ui.list.children[0].selected.checked=true;ui.controls['[data-mus-delete]'].onclick();assert.equal(ui.editor.read().length,1);assert.equal(ui.editor.read()[0].task,'가상 B');assert.equal(ui.events.length,1);
   approve=true;ui.submit.disabled=true;all.checked=true;all.onchange();ui.controls['[data-mus-delete]'].onclick();ui.controls['[data-mus-delete-all]'].onclick();assert.equal(ui.editor.read().length,1);assert.equal(ui.editor.read()[0].selected,false);ui.submit.disabled=false;ui.controls['[data-mus-delete-all]'].onclick();assert.equal(ui.editor.read().length,0);assert.equal(all.checked,false);assert.equal(ui.events.length,2);
+});
+
+test('개별 항목 삭제와 추가는 전체 선택 상태와 수정 여부를 갱신한다',t=>{
+  const ui=screen(t,[{task:'가상 A',selected:true},{task:'가상 B',selected:false}]),all=ui.controls['[data-mus-select-all]'];
+  const remove={closest:()=>ui.list.children[1],matches:selector=>selector==='[data-mus-remove]'};
+  ui.submit.disabled=true;ui.list.handlers.click({target:remove});assert.equal(ui.editor.read().length,2);assert.equal(ui.events.length,0);
+  ui.submit.disabled=false;ui.list.handlers.click({target:remove});assert.equal(ui.editor.read().length,1);assert.equal(all.checked,true);assert.equal(all.indeterminate,false);assert.equal(ui.events.length,1);
+  ui.controls['[data-mus-add]'].onclick();assert.equal(ui.editor.read().length,2);assert.equal(all.checked,true);assert.equal(ui.events.length,2);
+});
+
+test('근골격계 순서 변경은 수정 상태를 알리고 저장 중에는 움직이지 않는다',t=>{
+  const ui=screen(t,[{task:'가상 A'},{task:'가상 B'}]),first=ui.list.children[0],second=ui.list.children[1];
+  first.nextElementSibling=second;ui.list.insertBefore=(node,before)=>{ui.list.children.splice(ui.list.children.indexOf(node),1);ui.list.children.splice(ui.list.children.indexOf(before),0,node);};
+  let focus=0;const down={closest:()=>first,matches:selector=>selector==='[data-mus-down]'||selector==='[data-mus-up],[data-mus-down]',focus:()=>focus++};
+  ui.submit.disabled=true;ui.list.handlers.click({target:down});assert.deepEqual(ui.editor.read().map(row=>row.task),['가상 A','가상 B']);assert.equal(ui.events.length,0);
+  ui.submit.disabled=false;ui.list.handlers.click({target:down});assert.deepEqual(ui.editor.read().map(row=>row.task),['가상 B','가상 A']);assert.equal(ui.events.length,1);assert.equal(focus,1);
 });
