@@ -27,3 +27,7 @@ test('서버는 계산 모듈을 제공한다',{timeout:30000},async()=>{
   try{await Promise.race([once(child.stdout,'data'),once(child,'exit').then(()=>{throw Error('시험 서버가 종료됐습니다.');})]);const response=await fetch(`http://127.0.0.1:${port}/safety-cost.js`);assert.equal(response.status,200);assert.match(response.headers.get('content-type'),/javascript/);assert.match(await response.text(),/export function safetyCostAmount/);}
   finally{if(child.exitCode===null&&!child.signalCode){const exited=once(child,'exit');child.kill();await exited;}rmSync(dir,{recursive:true,force:true});}
 });
+
+test('새 사용내역은 항목을 선택하기 전 첫 분류를 자동 지정하지 않는다',()=>{
+ const source=readFileSync(new URL('../public/app.js',import.meta.url),'utf8'),start=source.indexOf("    $('#new-cost').onclick="),end=source.indexOf('\n',start),nodes={'#new-cost':{},'#dialog-form [name=unitPrice]':{value:''},'#dialog-form [name=quantity]':{value:''},'#cost-amount':{textContent:''}};let markup;const context={$:key=>nodes[key],showDialog:(_title,html)=>{markup=html;},costCategories:['분류 하나','분류 둘'],esc:String,field:()=>'',today:()=>'',api(){},siteId:1,bindSafetyCostAmount};runInNewContext(source.slice(start,end),context);nodes['#new-cost'].onclick();assert.match(markup,/<select name="category" required><option value="">항목 선택<\/option><option value="1">/);assert.match(markup,/분류 둘/);
+});
