@@ -1241,7 +1241,7 @@ const server = http.createServer((req,res)=>passwordRequests.run(true,()=>adminR
     const checklistPhoto=url.pathname.match(/^\/api\/documents\/(\d+)\/checklist-photos\/(\d+)$/);
     if(checklistPhoto&&req.method==='GET'){
       const doc=store.document(checklistPhoto[1]),file=store.attachment(checklistPhoto[2]);
-      if(!doc||doc.type!=='checklist'||JSON.parse(doc.details).kind!=='morning'||!file||file.document_id!==doc.id||file.category!=='morning_hazard_photo')return json(res,404,{error:'점검 항목 사진을 찾을 수 없습니다.'});
+      if(!doc||doc.type!=='checklist'||!file||file.document_id!==doc.id||!((JSON.parse(doc.details).kind==='morning'&&file.category==='morning_hazard_photo')||(JSON.parse(doc.details).kind==='wind'&&file.category==='wind_check_photo')))return json(res,404,{error:'점검 항목 사진을 찾을 수 없습니다.'});
       const mime=Buffer.from(file.data).subarray(0,3).equals(Buffer.from('ffd8ff','hex'))?'image/jpeg':'image/png';
       res.writeHead(200,{'Content-Type':mime,'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(file.data);
     }
