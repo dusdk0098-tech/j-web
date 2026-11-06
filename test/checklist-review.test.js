@@ -21,5 +21,6 @@ test('결재 상세는 종류별 문항에 저장된 답변과 비고를 연결�
   const current=render({type:'checklist',details:JSON.stringify({kind:'rain_detail',answers})});
   assert.match(old,/양수기 비치/);assert.doesNotMatch(old,/수중 배수 펌프/);assert.match(current,/수중 배수 펌프/);
   const heatAnswers=Array.from({length:8},()=>({answer:'O',note:''}));const oldHeat=render({type:'checklist',details:JSON.stringify({kind:'heat',answers:heatAnswers})}),newHeat=render({type:'checklist',details:JSON.stringify({kind:'heat_detail',answers:heatAnswers})});assert.doesNotMatch(oldHeat,/오후 1~3시/);assert.match(newHeat,/오후 1~3시/);
+  const coldAnswers=Array.from({length:10},()=>({answer:'O',note:''}));const oldCold=render({type:'checklist',details:JSON.stringify({kind:'cold',answers:coldAnswers})}),newCold=render({type:'checklist',details:JSON.stringify({kind:'cold_detail',answers:coldAnswers})});assert.doesNotMatch(oldCold,/영하 작업 중지/);assert.match(newCold,/영하 작업 중지/);
   const malformed=render({type:'checklist',details:JSON.stringify({kind:'rain',answers:[{answer:'X',note:'보존'}]})});assert.match(malformed,/보존/);
 });
