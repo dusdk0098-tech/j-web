@@ -752,3 +752,11 @@ test('위험성평가 결재 사본은 요청 당시 평가·활동과 파일을
 test('현재 활동과 사본 조회가 겹치면 마지막으로 선택한 결과를 유지한다',async()=>{
  const doc={id:5,site_id:1,type:'risk',title:'가상',details:'{}'},wait=delayed(),snapshot={cycleId:8,title:'선택한 사본',date:'2026-11-03',createdAt:'',details:{items:[]},activities:[]};const ui=screen(async path=>path.endsWith('/risk-activity-view')?wait.promise:response(path.endsWith('/risk-activity-snapshot')?{snapshot}:doc));ui.state.page='documents';ui.state.detail=5;await ui.context.renderRestrictedDocuments();const pending=ui.get('#restricted-risk-activities').onclick();await ui.get('#restricted-risk-snapshot').onclick();assert.match(ui.get('#restricted-risk-results').innerHTML,/선택한 사본/);wait.resolve(response([]));await pending;assert.match(ui.get('#restricted-risk-results').innerHTML,/선택한 사본/);
 });
+
+test('제한 관리자는 배정 현장의 출역 기간으로 근로자를 검색한다',async()=>{
+  const ui=screen(async path=>response(path==='/api/sites'?sites:[]));ui.state.page='workers';ui.state.admin={id:4,scope:'restricted'};ui.state.workerFilters={};await ui.context.renderRestrictedWorkforce();
+  assert.match(ui.content.innerHTML,/출역 시작일/);ui.get('#restricted-worker-from').value='2026-11-01';ui.get('#restricted-worker-to').value='2026-11-06';ui.get('#restricted-worker-search').onclick();await ui.context.renderPending;
+  const params=new URLSearchParams(ui.requests.at(-1).path.split('?')[1]);assert.equal(params.get('siteId'),'1');assert.equal(params.get('attendanceFrom'),'2026-11-01');assert.equal(params.get('attendanceTo'),'2026-11-06');assert.match(ui.content.innerHTML,/검색 결과가 없습니다/);
+  const before=ui.requests.length;ui.get('#restricted-worker-from').value='2026-11-07';ui.get('#restricted-worker-to').value='2026-11-06';ui.get('#restricted-worker-search').onclick();assert.equal(ui.requests.length,before);assert.match(ui.flashes.at(-1),/기간/);
+  const previous=ui.get('#restricted-worker-search').onclick;ui.context.detailEpoch++;ui.state.siteId=2;previous();assert.equal(ui.requests.length,before);
+});

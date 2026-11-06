@@ -47,6 +47,7 @@ test('제한 관리자 근로자·출역 HTTP: 소유 현장, 필드 경계, 지
   const day='2026-11-02',attendance={siteId:a.id,workerId:wa.id,date:day,present:true,expectedDayVersion:0};
   assert.equal((await send('/api/attendance','POST',attendance,cookie)).status,200);
   let daily=(await read(`/api/attendance?siteId=${a.id}&date=${day}`)).find(w=>w.id===wa.id);assert.equal(daily.present,1);
+  const workerFilter=`attendanceFrom=${day}&attendanceTo=${day}`;assert.deepEqual((await read(`/api/workers?siteId=${a.id}&${workerFilter}`)).map(w=>w.id),[wa.id]);assert.deepEqual(await read(`/api/workers?siteId=${a.id}&attendanceFrom=2026-11-03`),[]);assert.equal((await send(`/api/workers?siteId=${b.id}&${workerFilter}`,'GET',null,cookie)).status,403);
   for(const key of ['birth_date','phone','daily_rate','salary_kind','salary_amount'])assert.equal(Object.hasOwn(daily,key),false,key);
   assert.equal((await send('/api/attendance/units','PUT',{siteId:a.id,workerId:wa.id,date:day,units:'1.25',expectedDayVersion:daily.day_version},cookie)).status,200);
   const monthly=(await read(`/api/attendance/month?siteId=${a.id}&month=2026-11`)).find(w=>w.id===wa.id);assert.deepEqual(monthly.days,[day]);assert.equal(monthly.units[0].units_hundredths,125);for(const key of ['daily_rate','salary_kind','salary_amount','estimated_pay'])assert.equal(Object.hasOwn(monthly.units[0],key),false,key);
