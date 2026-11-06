@@ -23,3 +23,12 @@ test('연결·모바일 CSS·기존 PDF/선택 인쇄 보존',()=>{const app=rea
 test('가상 UI: 시간 초과와 화면 전환 감시 정리',async()=>{const oldTimeout=globalThis.setTimeout,oldInterval=globalThis.setInterval;let timeout,poll,release;globalThis.setTimeout=fn=>{timeout=fn;return 0;};globalThis.setInterval=fn=>{poll=fn;return 0;};try{const h=harness(()=>new Promise(resolve=>release=resolve));const pending=h.button.onclick();timeout();assert.match(h.nodes['[data-status]'].textContent,/초과/);release(plan);await pending;assert.equal(h.nodes['[data-output]'].innerHTML,undefined);assert.equal(h.prints,0);h.leave();poll();assert.equal(h.dialog.isConnected,false);assert.equal(h.button.disabled,false);}finally{globalThis.setTimeout=oldTimeout;globalThis.setInterval=oldInterval;}});
 
 test('수기 출력 소유권: 다른 인쇄 차단·취소/오류 해제·이전 해제 재진입 안전',async()=>{const {reservePlanPrint}=await import('../public/plan-print-lock.js');const h=harness();await h.button.onclick();assert.equal(reservePlanPrint(h.view),null);h.close();const first=reservePlanPrint(h.view);assert.equal(typeof first,'function');first();const second=reservePlanPrint(h.view);first();assert.equal(reservePlanPrint(h.view),null);second();const held=reservePlanPrint(h.view);await h.button.onclick();assert.equal(h.dialog.isConnected,false);held();const failed=harness(async()=>{throw Error('준비 실패');});await failed.button.onclick();assert.equal(failed.dialog.isConnected,false);const next=reservePlanPrint(failed.view);assert.equal(typeof next,'function');next();});
+
+test('수기 양식은 구분과 항목의 쌍을 보존하고 같은 쌍만 중복 제거한다',()=>{
+ const rows=[{name:'공통 항목',section:'가상 <구분 A>',result:'비밀판정',action:'비밀조치'},{name:'공통 항목',section:'가상 구분 B'},{name:'공통 항목',section:'가상 <구분 A>'},{name:'이전 항목'}],html=manualPlanMarkup(plan,equipment,[{equipment_id:1,items:JSON.stringify(rows)}],fields);
+ assert.match(html,/<th>점검 구분<\/th>/);assert.match(html,/가상 &lt;구분 A&gt;/);assert.doesNotMatch(html,/<구분 A>|비밀판정|비밀조치/);assert.equal((html.match(/공통 항목/g)||[]).length,2);assert.match(html,/<td><\/td><td>이전 항목<\/td>/);
+});
+test('인쇄 직전 점검 구분이 바뀌면 인쇄를 중단한다',async()=>{
+ let changed=false;const h=harness(async path=>path.includes('equipment-checks')?[{equipment_id:1,items:JSON.stringify([{name:'가상 항목',section:changed?'변경':'이전'}])}]:path.includes('/api/equipment?')?equipment:plan);
+ try{await h.button.onclick();changed=true;await h.nodes['[data-print]'].onclick();assert.equal(h.prints,0);assert.match(h.nodes['[data-status]'].textContent,/변경/);}finally{h.close();}
+});
