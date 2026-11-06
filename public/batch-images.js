@@ -18,8 +18,13 @@ export async function freezeBatchImages(images,active,{fetchImage=fetch,urls=URL
       blob=new Blob([Uint8Array.from(atob(match[2]),char=>char.charCodeAt(0))],{type:match[1]});
     }else{
       const response=await fetchImage(source,{credentials:'same-origin',redirect:'error',cache:'no-store',signal:AbortSignal.timeout(instruction?60000:15000)});
-      if(!response.ok)throw Error('출력 이미지를 다시 확인하지 못했습니다.');
-      const length=Number(response.headers?.get('content-length'));if(length>limit)throw Error('출력 이미지 형식 또는 크기를 확인해 주세요.');if(length>remaining)throw Error('선택 출력의 이미지 합계는 100MB를 초과할 수 없습니다.');
+      const length=Number(response.headers?.get('content-length'));
+      if(!response.ok||length>limit||length>remaining){
+        try{await response.body?.cancel();}catch{}
+        if(!response.ok)throw Error('출력 이미지를 다시 확인하지 못했습니다.');
+        if(length>limit)throw Error('출력 이미지 형식 또는 크기를 확인해 주세요.');
+        throw Error('선택 출력의 이미지 합계는 100MB를 초과할 수 없습니다.');
+      }
       blob=await response.blob();
     }
     if(!['image/png','image/jpeg','image/webp','image/gif'].includes(blob.type)||!blob.size||blob.size>limit)throw Error('출력 이미지 형식 또는 크기를 확인해 주세요.');if(blob.size>remaining)throw Error('선택 출력의 이미지 합계는 100MB를 초과할 수 없습니다.');
