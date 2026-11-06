@@ -4,6 +4,12 @@ export function setWorkerInvitationMode(form,existing){
   for(const name of ['category','company','occupation']){const field=form.elements[name];field.disabled=existing;field.closest('label').hidden=existing;}
 }
 
+export function validateWorkerInvitation(issued,origin){
+  const url=new URL(issued.link);
+  if(url.origin!==origin||url.pathname!=='/join'||url.hash||[...url.searchParams.keys()].some(key=>key!=='token')||url.searchParams.getAll('token').length!==1||!/^[\w-]{43}$/.test(url.searchParams.get('token')||'')||typeof issued.image!=='string'||!issued.image.startsWith('data:image/png;base64,')||!Number.isFinite(issued.expiresAt)||issued.expiresAt<=Date.now()||!Number.isFinite(new Date(issued.expiresAt).getTime()))throw Error('가입 QR 응답을 확인해 주세요.');
+  return url;
+}
+
 export function mountWorkerInvitation(anchor,worker,api,current,doc=globalThis.document){
   if(worker.has_account)return;
   const box=doc.createElement('div'),button=doc.createElement('button'),result=doc.createElement('div');
@@ -15,8 +21,7 @@ export function mountWorkerInvitation(anchor,worker,api,current,doc=globalThis.d
     try{
       const issued=await api(`/api/workers/${worker.id}/invitation`,{method:'POST',body:JSON.stringify({siteId:worker.site_id,version:worker.version})},active);
       if(!active())return;
-      const url=new URL(issued.link),origin=globalThis.location.origin;
-      if(url.origin!==origin||url.pathname!=='/join'||url.hash||[...url.searchParams.keys()].some(key=>key!=='token')||url.searchParams.getAll('token').length!==1||!/^[\w-]{43}$/.test(url.searchParams.get('token')||'')||typeof issued.image!=='string'||!issued.image.startsWith('data:image/png;base64,')||!Number.isFinite(issued.expiresAt)||issued.expiresAt<=Date.now())throw Error('가입 QR 응답을 확인해 주세요.');
+      validateWorkerInvitation(issued,globalThis.location.origin);
       const image=doc.createElement('img'),address=doc.createElement('input'),note=doc.createElement('p'),close=doc.createElement('button');
       image.src=issued.image;image.alt='개인 가입 QR 코드';image.width=192;image.height=192;
       address.value=issued.link;address.readOnly=true;address.setAttribute('aria-label','개인 가입 주소');
