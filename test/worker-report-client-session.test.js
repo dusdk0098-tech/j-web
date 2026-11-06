@@ -19,3 +19,14 @@ for(const kind of ['stop','hazard']){
   test(kind+' 중복 전송 방지',async()=>{const ui=screen(kind),first=ui.submit();await ui.submit();assert.equal(ui.readers.length,1);ui.finish();await first;assert.equal(ui.requests.length,1);});
   for(const change of ['text','photo'])test(kind+' 전송 중 새 '+change+' 입력은 성공 후에도 보존한다',async()=>{const ui=screen(kind,false);let release;const gate=new Promise(resolve=>{release=resolve;});ui.context.fetch=async(url,options)=>{ui.requests.push({url,data:JSON.parse(options.body)});await gate;return {ok:true,status:201,json:async()=>({})};};const pending=ui.submit();if(change==='text')ui.fields[kind==='stop'?'reason':'body']='새 가상 입력';else ui.form.elements.photo.files=[{size:10,type:'image/png'}];release();await pending;assert.equal(ui.form.resets,0);assert.match(ui.status.textContent,/새 입력.*유지/);assert.equal(ui.button.disabled,false);});
 }
+
+for(const kind of ['stop','hazard'])for(const failure of ['network','broken-response','server-error'])test(kind+' 전송 결과가 불확실하면 중복을 경고하고 입력을 유지한다: '+failure,async()=>{
+  const ui=screen(kind,false);
+  ui.context.fetch=async()=>{if(failure==='network')throw new TypeError('Failed to fetch');if(failure==='broken-response')return {ok:true,status:201,json:async()=>{throw new SyntaxError('Unexpected end');}};return {ok:false,status:500,json:async()=>({error:'서버 오류'})};};
+  await ui.submit();assert.equal(ui.form.resets,0);assert.match(ui.status.textContent,/저장 여부.*확인/);assert.match(ui.status.textContent,/중복/);assert.equal(ui.button.disabled,false);
+});
+
+for(const kind of ['stop','hazard'])test(kind+' 저장 응답을 받는 중 세션이 바뀌면 저장 여부를 확인하도록 안내한다',async()=>{
+  const ui=screen(kind,false);ui.context.fetch=async()=>({ok:true,status:201,json:async()=>{ui.logout.disabled=true;return {};}});
+  await ui.submit();assert.equal(ui.form.resets,0);assert.match(ui.status.textContent,/저장 여부.*확인/);assert.match(ui.status.textContent,/중복/);
+});
