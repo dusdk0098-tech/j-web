@@ -1210,7 +1210,7 @@ const server = http.createServer((req,res)=>passwordRequests.run(true,()=>adminR
       const id=instructionPhotos[1],photoId=instructionPhotos[2];
       if(!photoId&&req.method==='GET')return json(res,200,store.instructionPhotos(id));
       if(!photoId&&req.method==='POST'){
-        const uploadedPhotoId=await receiveInstructionPhoto(req,bytes=>{let name;try{name=decodeURIComponent(req.headers['x-file-name']||'');}catch{throw new Error('사진 이름을 확인해 주세요.');}return store.addInstructionPhoto(id,url.searchParams.get('phase'),name,bytes);});
+        const uploadedPhotoId=await receiveInstructionPhoto(req,bytes=>{let name;try{name=decodeURIComponent(req.headers['x-file-name']||'');}catch{throw new Error('사진 이름을 확인해 주세요.');}return store.addAuthorizedInstructionPhoto(id,url.searchParams.get('phase'),name,bytes,()=>checkRequestSession(req));});
         return json(res,201,{id:uploadedPhotoId});
       }
       if(photoId&&req.method==='DELETE'){store.deleteInstructionPhoto(id,photoId);return json(res,200,{ok:true});}
