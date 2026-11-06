@@ -1113,6 +1113,8 @@ const server = http.createServer((req,res)=>passwordRequests.run(true,()=>adminR
     if(url.pathname==='/api/workers/joined-on'&&req.method==='GET'){if(req.adminRestricted)return json(res,403,{error:'전역 관리자 권한이 필요합니다.'});return json(res,200,store.joinedWorkersForDay(url.searchParams.get('siteId'),url.searchParams.get('date'),()=>checkRequestSession(req)));}
     if(url.pathname==='/api/workers/preview'&&req.method==='POST'){const input=await body(req),result=store.previewWorkers(input.siteId,input.items,()=>checkRequestSession(req));return json(res,200,result);}
     const worker=url.pathname.match(/^\/api\/workers\/(\d+)$/);
+    const workerDefaultPay=url.pathname.match(/^\/api\/workers\/(\d+)\/default-pay$/);
+    if(workerDefaultPay){if(req.adminRestricted)return json(res,403,{error:'전역 관리자 권한이 필요합니다.'});if(req.method==='GET'){const value=store.workerDefaultPay(url.searchParams.get('siteId'),workerDefaultPay[1]);checkRequestSession(req);return json(res,200,value);}if(req.method==='PUT'){const input=await body(req);return json(res,200,store.setWorkerDefaultPay(input.siteId,workerDefaultPay[1],input,()=>checkRequestSession(req)));}}
     const workerRegistration=url.pathname.match(/^\/api\/workers\/(\d+)\/registration\/general$/);
     if(workerRegistration&&req.method==='POST'){const input=await body(req);return json(res,200,store.convertWorkerRegistration(workerRegistration[1],input,()=>checkRequestSession(req)));}
     const workerPermissions=url.pathname.match(/^\/api\/workers\/(\d+)\/permissions$/);

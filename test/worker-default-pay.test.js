@@ -1,0 +1,27 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {Store} from '../store.js';
+
+test('기본 시험 급여는 새 출역에만 복사되고 기존 출역을 변경하지 않는다',()=>{
+ const s=new Store(':memory:');try{
+  const a=s.createSite({name:'가상 현장'}),b=s.createSite({name:'다른 현장'}),worker=s.createWorker({siteId:a.id,name:'가상',category:'직영',company:'가상',occupation:'목공'}),input={siteId:a.id,workerId:worker.id};
+  const pay=(kind,amount,version)=>s.setWorkerDefaultPay(a.id,worker.id,{siteId:a.id,kind,amount,version}),day=date=>s.attendance(a.id,date).find(row=>row.id===worker.id);
+  assert.deepEqual(s.workerDefaultPay(a.id,worker.id),{kind:null,amount:null,version:0});assert.throws(()=>s.workerDefaultPay(b.id,worker.id));
+  s.setAttendance({...input,date:'2024-01-01',present:true});pay('daily','0',0);s.setAttendance({...input,date:'2024-01-02',present:true});assert.equal(day('2024-01-01').daily_rate,null);assert.equal(day('2024-01-02').daily_rate,0);
+  assert.throws(()=>pay('daily','200',0),/변경/);assert.throws(()=>pay('monthly','',1));assert.throws(()=>pay('bad','10',1));assert.throws(()=>s.setWorkerDefaultPay(a.id,worker.id,{siteId:a.id,kind:'daily',amount:'10',version:1},()=>{throw Error('세션 종료');}),/세션 종료/);
+  pay('monthly','300',1);s.recordWorkerLogin(worker.id,'2024-01-03');assert.equal(day('2024-01-03').salary_kind,'monthly');assert.equal(day('2024-01-03').salary_amount,300);assert.equal(day('2024-01-02').daily_rate,0);
+  s.setAttendanceDailyRate({...input,date:'2024-01-02',dailyRate:'50'});s.recordWorkerLogin(worker.id,'2024-01-02');assert.equal(day('2024-01-02').daily_rate,50);
+  s.setAttendance({...input,date:'2024-01-02',present:false});s.setAttendance({...input,date:'2024-01-02',present:true});assert.equal(day('2024-01-02').daily_rate,50);
+  pay('','',2);s.recordWorkerLogin(worker.id,'2024-01-04');assert.equal(day('2024-01-04').daily_rate,null);assert.equal(day('2024-01-04').salary_kind,null);
+ }finally{s.close();}
+});
+
+test('기본 시험 급여 API는 전역 관리자만 허용하고 현장과 변경 충돌을 검사한다',{timeout:30000},async()=>{
+ const {mkdtempSync,rmSync}=await import('node:fs'),{tmpdir}=await import('node:os'),{join}=await import('node:path'),{createServer}=await import('node:net'),{spawn}=await import('node:child_process'),{once}=await import('node:events'),{AdminAccounts}=await import('../admin-accounts.js');
+ const dir=mkdtempSync(join(tmpdir(),'jweb-default-pay-')),s=new Store(join(dir,'jweb.sqlite')),site=s.createSite({name:'가상'}),other=s.createSite({name:'다른 현장'}),worker=s.createWorker({siteId:site.id,name:'가상',category:'직영',company:'가상',occupation:'목공'}),auth=new AdminAccounts(s.db);auth.create({loginId:'global_pay',name:'가상 전체 관리자',password:'virtual-admin-password',scope:'global'});auth.create({loginId:'restricted_pay',name:'가상 관리자',password:'virtual-password-123',scope:'restricted',siteIds:[site.id]});s.close();
+ const reserve=createServer();await new Promise(resolve=>reserve.listen(0,'127.0.0.1',resolve));const port=reserve.address().port;await new Promise(resolve=>reserve.close(resolve));const child=spawn(process.execPath,['server.js'],{cwd:process.cwd(),env:{...process.env,PORT:String(port),JWEB_DATA_DIR:dir,JWEB_ADMIN_PASSWORD:'virtual-admin-password'},stdio:['ignore','pipe','pipe']});
+ try{await Promise.race([once(child.stdout,'data'),once(child,'exit').then(()=>{throw Error('시험 서버 종료');})]);const call=(path,method='GET',data,cookie)=>fetch(`http://127.0.0.1:${port}${path}`,{method,headers:{...(data?{'content-type':'application/json'}:{}),...(cookie?{cookie}:{})},...(data?{body:JSON.stringify(data)}:{})}),admin=(await call('/api/login','POST',{loginId:'global_pay',password:'virtual-admin-password'})).headers.get('set-cookie').split(';')[0],restricted=(await call('/api/login','POST',{loginId:'restricted_pay',password:'virtual-password-123'})).headers.get('set-cookie').split(';')[0],path=`/api/workers/${worker.id}/default-pay`,query=`${path}?siteId=${site.id}`,value={siteId:site.id,kind:'daily',amount:'100',version:0};
+  assert.equal((await call(query)).status,401);assert.equal((await call(query,'GET',null,restricted)).status,403);assert.equal((await call(path,'PUT',value,restricted)).status,403);assert.equal((await call(`${path}?siteId=${other.id}`,'GET',null,admin)).status,400);assert.equal((await call(path,'PUT',value,admin)).status,200);assert.equal((await call(path,'PUT',value,admin)).status,409);assert.deepEqual(await (await call(query,'GET',null,admin)).json(),{kind:'daily',amount:100,version:1});
+  const attendance={siteId:site.id,workerId:worker.id,date:'2024-02-29',present:true};assert.equal((await call('/api/attendance','POST',attendance,admin)).status,200);const rows=await(await call(`/api/attendance?siteId=${site.id}&date=${attendance.date}`,'GET',null,admin)).json();assert.equal(rows[0].daily_rate,100);const limited=await(await call(`/api/attendance?siteId=${site.id}&date=${attendance.date}`,'GET',null,restricted)).json();assert.equal('daily_rate' in limited[0],false);
+ }finally{if(child.exitCode===null){const exited=once(child,'exit');child.kill();await exited;}rmSync(dir,{recursive:true,force:true});}
+});
