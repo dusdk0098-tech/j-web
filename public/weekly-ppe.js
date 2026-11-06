@@ -1,8 +1,13 @@
+import { checklistKindLabels } from './checklist-copy.js';
 const esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
 export function weeklyActivitySummaryMarkup(days){
   const kinds=[['notice','공지',day=>day.noticeReads],['tbm','TBM',day=>day.trainingByType.tbm],['education','교육',day=>day.trainingByType.education],['inspection','안전 점검'],['patrol','순회 점검'],['safety_log','안전 업무 일지'],['work_plan','작업계획서'],['checklist','체크리스트']];
   return `<section><h3>주간 가상 활동 합계</h3><p>문서는 모든 상태의 건수이며 확인은 승인된 문서별 시험 기록입니다. 같은 사람이 여러 문서를 확인하면 여러 건으로 계산됩니다. 확인 집계를 제공하지 않는 항목은 —로 표시합니다.</p><div class="table-wrap"><table><thead><tr><th>구분</th><th>문서</th><th>시험 확인 건수</th></tr></thead><tbody>${kinds.map(([type,label,checks])=>`<tr><td>${label}</td><td>${days.reduce((sum,day)=>sum+(day.documents[type]||0),0)}</td><td>${checks?days.reduce((sum,day)=>sum+checks(day),0):'—'}</td></tr>`).join('')}</tbody></table></div></section>`;
+}
+
+export function weeklyChecklistMarkup(days){
+  return `<section><h3>날짜별 가상 체크리스트 종류</h3><p>문서는 모든 상태의 건수입니다. 자가점검은 별도 저장된 기록이며 실제 제출이나 완료를 뜻하지 않습니다.</p><div class="table-wrap"><table><thead><tr><th>날짜</th><th>종류별 기록 수</th></tr></thead><tbody>${days.map(day=>{const counts=new Map();for(const check of day.checklists||[]){const label=Object.hasOwn(checklistKindLabels,check.kind)?checklistKindLabels[check.kind]:check.kind?'알 수 없는 종류':'종류 미기록';counts.set(label,(counts.get(label)||0)+1);}if(day.workerChecks)counts.set('출입자 자가점검',day.workerChecks);if(day.managerChecks)counts.set('관리자·직원 자가점검',day.managerChecks);return `<tr><td>${esc(day.date)}</td><td>${counts.size?[...counts].map(([label,count])=>`${esc(label)} ${esc(count)}건`).join(' · '):'기록 없음'}</td></tr>`;}).join('')}</tbody></table></div></section>`;
 }
 
 export function weeklyPpeMarkup(days){

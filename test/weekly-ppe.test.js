@@ -1,8 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { PNG } from 'pngjs';
+import { checklistQuestions } from '../public/checklist-copy.js';
 import { Store } from '../store.js';
-import { weeklyPpeMarkup,weeklyActivitySummaryMarkup } from '../public/weekly-ppe.js';
+import { weeklyPpeMarkup,weeklyActivitySummaryMarkup,weeklyChecklistMarkup } from '../public/weekly-ppe.js';
 
 test('주간 활동 합계는 문서와 시험 확인을 종류별로 분리해 합산한다',()=>{
   const days=[{documents:{notice:2,tbm:1,inspection:2,patrol:1,safety_log:1,work_plan:1,checklist:3},noticeReads:3,trainingByType:{tbm:2,education:0}},{documents:{notice:1,education:4,patrol:2,checklist:1},noticeReads:1,trainingByType:{tbm:0,education:3}}];
@@ -53,4 +54,9 @@ test('주간 보호구 품목별 집계는 수량과 서명된 지급 기록을 
     store.updatePpeIssue(signed,{siteId:site.id,workerId:worker.id,date:'2024-02-29',item:'가상 안전모',quantity:'4',expectedVersion:current.version});
     assert.deepEqual(store.weeklyActivity(site.id,'2024-02-27')[2].ppeReceiptsByItem,[{item:'가상 안전모',confirmed:0,total:2}]);
   }finally{store.close();}
+});
+
+test('주간 체크리스트는 날짜와 저장 종류별로 구분하고 미기록 및 자가점검을 분리한다',()=>{
+ const store=new Store(':memory:');try{const site=store.createSite({name:'가상 현장'}),other=store.createSite({name:'다른 현장'}),make=(siteId,date,title,kind)=>store.createDocument({siteId,type:'checklist',date,title,...(kind?{details:{kind,answers:checklistQuestions[kind].map(()=>({answer:'O',note:''}))}}:{})});make(site.id,'2024-02-29','가상 하나','wind');make(site.id,'2024-02-29','가상 둘','wind');make(site.id,'2024-02-29','가상 셋','fire');make(site.id,'2024-02-29','이전 기록');make(other.id,'2024-02-29','다른 현장','wind');make(site.id,'2024-03-05','다음 주','wind');const rows=store.weeklyActivity(site.id,'2024-02-27'),day=rows[2];assert.equal(day.checklists.filter(x=>x.kind==='wind').length,2);assert.equal(day.checklists.filter(x=>!x.kind).length,1);const html=weeklyChecklistMarkup(rows);assert.match(html,/강풍 대비 점검 2건/);assert.match(html,/화재 예방 점검 1건/);assert.match(html,/종류 미기록 1건/);assert.doesNotMatch(html,/다른 현장|다음 주/);assert.equal((html.match(/강풍 대비 점검 2건/g)||[]).length,1);day.workerChecks=3;day.managerChecks=2;const withChecks=weeklyChecklistMarkup([day]);assert.match(withChecks,/출입자 자가점검 3건/);assert.match(withChecks,/관리자·직원 자가점검 2건/);const unknown=weeklyChecklistMarkup([{date:'<날짜>',checklists:[{kind:'<타입>'}]}]);assert.match(unknown,/&lt;날짜&gt;/);assert.match(unknown,/알 수 없는 종류 1건/);assert.doesNotMatch(unknown,/<타입>/);
+ }finally{store.close();}
 });

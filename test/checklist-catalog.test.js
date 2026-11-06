@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {runInNewContext} from 'node:vm';
-import {checklistCategoryForKind} from '../public/checklist-copy.js';
+import {checklistCategoryForKind,checklistKindLabels} from '../public/checklist-copy.js';
 
 test('체크리스트 분류와 이름 검색은 기존 선택을 보존한다',()=>{
   const source=readFileSync(new URL('../public/app.js',import.meta.url),'utf8'),line=source.match(/^function filterChecklistKinds\(.*$/m)?.[0];
@@ -24,7 +24,7 @@ test('작성 화면에서 검색과 종류 변경을 반복해도 종류별 답�
     kind.value=body.match(/<option value="([^"]*)"[^>]*\bselected\b/)?.[1]||'';
   }};
   let currentRows=[];const nodes={'#daily-fields':fields,'#dialog-form [name=checklistKind]':kind,'#checklist-category':category,'#checklist-search':search,'#rain-checks':checks,'#checklist-copy':{},'#checklist-recent-date':{value:''},'#checklist-copy-list':{isConnected:true},'#dialog-form input[name=date]':{value:'2026-11-06'}};
-  const context={today:()=> '2026-11-06',select:{value:'checklist'},details:{kind:'rain',answers:[{answer:'O',note:'기존 가상 비고'}]},$:key=>nodes[key],document:{querySelectorAll:()=>currentRows},esc:String,checklistCategoryForKind};
+  const context={today:()=> '2026-11-06',select:{value:'checklist'},details:{kind:'rain',answers:[{answer:'O',note:'기존 가상 비고'}]},$:key=>nodes[key],document:{querySelectorAll:()=>currentRows},esc:String,checklistCategoryForKind,checklistKindLabels};
   for(const name of ['rainChecks','rainDetailChecks','windChecks','thawChecks','heatChecks','heatDetailChecks','coldChecks','coldDetailChecks','wetSeasonChecks','heavyRainChecks','electricalChecks','fireChecks','formworkChecks','fallingChecks','confinedChecks','excavationChecks','semiannualChecks','morningChecks','afternoonChecks','eveningChecks'])context[name]=['가상 항목'];
   const filter=source.match(/^function filterChecklistKinds\(.*$/m)[0];runInNewContext(filter+'\nfunction render(){'+source.slice(start,end)+'}\nglobalThis.render=render;',context);context.render();
   assert.equal(kind.value,'rain');assert.match(checks.html,/기존 가상 비고/);assert.equal(kind.options.length,21);
