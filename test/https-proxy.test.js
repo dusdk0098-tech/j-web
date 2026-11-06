@@ -7,8 +7,14 @@ import { createServer as reservePort } from 'node:net';
 import { request as httpsRequest } from 'node:https';
 import { spawn, spawnSync } from 'node:child_process';
 import { once } from 'node:events';
+import { runInNewContext } from 'node:vm';
 import { PNG } from 'pngjs';
 import jsQR from 'jsqr';
+function opensslAvailable(){const result=spawnSync('openssl',['version'],{stdio:'ignore'});if(result.error?.code==='ENOENT')return false;if(result.error)throw result.error;assert.equal(result.status,0,'OpenSSL 실행 실패');return true;}
+
+test('OpenSSL 검사에서는 미설치만 건너뛰고 실행 실패는 오류로 처리한다',()=>{
+  const line=readFileSync(new URL(import.meta.url),'utf8').split('\n').find(value=>value.startsWith('function opensslAvailable()'));assert.ok(line);const probe=result=>{const scope={assert,spawnSync:()=>result};runInNewContext(line,scope);return scope.opensslAvailable();};assert.equal(probe({status:0}),true);assert.equal(probe({error:{code:'ENOENT'}}),false);const error=Object.assign(Error('자원 부족'),{code:'EAGAIN'});assert.throws(()=>probe({error}),value=>value===error);assert.throws(()=>probe({status:1}),/OpenSSL 실행 실패/);
+});
 
 test('중계는 인증서나 올바른 주소가 없으면 시작하지 않는다',()=>{
   const env={...process.env,JWEB_PROXY_SECRET:'virtual-proxy-secret-for-tests-123456',JWEB_PUBLIC_ORIGIN:'https://localhost:8443',PORT:'4173'};delete env.JWEB_TLS_CERT;delete env.JWEB_TLS_KEY;
@@ -18,7 +24,7 @@ test('중계는 인증서나 올바른 주소가 없으면 시작하지 않는�
 });
 
 test('중계는 주소·기간·개인키가 맞지 않는 인증서로 시작하지 않는다',async t=>{
-  if(spawnSync('openssl',['version'],{stdio:'ignore'}).status!==0){t.skip('OpenSSL이 없어 인증서 시험을 건너뜁니다.');return;}
+  if(!opensslAvailable()){t.skip('OpenSSL이 없어 인증서 시험을 건너뜁니다.');return;}
   const dir=mkdtempSync(join(tmpdir(),'jweb-tls-host-')),keyPath=join(dir,'key.pem'),certPath=join(dir,'cert.pem');
   try{
     assert.equal(spawnSync('openssl',['req','-x509','-newkey','rsa:2048','-keyout',keyPath,'-out',certPath,'-days','1','-nodes','-subj','/CN=localhost','-addext','subjectAltName=DNS:localhost,IP:127.0.0.1'],{stdio:'ignore'}).status,0);
@@ -33,7 +39,7 @@ test('중계는 주소·기간·개인키가 맞지 않는 인증서로 시작�
 });
 
 test('네트워크 IP의 HTTPS 중계에서 가상 QR 가입과 로그인이 이어진다',{timeout:30000},async t=>{
-  if(spawnSync('openssl',['version'],{stdio:'ignore'}).status!==0){t.skip('OpenSSL이 없어 IP 연결 시험을 건너뜁니다.');return;}
+  if(!opensslAvailable()){t.skip('OpenSSL이 없어 IP 연결 시험을 건너뜁니다.');return;}
   const address=Object.values(networkInterfaces()).flat().find(item=>item&&item.family==='IPv4'&&!item.internal)?.address;if(!address){t.skip('접속 가능한 IPv4가 없어 IP 연결 시험을 건너뜁니다.');return;}
   const dir=mkdtempSync(join(tmpdir(),'jweb-tls-ip-')),keyPath=join(dir,'key.pem'),certPath=join(dir,'cert.pem');let child,proxy;
   try{
@@ -54,7 +60,7 @@ test('네트워크 IP의 HTTPS 중계에서 가상 QR 가입과 로그인이 이
 });
 
 test('로컬 HTTPS 중계로 가상 QR 가입과 로그인이 이어진다', async t => {
-  if (spawnSync('openssl', ['version'], { stdio: 'ignore' }).status !== 0) { t.skip('OpenSSL이 없어 로컬 TLS 시험을 건너뜁니다.'); return; }
+  if (!opensslAvailable()) { t.skip('OpenSSL이 없어 로컬 TLS 시험을 건너뜁니다.'); return; }
   const dir=mkdtempSync(join(tmpdir(),'jweb-tls-')),keyPath=join(dir,'key.pem'),certPath=join(dir,'cert.pem');
   let proxy,child;
   try {
