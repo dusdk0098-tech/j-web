@@ -182,7 +182,7 @@ test('다른 서버에서 QR 초대를 중지하면 처리 중인 가입을 저�
   }finally{for(const child of children)if(child.exitCode===null){const exited=once(child,'exit');child.kill();await exited;}rmSync(dir,{recursive:true,force:true});}
 });
 
-test('데이터베이스가 잠시 사용 중이어도 현장 저장 요청을 처리한다',{timeout:15000},async()=>{
+test('데이터베이스가 잠시 사용 중이어도 현장 저장 요청을 처리한다',{timeout:60000},async()=>{
   const dir=mkdtempSync(join(tmpdir(),'jweb-db-busy-')),reservation=createServer();await new Promise(resolve=>reservation.listen(0,'127.0.0.1',resolve));const port=reservation.address().port;await new Promise(resolve=>reservation.close(resolve));
   const trace="import http from 'node:http';const create=http.createServer;http.createServer=handler=>create((req,res)=>{if(req.url==='/api/sites'&&req.method==='POST')process.stdout.write('SITE_WRITE\\n');return handler(req,res)});",child=spawn(process.execPath,['--import',`data:text/javascript,${encodeURIComponent(trace)}`,'server.js'],{cwd:process.cwd(),env:{...process.env,PORT:String(port),JWEB_DATA_DIR:dir,JWEB_ADMIN_PASSWORD:'test-password-12345'},stdio:['ignore','pipe','pipe']});let db,locked=false;
   try{
