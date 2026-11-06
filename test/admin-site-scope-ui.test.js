@@ -53,7 +53,7 @@ function screen(fetcher=async()=>({ok:true,status:200,json:async()=>[]})){
   context.attendanceNoticesMarkup=attendanceNoticesMarkup;
   context.trainingDetailMarkup=trainingDetailMarkup;context.educationAttachmentLabels=educationAttachmentLabels;
   Object.assign(context,{riskDetailMarkup,muscleDetailMarkup,planDetailMarkup,patrolActivitiesSummary});
-  for(const key of ['riskFields','riskKinds','riskScales','planFields','safetyLogFields','placeChoiceLabels'])context[key]=runInNewContext(source.split('\n').find(line=>line.startsWith('const '+key+'='))+'\n'+key);
+  for(const key of ['riskFields','riskKinds','riskScales','planFields','safetyLogFields','placeChoiceLabels','incidentFields','victimFields'])context[key]=runInNewContext(source.split('\n').find(line=>line.startsWith('const '+key+'='))+'\n'+key);
   runInNewContext(source.split('\n').find(line=>line.startsWith('function placeSummary(')),context);
   for(const key of ['rainChecks','windChecks','thawChecks','heatChecks','coldChecks','wetSeasonChecks','heavyRainChecks','electricalChecks','fireChecks','formworkChecks','fallingChecks','confinedChecks','excavationChecks','semiannualChecks','morningChecks','afternoonChecks','eveningChecks'])context[key]=runInNewContext(source.split('\n').find(line=>line.startsWith('const '+key+'='))+'\n'+key);
   context.siteSelect.selectedOptions=[{textContent:'가상 첫 현장'}];
@@ -771,4 +771,12 @@ test('제한 관리자 출역 검색 중 중복 요청과 입력 변경을 막�
   const wait=delayed();let waiting=false;const ui=screen(async()=>waiting?wait.promise:response([]));ui.state.page='workers';ui.state.admin={id:4,scope:'restricted'};ui.state.workerFilters={};await ui.context.renderRestrictedWorkforce();
   ui.get('#restricted-worker-from').value='2026-11-01';ui.get('#restricted-worker-to').value='2026-11-06';waiting=true;const button=ui.get('#restricted-worker-search'),pending=button.onclick(),count=ui.requests.length;assert.equal(button.disabled,true);assert.equal(ui.get('#restricted-worker-from').disabled,true);assert.equal(ui.get('#restricted-worker-to').disabled,true);await button.onclick();assert.equal(ui.requests.length,count);
   ui.context.detailEpoch++;ui.state.siteId=2;ui.content.innerHTML='새 현장';wait.resolve(response([{id:3,name:'이전 가상 정보'}]));await pending;assert.equal(ui.content.innerHTML,'새 현장');
+});
+
+test('배정 현장의 재해 보고서는 저장된 항목과 첨부만 안전하게 표시한다',async()=>{
+  const details={severity:'중상',location:'가상 <장소>',circumstances:'가상 경위',prevention:'가상 대책',victims:[{name:'가상 <근로자>',company:'가상 회사',occupation:'가상 직종',outcome:'부상',treatment:'가상 치료',secret:'노출 금지'}],inspections:[{name:'가상 <점검>',date:'2026-11-01',secret:'노출 금지'}],secret:'노출 금지'},doc={id:5,site_id:1,type:'incident',title:'가상 보고',status:'draft',details:JSON.stringify(details)};
+  const ui=screen(async path=>response(path.endsWith('/attachments')?[{id:7,name:'가상 <첨부>.txt',size:5}]:doc));ui.state.page='documents';ui.state.detail=5;await ui.context.renderRestrictedDocuments();
+  for(const text of ['재해 보고서 상세','중상','가상 &lt;장소&gt;','가상 경위','가상 대책','가상 &lt;근로자&gt;','가상 치료','가상 &lt;점검&gt;','가상 &lt;첨부&gt;.txt'])assert.ok(ui.content.innerHTML.includes(text),text);
+  assert.doesNotMatch(ui.content.innerHTML,/노출 금지|<근로자>|<장소>/);assert.deepEqual(ui.requests.map(r=>r.path),['/api/documents/5','/api/documents/5/attachments']);
+  const late=delayed(),stale=screen(async path=>path.endsWith('/attachments')?late.promise:response(doc));stale.state.page='documents';stale.state.detail=5;const pending=stale.context.renderRestrictedDocuments();while(!stale.requests.some(r=>r.path.endsWith('/attachments')))await new Promise(resolve=>setImmediate(resolve));stale.state.siteId=2;stale.content.innerHTML='새 현장';late.resolve(response([]));await pending;assert.equal(stale.content.innerHTML,'새 현장');
 });
