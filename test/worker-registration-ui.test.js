@@ -9,12 +9,12 @@ const source=readFileSync(new URL('../public/app.js',import.meta.url),'utf8');
 const worker={id:7,site_id:1,name:'가상 이름',category:'직영',company:'',occupation:'목공',memo:'가상 메모',registration_type:'self',has_account:true,version:'v1'};
 const deferred=()=>{let resolve,reject;const promise=new Promise((yes,no)=>{resolve=yes;reject=no;});return {promise,resolve,reject};};
 function screen(){
-  const controls=new Map(),nodes=new Map(),calls=[],flashes=[],errors=[],state={siteId:1,page:'workers'},form={},submit={disabled:false},convert={disabled:false};let renders=0,markup='';
+  const controls=new Map(),nodes=new Map(),calls=[],flashes=[],errors=[],state={siteId:1,page:'workers',admin:{id:1}},form={},submit={disabled:false},convert={disabled:false};let renders=0,markup='';
   const node=()=>({value:'',textContent:'',setAttribute(){},append(){}});
   for(const id of ['#dialog-title','#dialog-error','#dialog-close','#dialog-cancel'])nodes.set(id,node());
   nodes.set('#dialog-form',form);nodes.set('#dialog-form button[type=submit]',submit);
   nodes.set('#dialog-body',{append(){},set innerHTML(value){markup=value;controls.clear();for(const match of value.matchAll(/<input name="([^"]+)"[^>]*value="([^"]*)"/g))controls.set(match[1],{...node(),value:match[2]});const memo=value.match(/<textarea name="memo"[^>]*>(.*?)<\/textarea>/);if(memo)controls.set('memo',{...node(),value:memo[1]});convert.disabled=false;},get innerHTML(){return markup;}});
-  const dialog={open:false,showModal(){this.open=true;},close(){this.open=false;}},context={state,workerListEpoch:1,workerEditEpoch:0,workerFieldRequirements,dialog,FormData:class {constructor(){return [...controls].map(([name,input])=>[name,input.value]);}},document:{createElement:node},$:selector=>selector==='[data-worker-registration]'?(markup.includes('data-worker-registration')?convert:null):selector.startsWith('#dialog-form input[name=')?controls.get(selector.match(/name=(.+)\]/)[1]):nodes.get(selector),flash:message=>flashes.push(message),showError:error=>errors.push(error.message),render:async()=>{renders++;},location:{assign:path=>errors.push(path)}};
+  const dialog={open:false,showModal(){this.open=true;},close(){this.open=false;}},context={state,detailEpoch:1,workerListEpoch:1,workerEditEpoch:0,workerFieldRequirements,dialog,FormData:class {constructor(){return [...controls].map(([name,input])=>[name,input.value]);}},document:{createElement:node},$:selector=>selector==='[data-worker-registration]'?(markup.includes('data-worker-registration')?convert:null):selector.startsWith('#dialog-form input[name=')?controls.get(selector.match(/name=(.+)\]/)[1]):nodes.get(selector),flash:message=>flashes.push(message),showError:error=>errors.push(error.message),render:async()=>{renders++;},location:{assign:path=>errors.push(path)}};
   const ui={context,controls,state,form,submit,convert,dialog,calls,flashes,errors,load:async()=>[],write:async()=>({}),renders:()=>renders,markup:()=>markup,error:()=>nodes.get('#dialog-error').textContent};
   context.fetch=async(path,options)=>{calls.push({path,options});const result=await (options.method?ui.write(path,options):ui.load(path));return result?.httpStatus?{status:result.httpStatus,ok:false,json:async()=>({error:result.error})}:{status:200,ok:true,json:async()=>result};};
   runInNewContext([source.match(/^const esc = .*$/m)[0],source.slice(source.indexOf('async function api('),source.indexOf('function flash(')),source.slice(source.indexOf('function field('),source.indexOf('function signaturePad(')),source.slice(source.indexOf('function showDialog('),source.indexOf("$('#menu-toggle').onclick")),source.slice(source.indexOf('async function editWorker('),source.indexOf('async function showWorkerPermissions('))].join('\n'),context);
@@ -22,7 +22,7 @@ function screen(){
 }
 
 test('목록의 등록 방식은 계정 유무와 독립적으로 표시하고 기존 검색·정렬 열을 유지한다',async()=>{
-  const start=source.indexOf("  if(state.page==='workers')"),from=source.indexOf('    const epoch=workerListEpoch',start),to=source.indexOf("    $('#new-worker').onclick",from),content={},workers=[worker,{...worker,id:8,name:'가상 일반',registration_type:'general',has_account:true},{...worker,id:9,name:'가상 자기',has_account:false}],context={content,workerListEpoch:1,state:{page:'workers',siteId:1,query:'',workerOrder:'default',workerFilters:{},workerPage:0},URLSearchParams,paginateWorkers,workerSummaryMarkup:()=>'',api:async path=>path.startsWith('/api/workers/list')?{workers}:workers};
+  const start=source.indexOf("  if(state.page==='workers')"),from=source.indexOf('    const epoch=workerListEpoch',start),to=source.indexOf("    $('#new-worker').onclick",from),content={},workers=[worker,{...worker,id:8,name:'가상 일반',registration_type:'general',has_account:true},{...worker,id:9,name:'가상 자기',has_account:false}],context={content,workerListEpoch:1,detailEpoch:1,renderEpoch:1,state:{admin:{id:1},page:'workers',siteId:1,query:'',workerOrder:'default',workerFilters:{},workerPage:0},URLSearchParams,paginateWorkers,workerSummaryMarkup:()=>'',api:async path=>path.startsWith('/api/workers/list')?{workers}:workers};
   assert.ok(from>start&&to>from);runInNewContext(source.match(/^const esc = .*$/m)[0],context);await runInNewContext(`(async()=>{${source.slice(from,to)}})()`,context);
   assert.match(content.innerHTML,/<th>최초 출역 기록<\/th>/);assert.match(content.innerHTML,/<td>기록 없음<\/td>/);assert.match(content.innerHTML,/<th>등록 방식<\/th>/);assert.equal((content.innerHTML.match(/<td>자기 등록<\/td>/g)||[]).length,2);assert.equal((content.innerHTML.match(/<td>일반등록<\/td>/g)||[]).length,1);assert.match(content.innerHTML,/worker-order/);assert.match(content.innerHTML,/worker-from/);assert.match(content.innerHTML,/data-edit-worker="7"/);
 });
@@ -71,4 +71,21 @@ test('출역 기간 조건을 목록 검색에 전달하고 역순 기간을 거
   const fields={'#worker-from':{value:''},'#worker-to':{value:''},'#worker-attendance-from':{value:'2026-11-01'},'#worker-attendance-to':{value:'2026-11-06'},'#query':{value:'가상'},'#worker-order':{value:'default'},'#worker-category':{value:''},'#worker-company':{value:''},'#worker-occupation':{value:''},'#search':{}},state={workerFilters:{},workerPage:2},messages=[],context={$:key=>fields[key],state,filters:{category:'구분',company:'소속',occupation:'직종'},flash:value=>messages.push(value),render:()=>Promise.resolve(),showError:error=>{throw error;}};
   runInNewContext(source.slice(start,end+1),context);fields['#search'].onclick();assert.equal(state.workerFilters.attendanceFrom,'2026-11-01');assert.equal(state.workerFilters.attendanceTo,'2026-11-06');assert.equal(state.workerPage,0);
   fields['#worker-attendance-from'].value='2026-11-07';fields['#search'].onclick();assert.equal(state.workerFilters.attendanceFrom,'2026-11-01');assert.equal(messages.length,1);
+});
+
+test('출입자 편집 조회는 로그아웃·계정 변경 후 성공과 인증 오류를 표시하지 않는다',async()=>{
+ for(const mode of ['success','unauthorized','failure'])for(const change of [ui=>{ui.state.admin=null;ui.context.detailEpoch++;},ui=>{ui.state.admin={id:2};}]){
+  const ui=screen(),pending=deferred();ui.load=()=>pending.promise;const opening=ui.open();change(ui);if(mode==='failure')pending.reject(Error('이전 조회 오류'));else pending.resolve(mode==='unauthorized'?{httpStatus:401,error:'만료'}:[]);await opening;assert.equal(ui.dialog.open,false);assert.deepEqual(ui.errors,[]);assert.deepEqual(ui.flashes,[]);
+ }
+});
+
+test('출입자 목록 조회는 로그아웃·계정 교체 후 이전 응답과 오류를 무시한다',async()=>{
+ const start=source.indexOf("  if(state.page==='workers')"),from=source.indexOf('    const epoch=workerListEpoch',start),to=source.indexOf("    $('#new-worker').onclick",from);assert.ok(from>start&&to>from);
+ for(const outcome of ['resolve','reject'])for(const change of [ctx=>{ctx.state.admin=null;ctx.detailEpoch++;},ctx=>{ctx.state.admin={id:2};}]){
+  const pending=deferred(),content={innerHTML:'로그아웃 화면'},context={content,workerListEpoch:1,detailEpoch:1,renderEpoch:1,state:{admin:{id:1},page:'workers',siteId:1,query:'',workerOrder:'default',workerFilters:{},workerPage:0},URLSearchParams,paginateWorkers,workerSummaryMarkup:()=>'',api:()=>pending.promise};runInNewContext(source.match(/^const esc = .*$/m)[0],context);const loading=runInNewContext(`(async()=>{${source.slice(from,to)}})()`,context);change(context);if(outcome==='resolve')pending.resolve({workers:[worker]});else pending.reject(Error('이전 조회 오류'));await loading;assert.equal(content.innerHTML,'로그아웃 화면');
+ }
+});
+
+test('로그아웃 또는 계정 변경 후 이전 출입자 창은 저장·전환하지 않는다',async()=>{
+ for(const action of ['save','convertRegistration'])for(const change of [ui=>{ui.state.admin=null;ui.context.detailEpoch++;},ui=>{ui.state.admin={id:2};}]){const ui=screen();await ui.open();change(ui);await ui[action]();assert.equal(ui.writes().length,0);assert.deepEqual(ui.flashes,[]);}
 });
