@@ -28,3 +28,17 @@ test('주간 조회 실패는 읽기 범위를 정리하고 외부 트랜잭션 
     assert.equal(s.weeklyActivity(site.id,'2026-11-01').length,7);
   }finally{s.close();}
 });
+
+test('전체 현장 월별 보고서는 조회 중 출역과 문서가 바뀌어도 한 시점으로 집계한다',()=>{
+  const dir=mkdtempSync(join(tmpdir(),'jweb-month-snapshot-')),file=join(dir,'test.sqlite');let first=new Store(file),second;
+  try{
+    first.db.exec('PRAGMA journal_mode=WAL');second=new Store(file);
+    const site=first.createSite({name:'가상 현장'}),worker=first.createWorker({siteId:site.id,name:'가상 작업자',category:'직영',company:'가상 업체',occupation:'목공'}),date='2026-11-01';
+    first.setAttendance({siteId:site.id,workerId:worker.id,date,present:true});
+    const prepare=first.db.prepare.bind(first.db);let changed=false;
+    first.db.prepare=sql=>{if(!changed&&sql.startsWith('SELECT site_id,date,COUNT(*) AS n FROM documents')){changed=true;second.setAttendance({siteId:site.id,workerId:worker.id,date,present:false});second.createDocument({siteId:site.id,type:'tbm',title:'가상 교육',date});}return prepare(sql);};
+    const before=first.monthlySiteActivity('2026-11').sites.find(value=>value.id===site.id).weeks[0];first.db.prepare=prepare;
+    assert.equal(changed,true);assert.equal(before.attendance,1);assert.equal(before.documents,0);
+    const after=first.monthlySiteActivity('2026-11').sites.find(value=>value.id===site.id).weeks[0];assert.equal(after.attendance,0);assert.equal(after.documents,1);
+  }finally{first?.close();second?.close();rmSync(dir,{recursive:true,force:true});}
+});
