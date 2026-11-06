@@ -6,8 +6,8 @@ const choices={grade:['상','중','하'],improvedGrade:['상','중','하'],likel
 const choiceLabels={grade:'현재 위험 등급',improvedGrade:'개선 후 위험 등급',likelihood:'가능성',severity:'중대성'};
 
 export function mountMusculoskeletal(container,{rows,companies,scale,references}){
-  container.innerHTML='<fieldset><legend>근골격계 가상 위험요인</legend><p>직접 입력한 시험 자료입니다. 자동 참고자료와 실제 위험 판정은 제공하지 않습니다.</p><div data-mus-list></div><button type="button" data-mus-direct>직접 입력 3개 추가</button> <button type="button" data-mus-add>항목 추가</button> <button type="button" data-mus-delete>선택 항목 삭제</button><p data-mus-status role="status"></p></fieldset>';
-  const list=container.querySelector('[data-mus-list]'),status=container.querySelector('[data-mus-status]');let referencePanel;
+  container.innerHTML='<fieldset><legend>근골격계 가상 위험요인</legend><p>직접 입력한 시험 자료입니다. 자동 참고자료와 실제 위험 판정은 제공하지 않습니다.</p><label><input type="checkbox" data-mus-select-all> 전체 선택</label><div data-mus-list></div><button type="button" data-mus-direct>직접 입력 3개 추가</button> <button type="button" data-mus-add>항목 추가</button> <button type="button" data-mus-delete>선택 항목 삭제</button> <button type="button" data-mus-delete-all>전체 항목 삭제</button><p data-mus-status role="status"></p></fieldset>';
+  const list=container.querySelector('[data-mus-list]'),status=container.querySelector('[data-mus-status]'),selectAll=container.querySelector('[data-mus-select-all]');let referencePanel;
   function add(row={}){
     if(list.children.length>=100){status.textContent='근골격계 항목은 100개까지 입력할 수 있습니다.';return;}
     const item=document.createElement('fieldset');
@@ -17,6 +17,8 @@ export function mountMusculoskeletal(container,{rows,companies,scale,references}
   function conflicts(value){return [...list.querySelectorAll('select[data-mus-field]')].some(input=>input.value&&!riskScaleOptions(value,input.dataset.musField).includes(input.value));}
   function refresh(){
     referencePanel?.refresh();
+    const selected=[...list.children].filter(row=>row.querySelector('[data-mus-selected]').checked).length;
+    selectAll.checked=selected>0&&selected===list.children.length;selectAll.indeterminate=selected>0&&selected<list.children.length;
     for(const input of list.querySelectorAll('select[data-mus-field]')){const options=riskScaleOptions(scale(),input.dataset.musField);input.disabled=!options.length&&!input.value;for(const option of input.options)option.disabled=!!option.value&&!options.includes(option.value);}
     for(const row of list.children){const score=riskScore(scale(),row.querySelector('[data-mus-field=likelihood]').value,row.querySelector('[data-mus-field=severity]').value);row.querySelector('[data-mus-score]').textContent=score===null?'시험 점수: 미입력':`시험 점수: ${score}`;}
   }
@@ -28,7 +30,10 @@ export function mountMusculoskeletal(container,{rows,companies,scale,references}
     catch(error){status.textContent=error.message;}
   };
   container.querySelector('[data-mus-add]').onclick=()=>add();
-  container.querySelector('[data-mus-delete]').onclick=()=>{for(const row of [...list.children])if(row.querySelector('[data-mus-selected]').checked)row.remove();};
+  const editable=()=>!container.closest('form')?.querySelector('button[type=submit]')?.disabled;
+  selectAll.onchange=()=>{if(!editable()){refresh();return;}for(const row of list.children)row.querySelector('[data-mus-selected]').checked=selectAll.checked;refresh();};
+  container.querySelector('[data-mus-delete]').onclick=()=>{if(!editable())return;let removed=false;for(const row of [...list.children])if(row.querySelector('[data-mus-selected]').checked){row.remove();removed=true;}refresh();if(removed)container.dispatchEvent(new Event('input',{bubbles:true}));};
+  container.querySelector('[data-mus-delete-all]').onclick=()=>{if(editable()&&list.children.length&&confirm('근골격계 항목을 모두 삭제할까요?')&&editable()){for(const row of [...list.children])row.remove();refresh();container.dispatchEvent(new Event('input',{bubbles:true}));}};
   list.addEventListener('change',event=>{if(event.target.matches('[data-mus-company]')){const company=companies.find(c=>c.id===Number(event.target.value));if(company)event.target.closest('fieldset').querySelector('[data-mus-field=contractor]').value=company.name;}refresh();});
   list.addEventListener('click',event=>{const row=event.target.closest('fieldset');if(!row||row.parentElement!==list)return;if(event.target.matches('[data-mus-remove]'))row.remove();if(event.target.matches('[data-mus-up]')&&row.previousElementSibling)list.insertBefore(row,row.previousElementSibling);if(event.target.matches('[data-mus-down]')&&row.nextElementSibling)list.insertBefore(row.nextElementSibling,row);if(event.target.matches('[data-mus-up],[data-mus-down]'))event.target.focus();});
   rows.forEach(add);

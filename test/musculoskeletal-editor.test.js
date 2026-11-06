@@ -27,11 +27,11 @@ function rowNode(){
 }
 function screen(t,rows=[],companies=[],initialScale='3x3'){
   const previous=globalThis.document;globalThis.document={createElement:rowNode};t.after(()=>{if(previous===undefined)delete globalThis.document;else globalThis.document=previous;});
-  const submit={disabled:false},events=[],list={children:[],append(row){this.children.push(row);},addEventListener(){},querySelectorAll(selector){return this.children.flatMap(row=>row.querySelectorAll(selector));}},controls={'[data-mus-list]':list,'[data-mus-status]':{textContent:''},'[data-mus-add]':{},'[data-mus-delete]':{}},direct={disabled:false,fieldsetDisabled:false,matches(selector){assert.equal(selector,':disabled');return this.disabled||this.fieldsetDisabled;}};
+  const submit={disabled:false},events=[],list={children:[],append(row){this.children.push(row);row.remove=()=>{this.children.splice(this.children.indexOf(row),1);};},addEventListener(){},querySelectorAll(selector){return this.children.flatMap(row=>row.querySelectorAll(selector));}},controls={'[data-mus-list]':list,'[data-mus-status]':{textContent:''},'[data-mus-add]':{},'[data-mus-delete]':{},'[data-mus-select-all]':{},'[data-mus-delete-all]':{}},direct={disabled:false,fieldsetDisabled:false,matches(selector){assert.equal(selector,':disabled');return this.disabled||this.fieldsetDisabled;}};
   controls['[data-mus-direct]']=direct;
   const form={querySelector(selector){assert.equal(selector,'button[type=submit]');return submit;}},container={querySelector(selector){return controls[selector];},closest(selector){assert.equal(selector,'form');return form;},dispatchEvent(event){events.push(event);}};
   const scale={value:initialScale},editor=mountMusculoskeletal(container,{rows,companies,scale:()=>scale.value});
-  return {editor,list,direct,submit,events,scale,status:controls['[data-mus-status]']};
+  return {editor,list,direct,submit,events,scale,status:controls['[data-mus-status]'],controls};
 }
 
 function references(ui,{worker=false,request}={}){
@@ -168,4 +168,15 @@ test('근골격계 상세와 결재 사본 렌더링에 개선 후 등급이 표
   assert.match(html,/<strong>개선 후 위험 등급<\/strong> 하/);assert.match(html,/선택한 &lt;작업&gt;/);assert.doesNotMatch(html,/선택 안 한 작업|시험 점수:/);
   const start=source.indexOf('function capturedFields('),end=source.indexOf('function capturedFiles(',start),captured=runInNewContext(`${source.slice(start,end)}\ncapturedFields(details)`,{details,esc,riskFields,dailyFields:{},planFields:{},permitFields:{}});
   assert.match(captured,/<dt>개선 후 위험 등급<\/dt><dd>하<\/dd>/);assert.match(captured,/<dt>개선 후 위험 등급<\/dt><dd>중<\/dd>/);assert.match(captured,/선택한 &lt;작업&gt;/);
+});
+
+test('근골격계 전체 선택과 삭제는 확인과 기존 항목 선택을 지킨다',t=>{
+  const previous=globalThis.confirm;let approve=false;globalThis.confirm=()=>approve;t.after(()=>{if(previous===undefined)delete globalThis.confirm;else globalThis.confirm=previous;});
+  const ui=screen(t,[{task:'가상 A',selected:true},{task:'가상 B',selected:false}]),all=ui.controls['[data-mus-select-all]'];
+  assert.equal(all.checked,false);assert.equal(all.indeterminate,true);
+  all.checked=true;all.onchange();assert.deepEqual(ui.editor.read().map(row=>row.selected),[true,true]);assert.equal(all.indeterminate,false);
+  all.checked=false;all.onchange();assert.deepEqual(ui.editor.read().map(row=>row.selected),[false,false]);
+  ui.controls['[data-mus-delete-all]'].onclick();assert.equal(ui.editor.read().length,2);assert.equal(ui.events.length,0);
+  ui.list.children[0].selected.checked=true;ui.controls['[data-mus-delete]'].onclick();assert.equal(ui.editor.read().length,1);assert.equal(ui.editor.read()[0].task,'가상 B');assert.equal(ui.events.length,1);
+  approve=true;ui.submit.disabled=true;all.checked=true;all.onchange();ui.controls['[data-mus-delete]'].onclick();ui.controls['[data-mus-delete-all]'].onclick();assert.equal(ui.editor.read().length,1);assert.equal(ui.editor.read()[0].selected,false);ui.submit.disabled=false;ui.controls['[data-mus-delete-all]'].onclick();assert.equal(ui.editor.read().length,0);assert.equal(all.checked,false);assert.equal(ui.events.length,2);
 });
