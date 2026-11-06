@@ -26,3 +26,14 @@ test('기본 시험 급여 API는 전역 관리자만 허용하고 현장과 변
   const concurrent=await Promise.all(['200','300'].map(amount=>call(path,'PUT',{...value,amount,version:1},admin)));assert.deepEqual(concurrent.map(response=>response.status).sort(),[200,409]);const saved=await(await call(query,'GET',null,admin)).json();assert.equal(saved.version,2);assert.ok([200,300].includes(saved.amount));assert.equal((await(await call(`/api/attendance?siteId=${site.id}&date=${attendance.date}`,'GET',null,admin)).json())[0].daily_rate,100);
  }finally{if(child.exitCode===null){const exited=once(child,'exit');child.kill();await exited;}rmSync(dir,{recursive:true,force:true});}
 });
+
+test('로그인 출역은 당시 회원 정보와 기본 급여를 보존한다',()=>{
+ const s=new Store(':memory:');try{
+  const site=s.createSite({name:'가상 현장'}),input={siteId:site.id,name:'가상 근로자',category:'직영',company:'첫 소속',occupation:'목공'},worker=s.createWorker(input),pay=(amount,version)=>s.setWorkerDefaultPay(site.id,worker.id,{siteId:site.id,kind:'daily',amount,version}),row=date=>s.attendance(site.id,date).find(item=>item.id===worker.id),fields=value=>[value.attendance_category,value.attendance_company,value.attendance_occupation,value.daily_rate];
+  pay('100',0);s.recordWorkerLogin(worker.id,'2024-01-01');
+  s.updateWorker(worker.id,{...input,company:'새 소속',occupation:'전기'});pay('200',1);s.recordWorkerLogin(worker.id,'2024-01-02');
+  assert.deepEqual(fields(row('2024-01-01')),['직영','첫 소속','목공',100]);assert.deepEqual(fields(row('2024-01-02')),['직영','새 소속','전기',200]);
+  s.setAttendanceDailyRate({siteId:site.id,workerId:worker.id,date:'2024-01-01',dailyRate:'150'});s.recordWorkerLogin(worker.id,'2024-01-01');
+  assert.equal(row('2024-01-01').daily_rate,150);assert.deepEqual(s.workerDefaultPay(site.id,worker.id),{kind:'daily',amount:200,version:2});assert.equal(row('2024-01-02').daily_rate,200);
+ }finally{s.close();}
+});
