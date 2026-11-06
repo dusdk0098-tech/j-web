@@ -230,6 +230,11 @@ test('제한 작업계획서 기본정보는 명시된 필드·기존 시간·�
   assert.doesNotMatch(planDetailMarkup({equipment:{secret:'노출금지'},personnel:0},esc,ui.context.planFields),/노출금지|object/);assert.match(planDetailMarkup({personnel:0},esc,ui.context.planFields),/> 0</);
 });
 
+test('제한 관리자는 저장된 훅과 기존 양중 방식을 구분해 읽는다',async()=>{
+  const details={heavyLoads:[{kind:'가상 <물품>',size:'1m',totalWeight:'1t',liftWeight:'500kg',liftMode:'hook',safetyReview:'<가상 검토>'},{kind:'이전 물품',liftMode:'other'},{kind:'장구 물품',liftMode:'rigging',riggingName:'가상 장구',lines:'2줄',method:'직선'}]},doc={id:5,site_id:1,type:'work_plan',title:'가상 계획',body:'',status:'draft',details:JSON.stringify(details)},ui=screen(async path=>response(path.endsWith('/attachments')?[]:doc));ui.state.page='documents';ui.state.detail=5;await ui.context.renderRestrictedDocuments();
+  for(const text of ['가상 &lt;물품&gt;','훅 사용 (줄걸이 미사용)','기타 방식 (훅 포함)','장구 사용','가상 장구','&lt;가상 검토&gt;'])assert.ok(ui.content.innerHTML.includes(text),text);assert.doesNotMatch(ui.content.innerHTML,/<물품>|<가상 검토>/);
+});
+
 test('제한 작업계획서 빈·구형 기록과 늦은 응답·다른 현장·문서·인증 실패 경계',async()=>{
   const doc={id:5,site_id:1,type:'work_plan',title:'이전 계획',body:'이전 본문',status:'approved'};
   for(const details of [null,'null','{}','[]','"legacy"']){const ui=screen(async path=>response(path.endsWith('/attachments')?[]:{...doc,details}));ui.state.page='documents';ui.state.detail=5;await ui.context.renderRestrictedDocuments();assert.match(ui.content.innerHTML,/저장된 기본정보가 없습니다/);}

@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { runInNewContext } from 'node:vm';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Store } from '../store.js';
@@ -43,4 +45,20 @@ test('중량물 줄걸이 규격과 체결장구는 같은 현장과 등록 규�
     for(const invalid of [{...load,ropeStandard:'미등록'},{...load,fasteningStandard:'미등록'},{...load,fasteningId:foreign.id},{...load,fasteningId:rope.id}])assert.throws(()=>s.updateDocument(doc.id,{...input,details:{...input.details,heavyLoads:[invalid]}}),/규격|체결장구/);
     const old={...load};delete old.fasteningId;assert.throws(()=>s.updateDocument(doc.id,{...input,details:{...input.details,heavyLoads:[old]}}),/보존/);
   }finally{s.close();}
+});
+
+test('훅 양중은 별도로 저장·복사하고 결재 사본과 기존 기타 기록을 보존한다',()=>{
+ const s=new Store(':memory:');try{const site=s.createSite({name:'가상 현장'}),base={kind:'가상',size:'1m',totalWeight:'1t',liftWeight:'500kg'},input={siteId:site.id,type:'work_plan',title:'가상 계획',date:'2026-11-06',details:{heavyLoads:[{...base,liftMode:'hook'},{...base,liftMode:'other'}]}};
+  const doc=s.createDocument(input),modes=value=>JSON.parse(value.details).heavyLoads.map(row=>row.liftMode);assert.deepEqual(modes(doc),['hook','other']);
+  const copy=s.copyWorkPlan(doc.id,{siteId:site.id,title:'가상 복사',date:'2026-11-06'});assert.deepEqual(modes(copy),['hook','other']);
+  assert.throws(()=>s.createDocument({...input,details:{heavyLoads:[{...base,liftMode:'unknown'}]}}),/중량물/);
+  s.transition(doc.id,'submit');const cycle=s.document(doc.id).approval_cycle_id;s.transition(doc.id,'withdraw');s.updateDocument(doc.id,{...input,details:{heavyLoads:[{...base,liftMode:'other'}]}});
+  assert.deepEqual(modes(s.approvalCycle(doc.id,cycle).document),['hook','other']);assert.deepEqual(modes(s.document(doc.id)),['other']);
+ }finally{s.close();}
+});
+
+test('과거 기타 방식과 훅 방식은 결재 사본에서 구분해 표시한다',()=>{
+ const review=readFileSync(new URL('../public/review.js',import.meta.url),'utf8'),part=review.slice(review.indexOf('function displayFields('),review.indexOf('function displayDocumentDetails('));
+ const display=runInNewContext(part+';displayFields',{labels:{liftMode:'양중 방식'},esc:String});
+ assert.match(display({liftMode:'hook'}),/훅 사용 \(줄걸이 미사용\)/);assert.match(display({liftMode:'other'}),/기타 방식/);assert.doesNotMatch(display({liftMode:'other'}),/줄걸이 미사용/);
 });

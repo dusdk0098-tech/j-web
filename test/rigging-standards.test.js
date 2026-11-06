@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {riggingStandardChoices,mountRiggingStandards,heavyRiggingChoices,heavyRiggingOptions} from '../public/rigging-standards.js';
+import {riggingStandardChoices,mountRiggingStandards,heavyRiggingChoices,heavyRiggingOptions,heavyLiftOptions} from '../public/rigging-standards.js';
 import {Store} from '../store.js';
 
 test('장구별 규격을 표시하고 다시 선택할 때 입력을 보존한다',()=>{
@@ -20,4 +20,9 @@ test('근로자 장구 선택 정보에 같은 현장의 등록 규격이 포함
     make(a.id,'같은 현장');make(b.id,'다른 현장');s.setWorkerPermissions(a.id,worker.id,['work_plan']);
     const options=s.workerDocumentOptions(a.id,worker.id,'work_plan');assert.equal(options.rigging.length,1);assert.equal(options.rigging[0].name,'같은 현장');assert.deepEqual(options.rigging[0].standards,['10mm']);
   }finally{s.close();}
+});
+
+test('훅과 줄걸이를 구분하고 기존 기타 선택은 기존 기록에만 남긴다',()=>{
+ const fresh=heavyLiftOptions();assert.match(fresh,/value="hook"/);assert.match(fresh,/value="rigging"/);assert.doesNotMatch(fresh,/value="other"/);
+ assert.match(heavyLiftOptions('hook'),/value="hook" selected/);assert.match(heavyLiftOptions('rigging'),/value="rigging" selected/);assert.match(heavyLiftOptions('other'),/value="other" selected/);
 });

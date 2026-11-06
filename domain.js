@@ -155,7 +155,7 @@ export function recordInput(input) {
     if(value.heavyLoads!==undefined){
       if(!Array.isArray(value.heavyLoads)||value.heavyLoads.length>100)throw new Error('중량물 항목을 확인해 주세요.');
       details.heavyLoads=value.heavyLoads.map(row=>{
-        if(!row||typeof row!=='object'||Array.isArray(row)||!['other','rigging'].includes(row.liftMode))throw new Error('중량물 항목을 확인해 주세요.');
+        if(!row||typeof row!=='object'||Array.isArray(row)||!['other','hook','rigging'].includes(row.liftMode))throw new Error('중량물 항목을 확인해 주세요.');
         const item={};for(const key of ['kind','size','totalWeight','liftWeight']){if(typeof row[key]!=='string'||!row[key].trim()||row[key].length>200)throw new Error('중량물 항목을 확인해 주세요.');item[key]=row[key].trim();}item.liftMode=row.liftMode;
         if(row.safetyReview!==undefined){if(typeof row.safetyReview!=='string'||row.safetyReview.length>4000)throw new Error('중량물 안전성 검토를 확인해 주세요.');item.safetyReview=row.safetyReview.trim();}
         if(row.safetyImageIds!==undefined){if(!Array.isArray(row.safetyImageIds)||row.safetyImageIds.length>5||row.safetyImageIds.some(id=>!Number.isSafeInteger(id)||id<1)||new Set(row.safetyImageIds).size!==row.safetyImageIds.length)throw new Error('중량물 검토 사진을 확인해 주세요.');item.safetyImageIds=row.safetyImageIds;}
