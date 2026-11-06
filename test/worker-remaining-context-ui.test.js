@@ -38,3 +38,8 @@ for(const state of ['logout','detach','site','row'])test('지시 사진 지연 �
   await ui.submit();assert.equal(ui.requests.length,1);assert.equal(ui.context.loaded,0);assert.equal(ui.input.value,'virtual.png');assert.equal(ui.input.files[0],ui.file);assert.equal(ui.status.textContent,undefined);
   await ui.submit();assert.equal(ui.requests.length,1);
 });
+
+
+test('근로자 지시 사진은 GIF도 선택해 전송한다',async()=>{
+  const ui=photoScreen();ui.file.type='image/gif';ui.file.name='virtual.gif';ui.context.success=true;await ui.submit();assert.equal(ui.requests.length,1);assert.equal(ui.requests[0].options.body,ui.file);assert.equal(ui.context.loaded,1);
+});

@@ -26,7 +26,7 @@ import { workerSpreadsheet, wageSpreadsheet } from './exports.js';
 import { sessionToken, WorkerSessions, ReviewerSessions } from './auth.js';
 import { workerSitePath } from './public/worker-link.js';
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
-import { costImageType, safetyCostImageType } from './cost-image.js';
+import { costImageType, safetyCostImageType, instructionPhotoType } from './cost-image.js';
 import { AiChat, AI_BODY_LIMIT } from './ai-chat.js';
 import { sensAlimtalk } from './sens-alimtalk.js';
 import { NotificationOutbox } from './notification-outbox.js';
@@ -151,7 +151,7 @@ async function boardAttachmentRequest(req,res,url,match,actor){
   return json(res,405,{error:'지원하지 않는 요청입니다.'});
 }
 function instructionPhotoResponse(res,photo,preview){
-  const bytes=Buffer.from(photo.data),type=bytes.subarray(0,8).equals(Buffer.from('89504e470d0a1a0a','hex'))?'image/png':bytes.subarray(0,3).equals(Buffer.from('ffd8ff','hex'))?'image/jpeg':null;
+  const bytes=Buffer.from(photo.data),type=instructionPhotoType(bytes);
   if(preview&&!type)return json(res,415,{error:'미리 볼 수 없는 사진입니다.'});
   const name=encodeURIComponent(photo.name).replace(/[!'()*]/g,c=>`%${c.charCodeAt(0).toString(16).toUpperCase()}`);
   res.writeHead(200,{'Content-Type':preview?type:'application/octet-stream',...(preview?{}:{'Content-Disposition':`attachment; filename="photo"; filename*=UTF-8''${name}`}),'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(bytes);
