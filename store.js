@@ -2416,7 +2416,7 @@ export class Store {
   addInstructionPhoto(id,phase,name,data){
     const existing=this.instructionPhotos(id);if(!['before','after'].includes(phase))throw new Error('사진 구분을 확인해 주세요.');
     if(typeof name!=='string'||!name.trim()||name.length>200||/[\\/\x00-\x1f\x7f]/.test(name))throw new Error('사진 이름을 확인해 주세요.');
-    if(!(data instanceof Uint8Array)||!data.length||data.length>2*1024*1024)throw new Error('사진은 1바이트 이상 2MB 이하여야 합니다.');
+    if(!(data instanceof Uint8Array)||!data.length||data.length>50*1024*1024)throw new Error('사진은 1바이트 이상 50MB 이하여야 합니다.');
     const bytes=Buffer.from(data);if(!bytes.subarray(0,8).equals(Buffer.from('89504e470d0a1a0a','hex'))&&!bytes.subarray(0,3).equals(Buffer.from('ffd8ff','hex')))throw new Error('PNG 또는 JPEG 사진을 선택해 주세요.');
     if(existing.length>=20)throw new Error('시험 사진은 20개까지 가능합니다.');
     return this.db.prepare('INSERT INTO instruction_photos(document_id,phase,name,data) VALUES(?,?,?,?)').run(Number(id),phase,name,bytes).lastInsertRowid;

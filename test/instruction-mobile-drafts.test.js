@@ -18,7 +18,7 @@ function screen(){
   }
   const list=new Node('div'),instructions=new Node('section');instructions.parts={'#instruction-list':list};
   const requests=[],downloads=[],panel={isConnected:true},logout={disabled:false};
-  const context={instructions,panel,logout,siteKey:'A',workerSiteKey:'A',dayStopped:false,reportContext:{workerId:1,siteId:1,generation:'A'},initialLoads:[],document:{createElement:tag=>new Node(tag),body:new Node('body')},URL:{createObjectURL:()=> 'blob:virtual',revokeObjectURL(){}},setTimeout:()=>{},Date,
+  const context={instructions,panel,logout,siteKey:'A',workerSiteKey:'A',dayStopped:false,reportContext:{workerId:1,siteId:1,generation:'A'},initialLoads:[],document:{createElement:tag=>new Node(tag),createTextNode:value=>({textContent:value}),body:new Node('body')},URL:{createObjectURL:()=> 'blob:virtual',revokeObjectURL(){}},setTimeout:()=>{},Date,
     signaturePad:canvas=>({value(){if(!canvas.signature)throw Error('서명 필요');return canvas.signature;},clear(){canvas.signature='';}}),
     FormData:class{constructor(form){return Object.entries(form.elements).map(([key,input])=>[key,input.value]);}},
     endWorkerDay(){context.dayStopped=true;panel.isConnected=false;},
@@ -108,4 +108,9 @@ for(const selectNext of [false,true])test('사진 저장 성공 뒤 목록 실�
   await ui.reply(ui.pending('/api/worker/instructions/1/photos?phase=before','POST'),{},201);await ui.reply(ui.pending('/api/worker/instructions/1/photos'),{error:'가상 목록 실패'},500);await saving;
   assert.match(photos.parts['[role=status]'].textContent,/사진은 저장했습니다/);assert.match(photos.parts['[role=status]'].textContent,/목록 갱신에 실패/);
   if(selectNext){assert.equal(input.files[0],next);assert.equal(input.value,next.name);}else{assert.equal(input.value,'');assert.equal(input.files.length,0);await button.onclick({currentTarget:button});assert.equal(ui.requests.filter(r=>r.options?.method==='POST').length,1);assert.match(photos.parts['[role=status]'].textContent,/선택해 주세요/);}
+});
+
+test('큰 조치 사진은 자동으로 불러오지 않고 다운로드 선택을 제공한다',async()=>{
+  const ui=screen(),item={...ui.items[0],result_date:'2030-01-01',result_content:'가상 조치',result_source:'worker'},loading=ui.context.load();await ui.reply(ui.pending('/api/worker/instructions'),[item]);await ui.reply(ui.pending('/api/worker/instructions/1/attachments'),[]);await ui.reply(ui.pending('/api/worker/instructions/1/photos'),[{id:1,name:'작은.png',phase:'before',size:1024},{id:2,name:'큰.png',phase:'after',size:3*1024*1024}]);await loading;
+  assert.ok(ui.pending('/api/worker/instructions/1/photos/1?preview=1'));assert.equal(ui.pending('/api/worker/instructions/1/photos/2?preview=1'),undefined);const photos=ui.list.children[0].children.find(node=>node.parts?.select);assert.match(photos.parts.ul.children[1].children[0].textContent,/다운로드/);assert.match(photos.parts.ul.children[1].children[1].textContent,/큰.png/);
 });

@@ -163,6 +163,14 @@ function dailyReportPhoto(doc,kind,id){
   const version=createHash('sha256').update(JSON.stringify([doc.id,doc.site_id,doc.date,kind,file.id,file.name,file.description||''])).update(bytes).digest('hex');
   return {id:file.id,kind,name:file.name,description:kind==='site'?file.description:'',type,version,bytes};
 }
+let instructionPhotoUploadActive=false;
+async function receiveInstructionPhoto(req,save){
+  if(Number(req.headers['content-length'])>50*1024*1024)throw new Error('사진은 50MB 이하여야 합니다.');
+  if(instructionPhotoUploadActive)throw Object.assign(new Error('다른 사진을 처리하고 있습니다. 잠시 후 다시 시도해 주세요.'),{sessionStatus:503,retryAfter:1});
+  instructionPhotoUploadActive=true;
+  try{const chunks=[];let size=0;for await(const chunk of req){size+=chunk.length;if(size>50*1024*1024)throw new Error('사진은 50MB 이하여야 합니다.');chunks.push(chunk);}checkRequestSession(req);return save(Buffer.concat(chunks));}
+  finally{instructionPhotoUploadActive=false;}
+}
 async function body(req,max=65536,allowEmpty=false) {
   const chunks=[];let size=0;
   for await (const chunk of req) { size+=chunk.length;if(size>max)throw new Error('입력 내용이 너무 깁니다.');chunks.push(chunk); }
@@ -591,10 +599,8 @@ const server = http.createServer((req,res)=>passwordRequests.run(true,()=>adminR
       }
       if(photoId)return json(res,404,{error:'요청을 찾을 수 없습니다.'});
       store.workerInstructionPhotos(session.worker.id,id);
-      const chunks=[];let size=0;for await(const chunk of req){size+=chunk.length;if(size>2*1024*1024)throw new Error('사진은 2MB 이하여야 합니다.');chunks.push(chunk);}checkRequestSession(req);
-      const failure=workerSessionError(workerToken,session);if(failure)return json(res,failure.status,{error:failure.error});
-      let name;try{name=decodeURIComponent(req.headers['x-file-name']||'');}catch{throw new Error('사진 이름을 확인해 주세요.');}
-      return json(res,201,{id:store.addWorkerInstructionPhoto(session.worker.id,id,url.searchParams.get('phase'),name,Buffer.concat(chunks),()=>checkWorkerReport(req,key,session))});
+      const uploadedPhotoId=await receiveInstructionPhoto(req,bytes=>{const failure=workerSessionError(workerToken,session);if(failure)throw Object.assign(new Error(failure.error),{sessionStatus:failure.status});let name;try{name=decodeURIComponent(req.headers['x-file-name']||'');}catch{throw new Error('사진 이름을 확인해 주세요.');}return store.addWorkerInstructionPhoto(session.worker.id,id,url.searchParams.get('phase'),name,bytes,()=>checkWorkerReport(req,key,session));});
+      return json(res,201,{id:uploadedPhotoId});
     }
     const workerMeetingFile=url.pathname.match(/^\/api\/worker\/meetings\/(\d+)\/attachments\/(\d+)$/);
     if(workerMeetingFile&&req.method==='GET'){const key=workerKey(workerToken),session=workerSessions.get(key);if(!session||session.expires<=Date.now()){workerSessions.delete(key);return json(res,401,{error:'근로자 로그인이 필요합니다.'});}let file=store.workerMeetingAttachment(session.worker.id,workerMeetingFile[1],workerMeetingFile[2]);checkRequestSession(req);if(file)file=store.workerMeetingAttachment(session.worker.id,workerMeetingFile[1],workerMeetingFile[2]);checkRequestSession(req);if(!file)return json(res,404,{error:'첨부파일을 찾을 수 없습니다.'});const name=encodeURIComponent(file.name).replace(/[!'()*]/g,c=>`%${c.charCodeAt(0).toString(16).toUpperCase()}`);res.writeHead(200,{'Content-Type':'application/octet-stream','Content-Disposition':`attachment; filename="attachment"; filename*=UTF-8''${name}`,'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(file.data);}
@@ -1204,9 +1210,8 @@ const server = http.createServer((req,res)=>passwordRequests.run(true,()=>adminR
       const id=instructionPhotos[1],photoId=instructionPhotos[2];
       if(!photoId&&req.method==='GET')return json(res,200,store.instructionPhotos(id));
       if(!photoId&&req.method==='POST'){
-        const chunks=[];let size=0;for await(const chunk of req){size+=chunk.length;if(size>2*1024*1024)throw new Error('사진은 2MB 이하여야 합니다.');chunks.push(chunk);}checkRequestSession(req);
-        let name;try{name=decodeURIComponent(req.headers['x-file-name']||'');}catch{throw new Error('사진 이름을 확인해 주세요.');}
-        return json(res,201,{id:store.addInstructionPhoto(id,url.searchParams.get('phase'),name,Buffer.concat(chunks))});
+        const uploadedPhotoId=await receiveInstructionPhoto(req,bytes=>{let name;try{name=decodeURIComponent(req.headers['x-file-name']||'');}catch{throw new Error('사진 이름을 확인해 주세요.');}return store.addInstructionPhoto(id,url.searchParams.get('phase'),name,bytes);});
+        return json(res,201,{id:uploadedPhotoId});
       }
       if(photoId&&req.method==='DELETE'){store.deleteInstructionPhoto(id,photoId);return json(res,200,{ok:true});}
       if(photoId&&req.method==='GET'){const photo=store.instructionPhoto(id,photoId);if(!photo)return json(res,404,{error:'시험 사진을 찾을 수 없습니다.'});return instructionPhotoResponse(res,photo,url.searchParams.get('preview')==='1');}
