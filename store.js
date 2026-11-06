@@ -155,6 +155,7 @@ export class Store {
       CREATE TABLE IF NOT EXISTS work_place_photos (id INTEGER PRIMARY KEY,place_id INTEGER NOT NULL REFERENCES work_places(id),name TEXT NOT NULL,data BLOB NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
       CREATE TABLE IF NOT EXISTS equipment_attachments (id INTEGER PRIMARY KEY,equipment_id INTEGER NOT NULL REFERENCES equipment(id),category TEXT NOT NULL,name TEXT NOT NULL,data BLOB NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
       CREATE TABLE IF NOT EXISTS equipment_checks (id INTEGER PRIMARY KEY,document_id INTEGER NOT NULL REFERENCES documents(id),equipment_id INTEGER NOT NULL REFERENCES equipment(id),date TEXT NOT NULL,items TEXT NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,UNIQUE(document_id,equipment_id,date));
+      CREATE TABLE IF NOT EXISTS equipment_check_photos (id INTEGER PRIMARY KEY AUTOINCREMENT,check_id INTEGER NOT NULL REFERENCES equipment_checks(id) ON DELETE CASCADE,name TEXT NOT NULL,data BLOB NOT NULL);
       CREATE TABLE IF NOT EXISTS workers (id INTEGER PRIMARY KEY, site_id INTEGER NOT NULL REFERENCES sites(id), name TEXT NOT NULL, category TEXT NOT NULL, company TEXT NOT NULL, occupation TEXT NOT NULL, memo TEXT NOT NULL DEFAULT '');
       CREATE TABLE IF NOT EXISTS worker_accounts (worker_id INTEGER PRIMARY KEY REFERENCES workers(id),site_id INTEGER NOT NULL REFERENCES sites(id),login_id TEXT NOT NULL,salt BLOB NOT NULL,password_hash BLOB NOT NULL,UNIQUE(site_id,login_id));
       CREATE TABLE IF NOT EXISTS worker_password_failures (worker_id INTEGER NOT NULL REFERENCES workers(id),attempted_at INTEGER NOT NULL);
@@ -1079,8 +1080,10 @@ export class Store {
   equipmentChecks(documentId){
     const doc=this.document(documentId);if(!doc || doc.type!=='work_plan')throw new Error('작업계획서를 확인해 주세요.');
     const rows=this.db.prepare('SELECT id,equipment_id,date,items,created_at,equipment_snapshot,inspector,signature IS NOT NULL AS has_signature FROM equipment_checks WHERE document_id=? ORDER BY date DESC,id DESC').all(Number(documentId)),latest=this.db.prepare('SELECT id,status,created_at,ended_at FROM equipment_check_approval_cycles WHERE check_id=? ORDER BY id DESC LIMIT 1');
-    return rows.map(row=>{const approval=latest.get(row.id);return approval?{...row,approval:{...approval,steps:this.equipmentCheckApprovalSteps(approval.id)}}:row;});
+    return rows.map(row=>{const approval=latest.get(row.id),photos=this.equipmentCheckPhotos(documentId,row.id),result=photos.length?{...row,photos}:row;return approval?{...result,approval:{...approval,steps:this.equipmentCheckApprovalSteps(approval.id)}}:result;});
   }
+  equipmentCheckPhotos(documentId,checkId){return this.db.prepare('SELECT p.id,p.name,length(p.data) AS size FROM equipment_check_photos p JOIN equipment_checks e ON e.id=p.check_id WHERE e.document_id=? AND e.id=? ORDER BY p.id').all(Number(documentId),Number(checkId));}
+  equipmentCheckPhoto(documentId,checkId,photoId){return this.db.prepare('SELECT p.* FROM equipment_check_photos p JOIN equipment_checks e ON e.id=p.check_id WHERE e.document_id=? AND e.id=? AND p.id=?').get(Number(documentId),Number(checkId),Number(photoId))||null;}
   equipmentCheckIdentity(documentId,checkId){const row=this.db.prepare("SELECT e.id,e.document_id,d.site_id,e.signature IS NOT NULL AS has_signature FROM equipment_checks e JOIN documents d ON d.id=e.document_id WHERE d.type='work_plan' AND d.id=? AND e.id=?").get(Number(documentId),Number(checkId));if(!row)throw new Error('선택한 계획서의 시험 점검을 확인해 주세요.');return row;}
   equipmentCheckApprovalSteps(cycleId){return this.db.prepare('SELECT position,reviewer_id,reviewer_name,state,opinion,reviewed_at,signature IS NOT NULL AS has_signature FROM equipment_check_approval_steps WHERE cycle_id=? ORDER BY position').all(Number(cycleId));}
   equipmentCheckApprovals(documentId,checkId){this.equipmentCheckIdentity(documentId,checkId);return this.db.prepare('SELECT id,status,created_at,ended_at FROM equipment_check_approval_cycles WHERE check_id=? ORDER BY id DESC').all(Number(checkId)).map(row=>({...row,steps:this.equipmentCheckApprovalSteps(row.id)}));}
@@ -1119,7 +1122,7 @@ export class Store {
   }
   equipmentCheckSignature(documentId,checkId){return this.db.prepare('SELECT signature FROM equipment_checks WHERE document_id=? AND id=? AND signature IS NOT NULL').get(Number(documentId),Number(checkId))?.signature||null;}
   deleteEquipmentCheck(documentId,checkId,onAuthorize=()=>{}){this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();this.equipmentChecks(documentId);if(!this.db.prepare('DELETE FROM equipment_checks WHERE document_id=? AND id=?').run(Number(documentId),Number(checkId)).changes)throw new Error('시험 점검을 찾을 수 없습니다.');this.db.exec('COMMIT');}catch(error){this.db.exec('ROLLBACK');throw error;}}
-  addEquipmentCheck(documentId,input,onAuthorize=()=>{}){
+  addEquipmentCheck(documentId,input,onAuthorize=()=>{},photos=[]){
     this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();
     const doc=this.document(documentId);if(!doc || doc.type!=='work_plan')throw new Error('작업계획서를 확인해 주세요.');
     const details=JSON.parse(doc.details),equipmentId=Number(input.equipmentId),date=dateValue(input.date);
@@ -1128,9 +1131,10 @@ export class Store {
     if((details.periodFrom && date<details.periodFrom) || (details.periodTo && date>details.periodTo))throw new Error('점검일이 작업기간을 벗어났습니다.');
     if(!Array.isArray(input.items) || !input.items.length || input.items.length>100)throw new Error('점검 항목을 확인해 주세요.');
     const items=input.items.map(item=>{if(!item || typeof item!=='object' || Array.isArray(item) || !['적정','부적정','해당없음'].includes(item.result))throw new Error('점검 판정을 확인해 주세요.');const result={name:text(item.name,'점검 항목',500),result:item.result};if(item.checkType!==undefined){if(!['일반','장비'].includes(item.checkType))throw new Error('점검 유형을 확인해 주세요.');result.checkType=item.checkType;}for(const [key,label,max] of [['section','점검 구분',200],['action','조치 내용',2000]])if(item[key]!==undefined){if(typeof item[key]!=='string'||item[key].length>max)throw new Error(`${label}을 확인해 주세요.`);if(item[key].trim())result[key]=item[key].trim();}return result;});
+    if(!Array.isArray(photos)||photos.length>10)throw new Error('사진은 최대 10개까지 가능합니다.');for(const photo of photos){if(!photo||typeof photo.name!=='string'||!photo.name.trim()||photo.name.length>200||/[\/ -]/.test(photo.name))throw new Error('사진 이름을 확인해 주세요.');if(!(photo.data instanceof Uint8Array)||!photo.data.length||photo.data.length>10*1024*1024||!safetyCostImageType(photo.data))throw new Error('사진은 10MB 이하의 PNG·JPEG·GIF·WebP 파일이어야 합니다.');}
     const inspector=input.inspector===undefined?null:text(input.inspector,'점검자',200),signature=input.signature===undefined?null:signatureBytes(input.signature);if((inspector===null)!==(signature===null))throw new Error('점검자와 시험 서명을 함께 입력해 주세요.');
     if(this.db.prepare('SELECT 1 FROM equipment_checks WHERE document_id=? AND equipment_id=? AND date=?').get(Number(documentId),equipmentId,date))throw new Error('해당 날짜의 시험 점검이 이미 있습니다.');
-    const id=this.db.prepare('INSERT INTO equipment_checks(document_id,equipment_id,date,items,equipment_snapshot,inspector,signature) VALUES(?,?,?,?,?,?,?)').run(Number(documentId),equipmentId,date,JSON.stringify(items),JSON.stringify(equipment),inspector,signature).lastInsertRowid;this.db.exec('COMMIT');return id;}catch(error){this.db.exec('ROLLBACK');throw error;}
+    const id=this.db.prepare('INSERT INTO equipment_checks(document_id,equipment_id,date,items,equipment_snapshot,inspector,signature) VALUES(?,?,?,?,?,?,?)').run(Number(documentId),equipmentId,date,JSON.stringify(items),JSON.stringify(equipment),inspector,signature).lastInsertRowid;const insertPhoto=this.db.prepare('INSERT INTO equipment_check_photos(check_id,name,data) VALUES(?,?,?)');for(const photo of photos)insertPhoto.run(id,photo.name.trim(),photo.data);onAuthorize();this.db.exec('COMMIT');return id;}catch(error){this.db.exec('ROLLBACK');throw error;}
   }
   deleteEquipmentAttachment(siteId,equipmentId,id){
     if(!this.equipmentAttachment(siteId,equipmentId,id))throw new Error('첨부파일을 찾을 수 없습니다.');
@@ -2142,6 +2146,7 @@ export class Store {
     return {type:'plan',equipment,rigging,place:place?{info:{...place,details:JSON.parse(place.details)},files:this.workPlacePhotos(doc.site_id,place.id)}:null,checks:this.equipmentChecks(doc.id).map(check=>({...check,items:JSON.parse(check.items),equipment_snapshot:check.equipment_snapshot?JSON.parse(check.equipment_snapshot):null})),authorSignature:!!this.meetingSignature(doc.id)};
   }
   liveReviewerLinkedFile(doc,kind,parentId,fileId){
+    if(kind==='equipment-check-photo'&&doc.type==='work_plan')return this.equipmentCheckPhoto(doc.id,parentId,fileId);
     if(kind==='risk'&&doc.type==='risk')return this.riskActivityPhoto(doc.id,parentId,fileId);
     if(kind==='cost-photo'&&doc.type==='cost'){const photo=this.safetyCostReportPhoto(doc.id,fileId);return photo&&photo.cost_id===Number(parentId)?photo:null;}
     if(kind==='office-reference'&&doc.type==='office'){const details=JSON.parse(doc.details||'{}'),ref=details.referenceDocId||details.referenceId,file=ref===Number(parentId)&&(details.referenceDocId?this.officeLinkedDocument(doc.site_id,ref):this.officeReference(doc.site_id,ref))&&this.attachment(fileId);return file&&file.document_id===ref?file:null;}
@@ -2172,7 +2177,7 @@ export class Store {
       for(const item of linked.equipment)for(const file of item.files)save('equipment',item.info.id,file.id,this.liveReviewerLinkedFile(doc,'equipment',item.info.id,file.id));
       for(const item of linked.rigging)for(const file of item.files)save('rigging',item.info.id,file.id,this.liveReviewerLinkedFile(doc,'rigging',item.info.id,file.id));
       if(linked.place)for(const file of linked.place.files)save('place',linked.place.info.id,file.id,this.liveReviewerLinkedFile(doc,'place',linked.place.info.id,file.id));
-      for(const check of linked.checks){if(check.has_signature)save('equipment-check-signature',check.id,0,{data:this.liveReviewerLinkedSignature(doc,'equipment-check',check.id)});for(const step of check.approval?.steps||[])if(step.has_signature)save('equipment-review-signature',check.id,step.position,{data:this.equipmentCheckApprovalSignature(doc.id,check.id,check.approval.id,step.position)});}
+      for(const check of linked.checks){for(const photo of check.photos||[])save('equipment-check-photo',check.id,photo.id,this.equipmentCheckPhoto(doc.id,check.id,photo.id));if(check.has_signature)save('equipment-check-signature',check.id,0,{data:this.liveReviewerLinkedSignature(doc,'equipment-check',check.id)});for(const step of check.approval?.steps||[])if(step.has_signature)save('equipment-review-signature',check.id,step.position,{data:this.equipmentCheckApprovalSignature(doc.id,check.id,check.approval.id,step.position)});}
     }
     if(linked?.type==='risk')for(const activity of linked.activities){for(const file of activity.files)save('risk',activity.id,file.id,this.liveReviewerLinkedFile(doc,'risk',activity.id,file.id));if(activity.has_signature)save('risk-activity-signature',activity.id,0,{data:this.liveReviewerLinkedSignature(doc,'risk-activity',activity.id)});}
     if(linked?.type==='cost')for(const photo of linked.photos)save('cost-photo',photo.cost_id,photo.id,this.liveReviewerLinkedFile(doc,'cost-photo',photo.cost_id,photo.id));
@@ -2442,7 +2447,7 @@ export class Store {
     for(const item of linked.equipment)for(const file of item.files)hash.update(this.liveReviewerLinkedFile(doc,'equipment',item.info.id,file.id).data);
     for(const item of linked.rigging)for(const file of item.files)hash.update(this.liveReviewerLinkedFile(doc,'rigging',item.info.id,file.id).data);
     if(linked.place)for(const file of linked.place.files)hash.update(this.liveReviewerLinkedFile(doc,'place',linked.place.info.id,file.id).data);
-    for(const check of linked.checks){if(check.has_signature)hash.update(this.equipmentCheckSignature(doc.id,check.id));for(const step of check.approval?.steps||[])if(step.has_signature)hash.update(this.equipmentCheckApprovalSignature(doc.id,check.id,check.approval.id,step.position));}
+    for(const check of linked.checks){for(const photo of check.photos||[])hash.update(this.equipmentCheckPhoto(doc.id,check.id,photo.id).data);if(check.has_signature)hash.update(this.equipmentCheckSignature(doc.id,check.id));for(const step of check.approval?.steps||[])if(step.has_signature)hash.update(this.equipmentCheckApprovalSignature(doc.id,check.id,check.approval.id,step.position));}
     return hash.digest('hex');
   }
   planSignatureInfo(doc){const saved=this.meetingSignature(doc.id),version=this.planSignatureVersion(doc),previous=this.db.prepare('SELECT version FROM plan_signature_versions WHERE document_id=?').get(doc.id)?.version;return {hasSignature:!!saved,createdAt:saved?.created_at||null,editVersion:doc.edit_version,version,stale:!!saved&&['draft','rejected'].includes(doc.status)&&previous!==version};}
