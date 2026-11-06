@@ -16,7 +16,7 @@ export function trainingRoster(targets){
     id:worker.id,name:worker.name,
     company:worker.present?worker.attendance_company:worker.company,
     occupation:worker.present?worker.attendance_occupation:null,
-    confirmed:!!worker.daily_confirmed,hasSignature:!!worker.daily_has_signature
+    confirmed:!!worker.daily_confirmed,hasSignature:!!worker.daily_has_signature,...(worker.transferOrigin?{transferOrigin:worker.transferOrigin}:{})
   }));
 }
 

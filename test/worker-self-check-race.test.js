@@ -5,7 +5,7 @@ import {runInNewContext} from 'node:vm';
 
 function screen(){
   const source=readFileSync(new URL('../public/app.js',import.meta.url),'utf8'),start=source.indexOf('async function showWorkerSelfCheck('),end=source.indexOf('async function showWorkerActivities(',start);assert.ok(start>=0&&end>start);
-  let view={isConnected:true},opened=[],waits=[];const dialog={open:true,close(){this.open=false;view=null;}},controls={'#dialog-form button[type=submit]':{},'#self-check-print-button':{}},context={state:{siteId:7,admin:{id:1}},detailEpoch:1,dialog,workerSelfCheckEpoch:0,$:key=>key==='#activity-results'?view:controls[key],api:(_path,_options,active)=>new Promise((resolve,reject)=>waits.push({resolve,reject,active})),esc:String,showDialog:(_title,html)=>{opened.push(html);dialog.open=true;},showError:error=>{throw error;},flash(){},window:{print(){}}};
+  let view={isConnected:true},opened=[],waits=[];const dialog={open:true,close(){this.open=false;view=null;}},controls={'#dialog-form button[type=submit]':{},'#self-check-print-button':{}},context={state:{siteId:7,admin:{id:1}},detailEpoch:1,dialog,workerSelfCheckEpoch:0,$:key=>key==='#activity-results'?view:controls[key],api:(_path,_options,active)=>new Promise((resolve,reject)=>waits.push({resolve,reject,active})),esc:String,transferNote:row=>row.transferOrigin?` · 전환 전 기록자: ${row.transferOrigin.name}`:'',showDialog:(_title,html)=>{opened.push(html);dialog.open=true;},showError:error=>{throw error;},flash(){},window:{print(){}}};
   runInNewContext(source.slice(start,end)+'\nglobalThis.openCheck=showWorkerSelfCheck;',context);return {context,waits,opened,replaceView(){view.isConnected=false;view={isConnected:true};},getView:()=>view};
 }
 
