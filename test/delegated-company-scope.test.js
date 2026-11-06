@@ -53,3 +53,11 @@ test('업체가 변경된 출입자가 포함된 문서는 작성자에게서 �
   s.updateWorker(worker.id,{...base,name:worker.name,category:worker.category,companyId:a.id});assert.equal(s.workerDocuments(site.id,manager.id).length,2);
  }finally{s.close();}
 });
+
+test('협력업체 교육 문서는 상신 시 다른 업체 대상이 없을 때만 제출한다',()=>{
+ const s=new Store(':memory:');try{
+  const site=s.createSite({name:'가상 현장'}),a=s.createCompany({siteId:site.id,name:'가상 A',trade:'A'}),b=s.createCompany({siteId:site.id,name:'가상 B',trade:'B'}),token=s.createInvitation(site.id).token,base={siteId:site.id,company:a.name,occupation:'가상 직종'},manager=s.join(token,{...base,companyId:a.id,name:'관리자',category:'협력업체 관리자',loginId:'submit_manager',password:'virtual-password-123',acknowledged:true,profile:{birthDate:'2000-01-01',phone:'010-0000-0000'}}),worker=s.createWorker({...base,companyId:a.id,name:'작업자',category:'협력업체 근로자'});s.setWorkerPermissions(site.id,manager.id,['training']);
+  const doc=s.createWorkerDocument(site.id,manager.id,{type:'education',title:'가상 교육',date:'2026-11-01',details:{kind:'regular',timeFrom:'09:00',timeTo:'10:00',educationPlace:'가상 장소',educationMethod:'강의식',instructor:'가상 강사',textbook:'가상 교재'}});s.updateWorker(worker.id,{...base,name:worker.name,category:worker.category,companyId:b.id});assert.throws(()=>s.transitionWorkerDocument(site.id,manager.id,doc.id,'submit'),/다른 업체/);assert.equal(s.document(doc.id).status,'draft');assert.equal(s.trainingTargets(doc.id).workers.find(row=>row.id===worker.id).selected,1);
+  s.setTrainingTargets(doc.id,[manager.id]);s.transitionWorkerDocument(site.id,manager.id,doc.id,'submit');assert.equal(s.document(doc.id).status,'pending');
+ }finally{s.close();}
+});
