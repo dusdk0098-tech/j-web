@@ -18,4 +18,5 @@ test('근로자 서명은 시작한 포인터만 추적하고 취소·지우기 
   canvas.onpointerdown(event(3));pad.clear();canvas.onpointermove(event(3,40,40));assert.equal(lines.at(-1)[0],'clear');assert.equal(pad.hasValue(),false);assert.throws(()=>pad.value(),/서명/);
   canvas.onpointerdown({...event(4),pointerType:'mouse',button:2});assert.equal(pad.hasValue(),false);
   canvas.onpointerdown(event(5));canvas.onpointercancel(event(5));assert.equal(pad.value(),'data:image/png;base64,virtual');
+  canvas.onpointerdown(event(6));pad.setDisabled(true);const before=lines.length;canvas.onpointermove(event(6,30,30));canvas.onpointerdown(event(7));assert.equal(lines.length,before);assert.equal(pad.hasValue(),true);pad.setDisabled(false);canvas.onpointerdown(event(8));assert.ok(lines.length>before);
 });

@@ -36,13 +36,13 @@ const flow=createJoinFlow(document.querySelector('#worker-choices'),login,form,m
 let inviteInfo=null,workerOpening=false;
 function adoptSiteAddress(key){const path=workerSitePath(key);document.querySelector('#worker-path-warning')?.remove();if(!path){const warning=document.createElement('p');warning.id='worker-path-warning';warning.textContent='현장 로그인 주소를 확인하지 못했습니다. 관리자에게 새 QR을 요청하세요.';site.after(warning);return;}siteKey=key;const manifest=document.querySelector('link[rel="manifest"]');if(manifest)manifest.href=`/worker.webmanifest?site=${encodeURIComponent(key)}`;const loginLink=document.querySelector('#worker-site-link');if(loginLink)loginLink.href=path;if(!replaceWorkerSiteAddress(key,history)){const warning=document.createElement('p'),link=document.createElement('a');warning.id='worker-path-warning';warning.textContent='주소가 자동으로 바뀌지 않았습니다. ';link.href=path;link.textContent='현장 로그인 주소 열기';warning.append(link);site.after(warning);}}
 function signaturePad(canvas){
-  const ctx=canvas.getContext('2d');let pointer=null,signed=false;
+  const ctx=canvas.getContext('2d');let pointer=null,signed=false,disabled=false;
   const point=e=>{const rect=canvas.getBoundingClientRect();return [(e.clientX-rect.left)*canvas.width/rect.width,(e.clientY-rect.top)*canvas.height/rect.height];};
   ctx.lineWidth=2;ctx.lineCap='round';ctx.strokeStyle='#111';
-  canvas.onpointerdown=e=>{if(pointer!==null||(e.pointerType==='mouse'&&e.button!==0))return;e.preventDefault();canvas.setPointerCapture(e.pointerId);pointer=e.pointerId;signed=true;const [x,y]=point(e);ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(x+.1,y+.1);ctx.stroke();};
+  canvas.onpointerdown=e=>{if(disabled||pointer!==null||(e.pointerType==='mouse'&&e.button!==0))return;e.preventDefault();canvas.setPointerCapture(e.pointerId);pointer=e.pointerId;signed=true;const [x,y]=point(e);ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(x+.1,y+.1);ctx.stroke();};
   canvas.onpointermove=e=>{if(e.pointerId!==pointer)return;const [x,y]=point(e);ctx.lineTo(x,y);ctx.stroke();};
   canvas.onpointerup=canvas.onpointercancel=canvas.onlostpointercapture=e=>{if(e.pointerId===pointer)pointer=null;};
-  return {clear(){pointer=null;ctx.clearRect(0,0,canvas.width,canvas.height);signed=false;},hasValue(){return signed;},value(){if(!signed)throw Error('시험 서명을 입력해 주세요.');return canvas.toDataURL('image/png');}};
+  return {setDisabled(value){disabled=!!value;if(disabled)pointer=null;},clear(){pointer=null;ctx.clearRect(0,0,canvas.width,canvas.height);signed=false;},hasValue(){return signed;},value(){if(!signed)throw Error('시험 서명을 입력해 주세요.');return canvas.toDataURL('image/png');}};
 }
 form.querySelector('.fields').insertAdjacentHTML('beforeend','<details><summary>선택: 시험 아이디와 암호 사용</summary><label><input type="checkbox" name="useCredentials"> 아이디와 암호를 직접 설정합니다</label><label>시험 아이디<input name="loginId" disabled required pattern="[A-Za-z0-9_]{3,40}" autocomplete="username"></label><label>시험 암호<input name="password" disabled type="password" required minlength="12" maxlength="256" autocomplete="new-password"></label></details>');
 function updateJoinCredentials(){for(const name of ['loginId','password'])form.elements[name].disabled=!form.elements.useCredentials.checked;}form.elements.useCredentials.onchange=updateJoinCredentials;
