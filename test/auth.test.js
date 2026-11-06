@@ -824,7 +824,7 @@ test('관리자 인증 모드가 문서 API를 보호하고 로그아웃을 적�
     assert.equal((await fetch(weekly)).status,401);
     assert.equal((await fetch(weekly,{headers:{cookie:workerCookie}})).status,401);
     const week=await (await fetch(weekly,{headers:{cookie}})).json();
-    assert.equal(week.length,7);assert.equal(week[0].date,today);assert.equal(week[0].attendance,1);assert.equal(week[0].trainingChecks,1);assert.equal(week[0].documents.tbm,2);
+    assert.equal(week.length,7);assert.equal(week[0].date,today);assert.equal(week[0].attendance,1);assert.equal(week[0].trainingChecks,1);assert.deepEqual(week[0].trainingPeopleByType,{tbm:1,education:0});assert.equal(week[0].noticePeople,0);assert.equal(week[0].documents.tbm,2);
     const categoryReport=`${base}/api/attendance/report?siteId=${site.id}&from=${today}&to=${today}&group=category`;
     assert.equal((await fetch(categoryReport)).status,401);assert.equal((await fetch(categoryReport,{headers:{cookie:workerCookie}})).status,401);
     const categoryRows=await (await fetch(categoryReport,{headers:{cookie}})).json();assert.equal(categoryRows.length,1);assert.equal(categoryRows[0].days,1);assert.equal(categoryRows[0].label,'직영');
