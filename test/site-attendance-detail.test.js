@@ -52,3 +52,10 @@ test('월 출역에서 개인 활동을 열면 선택한 월 또는 하루를 �
  await ui.context.showSiteAttendanceDetail(site,'2026-02','',()=>true);ui.target.onclick({target:button});assert.equal(JSON.stringify(ui.context.opened[0][5]),JSON.stringify({from:'2026-02-01',to:'2026-02-28'}));
  await ui.context.showSiteAttendanceDetail(site,'2026-02','02',()=>true);ui.target.onclick({target:button});assert.equal(JSON.stringify(ui.context.opened[1][5]),JSON.stringify({from:'2026-02-02',to:'2026-02-02'}));
 });
+
+test('출역 관리 월별 미리보기는 현재 현장과 월을 전달하고 이전 화면을 무시한다',async()=>{
+ const source=readFileSync(new URL('../public/app.js',import.meta.url),'utf8'),line=source.split('\n').find(item=>item.includes('const attendancePreviewActor=state.admin'));assert.ok(line);assert.match(source,/id="attendance-month-preview"/);
+ const state={admin:{id:1},siteId:7,page:'attendance'},button={},opened=[],errors=[];let active=true;
+ const context={state,siteId:7,month:'2026-10',siteSelect:{selectedOptions:[{textContent:'가상 현장'}]},current:()=>active,$:()=>button,showSiteAttendanceDetail:async(...args)=>{opened.push(args);},showError:e=>errors.push(e)};runInNewContext(line,context);button.onclick();await Promise.resolve();assert.equal(opened.length,1);assert.deepEqual(JSON.parse(JSON.stringify(opened[0][0])),{id:7,name:'가상 현장'});assert.equal(opened[0][1],'2026-10');assert.equal(opened[0][2],'');
+ const originalAdmin=state.admin;state.admin={id:2};button.onclick();assert.equal(opened.length,1);assert.equal(opened[0][3](),false);state.admin=originalAdmin;active=false;button.onclick();assert.equal(opened.length,1);assert.equal(opened[0][3](),false);assert.equal(errors.length,0);
+});
