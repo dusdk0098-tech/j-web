@@ -21,3 +21,11 @@ test('직원 월별 점검 API는 인증과 현장 권한을 적용한다',{time
   assert.equal((await call('/staff-monthly-checks.js')).status,200);assert.equal((await call(path)).status,401);assert.equal((await call(path,'GET',null,limited)).status,403);const response=await call(path,'GET',null,admin);assert.equal(response.status,200);assert.deepEqual(await response.json(),[{id:person.id,name:'가상 직원',date:'2024-02-29',kind:'day_off'}]);assert.deepEqual(await(await call(`/api/attendance/staff-checks?siteId=${b.id}&month=2024-02`,'GET',null,admin)).json(),[]);assert.equal((await call(`/api/attendance/staff-checks?siteId=${a.id}&month=2024-13`,'GET',null,admin)).status,400);
  }finally{if(child.exitCode===null){const exited=once(child,'exit');child.kill();await exited;}rmSync(dir,{recursive:true,force:true});}
 });
+
+test('직원 월별 조회 응답은 현장·월·계정·화면이 바뀐 뒤 표시하지 않는다',async()=>{
+ const {readFileSync}=await import('node:fs'),{runInNewContext}=await import('node:vm'),source=readFileSync(new URL('../public/app.js',import.meta.url),'utf8'),lines=source.split('\n'),current=lines.find(line=>line.includes("const current=()=>state.page==='attendance'")),request=lines.find(line=>line.includes('const staffActor=state.admin,staffCurrent='));assert.ok(current&&request);
+ for(const change of ['none','site','month','account','page','epoch']){
+  let resolve;const waiting=new Promise(ok=>{resolve=ok;}),state={page:'attendance',siteId:1,admin:{id:1},attendanceDate:'2024-02-01',attendanceMonth:'2024-02',reportFrom:'2024-02-01',reportTo:'2024-02-29',reportGroup:'worker'},inserted=[],errors=[],context={state,siteId:1,epoch:1,detailEpoch:1,date:'2024-02-01',month:'2024-02',from:'2024-02-01',to:'2024-02-29',group:'worker',dates:['2024-02-01'],today:()=> '2024-02-01',encodeURIComponent,esc:String,content:{insertAdjacentHTML:(position,html)=>inserted.push(html)},staffMonthlyChecksMarkup:()=>'<가상 표>',api:()=>waiting,showError:error=>errors.push(error)};
+  runInNewContext(`${current}\n${request}`,context);if(change==='site')state.siteId=2;if(change==='month')state.attendanceMonth='2024-03';if(change==='account')state.admin={id:2};if(change==='page')state.page='workers';if(change==='epoch')context.detailEpoch=2;resolve([]);await waiting;await Promise.resolve();assert.equal(inserted.length,change==='none'?1:0,change);assert.equal(errors.length,0);
+ }
+});
