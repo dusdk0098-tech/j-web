@@ -7,12 +7,12 @@ test('기본 시험 급여는 새 출역에만 복사되고 기존 출역을 변
   const a=s.createSite({name:'가상 현장'}),b=s.createSite({name:'다른 현장'}),worker=s.createWorker({siteId:a.id,name:'가상',category:'직영',company:'가상',occupation:'목공'}),input={siteId:a.id,workerId:worker.id};
   const pay=(kind,amount,version)=>s.setWorkerDefaultPay(a.id,worker.id,{siteId:a.id,kind,amount,version}),day=date=>s.attendance(a.id,date).find(row=>row.id===worker.id);
   assert.deepEqual(s.workerDefaultPay(a.id,worker.id),{kind:null,amount:null,version:0});assert.throws(()=>s.workerDefaultPay(b.id,worker.id));
-  s.setAttendance({...input,date:'2024-01-01',present:true});pay('daily','0',0);s.setAttendance({...input,date:'2024-01-02',present:true});assert.equal(day('2024-01-01').daily_rate,null);assert.equal(day('2024-01-02').daily_rate,0);
+  s.setAttendance({...input,date:'2024-01-01',present:true});assert.equal(day('2024-01-01').day_version,1);pay('daily','0',0);s.setAttendance({...input,date:'2024-01-02',present:true});assert.equal(day('2024-01-01').daily_rate,null);assert.equal(day('2024-01-02').daily_rate,0);
   assert.throws(()=>pay('daily','200',0),/변경/);assert.throws(()=>pay('monthly','',1));assert.throws(()=>pay('bad','10',1));assert.throws(()=>s.setWorkerDefaultPay(a.id,worker.id,{siteId:a.id,kind:'daily',amount:'10',version:1},()=>{throw Error('세션 종료');}),/세션 종료/);
   pay('monthly','300',1);s.recordWorkerLogin(worker.id,'2024-01-03');assert.equal(day('2024-01-03').salary_kind,'monthly');assert.equal(day('2024-01-03').salary_amount,300);assert.equal(day('2024-01-02').daily_rate,0);
   s.setAttendanceDailyRate({...input,date:'2024-01-02',dailyRate:'50'});s.recordWorkerLogin(worker.id,'2024-01-02');assert.equal(day('2024-01-02').daily_rate,50);
   s.setAttendance({...input,date:'2024-01-02',present:false});s.setAttendance({...input,date:'2024-01-02',present:true});assert.equal(day('2024-01-02').daily_rate,50);
-  pay('','',2);s.recordWorkerLogin(worker.id,'2024-01-04');assert.equal(day('2024-01-04').daily_rate,null);assert.equal(day('2024-01-04').salary_kind,null);
+  pay('','',2);s.recordWorkerLogin(worker.id,'2024-01-04');assert.equal(day('2024-01-04').daily_rate,null);assert.equal(day('2024-01-04').salary_kind,null);assert.equal(day('2024-01-04').day_version,1);
  }finally{s.close();}
 });
 
