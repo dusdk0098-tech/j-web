@@ -111,6 +111,7 @@ assets.add('/client-recovery');
 assets.add('/worker-identity-remember.js');
 assets.add('/worker-list.js');
 assets.add('/attendance-matrix.js');
+assets.add('/staff-monthly-checks.js');
 assets.add('/restricted-month-editor.js');
 assets.add('/education-kinds.js');
 assets.add('/training-detail.js');
@@ -1151,6 +1152,7 @@ const server = http.createServer((req,res)=>passwordRequests.run(true,()=>adminR
       res.writeHead(200,{'Content-Type':'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet','Content-Disposition':"attachment; filename=workers.xlsx",'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});
       return res.end(data);
     }
+    if(url.pathname==='/api/attendance/staff-checks'&&req.method==='GET'){const rows=store.monthlyReviewerManagerChecks(url.searchParams.get('siteId'),url.searchParams.get('month'));checkRequestSession(req);return json(res,200,rows);}
     if (url.pathname === '/api/attendance/month' && req.method === 'GET') return json(res,200,adminAttendanceRows(req,store.monthlyAttendance(url.searchParams.get('siteId'),url.searchParams.get('month'))));
     if (url.pathname === '/api/education/report' && req.method === 'GET') return json(res,200,store.educationReport(url.searchParams.get('siteId'),url.searchParams.get('from'),url.searchParams.get('to')));
     if (url.pathname === '/api/education/manager-assignments' && req.method === 'GET') return json(res,200,store.managerEducationAssignments(url.searchParams.get('siteId'),url.searchParams.get('from'),url.searchParams.get('to')));

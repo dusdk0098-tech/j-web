@@ -421,6 +421,10 @@ export class Store {
   siteReviewerManagerChecks(siteId,date){
     date=dateValue(date);return this.db.prepare('SELECT c.reviewer_id AS id,r.name,c.date,c.kind,c.answers,c.created_at,c.signature IS NOT NULL AS has_signature FROM reviewer_manager_checks c JOIN reviewers r ON r.id=c.reviewer_id WHERE c.site_id=? AND c.date=? ORDER BY r.name,r.id').all(Number(siteId),date).map(row=>({...row,answers:row.answers===null?null:JSON.parse(row.answers)}));
   }
+  monthlyReviewerManagerChecks(siteId,month){
+    month=monthValue(month);siteId=Number(siteId);if(!this.db.prepare('SELECT 1 FROM sites WHERE id=?').get(siteId))throw new Error('현장을 선택해 주세요.');
+    return this.db.prepare("SELECT r.id,r.name,c.date,c.kind FROM reviewer_manager_checks c JOIN reviewers r ON r.id=c.reviewer_id AND r.site_id=c.site_id WHERE c.site_id=? AND c.date BETWEEN ? AND ? ORDER BY r.name,r.id,c.date").all(siteId,`${month}-01`,`${month}-31`);
+  }
   siteReviewerManagerSignature(siteId,reviewerId,date){return this.db.prepare("SELECT signature FROM reviewer_manager_checks WHERE site_id=? AND reviewer_id=? AND date=? AND kind='check'").get(Number(siteId),Number(reviewerId),dateValue(date))?.signature||null;}
   sites() { return this.db.prepare('SELECT * FROM sites ORDER BY name').all(); }
   sitePhotos(siteId,from='',to='',query=''){

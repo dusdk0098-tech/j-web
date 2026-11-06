@@ -1,3 +1,4 @@
+import { staffMonthlyChecksMarkup } from './staff-monthly-checks.js';
 import { riskReviewInputs,readRiskReviewRoles,mountRiskProcesses,mountRiskProcessPicker } from './risk-review-roles.js';
 import { mountPlanWorkerOther, mountPlanWorkerSearch } from './plan-worker-other.js';
 import { mountDailyMeals } from './meal-day.js';
@@ -1878,6 +1879,7 @@ async function render(){
     content.querySelectorAll('section:first-child tbody input,section:first-child tbody select').forEach(el=>el.dataset.initial=el.value);
     $('#report-search').onclick=()=>{const start=$('#report-from').value,end=$('#report-to').value;if(!start||!end||start>end){flash('조회 기간을 확인해 주세요.',true);return;}state.reportFrom=start;state.reportTo=end;state.reportGroup=$('#report-group').value;render().catch(showError);};
     content.insertAdjacentHTML('beforeend',directAttendanceMarkup(monthly)+attendanceMatrixMarkup(monthly,dates));
+    const staffActor=state.admin,staffCurrent=()=>current()&&state.admin===staffActor;api(`/api/attendance/staff-checks?siteId=${siteId}&month=${encodeURIComponent(month)}`,{},staffCurrent).then(rows=>{if(staffCurrent())content.insertAdjacentHTML('beforeend',staffMonthlyChecksMarkup(rows,dates,esc));}).catch(error=>{if(staffCurrent())showError(error);});
     return;
   }
   if(state.page==='workers'){
