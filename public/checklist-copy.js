@@ -3,6 +3,7 @@ export const rainDetailChecks=['기상특보 확인','장화 및 우의 확보',
 export const windChecks=['장비의 안전한 이동 및 고정','자재와 공구의 안전한 보관','임시 시설물과 폐기물 정리·고정','배수 및 긴급 복구 장비 확보','지붕·외벽의 설치물 고정','도로와 배수 경로 정비','침수 위험 구역의 사전 조치','대피 장소와 이동 경로 안내','기상 예보와 경보 확인'];
 export const thawChecks=['굴착 경사와 균열 확인','지표수 유입 차단','낙석·붕괴 방호와 출입 제한','굴착 지반 안정 및 지지 구조 확인','토류 구조물 손상·변위 확인','계측 결과 확인과 이상 조치','배면 토사 유실 방지','주변 지반의 수분·동결 확인','굴착 가장자리 차량·적치 제한','인접 지반과 건물 변형 확인','매설 설비 보호','장비 설치면 지지력과 받침 확인','콘크리트 강도 및 지지 기간 확인','작업 발판과 지지 구조 변형 확인','지지 구조의 받침과 바닥 상태 확인'];
 export const heatChecks=['기상 변화와 열 위험 안내','더운 시간대 작업 조정과 휴식','장비 냉각 상태 확인','위생시설 청결 유지','그늘과 휴게 공간 준비','환기 부족 장소 확인','인화성 용기 보관 상태','자체 발열 물질의 보관·환기'];
+export const heatDetailChecks=['기상 변화와 열 위험 안내','오후 1~3시 작업 중지와 휴식 확인','건설기계 냉각장치 수시 점검','샤워실·화장실 위생 확인','노천 작업 구역의 그늘과 차광막','공기가 순환되지 않는 밀폐구역 출입 여부','가스용기를 직사광선을 피해 보관','자체 발열 물질의 보관·환기'];
 export const coldChecks=['한파 알림과 작업 기준 공유','저체온·동상·미끄럼 위험 안내','방한 보호구 확보','난방 휴게 장소와 온음료','통행 구간 결빙 확인','제설·제빙 물품 확보','고소·양중 작업 제한 검토','동파 위험 설비 보온','저온 콘크리트 양생 확인','응급 대응 및 이송 절차 안내'];
 export const wetSeasonChecks=['강우 예상과 물길 확보','침수 대비 물품 준비','경사지 표면 보호','굴착 가장자리 접근 제한','옹벽 배수구 상태','흙 유실 예방'];
 export const heavyRainChecks=['기상 경보 파악','우천 보호 장비 준비','전기 설비의 물기 차단','자재 손상 방지','굴착 경사 보호','배수 펌프 준비','물 흐름 통로 확인','긴급 대응 인원 계획','연락 체계 준비','임시 경계 시설 확인','침수 우려 장소 확인'];
@@ -16,9 +17,9 @@ export const semiannualChecks=['사업장 이름','안전 관리 책임자','사
 export const morningChecks=['공정별 인원 수','안전체조','안전구호 3회','작업 불능자 확인','보호구 확인','위험 지역 사진','위험 지역 및 임시 수전설비 안내','안전점검 조치 사항','안전관련 특이 사항'];
 export const afternoonChecks=['공정별 인원 수','음주자 확인','작업 불능자 확인','보호구 확인','오후 투입자 위험 지역 및 설비 안내','현장 정리 정돈','오후 추가 작업'];
 export const eveningChecks=['주 출입구 확인','현장 정리','현장 사무실 확인','잔여 인원 확인','기계공구 및 안전모 확인','자재 적치장 확인','폐기물 적치장 확인','가설울타리 개방구 확인','작업용 전원 확인','야간 작업 인원·작업명·완료시간'];
-export const checklistQuestions=Object.freeze({rain:rainChecks,rain_detail:rainDetailChecks,wind:windChecks,thaw:thawChecks,heat:heatChecks,cold:coldChecks,wet_season:wetSeasonChecks,heavy_rain:heavyRainChecks,electrical:electricalChecks,fire:fireChecks,formwork:formworkChecks,falling:fallingChecks,confined:confinedChecks,excavation:excavationChecks,semiannual:semiannualChecks,morning:morningChecks,afternoon:afternoonChecks,evening:eveningChecks});
+export const checklistQuestions=Object.freeze({rain:rainChecks,rain_detail:rainDetailChecks,wind:windChecks,thaw:thawChecks,heat:heatChecks,heat_detail:heatDetailChecks,cold:coldChecks,wet_season:wetSeasonChecks,heavy_rain:heavyRainChecks,electrical:electricalChecks,fire:fireChecks,formwork:formworkChecks,falling:fallingChecks,confined:confinedChecks,excavation:excavationChecks,semiannual:semiannualChecks,morning:morningChecks,afternoon:afternoonChecks,evening:eveningChecks});
 export const checklistCategories=Object.freeze({daily:'일일 점검',weather:'기상별 점검',general:'일반 점검',semiannual:'반기점검'});
-const checklistKindCategories=Object.freeze({morning:'daily',afternoon:'daily',evening:'daily',rain:'weather',rain_detail:'weather',wind:'weather',thaw:'weather',heat:'weather',cold:'weather',wet_season:'weather',heavy_rain:'weather',electrical:'general',fire:'general',formwork:'general',falling:'general',confined:'general',excavation:'general',semiannual:'semiannual'});
+const checklistKindCategories=Object.freeze({morning:'daily',afternoon:'daily',evening:'daily',rain:'weather',rain_detail:'weather',wind:'weather',thaw:'weather',heat:'weather',heat_detail:'weather',cold:'weather',wet_season:'weather',heavy_rain:'weather',electrical:'general',fire:'general',formwork:'general',falling:'general',confined:'general',excavation:'general',semiannual:'semiannual'});
 export function checklistCategoryForKind(kind){return typeof kind==='string'&&Object.hasOwn(checklistKindCategories,kind)?checklistKindCategories[kind]:'';}
 
 export function checklistSources(rows,siteId,kind,date,excludeId){
