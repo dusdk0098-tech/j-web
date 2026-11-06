@@ -1557,6 +1557,11 @@ export class Store {
     if(!actor)throw new Error('선택한 현장의 출입자를 확인해 주세요.');
     return actor.category==='협력업체 관리자'?new Set(this.db.prepare('SELECT id FROM workers WHERE site_id=? AND company_id=?').all(Number(siteId),actor.company_id).map(row=>row.id)):null;
   }
+  contractorWorkers(siteId,actorId,onAuthorize=()=>{}){
+    this.db.exec('BEGIN');try{onAuthorize();const actor=this.db.prepare('SELECT category,company_id FROM workers WHERE id=? AND site_id=?').get(Number(actorId),Number(siteId));if(!actor||actor.category!=='협력업체 관리자'||!this.workerPermissions(siteId,actorId).includes('attendance'))throw Object.assign(new Error('협력업체 출입자 조회 권한이 필요합니다.'),{sessionStatus:403});
+      const rows=actor.company_id?this.db.prepare("SELECT w.id,w.name,w.occupation,CASE WHEN json_valid(j.profile) THEN json_extract(j.profile,'$.phone') END AS phone,p.kind AS pay_kind,p.amount AS pay_amount FROM workers w LEFT JOIN join_acknowledgements j ON j.worker_id=w.id LEFT JOIN worker_default_pay p ON p.worker_id=w.id WHERE w.site_id=? AND w.company_id=? ORDER BY w.name,w.id").all(Number(siteId),actor.company_id):[];onAuthorize();this.db.exec('COMMIT');return rows;
+    }catch(error){this.db.exec('ROLLBACK');throw error;}
+  }
   delegatedAttendance(siteId,actorId,date){
     if(!this.workerPermissions(siteId,actorId).includes('attendance'))throw new Error('출역 관리 시험 권한이 필요합니다.');
     const actor=this.db.prepare('SELECT category,company_id FROM workers WHERE id=? AND site_id=?').get(Number(actorId),Number(siteId));

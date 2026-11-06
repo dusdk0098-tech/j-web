@@ -70,3 +70,11 @@ test('협력업체 작업계획 권한은 허가서를 작성하고 같은 업�
   s.updateWorker(worker.id,{...base,name:worker.name,category:worker.category,companyId:b.id});assert.throws(()=>s.workerDocument(site.id,manager.id,doc.id),/권한/);assert.equal(s.document(doc.id).type,'permit');s.updateWorker(worker.id,{...base,name:worker.name,category:worker.category,companyId:a.id});s.updateWorker(manager.id,{...base,name:manager.name,category:manager.category,companyId:b.id});assert.throws(()=>s.workerDocument(site.id,manager.id,doc.id),/권한/);assert.throws(()=>s.createWorkerDocument(site.id,manager.id,input),/소속 업체/);
  }finally{s.close();}
 });
+
+test('협력업체 출입자 조회는 업체 번호와 조회 권한을 확인한다',()=>{
+ const s=new Store(':memory:');try{
+  const site=s.createSite({name:'가상 현장'}),a=s.createCompany({siteId:site.id,name:'동명 업체',trade:'A'}),b=s.createCompany({siteId:site.id,name:'동명 업체',trade:'B'}),token=s.createInvitation(site.id).token,base={siteId:site.id,company:a.name,occupation:'가상 직종'},join=(name,loginId,companyId,category)=>s.join(token,{...base,name,loginId,companyId,category,password:'virtual-password-123',acknowledged:true,profile:{birthDate:'2000-01-01',phone:'010-0000-0000'}}),manager=join('관리자','roster_manager',a.id,'협력업체 관리자'),same=join('같은 업체','roster_same',a.id,'협력업체 근로자'),other=join('다른 업체','roster_other',b.id,'협력업체 근로자');
+  assert.throws(()=>s.contractorWorkers(site.id,manager.id),/권한/);s.setWorkerPermissions(site.id,manager.id,['attendance']);s.setWorkerDefaultPay(site.id,same.id,{kind:'daily',amount:'100',version:0});const rows=s.contractorWorkers(site.id,manager.id);assert.deepEqual(new Set(rows.map(row=>row.id)),new Set([manager.id,same.id]));assert.equal(rows.find(row=>row.id===same.id).pay_amount,100);assert.ok(!rows.some(row=>row.id===other.id));assert.ok(rows.every(row=>!('birth_date' in row)&&!('profile' in row)));assert.throws(()=>s.contractorWorkers(site.id,manager.id,()=>{throw Error('세션 만료');}),/세션 만료/);assert.throws(()=>s.contractorWorkers(site.id,same.id),/권한/);
+  s.updateWorker(manager.id,{...base,name:manager.name,category:manager.category,companyId:0});assert.deepEqual(s.contractorWorkers(site.id,manager.id),[]);s.setWorkerPermissions(site.id,manager.id,[]);assert.throws(()=>s.contractorWorkers(site.id,manager.id),/권한/);
+ }finally{s.close();}
+});
