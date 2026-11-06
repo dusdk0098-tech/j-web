@@ -64,7 +64,7 @@ test('여러 신고는 현장별로 한 번 재조회하고 내용·사진 변�
 });
 
 test('선택 신고와 문서·신고 함께 인쇄는 선택 자료와 인쇄 요청을 전달한다',async()=>{
-  const source=readFileSync(new URL('../public/app.js',import.meta.url),'utf8'),start=source.indexOf('    const preview=(ids,autoPrint=false)=>'),end=source.indexOf('\n  }\n}\ntry {const session=',start);assert.ok(start>=0&&end>start);
+  const source=readFileSync(new URL('../public/app.js',import.meta.url),'utf8').replace(/\r\n/g,'\n'),start=source.indexOf('    const preview=(ids,autoPrint=false)=>'),end=source.indexOf('\n  }\n}\ntry {const session=',start);assert.ok(start>=0&&end>start);
   const reports=[{id:2,title:'가상 신고'}],filtered=[{id:7,title:'가상 문서'}],calls=[],errors=[],mixed=[],selected={reports:[{dataset:{hazardDocument:'2'}}],documents:[{dataset:{batchDocument:'7'}}]};let reportPrint;
   const controls={append:button=>mixed.push(button)},nodes={'#hazard-select-all':{},'#hazard-preview':{after:button=>{reportPrint=button;}}},section={querySelector:()=>controls,querySelectorAll:selector=>selector==='[data-hazard-document]:checked'?selected.reports:[]},content={querySelectorAll:()=>selected.documents};
   runInNewContext(source.slice(start,end),{reports,filtered,siteId:1,section,content,document:{createElement:()=>({})},$:id=>nodes[id],selectBatchDocuments,selectBatchItems,showBatchPreview:async(...args)=>{calls.push(args);},showError:error=>errors.push(error.message)});
