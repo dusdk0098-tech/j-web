@@ -1407,7 +1407,7 @@ export class Store {
   trainingState(documentId,onAuthorize=()=>{}){
     this.db.exec('BEGIN');try{onAuthorize();const doc=this.document(documentId),targets=this.trainingTargets(documentId),version=this.trainingStateVersion(documentId),hasSignature=doc.type==='tbm'&&!!this.tbmSignature(documentId);onAuthorize();this.db.exec('COMMIT');return {targets,version,hasSignature};}catch(error){this.db.exec('ROLLBACK');throw error;}
   }
-  setTrainingTargets(documentId,workerIds,onAuthorize=()=>{},managerIds) {
+  setTrainingTargets(documentId,workerIds,onAuthorize=()=>{},managerIds,scopeWorkerId) {
     const preserveWorkers=workerIds===undefined&&managerIds!==undefined;
     if(!preserveWorkers&&(!Array.isArray(workerIds) || workerIds.length>1000 || workerIds.some(id=>!Number.isSafeInteger(id) || id<1) || new Set(workerIds).size!==workerIds.length))throw new Error('교육 대상자를 확인해 주세요.');
     if(managerIds!==undefined&&(!Array.isArray(managerIds)||managerIds.length>1000||managerIds.some(id=>!Number.isSafeInteger(id)||id<1)||new Set(managerIds).size!==managerIds.length))throw new Error('관리자 교육 대상자를 확인해 주세요.');
@@ -1417,6 +1417,14 @@ export class Store {
       if(!doc || !['tbm','education'].includes(doc.type) || !['draft','rejected'].includes(doc.status))throw new Error('수정 가능한 교육 문서를 확인해 주세요.');
       const exists=this.db.prepare('SELECT 1 FROM workers WHERE id=? AND site_id=?');
       if(!preserveWorkers&&workerIds.some(id=>!exists.get(id,doc.site_id)))throw new Error('같은 현장의 교육 대상자를 선택해 주세요.');
+      if(scopeWorkerId!==undefined&&!preserveWorkers){
+        const allowed=this.workerCompanyScope(doc.site_id,scopeWorkerId);
+        if(allowed){
+          if(workerIds.some(id=>!allowed.has(id)))throw Object.assign(new Error('같은 업체의 교육 대상자를 선택해 주세요.'),{sessionStatus:403});
+          const previous=this.trainingTargets(documentId);workerIds=[...workerIds,...previous.workers.filter(row=>!allowed.has(row.id)&&(!previous.configured||row.selected)).map(row=>row.id)];
+          if(workerIds.length>1000)throw new Error('교육 대상자가 너무 많아 변경할 수 없습니다.');
+        }
+      }
       if(managerIds!==undefined){
         if(!hasManagerEducationTargets(doc)&&managerIds.length)throw new Error('관리자 대상이 있는 교육 종류를 선택해 주세요.');
         const manager=this.db.prepare('SELECT 1 FROM reviewers WHERE id=? AND site_id=? AND active=1');
@@ -1543,6 +1551,11 @@ export class Store {
     this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();const current=this.workerPermissions(siteId,workerId);if(expectedPermissions!==undefined&&JSON.stringify(current)!==JSON.stringify([...expectedPermissions].sort()))throw Object.assign(new Error('시험 권한이 변경되었습니다. 다시 조회해 주세요.'),{sessionStatus:409});
     if(permissions.length&&!this.db.prepare('SELECT 1 FROM worker_accounts WHERE site_id=? AND worker_id=?').get(Number(siteId),Number(workerId)))throw new Error('시험 계정이 있는 출입자를 선택해 주세요.');
     this.db.prepare('DELETE FROM worker_permissions WHERE worker_id=?').run(Number(workerId));for(const permission of permissions)this.db.prepare('INSERT INTO worker_permissions(worker_id,permission) VALUES(?,?)').run(Number(workerId),permission);const result=this.workerPermissions(siteId,workerId);this.db.exec('COMMIT');return result;}catch(error){this.db.exec('ROLLBACK');throw error;}
+  }
+  workerCompanyScope(siteId,workerId){
+    const actor=this.db.prepare('SELECT category,company_id FROM workers WHERE id=? AND site_id=?').get(Number(workerId),Number(siteId));
+    if(!actor)throw new Error('선택한 현장의 출입자를 확인해 주세요.');
+    return actor.category==='협력업체 관리자'?new Set(this.db.prepare('SELECT id FROM workers WHERE site_id=? AND company_id=?').all(Number(siteId),actor.company_id).map(row=>row.id)):null;
   }
   delegatedAttendance(siteId,actorId,date){
     if(!this.workerPermissions(siteId,actorId).includes('attendance'))throw new Error('출역 관리 시험 권한이 필요합니다.');

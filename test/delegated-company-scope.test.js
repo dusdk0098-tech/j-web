@@ -21,3 +21,14 @@ test('협력업체 관리자의 문서 작성 선택 목록은 자기 업체 출
   s.updateWorker(manager.id,{...base,name:manager.name,category:manager.category,companyId:0});assert.equal(s.workerDocumentOptions(site.id,manager.id,'work_plan').workers.length,0);assert.equal(s.workerDocumentOptions(site.id,manager.id,'risk').riskPeople.filter(person=>person.kind==='worker').length,0);
  }finally{s.close();}
 });
+
+test('협력업체 교육 대상 변경은 다른 업체의 명시·기본 대상을 보존한다',()=>{
+ const s=new Store(':memory:');try{
+  const site=s.createSite({name:'가상 현장'}),a=s.createCompany({siteId:site.id,name:'가상 A',trade:'A'}),b=s.createCompany({siteId:site.id,name:'가상 B',trade:'B'}),token=s.createInvitation(site.id).token,base={siteId:site.id,company:a.name,occupation:'가상 직종'},manager=s.join(token,{...base,companyId:a.id,name:'관리자',category:'협력업체 관리자',loginId:'scope_training',password:'virtual-password-123',acknowledged:true,profile:{birthDate:'2000-01-01',phone:'010-0000-0000'}}),same=s.createWorker({...base,companyId:a.id,name:'같은 업체',category:'협력업체 근로자'}),other=s.createWorker({...base,companyId:b.id,name:'다른 업체',category:'협력업체 근로자'});
+  s.setWorkerPermissions(site.id,manager.id,['training']);const doc=s.createWorkerDocument(site.id,manager.id,{type:'education',title:'가상 교육',date:'2026-11-01',details:{kind:'regular'}}),selected=()=>s.trainingTargets(doc.id).workers.filter(row=>row.selected).map(row=>row.id).sort((x,y)=>x-y);
+  assert.throws(()=>s.setTrainingTargets(doc.id,[other.id],()=>{},undefined,manager.id),/같은 업체/);assert.equal(s.trainingTargets(doc.id).configured,false);
+  s.setTrainingTargets(doc.id,[same.id],()=>{},undefined,manager.id);assert.deepEqual(selected(),[same.id,other.id].sort((x,y)=>x-y));
+  s.setTrainingTargets(doc.id,[manager.id],()=>{},undefined,manager.id);assert.deepEqual(selected(),[manager.id,other.id].sort((x,y)=>x-y));
+  s.updateWorker(manager.id,{...base,name:manager.name,category:manager.category,companyId:0});assert.throws(()=>s.setTrainingTargets(doc.id,[same.id],()=>{},undefined,manager.id),/같은 업체/);assert.deepEqual(selected(),[manager.id,other.id].sort((x,y)=>x-y));
+ }finally{s.close();}
+});
