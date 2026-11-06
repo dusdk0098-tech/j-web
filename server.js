@@ -1242,7 +1242,7 @@ const server = http.createServer((req,res)=>passwordRequests.run(true,()=>adminR
       if(req.method==='POST'){const {input,photos}=await equipmentCheckInput(req);return json(res,201,{id:store.addEquipmentCheck(equipmentChecks[1],input,()=>checkRequestSession(req),photos)});}
     }
     const equipmentCheck=url.pathname.match(/^\/api\/documents\/(\d+)\/equipment-checks\/(\d+)$/);
-    if(equipmentCheck&&req.method==='DELETE'){store.deleteEquipmentCheck(equipmentCheck[1],equipmentCheck[2],()=>checkRequestSession(req));return json(res,200,{ok:true});}
+    if(equipmentCheck&&req.method==='DELETE'){store.deleteEquipmentCheck(equipmentCheck[1],equipmentCheck[2],()=>checkRequestSession(req),url.searchParams.get('version'));return json(res,200,{ok:true});}
     const equipmentApprovalSignature=url.pathname.match(/^\/api\/documents\/(\d+)\/equipment-checks\/(\d+)\/approvals\/(\d+)\/signatures\/(\d+)$/);
     if(equipmentApprovalSignature&&req.method==='GET'){const [,id,checkId,cycleId,position]=equipmentApprovalSignature,signature=store.equipmentCheckApprovalSignature(id,checkId,cycleId,position);if(!signature)return json(res,404,{error:'시험 결재 서명을 찾을 수 없습니다.'});res.writeHead(200,{'Content-Type':'image/png','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(signature);}
     const equipmentApproval=url.pathname.match(/^\/api\/documents\/(\d+)\/equipment-checks\/(\d+)\/approvals(?:\/(withdraw))?$/);

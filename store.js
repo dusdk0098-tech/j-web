@@ -355,6 +355,8 @@ export class Store {
     if (!this.db.prepare('PRAGMA table_info(equipment_checks)').all().some(c=>c.name==='equipment_snapshot')) this.db.exec('ALTER TABLE equipment_checks ADD COLUMN equipment_snapshot TEXT');
     if (!this.db.prepare('PRAGMA table_info(equipment_checks)').all().some(c=>c.name==='inspector')) this.db.exec('ALTER TABLE equipment_checks ADD COLUMN inspector TEXT');
     if (!this.db.prepare('PRAGMA table_info(equipment_checks)').all().some(c=>c.name==='signature')) this.db.exec('ALTER TABLE equipment_checks ADD COLUMN signature BLOB');
+    if (!this.db.prepare('PRAGMA table_info(equipment_checks)').all().some(c=>c.name==='identity')) this.db.exec("ALTER TABLE equipment_checks ADD COLUMN identity TEXT");
+    this.db.exec("UPDATE equipment_checks SET identity=lower(hex(randomblob(16))) WHERE identity IS NULL");
     if (!this.db.prepare('PRAGMA table_info(instruction_results)').all().some(c=>c.name==='source')) this.db.exec("ALTER TABLE instruction_results ADD COLUMN source TEXT NOT NULL DEFAULT 'manager'");
     if (!this.db.prepare('PRAGMA table_info(instruction_results)').all().some(c=>c.name==='signature')) this.db.exec('ALTER TABLE instruction_results ADD COLUMN signature BLOB');
     this.db.exec('BEGIN IMMEDIATE');try{
@@ -1091,8 +1093,8 @@ export class Store {
   }
   equipmentChecks(documentId){
     const doc=this.document(documentId);if(!doc || doc.type!=='work_plan')throw new Error('작업계획서를 확인해 주세요.');
-    const rows=this.db.prepare('SELECT id,equipment_id,date,items,created_at,equipment_snapshot,inspector,signature IS NOT NULL AS has_signature FROM equipment_checks WHERE document_id=? ORDER BY date DESC,id DESC').all(Number(documentId)),latest=this.db.prepare('SELECT id,status,created_at,ended_at FROM equipment_check_approval_cycles WHERE check_id=? ORDER BY id DESC LIMIT 1');
-    return rows.map(row=>{const approval=latest.get(row.id),photos=this.equipmentCheckPhotos(documentId,row.id),result=photos.length?{...row,photos}:row;return approval?{...result,approval:{...approval,steps:this.equipmentCheckApprovalSteps(approval.id)}}:result;});
+    const rows=this.db.prepare('SELECT id,equipment_id,date,items,created_at,equipment_snapshot,inspector,identity,signature IS NOT NULL AS has_signature FROM equipment_checks WHERE document_id=? ORDER BY date DESC,id DESC').all(Number(documentId)),latest=this.db.prepare('SELECT id,status,created_at,ended_at FROM equipment_check_approval_cycles WHERE check_id=? ORDER BY id DESC LIMIT 1');
+    return rows.map(row=>{const {identity,...check}=row,approval=latest.get(row.id),photos=this.equipmentCheckPhotos(documentId,row.id),result=photos.length?{...check,photos}:check,complete=approval?{...result,approval:{...approval,steps:this.equipmentCheckApprovalSteps(approval.id)}}:result;return {...complete,version:createHash('sha256').update(JSON.stringify([identity,complete])).digest('hex')};});
   }
   equipmentCheckPhotos(documentId,checkId){return this.db.prepare('SELECT p.id,p.name,length(p.data) AS size FROM equipment_check_photos p JOIN equipment_checks e ON e.id=p.check_id WHERE e.document_id=? AND e.id=? ORDER BY p.id').all(Number(documentId),Number(checkId));}
   equipmentCheckPhoto(documentId,checkId,photoId){return this.db.prepare('SELECT p.* FROM equipment_check_photos p JOIN equipment_checks e ON e.id=p.check_id WHERE e.document_id=? AND e.id=? AND p.id=?').get(Number(documentId),Number(checkId),Number(photoId))||null;}
@@ -1133,7 +1135,7 @@ export class Store {
     }catch(error){this.db.exec('ROLLBACK');throw error;}
   }
   equipmentCheckSignature(documentId,checkId){return this.db.prepare('SELECT signature FROM equipment_checks WHERE document_id=? AND id=? AND signature IS NOT NULL').get(Number(documentId),Number(checkId))?.signature||null;}
-  deleteEquipmentCheck(documentId,checkId,onAuthorize=()=>{}){this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();this.equipmentChecks(documentId);if(!this.db.prepare('DELETE FROM equipment_checks WHERE document_id=? AND id=?').run(Number(documentId),Number(checkId)).changes)throw new Error('시험 점검을 찾을 수 없습니다.');this.db.exec('COMMIT');}catch(error){this.db.exec('ROLLBACK');throw error;}}
+  deleteEquipmentCheck(documentId,checkId,onAuthorize=()=>{},expectedVersion=null){this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();const current=this.equipmentChecks(documentId).find(row=>row.id===Number(checkId));if(expectedVersion!==null&&(!current||current.version!==expectedVersion))throw Object.assign(new Error('점검이 변경되었습니다. 다시 조회해 주세요.'),{sessionStatus:409});if(!this.db.prepare('DELETE FROM equipment_checks WHERE document_id=? AND id=?').run(Number(documentId),Number(checkId)).changes)throw new Error('시험 점검을 찾을 수 없습니다.');this.db.exec('COMMIT');}catch(error){this.db.exec('ROLLBACK');throw error;}}
   addEquipmentCheck(documentId,input,onAuthorize=()=>{},photos=[]){
     this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();
     const doc=this.document(documentId);if(!doc || doc.type!=='work_plan')throw new Error('작업계획서를 확인해 주세요.');
@@ -1146,7 +1148,7 @@ export class Store {
     if(!Array.isArray(photos)||photos.length>10)throw new Error('사진은 최대 10개까지 가능합니다.');for(const photo of photos){if(!photo||typeof photo.name!=='string'||!photo.name.trim()||photo.name.length>200||/[\\/\x00-\x1f\x7f]/.test(photo.name))throw new Error('사진 이름을 확인해 주세요.');if(!(photo.data instanceof Uint8Array)||!photo.data.length||photo.data.length>10*1024*1024||!safetyCostImageType(photo.data))throw new Error('사진은 10MB 이하의 PNG·JPEG·GIF·WebP 파일이어야 합니다.');}
     const inspector=input.inspector===undefined?null:text(input.inspector,'점검자',200),signature=input.signature===undefined?null:signatureBytes(input.signature);if((inspector===null)!==(signature===null))throw new Error('점검자와 시험 서명을 함께 입력해 주세요.');
     if(this.db.prepare('SELECT 1 FROM equipment_checks WHERE document_id=? AND equipment_id=? AND date=?').get(Number(documentId),equipmentId,date))throw new Error('해당 날짜의 시험 점검이 이미 있습니다.');
-    const id=this.db.prepare('INSERT INTO equipment_checks(document_id,equipment_id,date,items,equipment_snapshot,inspector,signature) VALUES(?,?,?,?,?,?,?)').run(Number(documentId),equipmentId,date,JSON.stringify(items),JSON.stringify(equipment),inspector,signature).lastInsertRowid;const insertPhoto=this.db.prepare('INSERT INTO equipment_check_photos(check_id,name,data) VALUES(?,?,?)');for(const photo of photos)insertPhoto.run(id,photo.name.trim(),photo.data);onAuthorize();this.db.exec('COMMIT');return id;}catch(error){this.db.exec('ROLLBACK');throw error;}
+    const id=this.db.prepare('INSERT INTO equipment_checks(document_id,equipment_id,date,items,equipment_snapshot,inspector,signature,identity) VALUES(?,?,?,?,?,?,?,lower(hex(randomblob(16))))').run(Number(documentId),equipmentId,date,JSON.stringify(items),JSON.stringify(equipment),inspector,signature).lastInsertRowid;const insertPhoto=this.db.prepare('INSERT INTO equipment_check_photos(check_id,name,data) VALUES(?,?,?)');for(const photo of photos)insertPhoto.run(id,photo.name.trim(),photo.data);onAuthorize();this.db.exec('COMMIT');return id;}catch(error){this.db.exec('ROLLBACK');throw error;}
   }
   deleteEquipmentAttachment(siteId,equipmentId,id){
     if(!this.equipmentAttachment(siteId,equipmentId,id))throw new Error('첨부파일을 찾을 수 없습니다.');

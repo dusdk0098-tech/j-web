@@ -26,3 +26,25 @@ test('점검 저장 대기 중 계획서에서 장비가 빠지면 점검을 저
     db=new DatabaseSync(join(dir,'jweb.sqlite'));db.exec('PRAGMA busy_timeout=3000');db.exec('BEGIN IMMEDIATE');locked=true;const started=once(child.stdout,'data'),pending=send(`/api/documents/${doc.id}/equipment-checks`,'POST',{equipmentId:equipment.id,date:'2026-10-30',items:[{name:'가상 점검',result:'적정'}]},admin);pending.catch(()=>{});assert.match(String((await started)[0]),/CHECK_SAVE/);db.prepare('UPDATE documents SET details=? WHERE id=?').run(JSON.stringify({equipmentIds:[]}),doc.id);db.exec('COMMIT');locked=false;assert.equal((await pending).status,400);assert.equal(db.prepare('SELECT COUNT(*) AS n FROM equipment_checks WHERE document_id=?').get(doc.id).n,0);
   }finally{if(db){if(locked)db.exec('ROLLBACK');db.close();}if(child.exitCode===null){const exited=once(child,'exit');child.kill();await exited;}rmSync(dir,{recursive:true,force:true});}
 });
+
+test('오래된 화면의 삭제는 같은 번호로 다시 만든 점검을 지우지 않는다',()=>{
+  const s=new Store(':memory:');try{
+    const site=s.createSite({name:'가상 현장'}),equipment=s.createEquipment({siteId:site.id,kind:'가상 장비',model:'가상 모델',capacity:'',manufacturer:'',registration:''}),doc=s.createDocument({siteId:site.id,type:'work_plan',title:'가상 계획',date:'2026-11-01',details:{equipmentIds:[equipment.id]}}),input={equipmentId:equipment.id,date:'2026-11-01',items:[{name:'가상 항목',result:'적정'}]};
+    const first=s.addEquipmentCheck(doc.id,input),old=s.equipmentChecks(doc.id)[0].version;
+    assert.match(old,/^[a-f0-9]{64}$/);s.deleteEquipmentCheck(doc.id,first,()=>{},old);
+    const second=s.addEquipmentCheck(doc.id,input),current=s.equipmentChecks(doc.id)[0].version;
+    assert.equal(first,second);assert.notEqual(current,old);
+    assert.throws(()=>s.deleteEquipmentCheck(doc.id,second,()=>{},old),error=>error.sessionStatus===409);
+    assert.equal(s.equipmentChecks(doc.id).length,1);s.deleteEquipmentCheck(doc.id,second,()=>{},current);assert.equal(s.equipmentChecks(doc.id).length,0);
+  }finally{s.close();}
+});
+
+test('이전 점검 기록은 이관과 재시작 후 같은 변경 확인값을 유지한다',()=>{
+  const dir=mkdtempSync(join(tmpdir(),'jweb-equipment-migration-')),file=join(dir,'test.sqlite');let s=new Store(file);
+  try{
+    const site=s.createSite({name:'가상 현장'}),equipment=s.createEquipment({siteId:site.id,kind:'장비',model:'모델',capacity:'',manufacturer:'',registration:''}),doc=s.createDocument({siteId:site.id,type:'work_plan',title:'계획',date:'2026-11-01',details:{equipmentIds:[equipment.id]}});
+    s.addEquipmentCheck(doc.id,{equipmentId:equipment.id,date:'2026-11-01',items:[{name:'항목',result:'적정'}]});s.close();s=null;
+    const old=new DatabaseSync(file);old.exec('ALTER TABLE equipment_checks DROP COLUMN identity');old.close();
+    s=new Store(file);const version=s.equipmentChecks(doc.id)[0].version;assert.match(version,/^[a-f0-9]{64}$/);s.close();s=new Store(file);assert.equal(s.equipmentChecks(doc.id)[0].version,version);
+  }finally{s?.close();rmSync(dir,{recursive:true,force:true});}
+});
