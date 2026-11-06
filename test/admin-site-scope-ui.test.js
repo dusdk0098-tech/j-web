@@ -17,6 +17,7 @@ import { trainingDetailMarkup } from '../public/training-detail.js';
 import { riskDetailMarkup, muscleDetailMarkup } from '../public/risk-detail.js';
 import { patrolActivitiesSummary } from '../public/patrol-activities.js';
 import { planDetailMarkup } from '../public/plan-detail.js';
+import { equipmentCheckResults } from '../public/equipment-check-results.js';
 import { educationAttachmentLabels } from '../public/education-kinds.js';
 import { checklistCategories } from '../public/checklist-copy.js';
 import { mountWorkerInvitation } from '../public/worker-invitation.js';
@@ -53,7 +54,7 @@ function screen(fetcher=async()=>({ok:true,status:200,json:async()=>[]})){
   context.changedTrainingWorkers=changedTrainingWorkers;
   context.attendanceNoticesMarkup=attendanceNoticesMarkup;
   context.trainingDetailMarkup=trainingDetailMarkup;context.educationAttachmentLabels=educationAttachmentLabels;
-  Object.assign(context,{riskDetailMarkup,muscleDetailMarkup,planDetailMarkup,patrolActivitiesSummary});
+  Object.assign(context,{riskDetailMarkup,muscleDetailMarkup,planDetailMarkup,patrolActivitiesSummary,equipmentCheckResults});
   for(const key of ['riskFields','riskKinds','riskScales','planFields','safetyLogFields','placeChoiceLabels','incidentFields','victimFields'])context[key]=runInNewContext(source.split('\n').find(line=>line.startsWith('const '+key+'='))+'\n'+key);
   runInNewContext(source.split('\n').find(line=>line.startsWith('function placeSummary(')),context);
   for(const key of ['rainChecks','rainDetailChecks','windChecks','thawChecks','heatChecks','heatDetailChecks','coldChecks','coldDetailChecks','wetSeasonChecks','heavyRainChecks','electricalChecks','fireChecks','formworkChecks','fallingChecks','confinedChecks','excavationChecks','semiannualChecks','morningChecks','afternoonChecks','eveningChecks'])context[key]=checklistDefinitions[key];
@@ -196,7 +197,7 @@ test('배정 현장 연장 서명은 현재 버전으로 내려받고 화면 이
 });
 
 test('배정 현장의 계획서에서 장비 점검을 조회하고 이전 화면의 응답을 무시한다',async()=>{
-  const doc={id:5,site_id:1,type:'work_plan',title:'가상',details:'{}'},checks=[{id:11,date:'2026-11-02',inspector:'가상 <점검자>',equipment:{kind:'<장비>',model:'가상 모델'},items:[{name:'<점검 항목>',result:'부적정',checkType:'장비',section:'가상 구분',action:'가상 조치'}],photos:[{id:12,name:'가상 <사진>.png'}]}],ui=screen(async path=>response(path.endsWith('/attachments')?[]:path.endsWith('/plan-linked')?{checks}:doc));ui.state.page='documents';ui.state.detail=5;await ui.context.renderRestrictedDocuments();await ui.get('#restricted-plan-checks').onclick();const html=ui.get('#restricted-plan-check-results').innerHTML;for(const value of ['&lt;점검자&gt;','&lt;장비&gt;','&lt;점검 항목&gt;','유형: 장비','가상 구분','가상 조치','가상 &lt;사진&gt;.png','plan-linked/equipment-check-photo/11/12'])assert.ok(html.includes(value),value);assert.doesNotMatch(html,/<점검 항목>/);
+  const doc={id:5,site_id:1,type:'work_plan',title:'가상',details:'{}'},checks=[{id:11,date:'2026-11-02',inspector:'가상 <점검자>',equipment:{kind:'<장비>',model:'가상 모델'},items:[{name:'<점검 항목>',result:'부적정',checkType:'장비',section:'가상 구분',action:'가상 조치'}],photos:[{id:12,name:'가상 <사진>.png'}]}],ui=screen(async path=>response(path.endsWith('/attachments')?[]:path.endsWith('/plan-linked')?{checks}:doc));ui.state.page='documents';ui.state.detail=5;await ui.context.renderRestrictedDocuments();await ui.get('#restricted-plan-checks').onclick();const html=ui.get('#restricted-plan-check-results').innerHTML;for(const value of ['&lt;점검자&gt;','&lt;장비&gt;','&lt;점검 항목&gt;','장비 점검','가상 구분','가상 조치','가상 &lt;사진&gt;.png','plan-linked/equipment-check-photo/11/12'])assert.ok(html.includes(value),value);assert.doesNotMatch(html,/<점검 항목>/);
   const wait=delayed(),late=screen(async path=>path.endsWith('/attachments')?response([]):path.endsWith('/plan-linked')?wait.promise:response(doc));late.state.page='documents';late.state.detail=5;await late.context.renderRestrictedDocuments();const pending=late.get('#restricted-plan-checks').onclick();await late.get('#restricted-plan-checks').onclick();assert.equal(late.requests.filter(r=>r.path.endsWith('/plan-linked')).length,1);late.state.siteId=2;late.get('#restricted-plan-check-results').innerHTML='새 화면';wait.resolve(response({checks}));await pending;assert.equal(late.get('#restricted-plan-check-results').innerHTML,'새 화면');
 });
 
