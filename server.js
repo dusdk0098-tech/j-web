@@ -532,6 +532,7 @@ const server = http.createServer((req,res)=>passwordRequests.run(true,()=>adminR
     }
     const contractorWorker=url.pathname.match(/^\/api\/worker\/company-workers\/(\d+)$/);
     if(contractorWorker&&req.method==='PUT'){const key=workerKey(workerToken),session=workerSessions.get(key);if(!session||session.expires<=Date.now())return json(res,401,{error:'근로자 로그인이 필요합니다.'});const input=await body(req);store.updateContractorWorker(session.worker.site_id,session.worker.id,contractorWorker[1],input,()=>checkWorkerReport(req,key,session,input));return json(res,200,{ok:true});}
+    if(url.pathname==='/api/worker/company-workers'&&req.method==='POST'){const key=workerKey(workerToken),session=workerSessions.get(key);if(!session||session.expires<=Date.now())return json(res,401,{error:'근로자 로그인이 필요합니다.'});const input=await body(req);return json(res,201,store.createContractorWorker(session.worker.site_id,session.worker.id,input,()=>checkWorkerReport(req,key,session,input)));}
     if(url.pathname==='/api/worker/company-workers'&&req.method==='GET'){
       const key=workerKey(workerToken),session=workerSessions.get(key);if(!session||session.expires<=Date.now())return json(res,401,{error:'근로자 로그인이 필요합니다.'});const authorize=()=>checkWorkerReport(req,key,session);return json(res,200,store.contractorWorkers(session.worker.site_id,session.worker.id,authorize));
     }
