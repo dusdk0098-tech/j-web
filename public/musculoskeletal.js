@@ -83,3 +83,17 @@ export function mountMuscleReferences(container,{editor,scale,request,siteId,wor
   }
   return {refresh};
 }
+
+export function mountRiskBulk(host,{list,active}){
+  host.innerHTML='<fieldset><legend>위험요인 일괄 편집</legend><button type="button" data-risk-select-all>모두 선택</button> <button type="button" data-risk-unselect-all>모두 선택 해제</button> <button type="button" data-risk-delete-selected>선택 항목 삭제</button> <button type="button" data-risk-delete-all>전체 항목 삭제</button></fieldset>';
+  const notify=()=>list.dispatchEvent(new Event('input',{bubbles:true}));
+  for(const [name,checked] of [['select-all',true],['unselect-all',false]])host.querySelector(`[data-risk-${name}]`).onclick=()=>{
+    if(!active())return;let changed=false;for(const row of list.children){const input=row.querySelector('[data-risk-selected]');if(input&&input.checked!==checked){input.checked=checked;changed=true;}}if(changed)notify();
+  };
+  host.querySelector('[data-risk-delete-selected]').onclick=()=>{
+    if(!active())return;let changed=false;for(const row of [...list.children])if(row.querySelector('[data-risk-selected]')?.checked){row.remove();changed=true;}if(changed)notify();
+  };
+  host.querySelector('[data-risk-delete-all]').onclick=()=>{
+    if(!active()||!list.children.length||!confirm('위험요인 항목을 모두 삭제할까요?')||!active())return;for(const row of [...list.children])row.remove();notify();
+  };
+}

@@ -56,7 +56,7 @@ import { mountEducationDraftWorkers } from './education-draft-workers.js';
 import { mountEducationReference } from './education-reference.js';
 import { jointExamples } from './joint-examples.js';
 import { mergeSafetyLogSources } from './safety-log-sources.js';
-import { mountMusculoskeletal } from './musculoskeletal.js';
+import { mountMusculoskeletal, mountRiskBulk } from './musculoskeletal.js';
 import { scheduleTypes, personalScheduleTypes, scheduleTargetRequired, scheduleMonthDays, scheduleTimeOptions } from './schedule.js';
 import { leaveExamples,officeTemplate,officeSuggestionCurrent,officeValuesForScope,officeSourceContent,officeSourceCurrent,officeDraftSignature } from './office-template.js';
 import { richBody,richEditorMarkup,mountRichEditor } from './rich-editor.js';
@@ -660,6 +660,7 @@ async function editDocument(doc=null,initialDetails={},initialType=null) {
       $('#daily-fields').innerHTML=`<label>평가 종류 <select name="riskKind"><option value="">선택하지 않음</option>${Object.entries(riskKinds).map(([key,label])=>`<option value="${key}" ${details.kind===key?'selected':''}>${label}</option>`).join('')}</select></label><label>평가척도 <select name="riskScale"><option value="">선택하지 않음</option>${Object.entries(riskScales).map(([key,label])=>`<option value="${key}" ${details.scale===key?'selected':''}>${label}</option>`).join('')}</select></label><p class="muted">가능성과 중대성을 선택하면 시험 점수를 계산합니다. 등급과 실제 위험 판정은 제공하지 않습니다.</p><div id="risk-list">${rows.map(rowHtml).join('')}</div><button type="button" class="outline" id="risk-add">위험요인 추가</button>`;
       $('#daily-fields').insertAdjacentHTML('afterbegin',`${field('periodFrom','관리기간 시작일',details.periodFrom||'','date',false)}${field('periodTo','관리기간 종료일',details.periodTo||'','date',false)}${riskReviewInputs(details,esc)}`);
       $('#daily-fields').insertAdjacentHTML('beforeend','<div id="risk-process-editor"></div>');processEditor=mountRiskProcesses($('#risk-process-editor'),details.processes||[],companies,esc);const mountedProcesses=processEditor,processCurrent=()=>dialog.open&&editCurrent()&&select.value==='risk'&&processEditor===mountedProcesses;api(`/api/risk-process-people?siteId=${siteId}`,{},processCurrent).then(people=>{if(processCurrent())mountedProcesses.setPeople(people);}).catch(error=>{if(processCurrent())$('#dialog-error').textContent=error.message;});mountRiskProcessPicker($('#risk-list'),processEditor,companies,{process:'[data-risk-field=processName]',companySelect:'[data-risk-contractor]',companyName:'[data-risk-field=contractor]'},esc);
+      $('#risk-list').insertAdjacentHTML('beforebegin','<div id="risk-bulk"></div>');mountRiskBulk($('#risk-bulk'),{list:$('#risk-list'),active:()=>dialog.open&&editCurrent()&&select.value==='risk'&&!$('#dialog-form button[type=submit]').disabled});
       const riskScale=$('#dialog-form select[name=riskScale]');let previousScale=riskScale.value;
       $('#daily-fields').insertAdjacentHTML('beforeend','<div id="musculoskeletal-editor"></div>');
       muscleEditor=mountMusculoskeletal($('#musculoskeletal-editor'),{rows:details.musculoskeletalItems||[],companies,scale:()=>riskScale.value,references:{request:api,siteId,active:()=>dialog.open&&state.siteId===siteId&&state.page===page}});

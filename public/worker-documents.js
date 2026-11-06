@@ -6,7 +6,7 @@ import { mountPlanCharts, readPlanCharts, refreshPlanImageChoices, mountWorkerPl
 import { mountRiggingStandards, heavyRiggingOptions, heavyImageChoices } from './rigging-standards.js';
 import { equipmentFilterMarkup, mountEquipmentFilter } from './equipment-filter.js';
 import { riskScaleOptions, riskScore } from './risk-scale.js';
-import { mountMusculoskeletal } from './musculoskeletal.js';
+import { mountMusculoskeletal, mountRiskBulk } from './musculoskeletal.js';
 import { educationKinds as trainingKinds, requireEducationSubmission, educationTimeField, educationMethodFields, readEducationMethod, educationAttachmentLabels } from './education-kinds.js';
 import { mountEducationReference } from './education-reference.js';
 
@@ -57,6 +57,7 @@ export async function mountWorkerDocuments(parent,permissions,signaturePad,repor
       const kinds={initial:'최초평가',regular:'정기평가',occasional:'수시평가',continuous:'상시평가'},scales={'three-level':'3등급','3x3':'3×3','5x4':'5×4'};
       fields.innerHTML=`<label>평가 종류<select name="kind"><option value="">선택 안 함</option>${Object.entries(kinds).map(([key,label])=>`<option value="${key}" ${details.kind===key?'selected':''}>${label}</option>`).join('')}</select></label><label>평가척도<select name="scale"><option value="">선택 안 함</option>${Object.entries(scales).map(([key,label])=>`<option value="${key}" ${details.scale===key?'selected':''}>${label}</option>`).join('')}</select></label>${field('periodFrom','관리기간 시작',details.periodFrom||'','date')}${field('periodTo','관리기간 종료',details.periodTo||'','date')}${riskReviewInputs(details,esc)}<div data-risk-list></div><button type="button" data-add-risk>위험요인 추가</button>`;
       const container=fields.querySelector('[data-risk-list]'),scale=form.elements.scale;let previousScale=scale.value;
+      container.insertAdjacentHTML('beforebegin','<div data-risk-bulk></div>');mountRiskBulk(fields.querySelector('[data-risk-bulk]'),{list:container,active:()=>editable&&active()&&section.isConnected&&form.isConnected&&request===requestNo&&!form.querySelector('button[type=submit]').disabled});
       fields.insertAdjacentHTML('beforeend','<div data-process-editor></div>');processEditor=mountRiskProcesses(fields.querySelector('[data-process-editor]'),details.processes||[],options.companies,esc,options.riskPeople||[]);mountRiskProcessPicker(container,processEditor,options.companies,{process:'[data-risk=processName]',companySelect:'[data-contractor]',companyName:'[data-risk=contractor]'},esc);
       fields.insertAdjacentHTML('beforeend','<div data-mus-editor></div>');
       muscleEditor=mountMusculoskeletal(fields.querySelector('[data-mus-editor]'),{rows:details.musculoskeletalItems||[],companies:options.companies,scale:()=>scale.value,references:editable?{request:json,worker:true,active:()=>request===requestNo&&form.isConnected}:undefined});
