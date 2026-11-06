@@ -45,7 +45,8 @@ async function pdfBytes(response) {
 // PDF의 스크립트·링크·양식은 실행하지 않고 페이지 캔버스만 만든다.
 export async function renderPlanPdfs({snapshot,base,area,pdfjs,worker,signal,fetchFile=fetch,check=()=>{}}) {
   if(!Array.isArray(snapshot.files)||snapshot.files.length>20||!/^\/api\/documents\/\d+\/print-pdfs$/.test(base)||!/^\w{64}$/.test(snapshot.version))throw Error('계획서 첨부를 다시 조회해 주세요.');
-  const files=snapshot.files.map(file=>({...file,url:`${base}/${file.id}?version=${snapshot.version}`,area}));
+  if(!Array.isArray(snapshot.equipmentFiles||[])||snapshot.files.length+(snapshot.equipmentFiles||[]).length>20)throw Error('PDF 첨부는 20개까지 출력할 수 있습니다.');
+  const files=[...snapshot.files.map(file=>({...file,url:`${base}/${file.id}?version=${snapshot.version}`,area})),...(snapshot.equipmentFiles||[]).map(file=>({...file,url:`${base}/equipment/${file.equipmentId}/${file.id}?version=${snapshot.version}`,area}))];
   return renderPdfFiles({files,pdfjs,worker,signal,fetchFile,check});
 }
 
@@ -53,7 +54,7 @@ export async function renderPdfFiles({files,pdfjs,worker,signal,fetchFile=fetch,
   let totalBytes=0,totalPixels=0,pages=0;
   if(!Array.isArray(files)||files.length>20)throw Error('PDF 첨부는 20개까지 출력할 수 있습니다.');
   for(const file of files){
-    check();if(!Number.isSafeInteger(file.id)||file.id<1||!file.area||!(/^\/api\/documents\/\d+\/print-pdfs\/\d+\?version=\w{64}$/.test(file.url)||/^\/api\/workers\/\d+\/files\/\d+\?siteId=\d+&version=[a-f0-9]{32}$/.test(file.url)))throw Error('첨부 정보를 확인해 주세요.');
+    check();if(!Number.isSafeInteger(file.id)||file.id<1||!file.area||!(/^\/api\/documents\/\d+\/print-pdfs\/(?:\d+|equipment\/\d+\/\d+)\?version=\w{64}$/.test(file.url)||/^\/api\/workers\/\d+\/files\/\d+\?siteId=\d+&version=[a-f0-9]{32}$/.test(file.url)))throw Error('첨부 정보를 확인해 주세요.');
     const area=file.area,bytes=await pdfBytes(await fetchFile(file.url,{credentials:'same-origin',redirect:'error',cache:'no-store',signal}));
     totalBytes+=bytes.length;if(totalBytes>pdfPrintLimits.totalBytes)throw Error('PDF 합계가 10MB를 초과합니다.');check();
     const task=pdfjs.getDocument({data:bytes,worker,enableXfa:false,stopAtErrors:true,disableFontFace:true,useSystemFonts:false,maxImageSize:pdfPrintLimits.pagePixels,canvasMaxAreaInBytes:8_000_000,cMapUrl:'/pdfjs/cmaps/',cMapPacked:true,standardFontDataUrl:'/pdfjs/standard_fonts/',wasmUrl:'/pdfjs/wasm/'});

@@ -692,17 +692,19 @@ const server = http.createServer((req,res)=>passwordRequests.run(true,()=>adminR
     if(req.method==='GET'&&pdfAssets.has(url.pathname)){
       res.writeHead(200,{'Content-Type':url.pathname.endsWith('.mjs')?'text/javascript; charset=utf-8':url.pathname.endsWith('.wasm')?'application/wasm':'application/octet-stream','X-Content-Type-Options':'nosniff','Cache-Control':'no-cache'});return res.end(readFileSync(pdfAssets.get(url.pathname)));
     }
-    const planPdf=url.pathname.match(/^\/api\/documents\/(\d+)\/print-pdfs(?:\/(\d+))?$/);
+    const planPdf=url.pathname.match(/^\/api\/documents\/(\d+)\/print-pdfs(?:\/(?:([0-9]+)|equipment\/([0-9]+)\/([0-9]+)))?$/);
     if(planPdf&&req.method==='GET'){
       const doc=store.document(planPdf[1]);if(!doc||doc.type!=='work_plan')return json(res,404,{error:'작업계획서를 찾을 수 없습니다.'});
       const files=store.attachments(doc.id).filter(file=>/\.pdf$/i.test(file.name)).sort((a,b)=>a.id-b.id);
+      const details=JSON.parse(doc.details||'{}');delete details.equipmentSnapshot;
+      const equipmentFiles=store.liveReviewerLinks({...doc,details:JSON.stringify(details)}).equipment.flatMap(item=>item.files.filter(file=>/\.pdf$/i.test(file.name)).map(file=>({equipmentId:item.info.id,id:file.id,name:file.name})));
       const version=createHash('sha256').update(JSON.stringify(doc)).update(store.planSignatureVersion(doc)).update(store.meetingSignature(doc.id)?.signature||'').digest('hex');
       if(url.searchParams.has('version')&&url.searchParams.get('version')!==version)return json(res,409,{error:'계획서 또는 연결 자료가 변경되었습니다. 다시 조회해 주세요.'});
       checkRequestSession(req);
-      if(!planPdf[2])return json(res,200,{document:doc,version,files:files.map(({id,name})=>({id,name}))});
+      if(!planPdf[2]&&!planPdf[3])return json(res,200,{document:doc,version,files:files.map(({id,name})=>({id,name})),equipmentFiles});
       if(url.searchParams.get('version')!==version)return json(res,409,{error:'계획서를 다시 조회해 주세요.'});
-      const file=files.some(item=>item.id===Number(planPdf[2]))&&store.attachment(planPdf[2]);
-      if(!file||file.document_id!==doc.id)return json(res,404,{error:'이 계획서의 PDF 첨부를 찾을 수 없습니다.'});
+      const file=planPdf[3]?equipmentFiles.some(item=>item.equipmentId===Number(planPdf[3])&&item.id===Number(planPdf[4]))&&store.equipmentAttachment(doc.site_id,planPdf[3],planPdf[4]):files.some(item=>item.id===Number(planPdf[2]))&&store.attachment(planPdf[2]);
+      if(!file||(!planPdf[3]&&file.document_id!==doc.id))return json(res,404,{error:'이 계획서의 PDF 첨부를 찾을 수 없습니다.'});
       const bytes=Buffer.from(file.data);if(bytes.length>2*1024*1024||bytes.subarray(0,5).toString()!=='%PDF-')return json(res,415,{error:'2MB 이하의 올바른 PDF 파일을 사용해 주세요.'});
       res.writeHead(200,{'Content-Type':'application/pdf','Content-Length':bytes.length,'Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Content-Disposition':'attachment'});return res.end(bytes);
     }
