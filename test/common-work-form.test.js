@@ -55,3 +55,11 @@ test('현장명이 없는 결재자 화면은 현장 번호를 표시한다',asy
   await mountCommonWork({target:f.target,base:'/api/reviewer/common-work',siteId:73,actorId:4,api:f.api});
   assert.match(f.target.innerHTML,/<p data-work-site>현장: 현장 #73<\/p>/);
 });
+
+test('화면 이동 후 이전 공통업무 저장 응답은 인증 처리를 바꾸지 않는다',async()=>{
+  const f=fixture();let release,scope,active=true,redirects=0;
+  const api=async(path,options,current)=>options?new Promise(resolve=>{scope=current;release=()=>{if(!scope||scope())redirects++;resolve();};}):[];
+  await mountCommonWork({target:f.target,base:'/api/common-work',siteId:1,api,active:()=>active});
+  const original=globalThis.FormData;globalThis.FormData=class{constructor(form){return Object.entries(form.elements).map(([key,item])=>[key,item.value]);}};
+  try{const pending=f.form.onsubmit({preventDefault(){}});assert.equal(typeof release,'function');active=false;release();await pending;assert.equal(redirects,0);}finally{globalThis.FormData=original;}
+});
