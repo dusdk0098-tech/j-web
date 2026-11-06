@@ -25,9 +25,10 @@ test('작성 화면에서 검색과 종류 변경을 반복해도 종류별 답�
   }};
   let currentRows=[];const nodes={'#daily-fields':fields,'#dialog-form [name=checklistKind]':kind,'#checklist-category':category,'#checklist-search':search,'#rain-checks':checks,'#checklist-copy':{},'#checklist-copy-list':{isConnected:true}};
   const context={select:{value:'checklist'},details:{kind:'rain',answers:[{answer:'O',note:'기존 가상 비고'}]},$:key=>nodes[key],document:{querySelectorAll:()=>currentRows},esc:String,checklistCategoryForKind};
-  for(const name of ['rainChecks','windChecks','thawChecks','heatChecks','coldChecks','wetSeasonChecks','heavyRainChecks','electricalChecks','fireChecks','formworkChecks','fallingChecks','confinedChecks','excavationChecks','semiannualChecks','morningChecks','afternoonChecks','eveningChecks'])context[name]=['가상 항목'];
+  for(const name of ['rainChecks','rainDetailChecks','windChecks','thawChecks','heatChecks','coldChecks','wetSeasonChecks','heavyRainChecks','electricalChecks','fireChecks','formworkChecks','fallingChecks','confinedChecks','excavationChecks','semiannualChecks','morningChecks','afternoonChecks','eveningChecks'])context[name]=['가상 항목'];
   const filter=source.match(/^function filterChecklistKinds\(.*$/m)[0];runInNewContext(filter+'\nfunction render(){'+source.slice(start,end)+'}\nglobalThis.render=render;',context);context.render();
-  assert.equal(kind.value,'rain');assert.match(checks.html,/기존 가상 비고/);assert.equal(kind.options.length,18);
+  assert.equal(kind.value,'rain');assert.match(checks.html,/기존 가상 비고/);assert.equal(kind.options.length,19);
+  currentRows=[{querySelector:key=>({value:key==='[data-answer]'?'O':'기존 가상 비고'})}];kind.value='rain_detail';kind.onchange();assert.doesNotMatch(checks.html,/기존 가상 비고/);currentRows=[{querySelector:key=>({value:key==='[data-answer]'?'X':'상세 가상 비고'})}];kind.value='rain';kind.onchange();assert.match(checks.html,/기존 가상 비고/);
   category.value='daily';category.onchange();assert.equal(kind.options.find(item=>item.value==='rain').hidden,false);assert.equal(kind.options.find(item=>item.value==='wind').hidden,true);
   search.value='일일';search.oninput();assert.equal(kind.options.find(item=>item.value==='morning').hidden,false);
   currentRows=[{querySelector:key=>({value:key==='[data-answer]'?'X':'수정한 가상 비고'})}];kind.value='morning';kind.onchange();assert.equal(kind.options.find(item=>item.value==='rain').hidden,true);
