@@ -1021,7 +1021,7 @@ const server = http.createServer((req,res)=>passwordRequests.run(true,()=>adminR
     if(boardPost&&req.method==='DELETE'){const input=await body(req);store.deleteBoardPost(input.kind,boardPost[1],()=>checkRequestSession(req),input.expectedVersion);return json(res,200,{ok:true});}
     if(url.pathname==='/api/schedules'){
       if(req.method==='GET')return json(res,200,store.schedules(url.searchParams.get('siteId'),url.searchParams.get('month'),url.searchParams.get('q')||''));
-      if(req.method==='POST')return json(res,201,store.saveSchedule(await body(req),null,()=>checkRequestSession(req)));
+      if(req.method==='POST')return json(res,201,store.saveSchedule(await body(req),null,()=>currentDocumentAdmin(req,token)));
     }
     const schedule=url.pathname.match(/^\/api\/schedules\/(\d+)$/);
     if(schedule&&req.method==='PUT')return json(res,200,store.saveSchedule(await body(req),schedule[1],()=>checkRequestSession(req)));
