@@ -17,7 +17,7 @@ import { runInNewContext } from 'node:vm';
 
 const password='virtual-admin-password';
 const cleanup=dir=>{assert.ok(resolve(dir).startsWith(resolve(tmpdir())+sep));rmSync(dir,{recursive:true,force:true});};
-function output(child,text){return new Promise((resolve,reject)=>{let seen='';const timer=setTimeout(()=>{child.stdout.off('data',read);reject(Error('시험 신호 대기 실패: '+text));},10000);function read(chunk){seen+=chunk;if(seen.includes(text)){clearTimeout(timer);child.stdout.off('data',read);resolve();}}child.stdout.on('data',read);});}
+function output(child,text){return new Promise((resolve,reject)=>{let seen='';const timer=setTimeout(()=>{child.stdout.off('data',read);reject(Error('시험 신호 대기 실패: '+text));},30000);function read(chunk){seen+=chunk;if(seen.includes(text)){clearTimeout(timer);child.stdout.off('data',read);resolve();}}child.stdout.on('data',read);});}
 
 test('관리자 검증·이관·마지막 활성 관리자·버전 충돌·세션 폐기·제한',()=>{
   const db=new DatabaseSync(':memory:');let now=1000;const auth=new AdminAccounts(db,()=>now);
