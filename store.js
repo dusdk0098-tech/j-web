@@ -1569,18 +1569,24 @@ export class Store {
   }
   delegatedAttendanceEvents(siteId,date){date=dateValue(date);return this.db.prepare('SELECT id,actor_name,worker_name,present,created_at FROM delegated_attendance_events WHERE site_id=? AND date=? ORDER BY id DESC').all(Number(siteId),date);}
   workerDocuments(siteId,workerId){
-    const permissions=this.workerPermissions(siteId,workerId);
-    return this.db.prepare('SELECT d.* FROM documents d JOIN worker_authored_documents a ON a.document_id=d.id WHERE d.site_id=? AND a.worker_id=? ORDER BY d.date DESC,d.id DESC').all(Number(siteId),Number(workerId)).filter(doc=>permissions.includes(workerDocumentPermission[doc.type]));
+    const permissions=this.workerPermissions(siteId,workerId),allowed=this.workerCompanyScope(siteId,workerId);
+    return this.db.prepare('SELECT d.* FROM documents d JOIN worker_authored_documents a ON a.document_id=d.id WHERE d.site_id=? AND a.worker_id=? ORDER BY d.date DESC,d.id DESC').all(Number(siteId),Number(workerId)).filter(doc=>permissions.includes(workerDocumentPermission[doc.type])&&this.workerDocumentInScope(doc,allowed));
   }
   workerPreviousRiskAssessments(siteId,workerId,before,kind,scale,excludeId){
     if(!this.workerPermissions(siteId,workerId).includes('risk'))throw Object.assign(new Error('위험성평가 작성 시험 권한이 필요합니다.'),{sessionStatus:403});before=dateValue(before);if(!['initial','regular','occasional','continuous'].includes(kind)||!['three-level','3x3','5x4'].includes(scale))throw new Error('평가 종류와 척도를 선택해 주세요.');const excluded=excludeId==null||excludeId===''?0:Number(excludeId);if(!Number.isSafeInteger(excluded)||excluded<0)throw new Error('제외할 문서를 확인해 주세요.');
-    return this.db.prepare("SELECT d.id,d.title,d.date,d.details FROM documents d JOIN worker_authored_documents a ON a.document_id=d.id WHERE d.site_id=? AND a.worker_id=? AND d.type='risk' AND d.status IN ('pending','approved') AND d.date<=? AND d.id<>? AND json_extract(d.details,'$.kind')=? AND json_extract(d.details,'$.scale')=? ORDER BY d.date DESC,d.id DESC LIMIT 20").all(Number(siteId),Number(workerId),before,excluded,kind,scale);
+    const allowed=this.workerCompanyScope(siteId,workerId);return this.db.prepare("SELECT d.id,d.title,d.date,d.details FROM documents d JOIN worker_authored_documents a ON a.document_id=d.id WHERE d.site_id=? AND a.worker_id=? AND d.type='risk' AND d.status IN ('pending','approved') AND d.date<=? AND d.id<>? AND json_extract(d.details,'$.kind')=? AND json_extract(d.details,'$.scale')=? ORDER BY d.date DESC,d.id DESC").all(Number(siteId),Number(workerId),before,excluded,kind,scale).filter(doc=>this.workerDocumentInScope({...doc,type:'risk'},allowed)).slice(0,20);
   }
   workerDocument(siteId,workerId,id){const doc=this.workerDocuments(siteId,workerId).find(item=>item.id===Number(id));if(!doc)throw new Error('권한이 있는 본인 작성 문서를 확인해 주세요.');return doc;}
+  workerDocumentPeople(details,type){
+    return type==='work_plan'?[...(Array.isArray(details.workers)?details.workers:[]),...(Array.isArray(details.equipmentAssignments)?details.equipmentAssignments:[])].map(row=>row?.workerId):type==='risk'?(Array.isArray(details.processes)?details.processes:[]).flatMap(process=>Object.values(process?.roles||{}).filter(person=>person?.kind==='worker').map(person=>person.id)):[];
+  }
+  workerDocumentInScope(doc,allowed){
+    if(!allowed||!['work_plan','risk'].includes(doc.type))return true;
+    try{return this.workerDocumentPeople(JSON.parse(doc.details),doc.type).every(id=>allowed.has(id));}catch{return false;}
+  }
   checkWorkerDocumentPeople(siteId,workerId,input,type){
     const allowed=this.workerCompanyScope(siteId,workerId),details=input.details;if(!allowed||!details||typeof details!=='object')return;
-    const people=type==='work_plan'?[...(Array.isArray(details.workers)?details.workers:[]),...(Array.isArray(details.equipmentAssignments)?details.equipmentAssignments:[])].map(row=>row?.workerId):type==='risk'?(Array.isArray(details.processes)?details.processes:[]).flatMap(process=>Object.values(process?.roles||{}).filter(person=>person?.kind==='worker').map(person=>person.id)):[];
-    if(people.some(id=>!allowed.has(id)))throw Object.assign(new Error('같은 업체의 출입자를 선택해 주세요.'),{sessionStatus:403});
+    if(this.workerDocumentPeople(details,type).some(id=>!allowed.has(id)))throw Object.assign(new Error('같은 업체의 출입자를 선택해 주세요.'),{sessionStatus:403});
   }
   createWorkerDocument(siteId,workerId,input,onAuthorize=()=>{}){
     this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();if(!Object.hasOwn(workerDocumentPermission,input.type)||!this.workerPermissions(siteId,workerId).includes(workerDocumentPermission[input.type]))throw new Error('문서 작성 시험 권한이 필요합니다.');this.checkWorkerDocumentPeople(siteId,workerId,input,input.type);const doc=this.createDocument({...input,siteId:Number(siteId)});this.db.prepare('INSERT INTO worker_authored_documents(document_id,worker_id) VALUES(?,?)').run(doc.id,Number(workerId));this.db.exec('COMMIT');return doc;}catch(error){this.db.exec('ROLLBACK');throw error;}

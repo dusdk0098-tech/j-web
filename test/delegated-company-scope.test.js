@@ -42,3 +42,13 @@ test('협력업체 문서 저장은 다른 업체 작업자와 공정 담당자�
   s.updateWorker(manager.id,{...base,name:manager.name,category:manager.category,companyId:0});assert.throws(()=>s.createWorkerDocument(site.id,manager.id,plan),/같은 업체/);
  }finally{s.close();}
 });
+
+test('업체가 변경된 출입자가 포함된 문서는 작성자에게서 숨기고 원본은 보존한다',()=>{
+ const s=new Store(':memory:');try{
+  const site=s.createSite({name:'가상 현장'}),a=s.createCompany({siteId:site.id,name:'가상 A',trade:'A'}),b=s.createCompany({siteId:site.id,name:'가상 B',trade:'B'}),token=s.createInvitation(site.id).token,base={siteId:site.id,company:a.name,occupation:'가상 직종'},join=(name,loginId,category)=>s.join(token,{...base,name,loginId,companyId:a.id,category,password:'virtual-password-123',acknowledged:true,profile:{birthDate:'2000-01-01',phone:'010-0000-0000'}}),manager=join('관리자','history_manager','협력업체 관리자'),worker=join('작업자','history_worker','협력업체 근로자');s.setWorkerPermissions(site.id,manager.id,['risk','work_plan']);
+  const plan={type:'work_plan',title:'가상 계획',date:'2026-11-01',details:{workers:[{workerId:worker.id,role:'신호수',training:'',qualification:'',signalMethods:['수신호'],trainingTypes:[]}]}},risk={type:'risk',title:'가상 평가',date:'2026-11-01',details:{kind:'regular',scale:'3x3',items:[],processes:[{name:'공정',contractorId:a.id,roles:{workerRequired:{kind:'worker',id:worker.id}}}]}},planDoc=s.createWorkerDocument(site.id,manager.id,plan),riskDoc=s.createWorkerDocument(site.id,manager.id,risk);
+  s.transition(riskDoc.id,'submit');assert.equal(s.workerDocuments(site.id,manager.id).length,2);assert.equal(s.workerPreviousRiskAssessments(site.id,manager.id,'2026-11-30','regular','3x3',0).length,1);
+  s.updateWorker(worker.id,{...base,name:worker.name,category:worker.category,companyId:b.id});assert.deepEqual(s.workerDocuments(site.id,manager.id),[]);assert.deepEqual(s.workerPreviousRiskAssessments(site.id,manager.id,'2026-11-30','regular','3x3',0),[]);assert.throws(()=>s.workerDocument(site.id,manager.id,planDoc.id),/권한/);assert.equal(JSON.parse(s.document(planDoc.id).details).workers[0].workerId,worker.id);assert.equal(s.document(riskDoc.id).status,'pending');
+  s.updateWorker(worker.id,{...base,name:worker.name,category:worker.category,companyId:a.id});assert.equal(s.workerDocuments(site.id,manager.id).length,2);
+ }finally{s.close();}
+});
