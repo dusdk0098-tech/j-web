@@ -12,3 +12,12 @@ test('협력업체 관리자의 위임 출역은 연결된 같은 업체만 허�
   s.updateWorker(manager.id,{...base,name:manager.name,category:manager.category,companyId:0});assert.deepEqual(list(),[]);assert.throws(()=>s.setDelegatedAttendance(site.id,manager.id,{workerId:same.id,date,present:false,expectedDayVersion:1}),/관리 가능한/);
  }finally{s.close();}
 });
+
+test('협력업체 관리자의 문서 작성 선택 목록은 자기 업체 출입자만 표시한다',()=>{
+ const s=new Store(':memory:');try{
+  const site=s.createSite({name:'가상 현장'}),a=s.createCompany({siteId:site.id,name:'같은 업체',trade:'A'}),b=s.createCompany({siteId:site.id,name:'같은 업체',trade:'B'}),token=s.createInvitation(site.id).token,base={siteId:site.id,company:a.name,occupation:'가상 직종'},join=(name,id,companyId,category)=>s.join(token,{...base,name,category,companyId,loginId:id,password:'virtual-password-123',acknowledged:true,profile:{birthDate:'2000-01-01',phone:'010-0000-0000'}});
+  const manager=join('관리자','manager_scope',a.id,'협력업체 관리자'),same=join('동일 업체','same_scope',a.id,'협력업체 근로자'),other=join('다른 업체','other_scope',b.id,'협력업체 근로자');s.setWorkerPermissions(site.id,manager.id,['risk','work_plan']);
+  for(const type of ['risk','work_plan']){const result=s.workerDocumentOptions(site.id,manager.id,type),workers=type==='risk'?result.riskPeople.filter(person=>person.kind==='worker'):result.workers;assert.deepEqual(new Set(workers.map(person=>person.id)),new Set([manager.id,same.id]));assert.ok(!workers.some(person=>person.id===other.id));}
+  s.updateWorker(manager.id,{...base,name:manager.name,category:manager.category,companyId:0});assert.equal(s.workerDocumentOptions(site.id,manager.id,'work_plan').workers.length,0);assert.equal(s.workerDocumentOptions(site.id,manager.id,'risk').riskPeople.filter(person=>person.kind==='worker').length,0);
+ }finally{s.close();}
+});
