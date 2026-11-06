@@ -51,7 +51,7 @@ import { restaurantPrice } from './restaurant-price.js';
 import { bindSafetyCostAmount } from './safety-cost.js';
 import { salarySummary, salaryDay, groupWageRecords, wageEstimateCurrent } from './salary-summary.js';
 import { attendanceMealChange, monthlyDirectMealSummary } from './attendance-meals.js';
-import { attendanceMatrixMarkup,attendanceNoticesMarkup,matchesAttendanceQuery,matchesMonthlyAttendance,directAttendanceMarkup } from './attendance-matrix.js';
+import { attendanceMatrix,attendanceMatrixMarkup,attendanceNoticesMarkup,matchesAttendanceQuery,matchesMonthlyAttendance,directAttendanceMarkup } from './attendance-matrix.js';
 import { mountRestrictedMonthEditor } from './restricted-month-editor.js';
 import { educationKinds, requireEducationSubmission, educationTimeField, educationMethodFields, readEducationMethod, educationAttachmentLabels, hasManagerEducationTargets } from './education-kinds.js';
 import { mountEducationDraftWorkers } from './education-draft-workers.js';
@@ -1087,6 +1087,14 @@ function showSiteEducationDetail(site,initialMonth){
   };
   month.onchange=load;return load();
 }
+function showAttendanceMatrixPrint(field,siteId,month,dates,rows,currentScope){
+  if(!['category','occupation','company'].includes(field)||!currentScope())return;
+  const labels={category:'구분',occupation:'직종',company:'소속'},snapshot=JSON.stringify(attendanceMatrix(rows,dates,field)),siteName=siteSelect.selectedOptions[0]?.textContent||'';
+  showDialog('월별 출역 집계 미리보기',`<div class="matrix-print"><h2>${esc(siteName)} · ${esc(month)} · ${labels[field]}</h2>${attendanceMatrixMarkup(rows,dates,field)}</div><button type="button" id="matrix-print">인쇄</button><p id="matrix-print-status" role="status"></p>`,async()=>{},currentScope);
+  const form=$('#dialog-form'),target=$('#matrix-print'),status=$('#matrix-print-status');$('#dialog-form button[type=submit]').textContent='닫기';form.onsubmit=e=>{e.preventDefault();dialog.close();};
+  const active=()=>currentScope()&&dialog.open&&$('#matrix-print')===target;
+  target.onclick=async()=>{if(!active()||target.disabled)return;target.disabled=true;status.textContent='출역 자료를 확인하고 있습니다.';try{const latest=await api(`/api/attendance/month?siteId=${siteId}&month=${encodeURIComponent(month)}`,{},active);if(!active())return;if(JSON.stringify(attendanceMatrix(latest,dates,field))!==snapshot){status.textContent='출역 집계가 변경되었습니다. 창을 닫고 다시 확인해 주세요.';return;}status.textContent='';window.print();}catch(error){if(active())status.textContent=error.message;}finally{if(active())target.disabled=false;}};
+}
 async function showSiteAttendanceDetail(site,month,day,currentScope){
   const parentSite=state.siteId,admin=state.admin,epoch=detailEpoch;
   showDialog('현장별 월 출역 상세',`<div class="site-attendance-print"><h2>월별 출역 상세</h2><p>${esc(site.name)} · ${esc(month)}${day?` · ${esc(day)}일 출역자`:''}</p><p>구분·직종·소속은 출역 당시 기록을 검색합니다. 표의 소속은 현재 정보입니다.</p><div id="site-attendance-filters"></div><p id="site-attendance-filter-summary"></p><div id="site-attendance-detail" aria-live="polite">불러오는 중입니다.</div></div><button type="button" id="site-attendance-print" disabled>인쇄</button><p id="site-attendance-print-status" role="status"></p>`,async()=>{},currentScope);
@@ -1879,6 +1887,7 @@ async function render(){
     content.querySelectorAll('section:first-child tbody input,section:first-child tbody select').forEach(el=>el.dataset.initial=el.value);
     $('#report-search').onclick=()=>{const start=$('#report-from').value,end=$('#report-to').value;if(!start||!end||start>end){flash('조회 기간을 확인해 주세요.',true);return;}state.reportFrom=start;state.reportTo=end;state.reportGroup=$('#report-group').value;render().catch(showError);};
     content.insertAdjacentHTML('beforeend',directAttendanceMarkup(monthly)+attendanceMatrixMarkup(monthly,dates));
+    const matrixActor=state.admin,matrixCurrent=()=>current()&&state.admin===matrixActor;content.querySelectorAll('[data-matrix-preview]').forEach(button=>button.onclick=()=>showAttendanceMatrixPrint(button.dataset.matrixPreview,siteId,month,dates,monthly,matrixCurrent));
     const staffActor=state.admin,staffCurrent=()=>current()&&state.admin===staffActor;api(`/api/attendance/staff-checks?siteId=${siteId}&month=${encodeURIComponent(month)}`,{},staffCurrent).then(rows=>{if(staffCurrent())content.insertAdjacentHTML('beforeend',staffMonthlyChecksMarkup(rows,dates,esc));}).catch(error=>{if(staffCurrent())showError(error);});
     return;
   }
