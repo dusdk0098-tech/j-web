@@ -411,7 +411,7 @@ test('주간 위험 신고 건수는 현장과 현지 날짜로 제한된다',()
 test('주간 활동은 TBM과 교육의 승인 문서별 확인을 분리한다',()=>{
   const s=new Store(':memory:');try{
     const site=s.createSite({name:'가상 현장'}),worker=s.createWorker({siteId:site.id,name:'가상 근로자',category:'직영',company:'가상 회사',occupation:'목공'});
-    for(const type of ['tbm','education']){const d=s.createDocument({siteId:site.id,date:'2024-02-29',type,title:'가상 교육',details:{timeFrom:'09:00',timeTo:'10:00',educationPlace:'가상 장소',educationMethod:'가상 방식',instructor:'가상 강사',textbook:'가상 교재'}});s.transition(d.id,'submit');s.transition(d.id,'approve');s.confirmWorkerTraining(worker.id,d.id,'2024-02-29',true);}
+    for(const type of ['tbm','education']){const d=s.createDocument({siteId:site.id,date:'2024-02-29',type,title:'가상 교육',details:{...(type==='education'?{kind:'regular'}:{}),timeFrom:'09:00',timeTo:'10:00',educationPlace:'가상 장소',educationMethod:'가상 방식',instructor:'가상 강사',textbook:'가상 교재'}});s.transition(d.id,'submit');s.transition(d.id,'approve');s.confirmWorkerTraining(worker.id,d.id,'2024-02-29',true);}
     const day=s.weeklyActivity(site.id,'2024-02-27')[2];assert.deepEqual(day.trainingByType,{tbm:1,education:1});assert.equal(day.trainingChecks,2);assert.deepEqual(s.weeklyActivity(site.id,'2024-03-01')[0].trainingByType,{tbm:0,education:0});
   }finally{s.close();}
 });
@@ -1279,7 +1279,7 @@ test('교육 대상은 현장별로 제한되고 결재 요청 후 변경할 수
     const a=s.createSite({name:'가상 A'}),b=s.createSite({name:'가상 B'});
     const add=siteId=>s.createWorker({siteId,name:'가상 근로자',category:'직영',company:'가상 업체',occupation:'목공'});
     const one=add(a.id),two=add(a.id),other=add(b.id);
-    const doc=s.createDocument({siteId:a.id,type:'education',title:'가상 교육',date:'2026-10-28',details:{timeFrom:'09:00',timeTo:'10:00',educationPlace:'가상 장소',educationMethod:'가상 방식',instructor:'가상 강사',textbook:'가상 교재'}});
+    const doc=s.createDocument({siteId:a.id,type:'education',title:'가상 교육',date:'2026-10-28',details:{kind:'regular',timeFrom:'09:00',timeTo:'10:00',educationPlace:'가상 장소',educationMethod:'가상 방식',instructor:'가상 강사',textbook:'가상 교재'}});
     assert.equal(s.trainingTargets(doc.id).configured,false);
     s.setTrainingTargets(doc.id,[one.id]);
     assert.throws(()=>s.setTrainingTargets(doc.id,[other.id]),/현장/);

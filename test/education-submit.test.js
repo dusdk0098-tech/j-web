@@ -11,7 +11,7 @@ import {fetchWithWorkerSession as fetch} from './helpers/worker-session-request.
 
 const complete={kind:'regular',timeFrom:'09:00',timeTo:'10:00',educationPlace:'가상 교육장',educationMethod:'가상 강의',instructor:'가상 강사',textbook:'가상 교재'};
 const input=details=>({type:'education',title:'가상 교육',date:'2026-11-01',details});
-const required=['timeFrom','timeTo','educationPlace','educationMethod','instructor','textbook'];
+const required=['kind','timeFrom','timeTo','educationPlace','educationMethod','instructor','textbook'];
 
 test('교육 제출은 저장된 필드의 누락·형식·공백을 검사하며 실패 시 상태·이벤트·결재 사본을 보존한다',()=>{
   const s=new Store(':memory:');
@@ -67,8 +67,8 @@ test('관리자·작성 허용 근로자 API는 각 누락을 차단하고 완�
     const grant=permissions=>call(`/api/workers/${worker.id}/permissions`,'PUT',{siteId:site.id,permissions},admin);
     assert.equal((await grant(['training'])).status,200);
     for(const [path,actor] of [['/api/documents',admin],['/api/worker/documents',cookie]]){
-      for(const missing of ['time','educationPlace','educationMethod','instructor','textbook']){
-        const details={...complete};if(missing==='time'){details.timeFrom='';details.timeTo='';}else details[missing]='   ';
+      for(const missing of ['kind','time','educationPlace','educationMethod','instructor','textbook']){
+        const details={...complete};if(missing==='time'){details.timeFrom='';details.timeTo='';}else details[missing]=missing==='kind'?'':'   ';
         const created=await call(path,'POST',{siteId:site.id,...input(details)},actor);assert.equal(created.status,201);const doc=await created.json();assert.equal(doc.status,'draft');
         const rejected=await call(`${path}/${doc.id}/transition`,'POST',{action:'submit'},actor);assert.equal(rejected.status,400);assert.match((await rejected.json()).error,/시험 결재 요청 전/);
         const saved=await (await call(`${path}/${doc.id}`,'GET',null,actor)).json();assert.equal(saved.status,'draft');assert.equal(saved.approval_cycle_id,null);assert.equal(saved.details,doc.details);

@@ -6,7 +6,7 @@ import {requireEducationSubmission,readEducationMethod} from '../public/educatio
 
 const admin=readFileSync(new URL('../public/app.js',import.meta.url),'utf8');
 const worker=readFileSync(new URL('../public/worker-documents.js',import.meta.url),'utf8');
-const complete={timeFrom:'09:00',timeTo:'10:00',educationPlace:'가상 장소',educationMethod:'가상 방법',instructor:'가상 강사',textbook:'가상 교재'};
+const complete={kind:'regular',timeFrom:'09:00',timeTo:'10:00',educationPlace:'가상 장소',educationMethod:'가상 방법',instructor:'가상 강사',textbook:'가상 교재'};
 const line=(source,text)=>{const found=source.split(/\r?\n/).find(row=>row.includes(text));assert.ok(found,text);return found;};
 
 test('교육 결재 필수항목은 공백·한쪽 시간 누락을 포함해 정확히 안내한다',()=>{
@@ -18,6 +18,9 @@ test('교육 결재 필수항목은 공백·한쪽 시간 누락을 포함해 �
       return true;
     });
   }
+  assert.throws(()=>requireEducationSubmission({...complete,kind:''}),/교육 종류/);
+  assert.throws(()=>requireEducationSubmission({...complete,kind:'other',otherTitle:'  '}),/기타 교육명/);
+  assert.doesNotThrow(()=>requireEducationSubmission({...complete,kind:'other',otherTitle:'가상 기타 교육'}));
   assert.doesNotThrow(()=>requireEducationSubmission(complete));
   assert.throws(()=>requireEducationSubmission({}),/교육시간, 교육장소, 교육방법, 교육강사/);
 });
