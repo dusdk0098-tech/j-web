@@ -8,7 +8,7 @@ export function weeklyActivitySummaryMarkup(days){
 }
 
 export function weeklyChecklistMarkup(days){
-  return `<section><h3>날짜별 가상 체크리스트 종류</h3><p>문서는 모든 상태의 건수입니다. 자가점검은 별도 저장된 기록이며 실제 제출이나 완료를 뜻하지 않습니다.</p><div class="table-wrap"><table><thead><tr><th>날짜</th><th>종류별 기록 수</th></tr></thead><tbody>${days.map(day=>{const counts=new Map();for(const check of day.checklists||[]){const label=Object.hasOwn(checklistKindLabels,check.kind)?checklistKindLabels[check.kind]:check.kind?'알 수 없는 종류':'종류 미기록';counts.set(label,(counts.get(label)||0)+1);}if(day.workerChecks)counts.set('출입자 자가점검',day.workerChecks);if(day.managerChecks)counts.set('관리자·직원 자가점검',day.managerChecks);return `<tr><td>${esc(day.date)}</td><td>${counts.size?[...counts].map(([label,count])=>`${esc(label)} ${esc(count)}건`).join(' · '):'기록 없음'}</td></tr>`;}).join('')}</tbody></table></div></section>`;
+  return `<section><h3>날짜별 가상 체크리스트 종류</h3><p>문서는 모든 상태의 건수입니다. 자가점검은 별도 저장된 기록이며 실제 제출이나 완료를 뜻하지 않습니다.</p><div class="table-wrap"><table><thead><tr><th>날짜</th><th>종류별 기록 수</th></tr></thead><tbody>${days.map(day=>{const counts=new Map();for(const check of day.checklists||[]){const label=check.kind==='custom'?'사용자 정의 점검표':Object.hasOwn(checklistKindLabels,check.kind)?checklistKindLabels[check.kind]:check.kind?'알 수 없는 종류':'종류 미기록';counts.set(label,(counts.get(label)||0)+1);}if(day.workerChecks)counts.set('출입자 자가점검',day.workerChecks);if(day.managerChecks)counts.set('관리자·직원 자가점검',day.managerChecks);return `<tr><td>${esc(day.date)}</td><td>${counts.size?[...counts].map(([label,count])=>`${esc(label)} ${esc(count)}건`).join(' · '):'기록 없음'}</td></tr>`;}).join('')}</tbody></table></div></section>`;
 }
 
 export function weeklyPpeMarkup(days){

@@ -1,3 +1,4 @@
+import {CustomChecklists} from './custom-checklists.js';
 import { riskProcessRoles } from './public/risk-review-roles.js';
 import {installWorkerTransferSchema,previewWorkerTransfer,executeWorkerTransfer,workerTransferAudit,workerTransferHistory,workerTransferSignature} from './worker-transfer.js';
 import { listPermitMeasures,savePermitMeasure,validatePermitMeasureSources,listPlanCategoryMeasures,savePlanCategoryMeasure,validatePlanCategorySources } from './permit-measures.js';
@@ -388,6 +389,7 @@ export class Store {
     if(!attendanceColumns.includes('day_version'))this.db.exec('ALTER TABLE attendance ADD COLUMN day_version INTEGER NOT NULL DEFAULT 1');
     this.db.exec('CREATE TRIGGER IF NOT EXISTS attendance_day_version AFTER UPDATE ON attendance WHEN NEW.day_version=OLD.day_version BEGIN UPDATE attendance SET day_version=OLD.day_version+1 WHERE worker_id=NEW.worker_id AND date=NEW.date; END');
     installWorkerTransferSchema(this.db);
+    this.customChecklists=new CustomChecklists(this.db);
   }
   planCategoryMeasures(siteId,category){return listPlanCategoryMeasures(this.db,siteId,category);}
   savePlanCategoryMeasure(siteId,category,id,input,remove=false,onAuthorize=()=>{}){return savePlanCategoryMeasure(this.db,siteId,category,id,input,remove,onAuthorize);}
@@ -2298,6 +2300,8 @@ export class Store {
   reviewerPlanEquipmentSignature(doc,checkId,position){if(doc.type!=='work_plan')return null;if(doc.approval_cycle_id)return this.approvalCycleFile(doc.id,doc.approval_cycle_id,'equipment-review-signature',checkId,position)?.data||null;const check=this.equipmentChecks(doc.id).find(item=>item.id===Number(checkId)),step=check?.approval?.steps.find(item=>item.position===Number(position)&&item.has_signature);return step?this.equipmentCheckApprovalSignature(doc.id,checkId,check.approval.id,position):null;}
   reviewerAttachment(doc,fileId){return doc.approval_cycle_id?this.approvalCycleFile(doc.id,doc.approval_cycle_id,'document',0,fileId):this.attachment(fileId);}
   createDocument(input,adminAuthor=null) {
+    if(input?.type==='checklist'&&input.details?.kind==='custom'&&!this.db.isTransaction)return this.createAuthorizedDocument(input,()=>{},()=>adminAuthor);
+    input=this.customChecklists.prepare(input);
     validatePermitMeasureSources(this.db,input);validatePlanCategorySources(this.db,input);
     const d = recordInput(input);
     adminAuthor=adminAuthorDetails(adminAuthor);
@@ -2591,12 +2595,14 @@ export class Store {
     const doc=this.document(attachment.document_id);
     if(!doc || !['draft','rejected'].includes(doc.status)) throw new Error('임시저장 또는 반려된 문서의 첨부파일만 삭제할 수 있습니다.');
     if(doc.type==='work_plan'){const details=JSON.parse(doc.details);if((details.additionalCharts||[]).some(chart=>(chart.imageIds||[]).includes(Number(id)))||(details.heavyLoads||[]).some(load=>(load.safetyImageIds||[]).includes(Number(id))))throw new Error('계획도 또는 중량물 사진 연결을 해제한 뒤 삭제해 주세요.');}
+    if(doc.type==='checklist'){const details=JSON.parse(doc.details);if(details.kind==='custom'&&details.answers.some(answer=>answer.files.includes(Number(id))))throw Error('문항에서 첨부 연결을 해제한 뒤 삭제해 주세요.');}
     this.db.prepare('DELETE FROM attachments WHERE id=?').run(Number(id));if(doc.type==='checklist')this.db.prepare('DELETE FROM checklist_signatures WHERE document_id=?').run(doc.id);if(doc.type==='tbm')this.db.prepare('DELETE FROM tbm_signatures WHERE document_id=?').run(doc.id);if(doc.type==='joint_inspection')this.db.prepare('DELETE FROM joint_inspection_signatures WHERE document_id=?').run(doc.id);if(['work_council','safety_meeting','office','inspection','safety_log','patrol','cost','work_plan'].includes(doc.type))this.db.prepare('DELETE FROM meeting_signatures WHERE document_id=?').run(doc.id);if(doc.type==='work_plan')this.db.prepare('DELETE FROM plan_signature_versions WHERE document_id=?').run(doc.id);const editVersion=this.document(doc.id).edit_version;this.db.exec('COMMIT');return returnVersion?{ok:true,editVersion}:undefined;}catch(error){this.db.exec('ROLLBACK');throw error;}
   }
   updateDocument(id, input, onAuthorize=()=>{}) {
     this.db.exec('BEGIN IMMEDIATE');try{onAuthorize();
     const current = this.document(id);
     if (!current) throw new Error('문서를 찾을 수 없습니다.');
+    input=this.customChecklists.prepare(input,current);
     const editSignature=input.officeEditSignature;
     if(editSignature!==undefined){
       if(current.type!=='office'||!editSignature||typeof editSignature!=='object'||Array.isArray(editSignature))throw new Error('업무 문서 수정 서명을 확인해 주세요.');
@@ -2785,6 +2791,7 @@ export class Store {
     if(doc.type==='risk' && action==='reject' && !opinion)throw new Error('반려 의견을 입력해 주세요.');
     let cycleId=doc.approval_cycle_id||null;this.db.exec('SAVEPOINT document_transition');
     try {
+      if(action==='submit')this.customChecklists.submit(doc);
       if(action==='submit'&&hasManagerEducationTargets(doc)&&this.db.prepare('SELECT 1 FROM training_manager_targets t JOIN reviewers r ON r.id=t.reviewer_id WHERE t.document_id=? AND (r.active<>1 OR r.site_id<>?)').get(Number(id),doc.site_id))throw new Error('관리자 교육 대상의 현장 배정과 활성 상태를 다시 확인해 주세요.');
       if(doc.type==='permit'&&action==='submit'){
         this.db.prepare('UPDATE documents SET id=id WHERE id=?').run(Number(id));const latest=this.document(id),roles=this.permitRoles(id).roles,ids=this.validatePermitRoles(latest,roles);

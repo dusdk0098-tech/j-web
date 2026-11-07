@@ -129,6 +129,7 @@ assets.add('/education-reference.js');
 assets.add('/checklist-copy.js');
 assets.add('/permit-sources.js');
 assets.add('/permit-measures.js');
+assets.add('/custom-checklist.js');assets.add('/custom-checklists-view.js');
 assets.add('/worker-invitation.js');
 assets.add('/contractor-invitation.js');
 assets.add('/worker-password.js');
@@ -1214,6 +1215,12 @@ const server = http.createServer((req,res)=>passwordRequests.run(true,()=>adminR
     if (url.pathname === '/api/attendance/delegated-events' && req.method === 'GET') return json(res,200,store.delegatedAttendanceEvents(url.searchParams.get('siteId'),url.searchParams.get('date')));
     if(url.pathname==='/api/office-approval-default'&&req.method==='GET'){const result=store.officeApprovalDefault(url.searchParams.get('siteId'),url.searchParams.get('kind'),url.searchParams.get('otherKind')||'');checkRequestSession(req);return json(res,200,result);}
     if(url.pathname==='/api/office-reference-preview'&&req.method==='GET'){const siteId=Number(url.searchParams.get('siteId')),id=Number(url.searchParams.get('id'));if(!Number.isSafeInteger(siteId)||siteId<1||!Number.isSafeInteger(id)||id<1)throw new Error('현장과 참조 문서를 확인해 주세요.');const result=store.officeReferenceInfo(siteId,id);checkRequestSession(req);return json(res,200,result);}
+    if(url.pathname==='/api/checklist-templates'){
+      if(req.method==='GET')return json(res,200,store.customChecklists.list());
+      if(req.method==='POST')return json(res,201,store.customChecklists.save(null,await body(req,120000),()=>checkRequestSession(req)));
+    }
+    const checklistTemplate=url.pathname.match(new RegExp('^/api/checklist-templates/([1-9][0-9]*)$'));
+    if(checklistTemplate){if(!['PUT','DELETE'].includes(req.method))return json(res,405,{error:'지원하지 않는 요청입니다.'});const id=Number(checklistTemplate[1]),input=await body(req,120000);if(req.method==='PUT')return json(res,200,store.customChecklists.save(id,input,()=>checkRequestSession(req)));store.customChecklists.remove(id,input.expectedVersion,()=>checkRequestSession(req));return json(res,200,{ok:true});}
     if (url.pathname === '/api/documents') {
       if (req.method === 'GET') {const rows=store.documents(url.searchParams.get('siteId'),url.searchParams.get('type') || '',url.searchParams.get('q') || '',url.searchParams.get('from') || '',url.searchParams.get('to') || '',url.searchParams.get('riskKind') || '',url.searchParams.get('riskContractorId') || '',url.searchParams.get('instructionCompanyId') || '',url.searchParams.get('permitCompany') || '',url.searchParams.get('permitFrom') || '',url.searchParams.get('permitTo') || '',url.searchParams.get('educationKind') || '',url.searchParams.get('workPlanCompany') || '',url.searchParams.get('checklistCategory') || '',url.searchParams.get('workPlanCompanyId') || '');checkRequestSession(req);const actor=auth.session(token);return json(res,200,actor.scope==='global'?rows:rows.filter(row=>actor.siteIds.includes(row.site_id)));}
       if (req.method === 'POST') {const input=await body(req,220000);return json(res,201,withDocumentAuthor(input.officeSetup===undefined?store.createAuthorizedDocument(input,()=>checkRequestSession(req),()=>currentDocumentAdmin(req,token)):store.createOfficeDraft(input,()=>checkRequestSession(req),null,()=>currentDocumentAdmin(req,token))));}
