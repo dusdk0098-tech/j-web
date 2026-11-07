@@ -1,3 +1,4 @@
+import { PNG } from 'pngjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Store } from '../store.js';
@@ -17,7 +18,7 @@ test('합동 점검 항목별 보완과 조치는 수정·결재 사본에 보�
     assert.deepEqual(read(),{name:'가상 항목',result:'보완사항',issueDetail:'가상 문제',action:'가상 조치'});
     assert.throws(()=>s.updateDocument(doc.id,{...input,details:{items:[{name:'가상 항목',result:'양호'}]}}),/보존/);
     assert.equal(read().issueDetail,'가상 문제');
-    s.updateDocument(doc.id,{...input,details:{items:[{...input.details.items[0],action:'새 조치'}]}});s.transition(doc.id,'submit');
+    s.updateDocument(doc.id,{...input,details:{items:[{...input.details.items[0],action:'새 조치'}]}});const png=new PNG({width:1,height:1});png.data[3]=255;s.saveJointSignature(doc.id,'data:image/png;base64,'+PNG.sync.write(png).toString('base64'));s.transition(doc.id,'submit');
     const saved=s.document(doc.id),snapshot=s.approvalCycle(doc.id,saved.approval_cycle_id);
     assert.equal(JSON.parse(snapshot.document.details).items[0].action,'새 조치');
     for(const bad of [null,7,'x'.repeat(2001)])assert.throws(()=>recordInput({...input,details:{items:[{...input.details.items[0],action:bad}]}}),/점검 항목/);
@@ -53,4 +54,14 @@ test('HTTP에서 항목별 내용을 저장하고 구형 수정 요청에 의한
     const current=await (await call(path,'GET',null,admin)).json();assert.equal(JSON.parse((current.document||current).details).items[0].issueDetail,'가상 문제');
     const updated=await call(path,'PUT',{...input,expectedEditVersion:doc.edit_version,details:{items:[{...input.details.items[0],action:'새 조치'}]}},admin);assert.equal(updated.status,200);assert.equal(JSON.parse((await updated.json()).details).items[0].action,'새 조치');
   }finally{if(child.exitCode===null){const exited=once(child,'exit');child.kill();await exited;}rmSync(dir,{recursive:true,force:true});}
+});
+
+test('합동 점검은 서명 없는 상신을 원복하고 수정 뒤 새 서명을 요구한다',()=>{
+  const s=new Store(':memory:');try{
+    const site=s.createSite({name:'가상 현장'}),input={siteId:site.id,type:'joint_inspection',title:'가상 점검',date:'2026-11-07',details:{items:[]}},doc=s.createDocument(input),before=s.document(doc.id),submit=version=>s.managedTransition(doc.id,{action:'submit',expectedEditVersion:version});
+    assert.throws(()=>submit(before.edit_version),/작성자 서명/);assert.deepEqual(s.document(doc.id),before);assert.equal(s.events(doc.id).length,0);assert.equal(s.approvalCycle(doc.id,1),null);
+    const png=new PNG({width:1,height:1});png.data[3]=255;const bytes=PNG.sync.write(png),signature='data:image/png;base64,'+bytes.toString('base64');s.saveJointSignature(doc.id,signature);
+    assert.throws(()=>submit(before.edit_version),e=>e.sessionStatus===409);const submitted=submit(s.document(doc.id).edit_version),cycle=submitted.approval_cycle_id;assert.equal(submitted.status,'pending');assert.deepEqual(Buffer.from(s.approvalCycleFile(doc.id,cycle,'author-signature',0,0).data),bytes);
+    s.transition(doc.id,'withdraw');s.updateDocument(doc.id,{...input,title:'수정한 가상 점검'});const edited=s.document(doc.id);assert.throws(()=>submit(edited.edit_version),/작성자 서명/);assert.deepEqual(s.document(doc.id),edited);assert.deepEqual(Buffer.from(s.approvalCycleFile(doc.id,cycle,'author-signature',0,0).data),bytes);
+  }finally{s.close();}
 });

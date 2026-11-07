@@ -1,3 +1,4 @@
+import { PNG } from 'pngjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync,mkdtempSync,rmSync} from 'node:fs';
@@ -49,7 +50,7 @@ test('합동 점검 활동은 검증·구형 수정·결재 사본에서 보존�
   assert.throws(()=>s.updateDocument(doc.id,{...input,details:{items:[],patrolActivities:[{...activity,timeTo:''}]}}),/점검 활동/);
   assert.throws(()=>s.updateDocument(doc.id,{...input,details:{items:[],patrolActivities:Array(101).fill(activity)}}),/점검 활동/);
   s.updateDocument(doc.id,{...input,details:{items:[]}});assert.deepEqual(read().patrolActivities,[saved]);
-  s.transition(doc.id,'submit');const cycle=s.document(doc.id).approval_cycle_id;s.transition(doc.id,'withdraw');s.updateDocument(doc.id,{...input,details:{items:[],patrolActivities:[]}});
+  const png=new PNG({width:1,height:1});png.data[3]=255;s.saveJointSignature(doc.id,'data:image/png;base64,'+PNG.sync.write(png).toString('base64'));s.transition(doc.id,'submit');const cycle=s.document(doc.id).approval_cycle_id;s.transition(doc.id,'withdraw');s.updateDocument(doc.id,{...input,details:{items:[],patrolActivities:[]}});
   assert.deepEqual(read().patrolActivities,[]);assert.deepEqual(JSON.parse(s.approvalCycle(doc.id,cycle).document.details).patrolActivities,[saved]);
  }finally{s.close();}
 });
@@ -71,6 +72,7 @@ test('합동 점검 활동은 HTTP 수정과 결재 사본에서 유지된다',{
   await Promise.race([once(child.stdout,'data'),once(child,'exit').then(()=>{throw Error('시험 서버 종료');})]);const base=`http://127.0.0.1:${port}`,send=(path,method='GET',data,cookie)=>fetch(base+path,{method,headers:{...(cookie?{cookie}:{}),...(data?{'content-type':'application/json'}:{})},...(data?{body:JSON.stringify(data)}:{})}),cookie=(await send('/api/login','POST',{password:'virtual-password-123'})).headers.get('set-cookie').split(';')[0],site=await(await send('/api/sites','POST',{name:'가상'},cookie)).json(),input={siteId:site.id,type:'joint_inspection',title:'합동 시험',date:'2026-11-03',details:{items:[],patrolActivities:[activity]}};
   const created=await send('/api/documents','POST',input,cookie);assert.equal(created.status,201);const doc=await created.json(),path=`/api/documents/${doc.id}`;assert.equal(JSON.parse(doc.details).patrolActivities[0].content,'없음');
   assert.equal((await send(path,'PUT',{...input,details:{items:[]},expectedEditVersion:doc.edit_version},cookie)).status,200);const current=await(await send(path,'GET',null,cookie)).json();assert.equal(JSON.parse(current.details).patrolActivities[0].inspector,'가상 점검자');
-  assert.equal((await send(path+'/transition','POST',{action:'submit',expectedEditVersion:current.edit_version},cookie)).status,200);const submitted=await(await send(path,'GET',null,cookie)).json(),cycle=await(await send(path+'/approval-cycles/'+submitted.approval_cycle_id,'GET',null,cookie)).json();assert.equal(JSON.parse(cycle.document.details).patrolActivities[0].action,'가상 조치');assert.equal((await send(path)).status,401);
+  const missing=await send(path+'/transition','POST',{action:'submit',expectedEditVersion:current.edit_version},cookie);assert.equal(missing.status,400);assert.match((await missing.json()).error,/작성자 서명/);assert.deepEqual(await(await send(path,'GET',null,cookie)).json(),current);
+  const png=new PNG({width:1,height:1});png.data[3]=255;assert.equal((await send(path+'/joint-signature','POST',{signature:'data:image/png;base64,'+PNG.sync.write(png).toString('base64'),expectedEditVersion:current.edit_version},cookie)).status,200);const signed=await(await send(path,'GET',null,cookie)).json();assert.equal((await send(path+'/transition','POST',{action:'submit',expectedEditVersion:current.edit_version},cookie)).status,409);assert.equal((await send(path+'/transition','POST',{action:'submit',expectedEditVersion:signed.edit_version},cookie)).status,200);const submitted=await(await send(path,'GET',null,cookie)).json(),cycle=await(await send(path+'/approval-cycles/'+submitted.approval_cycle_id,'GET',null,cookie)).json();assert.equal(JSON.parse(cycle.document.details).patrolActivities[0].action,'가상 조치');assert.equal((await send(path)).status,401);
  }finally{if(child.exitCode===null){const exited=once(child,'exit');child.kill();await exited;}rmSync(dir,{recursive:true,force:true});}
 });

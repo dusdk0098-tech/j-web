@@ -701,7 +701,7 @@ test('합동 점검은 가상 관리자를 근로자와 구분하고 선택 당�
     assert.throws(()=>s.createDocument({...input,details:{...input.details,managerIds:[foreign.id]}}),/현장/);assert.throws(()=>s.createDocument({...input,details:{...input.details,managerIds:[worker.id]}}),/관리자/);assert.throws(()=>s.createDocument({...input,details:{...input.details,managerIds:[manager.id,manager.id]}}),/관리자/);
     s.updateWorker(manager.id,{siteId:site.id,name:'변경 이름',category:'직영',company:'변경 업체',occupation:'가상 직종'});s.updateDocument(doc.id,input);details=JSON.parse(s.document(doc.id).details);assert.equal(details.managerSnapshot[0].name,'가상 관리자');
     const {managerIds,...withoutManagers}=input.details;s.updateDocument(doc.id,{...input,details:withoutManagers});assert.equal(JSON.parse(s.document(doc.id).details).managerSnapshot[0].name,'가상 관리자');
-    s.transition(doc.id,'submit');const submitted=s.document(doc.id),snapshot=s.approvalCycle(doc.id,submitted.approval_cycle_id);assert.equal(JSON.parse(snapshot.document.details).managerSnapshot[0].name,'가상 관리자');
+    const png=new PNG({width:1,height:1});png.data[3]=255;s.saveJointSignature(doc.id,'data:image/png;base64,'+PNG.sync.write(png).toString('base64'));s.transition(doc.id,'submit');const submitted=s.document(doc.id),snapshot=s.approvalCycle(doc.id,submitted.approval_cycle_id);assert.equal(JSON.parse(snapshot.document.details).managerSnapshot[0].name,'가상 관리자');
   }finally{s.close();}
 });
 
@@ -712,7 +712,7 @@ test('합동 점검 시험 서명은 변경 시 삭제되고 결재 요청 당�
     const file=s.addAttachment(doc.id,'가상.txt',Buffer.from('가상'));assert.equal(s.jointSignature(doc.id),null);assert.ok(s.jointSignature(other.id));s.saveJointSignature(doc.id,signature);s.deleteAttachment(file);assert.equal(s.jointSignature(doc.id),null);
     s.saveJointSignature(doc.id,signature);s.updateDocument(doc.id,{...input,title:'수정된 점검'});assert.equal(s.jointSignature(doc.id),null);s.saveJointSignature(doc.id,signature);s.transition(doc.id,'submit');
     const submitted=s.document(doc.id),cycle=submitted.approval_cycle_id;assert.equal(s.reviewerPayload(submitted).linked.authorSignature,true);assert.deepEqual(Buffer.from(s.reviewerLinkedSignature(submitted,'author',0)),bytes);assert.throws(()=>s.saveJointSignature(doc.id,signature),/수정/);
-    s.transition(doc.id,'withdraw');s.updateDocument(doc.id,input);assert.equal(s.jointSignature(doc.id),null);assert.deepEqual(Buffer.from(s.approvalCycleFile(doc.id,cycle,'author-signature',0,0).data),bytes);s.transition(doc.id,'submit');assert.equal(s.reviewerPayload(s.document(doc.id)).linked.authorSignature,false);
+    s.transition(doc.id,'withdraw');s.updateDocument(doc.id,input);assert.equal(s.jointSignature(doc.id),null);assert.deepEqual(Buffer.from(s.approvalCycleFile(doc.id,cycle,'author-signature',0,0).data),bytes);assert.throws(()=>s.transition(doc.id,'submit'),/작성자 서명/);s.saveJointSignature(doc.id,signature);s.transition(doc.id,'submit');assert.equal(s.reviewerPayload(s.document(doc.id)).linked.authorSignature,true);
   }finally{s.close();}
 });
 

@@ -2794,6 +2794,11 @@ export class Store {
         if(!roles.siteManager||details.directWork!==true&&!roles.contractorLead)throw new Error('시험 결재 요청 전에 현장소장과 협력사 작업의 협력사 현장소장을 지정해 주세요.');
         if(JSON.stringify(ids)!==JSON.stringify(line.map(step=>step.reviewer_id)))throw new Error('역할별 시험 결재자를 다시 저장해 결재선을 설정해 주세요.');
       }
+      if(doc.type==='joint_inspection'&&action==='submit'){
+        const locked=this.db.prepare('UPDATE documents SET id=id WHERE id=? AND edit_version=? AND status=?').run(Number(id),doc.edit_version,doc.status);
+        if(!locked.changes)throw Object.assign(new Error('합동 점검이 변경되었습니다. 다시 조회해 주세요.'),{sessionStatus:409});
+        if(!this.jointSignature(id))throw new Error('결재 요청 전에 합동 점검의 작성자 서명을 저장해 주세요.');
+      }
       if(doc.type==='safety_log'&&action==='submit'){
         this.db.prepare('UPDATE documents SET id=id WHERE id=?').run(Number(id));const latest=this.document(id);
         if(!latest||['status','title','date','body','details'].some(key=>latest[key]!==doc[key]))throw new Error('안전 업무 일지가 변경되었습니다. 다시 확인해 주세요.');
