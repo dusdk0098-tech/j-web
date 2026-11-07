@@ -1,3 +1,5 @@
+import {PNG} from 'pngjs';
+const authorImage=new PNG({width:1,height:1});authorImage.data[3]=255;const authorSignature='data:image/png;base64,'+PNG.sync.write(authorImage).toString('base64');
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {Store} from '../store.js';
@@ -15,7 +17,7 @@ test('안전점검은 밤샘 시간과 같은 시간대의 분 순서를 보존�
     assert.deepEqual(rows.map(r=>[r.timeFrom,r.timeTo]),[['23:30','01:00'],['10:10','10:45'],['12:00','12:00']]);
     assert.throws(()=>s.updateDocument(doc.id,{...base,details:{rows:[{...row,timeFrom:'23:30',timeTo:''}]}}),/점검시간/);
     assert.deepEqual(JSON.parse(s.document(doc.id).details).rows,rows);
-    s.transition(doc.id,'submit');const saved=s.document(doc.id),snapshot=s.approvalCycle(doc.id,saved.approval_cycle_id);assert.deepEqual(JSON.parse(snapshot.document.details).rows,rows);
+    s.saveMeetingSignature(doc.id,authorSignature);s.transition(doc.id,'submit');const saved=s.document(doc.id),snapshot=s.approvalCycle(doc.id,saved.approval_cycle_id);assert.deepEqual(JSON.parse(snapshot.document.details).rows,rows);
   }finally{s.close();}
 });
 
@@ -34,6 +36,6 @@ test('불안전 상태가 없는 점검도 없음으로 저장하고 결재 사�
     const site=s.createSite({name:'가상 현장'}),base={siteId:site.id,type:'inspection',title:'가상 점검',date:'2026-11-01'},row={inspector:'가상 점검자',timeFrom:'09:00',timeTo:'09:30',hazard:'   ',action:''};
     const doc=s.createDocument({...base,details:{rows:[row]}});assert.equal(JSON.parse(doc.details).rows[0].hazard,'없음');
     assert.throws(()=>s.createDocument({...base,details:{rows:[{...row,inspector:''}]}}),/점검자/);
-    s.transition(doc.id,'submit');const saved=s.document(doc.id);assert.equal(JSON.parse(s.approvalCycle(doc.id,saved.approval_cycle_id).document.details).rows[0].hazard,'없음');
+    s.saveMeetingSignature(doc.id,authorSignature);s.transition(doc.id,'submit');const saved=s.document(doc.id);assert.equal(JSON.parse(s.approvalCycle(doc.id,saved.approval_cycle_id).document.details).rows[0].hazard,'없음');
   }finally{s.close();}
 });
