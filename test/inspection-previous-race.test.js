@@ -21,7 +21,7 @@ function screen(){
     querySelector(selector){if(selector==='[data-inspection-row]')return nodes.get('#inspection-rows').rows[0];assert.ok(nodes.has(selector),selector);return nodes.get(selector);},
     insertAdjacentHTML(position,html){
       if(html.includes('data-inspection-row')){
-        const item={html,querySelector(selector){assert.equal(selector,'[data-inspection-remove]');return {};}};
+        const item={html,querySelector(selector){assert.ok(selector==='[data-inspection-remove]'||selector.startsWith('[data-inspection-midnight=')||selector.startsWith('[data-inspection-field='));return {};}};
         this.rows.push(item);this.lastElementChild=item;
       }
     }
