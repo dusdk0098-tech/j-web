@@ -1368,6 +1368,8 @@ async function render(){
   await loadSites();
   if(detailEpoch!==renderEpoch)return;
   if(state.admin?.scope==='restricted'&&!['documents','workers','attendance','equipment-attendance'].includes(state.page)){state.page='documents';state.detail=null;}
+  const view=JSON.stringify([state.page,state.siteId,state.detail,state.boardKind,state.communityPostId]);
+  if(state.renderedView!==view){state.renderedView=view;window.scrollTo(0,0);}
   $('#heading').textContent=labels[state.page];$('#crumb').textContent=labels[state.page];
   document.querySelectorAll('[data-page]').forEach(b=>b.classList.toggle('selected',b.dataset.page===state.page));
   if(state.admin?.scope==='restricted'){
