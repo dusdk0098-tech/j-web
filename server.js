@@ -1,3 +1,4 @@
+import {handleAssignedChecklists} from './assigned-checklist-routes.js';
 import { adminSitePolicy, adminAttendanceRows, adminEquipmentRows } from './admin-site-policy.js';
 import { adminWriteGuard } from './admin-write-guard.js';
 import http from 'node:http';
@@ -129,7 +130,7 @@ assets.add('/education-reference.js');
 assets.add('/checklist-copy.js');
 assets.add('/permit-sources.js');
 assets.add('/permit-measures.js');
-assets.add('/custom-checklist.js');assets.add('/custom-checklists-view.js');
+assets.add('/custom-checklist.js');assets.add('/custom-checklists-view.js');assets.add('/assigned-checklists.js');
 assets.add('/worker-invitation.js');
 assets.add('/contractor-invitation.js');
 assets.add('/worker-password.js');
@@ -287,6 +288,7 @@ const server = http.createServer((req,res)=>passwordRequests.run(true,()=>adminR
       if(url.pathname==='/api/reviewer/logout'&&req.method==='POST'){reviewerSessions.delete(key);res.setHeader('Set-Cookie',`jweb_reviewer=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0${secureCookie}`);return json(res,200,{ok:true});}
       if(await handleCommonWork(req,res,url,'/api/reviewer/common-work',reviewer))return;
       if(url.pathname==='/api/reviewer/session'&&req.method==='GET')return json(res,200,{reviewer,context});
+      if(await handleAssignedChecklists(req,res,url,{actor:{kind:'reviewer',id:reviewer.id,siteId:reviewer.site_id},authorize:()=>{checkRequestSession(req);if(req.headers['x-reviewer-context']!==context)throw Object.assign(Error('직원 로그인 세션이 변경되었습니다. 다시 로그인해 주세요.'),{sessionStatus:409,sessionChanged:true});},store,body,json}))return;
       if(url.pathname==='/api/reviewer/risk-process-confirmations'){
         if(req.method==='GET'){const rows=store.riskProcessAssignments(reviewer.site_id,'reviewer',reviewer.id);checkRequestSession(req);return json(res,200,rows);}
         if(req.method==='POST'){const input=await body(req);store.confirmRiskProcess(reviewer.site_id,'reviewer',reviewer.id,input,()=>checkRequestSession(req));return json(res,200,{ok:true});}
@@ -474,6 +476,11 @@ const server = http.createServer((req,res)=>passwordRequests.run(true,()=>adminR
       if(!session || session.expires<=Date.now()){workerSessions.delete(key);return json(res,401,{error:'근로자 로그인이 필요합니다.'});}
       const input=await body(req),site=input.siteKey?store.siteFromAccess(input.siteKey):store.invitation(input.token);if(!Number.isSafeInteger(input.siteId)||input.siteId!==session.worker.site_id||!site||site.id!==session.worker.site_id)return json(res,400,{error:'유효한 현장 접속 주소를 확인해 주세요.'});
       const now=new Date(),date=new Date(now.getTime()-now.getTimezoneOffset()*60000).toISOString().slice(0,10);store.recordWorkerLogin(session.worker.id,date,null,()=>{checkWorkerReport(req,key,session,input);const failure=workerSessionError(workerToken,session);if(failure)throw Object.assign(new Error(failure.error),{sessionStatus:failure.status});const currentSite=input.siteKey?store.siteFromAccess(input.siteKey):store.invitation(input.token);if(!currentSite||currentSite.id!==session.worker.site_id)throw new Error('유효한 현장 접속 주소를 확인해 주세요.');},input.location);return json(res,200,{ok:true,siteKey:store.siteAccessKey(session.worker.site_id)});
+    }
+    if(url.pathname==='/api/worker/custom-checklists'||url.pathname.startsWith('/api/worker/custom-checklists/')){
+      const key=workerKey(workerToken),session=workerSessions.get(key),failure=workerSessionError(workerToken,session);if(failure)return json(res,failure.status,{error:failure.error});
+      const authorize=()=>{checkWorkerReport(req,key,session);const failure=workerSessionError(workerToken,session);if(failure)throw Object.assign(Error(failure.error),{sessionStatus:failure.status});};
+      if(await handleAssignedChecklists(req,res,url,{actor:{kind:'worker',id:session.worker.id,siteId:session.worker.site_id},authorize,store,body,json}))return;
     }
     if(url.pathname==='/api/worker/risk-process-confirmations'){
       const key=workerKey(workerToken),session=workerSessions.get(key);if(!session||session.expires<=Date.now())return json(res,401,{error:'근로자 로그인이 필요합니다.'});
@@ -1215,6 +1222,7 @@ const server = http.createServer((req,res)=>passwordRequests.run(true,()=>adminR
     if (url.pathname === '/api/attendance/delegated-events' && req.method === 'GET') return json(res,200,store.delegatedAttendanceEvents(url.searchParams.get('siteId'),url.searchParams.get('date')));
     if(url.pathname==='/api/office-approval-default'&&req.method==='GET'){const result=store.officeApprovalDefault(url.searchParams.get('siteId'),url.searchParams.get('kind'),url.searchParams.get('otherKind')||'');checkRequestSession(req);return json(res,200,result);}
     if(url.pathname==='/api/office-reference-preview'&&req.method==='GET'){const siteId=Number(url.searchParams.get('siteId')),id=Number(url.searchParams.get('id'));if(!Number.isSafeInteger(siteId)||siteId<1||!Number.isSafeInteger(id)||id<1)throw new Error('현장과 참조 문서를 확인해 주세요.');const result=store.officeReferenceInfo(siteId,id);checkRequestSession(req);return json(res,200,result);}
+    if(url.pathname==='/api/checklist-template-people'&&req.method==='GET')return json(res,200,store.customChecklists.people());
     if(url.pathname==='/api/checklist-templates'){
       if(req.method==='GET')return json(res,200,store.customChecklists.list());
       if(req.method==='POST')return json(res,201,store.customChecklists.save(null,await body(req,120000),()=>checkRequestSession(req)));

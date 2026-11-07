@@ -1,3 +1,4 @@
+import {mountAssignedChecklists} from './assigned-checklists.js';
 import { mountRiskProcessConfirmations } from './risk-process-confirmation.js';
 import { workerSitePath,replaceWorkerSiteAddress,workerJoinCredentials,switchWorkerJoinToSite } from './worker-link.js';
 import { mountWorkerDocuments, workerDocumentRequest, downloadWorkerAttachment, bindWorkerDownload, showWorkerImage } from './worker-documents.js';
@@ -88,6 +89,7 @@ async function showWorker(worker,reportContext){
     const dayActive=(generation=dayGeneration)=>panel.isConnected&&!logout.disabled&&!dayStopped&&siteKey===workerSiteKey&&dayReady&&performance.now()<dayDeadline&&document.visibilityState!=='hidden'&&generation===dayGeneration;
     const workerPanelActive=()=>panel.isConnected&&!logout.disabled&&!dayStopped&&siteKey===workerSiteKey;
     const workerFileRequest=workerDocumentRequest(reportContext,workerPanelActive,text=>{stopWorkerDay();dayStatus.textContent=text;});
+    const assignedPanel=document.createElement('section');assignedPanel.className='panel';panel.append(assignedPanel);mountAssignedChecklists({target:assignedPanel,base:'/api/worker/custom-checklists',siteId:worker.site_id,request:workerFileRequest,pad:signaturePad,active:workerPanelActive}).catch(error=>{if(workerPanelActive())assignedPanel.textContent=error.message;});
     const month=panel.querySelector('#worker-month'),output=panel.querySelector('#worker-attendance'),initialLoads=[];
     const riskConfirmPanel=document.createElement('section');panel.append(riskConfirmPanel);const riskConfirmRequest=workerDocumentRequest(reportContext,workerPanelActive,text=>{stopWorkerDay();dayStatus.textContent=text;});initialLoads.push(()=>mountRiskProcessConfirmations({target:riskConfirmPanel,base:'/api/worker/risk-process-confirmations',active:workerPanelActive,pad:(canvas,clear)=>{const signature=signaturePad(canvas);clear.onclick=()=>signature.clear();return ()=>signature.value();},api:(path,options={})=>riskConfirmRequest(path,options.method==='POST'?{...options,headers:{'Content-Type':'application/json'},body:JSON.stringify({...JSON.parse(options.body),reportContext})}:options)}));
     const now=new Date();month.value=`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;

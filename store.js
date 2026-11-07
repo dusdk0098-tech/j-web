@@ -1,3 +1,4 @@
+import {AssignedChecklists} from './assigned-checklists.js';
 import {CustomChecklists} from './custom-checklists.js';
 import { riskProcessRoles } from './public/risk-review-roles.js';
 import {installWorkerTransferSchema,previewWorkerTransfer,executeWorkerTransfer,workerTransferAudit,workerTransferHistory,workerTransferSignature} from './worker-transfer.js';
@@ -22,7 +23,7 @@ import { costImageType, safetyCostImageType, instructionPhotoType } from './cost
 import { riskActivityFileLimit } from './public/risk-activity-mode.js';
 
 const siteArticleRow=row=>({...row,rich_body:row.rich_body===null?null:JSON.parse(row.rich_body)});
-const documentAuthorSql="COALESCE((SELECT w.name FROM worker_authored_documents a JOIN workers w ON w.id=a.worker_id AND w.site_id=documents.site_id WHERE a.document_id=documents.id),(SELECT r.name FROM office_document_authors a JOIN reviewers r ON r.id=a.reviewer_id AND r.site_id=documents.site_id WHERE a.document_id=documents.id),(SELECT a.author_name FROM admin_document_authors a WHERE a.document_id=documents.id))";
+const documentAuthorSql="COALESCE((SELECT w.name FROM worker_authored_documents a JOIN workers w ON w.id=a.worker_id AND w.site_id=documents.site_id WHERE a.document_id=documents.id),(SELECT r.name FROM office_document_authors a JOIN reviewers r ON r.id=a.reviewer_id AND r.site_id=documents.site_id WHERE a.document_id=documents.id),(SELECT a.author_name FROM admin_document_authors a WHERE a.document_id=documents.id),(SELECT a.name FROM custom_checklist_authors a WHERE a.document_id=documents.id))";
 function adminAuthorDetails(author){if(author===null)return null;if(!Number.isSafeInteger(author?.id)||author.id<1||typeof author.name!=='string'||!author.name.trim()||author.name.length>200)throw new Error('문서 작성 관리자 계정을 확인해 주세요.');return {id:author.id,name:author.name.trim()};}
 const boardImages=nodes=>(nodes||[]).flatMap(node=>node.type==='image'?[node]:boardImages(node.children));
 const boardPostRow=row=>({...row,rich_body:row.rich_body===null?null:JSON.parse(row.rich_body)});
@@ -390,6 +391,7 @@ export class Store {
     this.db.exec('CREATE TRIGGER IF NOT EXISTS attendance_day_version AFTER UPDATE ON attendance WHEN NEW.day_version=OLD.day_version BEGIN UPDATE attendance SET day_version=OLD.day_version+1 WHERE worker_id=NEW.worker_id AND date=NEW.date; END');
     installWorkerTransferSchema(this.db);
     this.customChecklists=new CustomChecklists(this.db);
+    this.assignedChecklists=new AssignedChecklists(this);
   }
   planCategoryMeasures(siteId,category){return listPlanCategoryMeasures(this.db,siteId,category);}
   savePlanCategoryMeasure(siteId,category,id,input,remove=false,onAuthorize=()=>{}){return savePlanCategoryMeasure(this.db,siteId,category,id,input,remove,onAuthorize);}
