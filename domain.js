@@ -44,6 +44,8 @@ export function muscleReferenceInput(input) {
   return {siteId:input.siteId,title,scale,items:doc.details.musculoskeletalItems};
 }
 
+function normalizePatrolActivities(activities){if(!Array.isArray(activities)||activities.length>100)throw new Error('점검 활동을 확인해 주세요.');return activities.map(row=>{if(!row||typeof row!=='object'||Array.isArray(row))throw new Error('점검 활동을 확인해 주세요.');const result={};for(const key of ['inspector','content','action']){const v=row[key]??'';if(typeof v!=='string'||v.length>(key==='inspector'?200:2000))throw new Error('점검 활동을 확인해 주세요.');result[key]=v.trim();}if(!result.inspector)throw new Error('점검 활동의 점검자를 입력해 주세요.');for(const key of ['timeFrom','timeTo']){const v=row[key];if(typeof v!=='string'||!/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(v))throw new Error('점검 활동의 시간을 확인해 주세요.');result[key]=v;}if(result.timeFrom>result.timeTo)[result.timeFrom,result.timeTo]=[result.timeTo,result.timeFrom];if(!result.content)result.content='없음';return result;});}
+
 export function recordInput(input) {
   const type = text(input.type, '문서 유형');
   if (!Object.hasOwn(types, type)) throw new Error('지원하지 않는 문서 유형입니다.');
@@ -77,7 +79,7 @@ export function recordInput(input) {
     const value=input.details??{};if(!value||typeof value!=='object'||Array.isArray(value))throw new Error('순회 점검 항목을 확인해 주세요.');
     if(typeof (value.inspector??'')!=='string'||(value.inspector??'').length>200)throw new Error('순회 점검자를 확인해 주세요.');details.inspector=(value.inspector??'').trim();
     for(const key of ['other','notes','instruction']){const v=value[key]??'';if(typeof v!=='string'||v.length>2000)throw new Error('순회 점검 항목을 확인해 주세요.');details[key]=v.trim();}
-    if(value.patrolActivities!==undefined){if(!Array.isArray(value.patrolActivities)||value.patrolActivities.length>100)throw new Error('점검 활동을 확인해 주세요.');details.patrolActivities=value.patrolActivities.map(row=>{if(!row||typeof row!=='object'||Array.isArray(row))throw new Error('점검 활동을 확인해 주세요.');const result={};for(const key of ['inspector','content','action']){const v=row[key]??'';if(typeof v!=='string'||v.length>(key==='inspector'?200:2000))throw new Error('점검 활동을 확인해 주세요.');result[key]=v.trim();}if(!result.inspector)throw new Error('점검 활동의 점검자를 입력해 주세요.');for(const key of ['timeFrom','timeTo']){const v=row[key];if(typeof v!=='string'||!/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(v))throw new Error('점검 활동의 시간을 확인해 주세요.');result[key]=v;}if(result.timeFrom>result.timeTo)[result.timeFrom,result.timeTo]=[result.timeTo,result.timeFrom];if(!result.content)result.content='없음';return result;});}
+    if(value.patrolActivities!==undefined)details.patrolActivities=normalizePatrolActivities(value.patrolActivities);
     const items=value.items??[];if(!Array.isArray(items)||items.length>100)throw new Error('순회 점검 내용을 확인해 주세요.');details.items=items.map(item=>{if(!item||typeof item.name!=='string'||!item.name.trim()||item.name.length>500||!['O','X','해당없음'].includes(item.result)||typeof item.note!=='string'||item.note.length>2000)throw new Error('순회 점검 내용을 확인해 주세요.');const extra={};for(const key of ['patrolGroup','patrolGuidance'])if(item[key]!==undefined){if(typeof item[key]!=='string'||item[key].length>2000)throw new Error('순회 점검 내용을 확인해 주세요.');extra[key]=item[key].trim();}return {name:item.name.trim(),result:item.result,note:item.note.trim(),...extra};});
   }
   if(type==='inspection'){
@@ -100,6 +102,7 @@ export function recordInput(input) {
       for(const key of ['host','decisions','discussion']){if(typeof (value[key]??'')!=='string'||(value[key]??'').length>2000)throw new Error('노사협의체 항목을 확인해 주세요.');details[key]=(value[key]??'').trim();}
     }
     if(type==='joint_inspection'){
+      if(value.patrolActivities!==undefined)details.patrolActivities=normalizePatrolActivities(value.patrolActivities);
       for(const key of ['improvements','result','other']){if(typeof (value[key]??'')!=='string'||(value[key]??'').length>2000)throw new Error('합동 점검 항목을 확인해 주세요.');details[key]=(value[key]??'').trim();}
       const items=value.items??[];if(!Array.isArray(items)||items.length>100)throw new Error('점검 항목을 확인해 주세요.');
       details.items=items.map(item=>{if(!item||typeof item.name!=='string'||!item.name.trim()||item.name.length>500||!['양호','보완사항','N/A'].includes(item.result)||['issueDetail','action'].some(key=>item[key]!==undefined&&(typeof item[key]!=='string'||item[key].length>2000)))throw new Error('점검 항목을 확인해 주세요.');const row={name:item.name.trim(),result:item.result};for(const key of ['issueDetail','action'])if(item[key]!==undefined)row[key]=item[key].trim();return row;});
