@@ -162,9 +162,9 @@ test('회의·교육·계획서·재해 보고 첨부는 현장 전환 후 내�
 });
 
 test('배정 현장의 합동 안전점검 상세는 항목과 참석자 이름을 안전하게 표시한다',async()=>{
-  const details={improvements:'<보완>',result:'가상 결과',other:'가상 비고',items:[{name:'가상 <항목>',result:'보완사항',issueDetail:'가상 문제',action:'가상 조치'}],managerSnapshot:[{name:'관리자 <가상>',phone:'표시 금지'}],workerSnapshot:[{name:'근로자 & 가상'}],secret:'표시 금지'};
+  const details={patrolActivities:[{inspector:'활동 <점검자>',timeFrom:'08:10',timeTo:'15:50',content:'활동 <내용>',action:'활동 조치'}],improvements:'<보완>',result:'가상 결과',other:'가상 비고',items:[{name:'가상 <항목>',result:'보완사항',issueDetail:'가상 문제',action:'가상 조치'}],managerSnapshot:[{name:'관리자 <가상>',phone:'표시 금지'}],workerSnapshot:[{name:'근로자 & 가상'}],secret:'표시 금지'};
   const doc={id:5,site_id:1,type:'joint_inspection',title:'가상 점검',body:'가상 본문',status:'approved',details:JSON.stringify(details)},ui=screen(async path=>response(path.endsWith('/attachments')?[]:doc));ui.state.page='documents';ui.state.detail=5;await ui.context.renderRestrictedDocuments();
-  for(const text of ['&lt;보완&gt;','가상 결과','가상 비고','가상 &lt;항목&gt;','보완사항','가상 문제','가상 조치','관리자 &lt;가상&gt;','근로자 &amp; 가상'])assert.ok(ui.content.innerHTML.includes(text),text);
+  for(const text of ['활동 &lt;점검자&gt;','08:10','15:50','활동 &lt;내용&gt;','활동 조치','&lt;보완&gt;','가상 결과','가상 비고','가상 &lt;항목&gt;','보완사항','가상 문제','가상 조치','관리자 &lt;가상&gt;','근로자 &amp; 가상'])assert.ok(ui.content.innerHTML.includes(text),text);
   assert.doesNotMatch(ui.content.innerHTML,/표시 금지|<항목>|restricted-notice-edit/);assert.deepEqual(ui.requests.map(r=>r.path),['/api/documents/5','/api/documents/5/attachments']);
   const wrong=screen(async()=>response({...doc,site_id:2}));wrong.state.page='documents';wrong.state.detail=5;await assert.rejects(wrong.context.renderRestrictedDocuments(),/현장/);assert.doesNotMatch(wrong.content.innerHTML,/가상 문제/);
   const old=screen(async path=>response(path.endsWith('/attachments')?[]:{...doc,details:null}));old.state.page='documents';old.state.detail=5;await old.context.renderRestrictedDocuments();assert.match(old.content.innerHTML,/점검 항목 없음/);

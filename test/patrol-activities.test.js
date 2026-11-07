@@ -59,7 +59,9 @@ test('합동 점검 화면에서 활동을 추가하고 저장과 상세 표시�
  const container={count:0,html:'',querySelectorAll(){return Array(this.count).fill(1);},insertAdjacentHTML(_where,html){this.html+=html;this.count++;},addEventListener(_type,fn){this.click=fn;},contains:()=>true},add={},error={};let approved=false;
  runInNewContext(line,{$:key=>({'#joint-activities':container,'#joint-activity-add':add,'#dialog-error':error}[key]),patrolActivityRow,esc,confirm:()=>approved});add.onclick();assert.match(container.html,/data-patrol-activity/);
  let removed=false;const click=()=>container.click({target:{closest:()=>({closest:()=>({remove(){removed=true;}})})}});click();assert.equal(removed,false);approved=true;click();assert.equal(removed,true);container.count=100;add.onclick();assert.match(error.textContent,/100개/);
- const save=source.split('\n').find(s=>s.includes("if(['safety_meeting','work_council','joint_inspection'].includes(data.type))"));assert.match(save,/patrolActivities:readPatrolActivities\(document\)/);
+ const save=source.split('\n').find(s=>s.includes("if(['safety_meeting','work_council','joint_inspection'].includes(data.type))")),row={inspector:'가상 활동자',timeFrom:'09:00',timeTo:'10:00',content:'가상 활동',action:'가상 조치'},data={type:'joint_inspection',date:'2026-11-07'};
+ const domRow={querySelector:selector=>({value:row[selector.match(/"(.*?)"/)[1]]})},document={querySelectorAll:selector=>selector==='[data-patrol-activity]'?[domRow]:[]};
+ runInNewContext(save,{data,document,readPatrolActivities,$:selector=>({dataset:{loaded:selector==='#meeting-workers'?data.date:'yes'}})});assert.deepEqual(data.details.patrolActivities,[row]);
  const detail=source.split('\n').find(s=>s.includes("if(doc.type==='joint_inspection')content.querySelector"));assert.match(detail,/patrolActivitiesSummary\(details.patrolActivities,esc\)/);
 });
 
